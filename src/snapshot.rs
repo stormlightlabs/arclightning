@@ -10,6 +10,8 @@ pub const CONFIG_FORMAT_VERSION: u32 = 1;
 pub enum SnapshotError {
     #[error("configuration TOML is invalid: {0}")]
     Parse(#[from] toml::de::Error),
+    #[error("configuration TOML could not be rendered: {0}")]
+    Render(#[from] toml::ser::Error),
     #[error("unsupported configuration format version {found}; expected {expected}")]
     UnsupportedVersion { found: u32, expected: u32 },
     #[error("snapshot path `{path}` must be a non-empty worktree-relative path")]
@@ -48,6 +50,11 @@ impl ProjectConfig {
             });
         }
         validate_relative_path(&self.snapshot.path)
+    }
+
+    /// Render the canonical v1 configuration representation.
+    pub fn render(&self) -> Result<String> {
+        toml::to_string_pretty(self).map_err(|e| e.into())
     }
 }
 

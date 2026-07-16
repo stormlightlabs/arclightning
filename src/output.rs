@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use owo_colors::{OwoColorize, Stream};
 use serde::Serialize;
 use thiserror::Error;
@@ -47,6 +49,31 @@ impl Renderer {
         Ok(Some(message))
     }
 
+    /// Render the result of project initialization.
+    pub fn render_init(&self, root: &Path, snapshot_enabled: bool) -> Result<Option<String>, OutputError> {
+        let root = root.to_string_lossy();
+        let message = match self.mode {
+            OutputMode::Human => {
+                let snapshot = if snapshot_enabled { " with snapshots enabled" } else { "" };
+                format!("Initialized Arc Lightning in `{root}`{snapshot}")
+            }
+            OutputMode::Plain => format!("initialized\t{root}"),
+            OutputMode::Json => serde_json::to_string(&Envelope {
+                format_version: 1,
+                data: InitData { status: "initialized", root: root.as_ref(), snapshot_enabled },
+            })?,
+            OutputMode::Quiet => return Ok(None),
+        };
+
+        Ok(Some(match (self.mode, self.color) {
+            (OutputMode::Human, ColorChoice::Always) => message.bright_blue().to_string(),
+            (OutputMode::Human, ColorChoice::Auto) => message
+                .if_supports_color(Stream::Stdout, |text| text.bright_blue())
+                .to_string(),
+            _ => message,
+        }))
+    }
+
     fn human_message(&self) -> String {
         const MESSAGE: &str = "Arc Lightning foundation ready";
         match self.color {
@@ -69,6 +96,13 @@ struct Envelope<T> {
 struct StartupData {
     status: &'static str,
     message: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct InitData<'a> {
+    status: &'static str,
+    root: &'a str,
+    snapshot_enabled: bool,
 }
 
 #[cfg(test)]

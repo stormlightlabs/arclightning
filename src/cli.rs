@@ -1,6 +1,6 @@
 use std::fmt;
 
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 
 /// The explicit color policy accepted by the CLI.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -21,6 +21,17 @@ impl fmt::Display for ColorChoice {
     }
 }
 
+/// Arc Lightning commands.
+#[derive(Clone, Debug, Subcommand)]
+pub enum Command {
+    /// Initialize or rediscover the project in the enclosing Git worktree.
+    Init {
+        /// Enable the optional version-controlled snapshot path when creating configuration.
+        #[arg(long)]
+        snapshot: bool,
+    },
+}
+
 /// Arc Lightning's command-line options.
 #[derive(Debug, Parser)]
 #[command(
@@ -29,6 +40,8 @@ impl fmt::Display for ColorChoice {
     about = "Arc Lightning: a Git-aware task tracker for developers and coding agents",
     after_help = "Examples:
 
+    arcl init
+    arcl init --snapshot
     arcl --help
     arcl --version
 "
@@ -49,4 +62,7 @@ pub struct Cli {
     /// Suppress explanatory output.
     #[arg(long, global = true, conflicts_with_all = ["json", "plain"])]
     pub quiet: bool,
+
+    #[command(subcommand)]
+    pub command: Option<Command>,
 }

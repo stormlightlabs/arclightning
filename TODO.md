@@ -45,18 +45,18 @@ anywhere in a non-bare Git worktree.
 
 **Acceptance criteria:**
 
-- [ ] Discover the enclosing worktree with `gix` from the root or any descendant directory.
-- [ ] `arcl init` creates `.arcl/config.toml`, `.arcl/.gitignore`, and a migrated local
+- [x] Discover the enclosing worktree with `gix` from the root or any descendant directory.
+- [x] `arcl init` creates `.arcl/config.toml`, `.arcl/.gitignore`, and a migrated local
       `.arcl/arcl.db` without changing the root `.gitignore`.
-- [ ] `.arcl/.gitignore` covers the database, SQLite side files, temporary files, and
+- [x] `.arcl/.gitignore` covers the database, SQLite side files, temporary files, and
       conflict artifacts specified by the roadmap.
-- [ ] Initialization enables SQLite foreign keys, configures a finite busy timeout, and
+- [x] Initialization enables SQLite foreign keys, configures a finite busy timeout, and
       applies embedded numbered migrations using `PRAGMA user_version`.
-- [ ] Repeating initialization is safe and does not replace valid configuration or data.
-- [ ] Operation outside Git and inside a bare repository fails with a helpful error and
+- [x] Repeating initialization is safe and does not replace valid configuration or data.
+- [x] Operation outside Git and inside a bare repository fails with a helpful error and
       the specified exit-code category.
-- [ ] Unborn and detached `HEAD` states do not panic.
-- [ ] Arc Lightning does not invoke the `git` executable or mutate refs, the index, remotes, or Git configuration.
+- [x] Unborn and detached `HEAD` states do not panic.
+- [x] Arc Lightning does not invoke the `git` executable or mutate refs, the index, remotes, or Git configuration.
 
 **Verification:**
 

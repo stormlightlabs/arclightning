@@ -74,6 +74,12 @@ mod tests {
             .expect("foreign keys pragma is readable");
         assert_eq!(foreign_keys, 1);
 
+        let busy_timeout: i32 = database
+            .connection()
+            .pragma_query_value(None, "busy_timeout", |row| row.get(0))
+            .expect("busy timeout pragma is readable");
+        assert_eq!(busy_timeout, 5_000);
+
         let format_version: String = database
             .connection()
             .query_row(
