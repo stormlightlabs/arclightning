@@ -815,3 +815,124 @@ fn milestones_tasks_and_subtasks_round_trip_with_atomic_moves() {
     assert_eq!(rejected.status.code(), Some(3));
     assert!(String::from_utf8_lossy(&rejected.stderr).contains("cycle"));
 }
+
+#[test]
+fn lifecycle_commands_enforce_transitions_guards_and_non_cascading_overrides() {
+    let repository = initialized_repository();
+    fs::write(repository.path().join("feature.md"), "# Feature\n").expect("spec can be written");
+
+    let release = arcl_in(repository.path())
+        .args(["--json", "release", "create", "Release"])
+        .output()
+        .expect("release create runs");
+    let release_id = release_id_from_json(&release.stdout);
+    let epic = arcl_in(repository.path())
+        .args([
+            "--json",
+            "epic",
+            "create",
+            "Epic",
+            "--spec",
+            "feature.md",
+            "--release",
+            &release_id,
+        ])
+        .output()
+        .expect("epic create runs");
+    let epic_id = epic_id_from_json(&epic.stdout);
+    let milestone = arcl_in(repository.path())
+        .args(["--json", "milestone", "create", "Milestone", "--epic", &epic_id])
+        .output()
+        .expect("milestone create runs");
+    let milestone_id = milestone_id_from_json(&milestone.stdout);
+    let task = arcl_in(repository.path())
+        .args(["--json", "task", "create", "Task", "--milestone", &milestone_id])
+        .output()
+        .expect("task create runs");
+    let task_id = task_id_from_json(&task.stdout);
+
+    for (command, expected_action, expected_status) in [
+        ("park", "parked", "parked"),
+        ("unpark", "unparked", "pending"),
+        ("start", "started", "in_progress"),
+        ("complete", "completed", "completed"),
+        ("complete", "completed", "completed"),
+    ] {
+        let output = arcl_in(repository.path())
+            .args(["--json", "task", command, &task_id])
+            .output()
+            .expect("task lifecycle command runs");
+        assert!(
+            output.status.success(),
+            "stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let payload: Value = serde_json::from_slice(&output.stdout).expect("lifecycle JSON parses");
+        assert_eq!(payload["data"]["action"], expected_action);
+        assert_eq!(payload["data"]["task"]["status"], expected_status);
+    }
+    let terminal_change = arcl_in(repository.path())
+        .args(["task", "cancel", &task_id])
+        .output()
+        .expect("invalid terminal change runs");
+    assert_eq!(terminal_change.status.code(), Some(3));
+
+    let parent = arcl_in(repository.path())
+        .args(["--json", "task", "create", "Parent", "--milestone", &milestone_id])
+        .output()
+        .expect("parent create runs");
+    let parent_id = task_id_from_json(&parent.stdout);
+    let child = arcl_in(repository.path())
+        .args([
+            "--json",
+            "task",
+            "create",
+            "Child",
+            "--milestone",
+            &milestone_id,
+            "--parent",
+            &parent_id,
+        ])
+        .output()
+        .expect("child create runs");
+    let child_id = task_id_from_json(&child.stdout);
+
+    let guarded = arcl_in(repository.path())
+        .args(["task", "cancel", &parent_id])
+        .output()
+        .expect("guarded cancellation runs");
+    assert_eq!(guarded.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&guarded.stderr).contains("non-terminal descendants"));
+    let overridden = arcl_in(repository.path())
+        .args(["--json", "task", "cancel", &parent_id, "--allow-open-children"])
+        .output()
+        .expect("override cancellation runs");
+    assert!(overridden.status.success());
+
+    for (kind, action, id) in [
+        ("milestone", "complete", milestone_id.as_str()),
+        ("epic", "cancel", epic_id.as_str()),
+        ("release", "complete", release_id.as_str()),
+    ] {
+        let guarded = arcl_in(repository.path())
+            .args([kind, action, id])
+            .output()
+            .expect("guarded container transition runs");
+        assert_eq!(guarded.status.code(), Some(3));
+        let overridden = arcl_in(repository.path())
+            .args(["--json", kind, action, id, "--allow-open-children"])
+            .output()
+            .expect("container override runs");
+        assert!(
+            overridden.status.success(),
+            "stderr: {}",
+            String::from_utf8_lossy(&overridden.stderr)
+        );
+    }
+
+    let database = rusqlite::Connection::open(repository.path().join(".arcl/arcl.db")).expect("database opens");
+    let child_status: String = database
+        .query_row("SELECT status FROM tasks WHERE id = ?1", [&child_id], |row| row.get(0))
+        .expect("child status reads");
+    assert_eq!(child_status, "pending");
+}

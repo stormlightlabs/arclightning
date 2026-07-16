@@ -5,11 +5,9 @@ use std::{
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::domain::{self, DomainError, MilestoneId, Task, TaskId, TaskPriority, TaskStatus};
+use crate::domain::{self, DomainError, MilestoneId, Task, TaskAction, TaskId, TaskPriority, TaskStatus};
 
-use super::StorageError;
-
-type Result<T> = std::result::Result<T, StorageError>;
+use super::{Result, StorageError};
 
 /// Optional fields accepted by a task update.
 #[derive(Clone, Debug, Default)]
@@ -203,6 +201,43 @@ pub fn update(conn: &mut Connection, id: TaskId, update: TaskUpdate) -> Result<T
     })
 }
 
+pub fn transition(
+    connection: &mut Connection, id: TaskId, action: TaskAction, allow_open_children: bool,
+) -> Result<Task> {
+    let transaction = connection.transaction()?;
+    let current = read_one(&transaction, &id)?.ok_or_else(|| StorageError::TaskNotFound { id: id.to_string() })?;
+    let next_status = current.status.apply(action).map_err(StorageError::InvalidTask)?;
+    if next_status == current.status {
+        return Ok(current);
+    }
+    if matches!(action, TaskAction::Complete | TaskAction::Cancel) && !allow_open_children {
+        let has_open_descendants: bool = transaction.query_row(
+            "WITH RECURSIVE descendants(id, status) AS (
+                 SELECT id, status FROM tasks WHERE parent_id = ?1
+                 UNION ALL
+                 SELECT task.id, task.status FROM tasks task
+                 JOIN descendants parent ON task.parent_id = parent.id
+             )
+             SELECT EXISTS (SELECT 1 FROM descendants WHERE status NOT IN ('completed', 'cancelled'))",
+            params![id.to_string()],
+            |row| row.get(0),
+        )?;
+        if has_open_descendants {
+            return Err(StorageError::InvalidTask(DomainError::OpenDescendants {
+                entity: "task",
+                id: id.to_string(),
+                action: action.as_str(),
+            }));
+        }
+    }
+    transaction.execute(
+        "UPDATE tasks SET status = ?1 WHERE id = ?2",
+        params![next_status.as_str(), id.to_string()],
+    )?;
+    transaction.commit()?;
+    Ok(Task { status: next_status, ..current })
+}
+
 fn read_one(conn: &Connection, id: &TaskId) -> Result<Option<Task>> {
     let raw_task = conn
         .query_row(
@@ -327,7 +362,7 @@ fn validate_parent_chain(root: TaskId, parent_id: TaskId, tasks: &HashMap<TaskId
 #[cfg(test)]
 mod tests {
     use super::super::{Database, StorageError, TaskUpdate};
-    use crate::domain::{self, DomainError, TaskPriority};
+    use crate::domain::{self, DomainError, TaskAction, TaskPriority, TaskStatus};
 
     fn graph() -> (Database, domain::MilestoneId, domain::MilestoneId) {
         let mut database = Database::open_in_memory().expect("database opens");
@@ -458,5 +493,131 @@ mod tests {
             .expect_err("empty title is rejected");
         assert!(matches!(error, StorageError::InvalidTask(DomainError::EmptyTitle)));
         assert_eq!(database.task(task.id).expect("task reads"), before);
+    }
+
+    #[test]
+    fn task_lifecycle_transitions_and_failures_are_atomic() {
+        let (mut database, milestone, _) = graph();
+        let task = database
+            .create_task(
+                milestone,
+                None,
+                "Task".to_owned(),
+                String::new(),
+                TaskPriority::Normal,
+                0,
+            )
+            .expect("task creates");
+
+        let parked = database
+            .transition_task(task.id, TaskAction::Park, false)
+            .expect("pending task parks");
+        assert_eq!(parked.status, TaskStatus::Parked);
+        let error = database
+            .transition_task(task.id, TaskAction::Complete, false)
+            .expect_err("parked task cannot complete");
+        assert!(matches!(
+            error,
+            StorageError::InvalidTask(DomainError::InvalidTransition { .. })
+        ));
+        assert_eq!(
+            database.task(task.id).expect("task reads").expect("task exists").status,
+            TaskStatus::Parked
+        );
+
+        assert_eq!(
+            database
+                .transition_task(task.id, TaskAction::Unpark, false)
+                .expect("task unparks")
+                .status,
+            TaskStatus::Pending
+        );
+        assert_eq!(
+            database
+                .transition_task(task.id, TaskAction::Start, false)
+                .expect("task starts")
+                .status,
+            TaskStatus::InProgress
+        );
+        assert_eq!(
+            database
+                .transition_task(task.id, TaskAction::Complete, false)
+                .expect("task completes")
+                .status,
+            TaskStatus::Completed
+        );
+        assert_eq!(
+            database
+                .transition_task(task.id, TaskAction::Complete, false)
+                .expect("complete repeats")
+                .status,
+            TaskStatus::Completed
+        );
+        assert!(database.transition_task(task.id, TaskAction::Cancel, false).is_err());
+        assert_eq!(
+            database.task(task.id).expect("task reads").expect("task exists").status,
+            TaskStatus::Completed
+        );
+    }
+
+    #[test]
+    fn parent_terminal_transitions_require_an_override_and_never_cascade() {
+        let (mut database, milestone, _) = graph();
+        let parent = database
+            .create_task(
+                milestone,
+                None,
+                "Parent".to_owned(),
+                String::new(),
+                TaskPriority::Normal,
+                0,
+            )
+            .expect("parent creates");
+        let child = database
+            .create_task(
+                milestone,
+                Some(parent.id),
+                "Child".to_owned(),
+                String::new(),
+                TaskPriority::Normal,
+                0,
+            )
+            .expect("child creates");
+
+        let error = database
+            .transition_task(parent.id, TaskAction::Cancel, false)
+            .expect_err("open child blocks cancellation");
+        assert!(matches!(
+            error,
+            StorageError::InvalidTask(DomainError::OpenDescendants { .. })
+        ));
+        assert_eq!(
+            database
+                .task(parent.id)
+                .expect("parent reads")
+                .expect("parent exists")
+                .status,
+            TaskStatus::Pending
+        );
+
+        let cancelled = database
+            .transition_task(parent.id, TaskAction::Cancel, true)
+            .expect("override cancels parent");
+        assert_eq!(cancelled.status, TaskStatus::Cancelled);
+        assert_eq!(
+            database
+                .task(child.id)
+                .expect("child reads")
+                .expect("child exists")
+                .status,
+            TaskStatus::Pending
+        );
+        assert_eq!(
+            database
+                .transition_task(parent.id, TaskAction::Cancel, false)
+                .expect("terminal repetition stays idempotent")
+                .status,
+            TaskStatus::Cancelled
+        );
     }
 }

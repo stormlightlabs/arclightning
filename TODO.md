@@ -10,128 +10,27 @@ work without snapshots.
 
 ### T01: Establish the synchronous Rust application foundation
 
-**What to build:** Prepare the crate for incremental feature work with the approved
-dependencies, module boundaries, error strategy, and a CLI-focused test harness.
-
-**Blocked by:** None - can start immediately
-
-**Acceptance criteria:**
-
-- [x] Add the production dependencies and feature selections approved in the roadmap,
-      including `clap`, `gix`, `owo-colors`, `rusqlite`, `serde`, `toml`, `ulid`, `thiserror`, and `anyhow`.
-- [x] Keep the application synchronous and omit Tokio and all `gix` network-client features.
-- [x] Establish the roadmap's application, domain, storage, snapshot, plan, output, and
-      VCS module boundaries without placeholder production APIs.
-- [x] Restrict `anyhow` to the binary/application boundary and define typed infrastructure
-      and domain error categories with `thiserror`.
-- [x] Add the minimum test-only dependencies and helpers needed to run the binary in isolated temporary directories.
-- [x] `arcl --help` and `arcl --version` succeed from the compiled binary.
-- [x] Review `cargo tree -e features` and document the selected minimal `gix` feature set.
-
-**Verification:**
-
-- `cargo fmt --all -- --check`
-- `cargo check --workspace --all-targets --all-features`
-- `cargo clippy --workspace --all-targets --all-features -- -D warnings`
-- `cargo test --workspace --all-features`
-- `cargo tree -e features`
+Prepare the crate for incremental feature work with the approved dependencies,
+module boundaries, error strategy, and a CLI-focused test harness.
 
 ### T02: Initialize a Git-aware Arc Lightning project
 
-**What to build:** Let a developer initialize and rediscover an Arc Lightning project from
-anywhere in a non-bare Git worktree.
-
-**Blocked by:** T01
-
-**Acceptance criteria:**
-
-- [x] Discover the enclosing worktree with `gix` from the root or any descendant directory.
-- [x] `arcl init` creates `.arcl/config.toml`, `.arcl/.gitignore`, and a migrated local
-      `.arcl/arcl.db` without changing the root `.gitignore`.
-- [x] `.arcl/.gitignore` covers the database, SQLite side files, temporary files, and
-      conflict artifacts specified by the roadmap.
-- [x] Initialization enables SQLite foreign keys, configures a finite busy timeout, and
-      applies embedded numbered migrations using `PRAGMA user_version`.
-- [x] Repeating initialization is safe and does not replace valid configuration or data.
-- [x] Operation outside Git and inside a bare repository fails with a helpful error and
-      the specified exit-code category.
-- [x] Unborn and detached `HEAD` states do not panic.
-- [x] Arc Lightning does not invoke the `git` executable or mutate refs, the index, remotes, or Git configuration.
-
-**Verification:**
-
-- `cargo test --workspace --all-features init`
-- Manually run `arcl init` from a repository root and nested directory, then inspect `.arcl/`.
-- Compare Git refs, index state, remotes, and configuration before and after initialization.
+Let a developer initialize and rediscover an Arc Lightning project from anywhere
+in a non-bare Git worktree.
 
 ### T03: Capture and manage ideas
 
-**What to build:** Give developers a local inbox for creating, editing, listing, and
-discarding ideas with Markdown descriptions.
-
-**Blocked by:** T02
-
-**Acceptance criteria:**
-
-- [x] Add validated `arcl-i-<ulid>` IDs and the `ideas` migration from the roadmap.
-- [x] Implement `arcl idea create`, `arcl idea update`, and `arcl idea discard` with the specified lifecycle rules.
-- [x] Support inline descriptions and UTF-8 descriptions read from a file or standard input.
-- [x] Reject empty titles, malformed IDs, invalid transitions, and ambiguous description inputs without partial writes.
-- [x] Repeating discard is idempotent; discarded ideas cannot return to `captured`.
-- [x] Mutations print useful human output and expose the created or updated record as versioned JSON.
-
-**Verification:**
-
-- `cargo test --workspace --all-features idea`
-- Create, update, and discard an idea through the compiled binary and inspect the SQLite row.
-- Pipe a multiline Markdown description through stdin and verify an exact round trip.
+Give developers a local inbox for creating, editing, listing, and discarding ideas
+with Markdown descriptions.
 
 ### T04: Create releases and spec-backed epics
 
-**What to build:** Let developers group work into releases and register one epic for each existing Markdown spec.
-
-**Blocked by:** T02
-
-**Acceptance criteria:**
-
-- [x] Add validated release and epic IDs and the corresponding roadmap migrations.
-- [x] Implement release create and update commands.
-- [x] Implement epic create and update commands, including optional release association.
-- [x] Require each epic to reference one unique, existing regular `.md` file inside the worktree.
-- [x] Normalize stored spec paths relative to the worktree and reject absolute paths,
-      traversal, symlink escapes, duplicates, and non-Markdown targets.
-- [x] Updating an epic never edits the linked spec.
-- [x] Missing or invalid release associations roll back the entire mutation.
-
-**Verification:**
-
-- `cargo test --workspace --all-features epic`
-- `cargo test --workspace --all-features release`
-- Create an epic from a nested working directory, then verify its stored path is root-relative.
-- Exercise traversal, symlink escape, duplicate-spec, and missing-file failures.
+Let developers group work into releases and register one epic for each existing Markdown spec.
 
 ### T05: Organize milestones, tasks, and subtasks
 
-**What to build:** Let developers decompose an epic into ordered milestones, tasks, and independently tracked subtasks.
-
-**Blocked by:** T04
-
-**Acceptance criteria:**
-
-- [x] Add validated milestone and task IDs and the corresponding roadmap migrations.
-- [x] Implement milestone create and update commands with epic ownership and non-negative position.
-- [x] Implement task create and update commands with milestone, optional parent, priority, position, title, and Markdown description.
-- [x] Represent subtasks as task rows with `parent_id`; do not infer tracked work from Markdown checkboxes.
-- [x] Enforce same-milestone parentage, reject self-parenting and parent cycles, and validate a moved subtree before changing milestone or parent.
-- [x] Accept duplicate positions and sort ties by ULID.
-- [x] Roll back multi-row moves when any descendant would violate an invariant.
-
-**Verification:**
-
-- `cargo test --workspace --all-features milestone`
-- `cargo test --workspace --all-features task`
-- Build an epic, milestone, task, and two-level subtask hierarchy through the binary.
-- Attempt cross-milestone and cyclic reparenting and confirm no rows change.
+Let developers decompose an epic into ordered milestones, tasks, and independently
+tracked subtasks.
 
 ### T06: Enforce lifecycle and parking behavior
 
@@ -141,13 +40,13 @@ discarding ideas with Markdown descriptions.
 
 **Acceptance criteria:**
 
-- [ ] Implement task start, park, unpark, complete, and cancel commands with the exact allowed transitions.
-- [ ] Unparking always returns a task to `pending`; completing a parked task fails until it is unparked.
-- [ ] Repeating the same terminal transition is idempotent; changing between terminal states fails.
-- [ ] Implement release, epic, and milestone complete and cancel commands.
-- [ ] Completing or cancelling any container, including a parent task, fails while descendants are non-terminal unless `--allow-open-children` is present.
-- [ ] The override changes only the selected record and never cascades state silently.
-- [ ] Lifecycle failures leave the database unchanged.
+- [x] Implement task start, park, unpark, complete, and cancel commands with the exact allowed transitions.
+- [x] Unparking always returns a task to `pending`; completing a parked task fails until it is unparked.
+- [x] Repeating the same terminal transition is idempotent; changing between terminal states fails.
+- [x] Implement release, epic, and milestone complete and cancel commands.
+- [x] Completing or cancelling any container, including a parent task, fails while descendants are non-terminal unless `--allow-open-children` is present.
+- [x] The override changes only the selected record and never cascades state silently.
+- [x] Lifecycle failures leave the database unchanged.
 
 **Verification:**
 

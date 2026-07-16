@@ -8,8 +8,8 @@ use anyhow::Context;
 use thiserror::Error;
 
 use crate::domain::{
-    DomainError, Epic, EpicId, Idea, IdeaId, Milestone, MilestoneId, Release, ReleaseId, Task, TaskId, TaskPriority,
-    validate_title,
+    ContainerAction, DomainError, Epic, EpicId, Idea, IdeaId, Milestone, MilestoneId, Release, ReleaseId, Task,
+    TaskAction, TaskId, TaskPriority, validate_title,
 };
 use crate::output::{
     EpicMutation, IdeaMutation, MilestoneMutation, OutputMode, ReleaseMutation, Renderer, TaskMutation,
@@ -370,7 +370,24 @@ fn exec_release(cmd: ReleaseCommand) -> CResult<ReleaseCommandResult> {
             let release = database.update_release(id, title, description)?;
             Ok(ReleaseCommandResult::Mutation { action: ReleaseMutation::Updated, release })
         }
+        ReleaseCommand::Complete { id, allow_open_children } => {
+            transition_release(id, ContainerAction::Complete, allow_open_children)
+        }
+        ReleaseCommand::Cancel { id, allow_open_children } => {
+            transition_release(id, ContainerAction::Cancel, allow_open_children)
+        }
     }
+}
+
+fn transition_release(id: String, action: ContainerAction, allow_open_children: bool) -> CResult<ReleaseCommandResult> {
+    let id = ReleaseId::parse(&id).map_err(DomainError::from)?;
+    let mut database = open_database()?;
+    let release = database.transition_release(id, action, allow_open_children)?;
+    let action = match action {
+        ContainerAction::Complete => ReleaseMutation::Completed,
+        ContainerAction::Cancel => ReleaseMutation::Cancelled,
+    };
+    Ok(ReleaseCommandResult::Mutation { action, release })
 }
 
 fn exec_epic(command: EpicCommand) -> CResult<EpicCommandResult> {
@@ -419,7 +436,24 @@ fn exec_epic(command: EpicCommand) -> CResult<EpicCommandResult> {
                 .update_epic(id, title, description, spec_path, release_change)?;
             Ok(EpicCommandResult::Mutation { action: EpicMutation::Updated, epic })
         }
+        EpicCommand::Complete { id, allow_open_children } => {
+            transition_epic(id, ContainerAction::Complete, allow_open_children)
+        }
+        EpicCommand::Cancel { id, allow_open_children } => {
+            transition_epic(id, ContainerAction::Cancel, allow_open_children)
+        }
     }
+}
+
+fn transition_epic(id: String, action: ContainerAction, allow_open_children: bool) -> CResult<EpicCommandResult> {
+    let id = EpicId::parse(&id).map_err(DomainError::from)?;
+    let mut database = open_database()?;
+    let epic = database.transition_epic(id, action, allow_open_children)?;
+    let action = match action {
+        ContainerAction::Complete => EpicMutation::Completed,
+        ContainerAction::Cancel => EpicMutation::Cancelled,
+    };
+    Ok(EpicCommandResult::Mutation { action, epic })
 }
 
 fn exec_milestone(command: MilestoneCommand) -> CResult<MilestoneCommandResult> {
@@ -447,7 +481,26 @@ fn exec_milestone(command: MilestoneCommand) -> CResult<MilestoneCommandResult> 
             let milestone = database.update_milestone(id, title, description, position)?;
             Ok(MilestoneCommandResult::Mutation { action: MilestoneMutation::Updated, milestone })
         }
+        MilestoneCommand::Complete { id, allow_open_children } => {
+            transition_milestone(id, ContainerAction::Complete, allow_open_children)
+        }
+        MilestoneCommand::Cancel { id, allow_open_children } => {
+            transition_milestone(id, ContainerAction::Cancel, allow_open_children)
+        }
     }
+}
+
+fn transition_milestone(
+    id: String, action: ContainerAction, allow_open_children: bool,
+) -> CResult<MilestoneCommandResult> {
+    let id = MilestoneId::parse(&id).map_err(DomainError::from)?;
+    let mut database = open_database()?;
+    let milestone = database.transition_milestone(id, action, allow_open_children)?;
+    let action = match action {
+        ContainerAction::Complete => MilestoneMutation::Completed,
+        ContainerAction::Cancel => MilestoneMutation::Cancelled,
+    };
+    Ok(MilestoneCommandResult::Mutation { action, milestone })
 }
 
 fn exec_task(command: TaskCommand) -> CResult<TaskCommandResult> {
@@ -504,7 +557,28 @@ fn exec_task(command: TaskCommand) -> CResult<TaskCommandResult> {
             )?;
             Ok(TaskCommandResult::Mutation { action: TaskMutation::Updated, task })
         }
+        TaskCommand::Start { id } => transition_task(id, TaskAction::Start, false),
+        TaskCommand::Park { id } => transition_task(id, TaskAction::Park, false),
+        TaskCommand::Unpark { id } => transition_task(id, TaskAction::Unpark, false),
+        TaskCommand::Complete { id, allow_open_children } => {
+            transition_task(id, TaskAction::Complete, allow_open_children)
+        }
+        TaskCommand::Cancel { id, allow_open_children } => transition_task(id, TaskAction::Cancel, allow_open_children),
     }
+}
+
+fn transition_task(id: String, action: TaskAction, allow_open_children: bool) -> CResult<TaskCommandResult> {
+    let id = TaskId::parse(&id).map_err(DomainError::from)?;
+    let mut database = open_database()?;
+    let task = database.transition_task(id, action, allow_open_children)?;
+    let action = match action {
+        TaskAction::Start => TaskMutation::Started,
+        TaskAction::Park => TaskMutation::Parked,
+        TaskAction::Unpark => TaskMutation::Unparked,
+        TaskAction::Complete => TaskMutation::Completed,
+        TaskAction::Cancel => TaskMutation::Cancelled,
+    };
+    Ok(TaskCommandResult::Mutation { action, task })
 }
 
 fn open_database() -> CResult<Database> {

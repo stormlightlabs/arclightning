@@ -1,10 +1,8 @@
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::domain::{ContainerStatus, DomainError, Epic, EpicId, ReleaseId};
+use crate::domain::{ContainerAction, ContainerStatus, DomainError, Epic, EpicId, ReleaseId};
 
-use super::StorageError;
-
-type Result<T> = std::result::Result<T, StorageError>;
+use super::{Result, StorageError};
 
 pub fn find(connection: &Connection, id: &EpicId) -> Result<Option<Epic>> {
     read_one(connection, id)
@@ -90,6 +88,46 @@ pub fn update(
         spec_path: next_spec_path.to_owned(),
         status: current.status,
     })
+}
+
+pub fn transition(
+    connection: &mut Connection, id: EpicId, action: ContainerAction, allow_open_children: bool,
+) -> Result<Epic> {
+    let transaction = connection.transaction()?;
+    let current = read_one(&transaction, &id)?.ok_or_else(|| StorageError::EpicNotFound { id: id.to_string() })?;
+    let next_status = current
+        .status
+        .apply("epic", action)
+        .map_err(StorageError::InvalidEpic)?;
+    if next_status == current.status {
+        return Ok(current);
+    }
+    if !allow_open_children && has_open_descendants(&transaction, &id)? {
+        return Err(StorageError::InvalidEpic(DomainError::OpenDescendants {
+            entity: "epic",
+            id: id.to_string(),
+            action: action.as_str(),
+        }));
+    }
+    transaction.execute(
+        "UPDATE epics SET status = ?1 WHERE id = ?2",
+        params![next_status.as_str(), id.to_string()],
+    )?;
+    transaction.commit()?;
+    Ok(Epic { status: next_status, ..current })
+}
+
+fn has_open_descendants(connection: &Connection, id: &EpicId) -> Result<bool> {
+    Ok(connection.query_row(
+        "SELECT EXISTS (
+             SELECT 1 FROM milestones WHERE epic_id = ?1 AND status = 'open'
+             UNION ALL
+             SELECT 1 FROM tasks t JOIN milestones m ON m.id = t.milestone_id
+             WHERE m.epic_id = ?1 AND t.status NOT IN ('completed', 'cancelled')
+         )",
+        params![id.to_string()],
+        |row| row.get(0),
+    )?)
 }
 
 fn read_one(connection: &Connection, id: &EpicId) -> Result<Option<Epic>> {

@@ -107,6 +107,22 @@ pub enum ReleaseCommand {
         #[command(flatten)]
         description: DescriptionArgs,
     },
+    /// Mark a release completed.
+    Complete {
+        /// The release ID to complete.
+        id: String,
+        /// Complete only the release even when descendants remain open.
+        #[arg(long)]
+        allow_open_children: bool,
+    },
+    /// Mark a release cancelled.
+    Cancel {
+        /// The release ID to cancel.
+        id: String,
+        /// Cancel only the release even when descendants remain open.
+        #[arg(long)]
+        allow_open_children: bool,
+    },
 }
 
 /// Spec-backed epic commands.
@@ -144,6 +160,22 @@ pub enum EpicCommand {
         #[command(flatten)]
         description: DescriptionArgs,
     },
+    /// Mark an epic completed.
+    Complete {
+        /// The epic ID to complete.
+        id: String,
+        /// Complete only the epic even when descendants remain open.
+        #[arg(long)]
+        allow_open_children: bool,
+    },
+    /// Mark an epic cancelled.
+    Cancel {
+        /// The epic ID to cancel.
+        id: String,
+        /// Cancel only the epic even when descendants remain open.
+        #[arg(long)]
+        allow_open_children: bool,
+    },
 }
 
 /// Milestone container commands.
@@ -174,6 +206,22 @@ pub enum MilestoneCommand {
         position: Option<i64>,
         #[command(flatten)]
         description: DescriptionArgs,
+    },
+    /// Mark a milestone completed.
+    Complete {
+        /// The milestone ID to complete.
+        id: String,
+        /// Complete only the milestone even when tasks remain open.
+        #[arg(long)]
+        allow_open_children: bool,
+    },
+    /// Mark a milestone cancelled.
+    Cancel {
+        /// The milestone ID to cancel.
+        id: String,
+        /// Cancel only the milestone even when tasks remain open.
+        #[arg(long)]
+        allow_open_children: bool,
     },
 }
 
@@ -223,6 +271,37 @@ pub enum TaskCommand {
         no_parent: bool,
         #[command(flatten)]
         description: DescriptionArgs,
+    },
+    /// Start pending work.
+    Start {
+        /// The task ID to start.
+        id: String,
+    },
+    /// Temporarily exclude pending or in-progress work from readiness.
+    Park {
+        /// The task ID to park.
+        id: String,
+    },
+    /// Return parked work to pending.
+    Unpark {
+        /// The task ID to unpark.
+        id: String,
+    },
+    /// Mark work completed.
+    Complete {
+        /// The task ID to complete.
+        id: String,
+        /// Complete only this task even when descendants remain open.
+        #[arg(long)]
+        allow_open_children: bool,
+    },
+    /// Mark work cancelled.
+    Cancel {
+        /// The task ID to cancel.
+        id: String,
+        /// Cancel only this task even when descendants remain open.
+        #[arg(long)]
+        allow_open_children: bool,
     },
 }
 

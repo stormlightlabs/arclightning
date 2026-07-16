@@ -29,6 +29,8 @@ pub enum IdeaMutation {
 pub enum ReleaseMutation {
     Created,
     Updated,
+    Completed,
+    Cancelled,
 }
 
 impl ReleaseMutation {
@@ -36,6 +38,8 @@ impl ReleaseMutation {
         match self {
             Self::Created => "created",
             Self::Updated => "updated",
+            Self::Completed => "completed",
+            Self::Cancelled => "cancelled",
         }
     }
 
@@ -43,6 +47,8 @@ impl ReleaseMutation {
         match self {
             Self::Created => "Created",
             Self::Updated => "Updated",
+            Self::Completed => "Completed",
+            Self::Cancelled => "Cancelled",
         }
     }
 }
@@ -52,6 +58,8 @@ impl ReleaseMutation {
 pub enum EpicMutation {
     Created,
     Updated,
+    Completed,
+    Cancelled,
 }
 
 /// The mutation represented by a milestone command's output.
@@ -59,6 +67,8 @@ pub enum EpicMutation {
 pub enum MilestoneMutation {
     Created,
     Updated,
+    Completed,
+    Cancelled,
 }
 
 /// The mutation represented by a task command's output.
@@ -66,6 +76,11 @@ pub enum MilestoneMutation {
 pub enum TaskMutation {
     Created,
     Updated,
+    Started,
+    Parked,
+    Unparked,
+    Completed,
+    Cancelled,
 }
 
 impl EpicMutation {
@@ -73,6 +88,8 @@ impl EpicMutation {
         match self {
             Self::Created => "created",
             Self::Updated => "updated",
+            Self::Completed => "completed",
+            Self::Cancelled => "cancelled",
         }
     }
 
@@ -80,6 +97,8 @@ impl EpicMutation {
         match self {
             Self::Created => "Created",
             Self::Updated => "Updated",
+            Self::Completed => "Completed",
+            Self::Cancelled => "Cancelled",
         }
     }
 }
@@ -89,6 +108,8 @@ impl MilestoneMutation {
         match self {
             Self::Created => "created",
             Self::Updated => "updated",
+            Self::Completed => "completed",
+            Self::Cancelled => "cancelled",
         }
     }
 
@@ -96,6 +117,8 @@ impl MilestoneMutation {
         match self {
             Self::Created => "Created",
             Self::Updated => "Updated",
+            Self::Completed => "Completed",
+            Self::Cancelled => "Cancelled",
         }
     }
 }
@@ -105,6 +128,11 @@ impl TaskMutation {
         match self {
             Self::Created => "created",
             Self::Updated => "updated",
+            Self::Started => "started",
+            Self::Parked => "parked",
+            Self::Unparked => "unparked",
+            Self::Completed => "completed",
+            Self::Cancelled => "cancelled",
         }
     }
 
@@ -112,6 +140,11 @@ impl TaskMutation {
         match self {
             Self::Created => "Created",
             Self::Updated => "Updated",
+            Self::Started => "Started",
+            Self::Parked => "Parked",
+            Self::Unparked => "Unparked",
+            Self::Completed => "Completed",
+            Self::Cancelled => "Cancelled",
         }
     }
 }

@@ -33,6 +33,14 @@ pub enum DomainError {
         action: &'static str,
         from: String,
     },
+    #[error(
+        "cannot {action} {entity} `{id}` while it has non-terminal descendants; pass --allow-open-children to override"
+    )]
+    OpenDescendants {
+        entity: &'static str,
+        id: String,
+        action: &'static str,
+    },
     #[error(transparent)]
     InvalidId(#[from] IdError),
 }

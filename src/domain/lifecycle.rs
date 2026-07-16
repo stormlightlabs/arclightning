@@ -109,14 +109,14 @@ impl ContainerStatus {
         }
     }
 
-    pub fn apply(self, action: ContainerAction) -> Result<Self, DomainError> {
+    pub fn apply(self, entity: &'static str, action: ContainerAction) -> Result<Self, DomainError> {
         match (self, action) {
             (Self::Open, ContainerAction::Complete) => Ok(Self::Completed),
             (Self::Open, ContainerAction::Cancel) => Ok(Self::Cancelled),
             (Self::Completed, ContainerAction::Complete) => Ok(Self::Completed),
             (Self::Cancelled, ContainerAction::Cancel) => Ok(Self::Cancelled),
-            (status, ContainerAction::Complete) => Err(invalid_transition("container", "complete", status.as_str())),
-            (status, ContainerAction::Cancel) => Err(invalid_transition("container", "cancel", status.as_str())),
+            (status, ContainerAction::Complete) => Err(invalid_transition(entity, "complete", status.as_str())),
+            (status, ContainerAction::Cancel) => Err(invalid_transition(entity, "cancel", status.as_str())),
         }
     }
 }
@@ -126,6 +126,16 @@ impl ContainerStatus {
 pub enum ContainerAction {
     Complete,
     Cancel,
+}
+
+impl ContainerAction {
+    /// Return the command verb used in lifecycle errors and output.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Complete => "complete",
+            Self::Cancel => "cancel",
+        }
+    }
 }
 
 /// The stable task-priority ordering used by ready-work queries.
@@ -168,12 +178,58 @@ mod tests {
 
     #[test]
     fn task_lifecycle_preserves_the_roadmap_transitions() {
-        assert_eq!(TaskStatus::Pending.apply(TaskAction::Start), Ok(TaskStatus::InProgress));
-        assert_eq!(TaskStatus::Parked.apply(TaskAction::Unpark), Ok(TaskStatus::Pending));
-        assert!(TaskStatus::Parked.apply(TaskAction::Complete).is_err());
+        use TaskAction::{Cancel, Complete, Park, Start, Unpark};
+        use TaskStatus::{Cancelled, Completed, InProgress, Parked, Pending};
+
+        let allowed = [
+            (Pending, Start, InProgress),
+            (InProgress, Start, InProgress),
+            (Pending, Park, Parked),
+            (InProgress, Park, Parked),
+            (Parked, Unpark, Pending),
+            (Pending, Complete, Completed),
+            (InProgress, Complete, Completed),
+            (Completed, Complete, Completed),
+            (Pending, Cancel, Cancelled),
+            (InProgress, Cancel, Cancelled),
+            (Parked, Cancel, Cancelled),
+            (Cancelled, Cancel, Cancelled),
+        ];
+        for (status, action, expected) in allowed {
+            assert_eq!(status.apply(action), Ok(expected), "{status:?} {action:?}");
+        }
+
+        for status in [Pending, InProgress, Parked, Completed, Cancelled] {
+            for action in [Start, Park, Unpark, Complete, Cancel] {
+                if !allowed
+                    .iter()
+                    .any(|(from, candidate, _)| *from == status && *candidate == action)
+                {
+                    assert!(status.apply(action).is_err(), "{status:?} {action:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn container_terminal_transitions_are_idempotent_but_not_interchangeable() {
         assert_eq!(
-            TaskStatus::Completed.apply(TaskAction::Complete),
-            Ok(TaskStatus::Completed)
+            ContainerStatus::Open.apply("release", ContainerAction::Complete),
+            Ok(ContainerStatus::Completed)
+        );
+        assert_eq!(
+            ContainerStatus::Completed.apply("release", ContainerAction::Complete),
+            Ok(ContainerStatus::Completed)
+        );
+        assert!(
+            ContainerStatus::Completed
+                .apply("release", ContainerAction::Cancel)
+                .is_err()
+        );
+        assert!(
+            ContainerStatus::Cancelled
+                .apply("release", ContainerAction::Complete)
+                .is_err()
         );
     }
 }

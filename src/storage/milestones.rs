@@ -1,10 +1,8 @@
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::domain::{ContainerStatus, DomainError, EpicId, Milestone, MilestoneId};
+use crate::domain::{ContainerAction, ContainerStatus, DomainError, EpicId, Milestone, MilestoneId};
 
-use super::StorageError;
-
-type Result<T> = std::result::Result<T, StorageError>;
+use super::{Result, StorageError};
 
 pub fn find(connection: &Connection, id: &MilestoneId) -> Result<Option<Milestone>> {
     read_one(connection, id)
@@ -78,6 +76,38 @@ pub fn update(
         status: current.status,
         position: next_position,
     })
+}
+
+pub fn transition(
+    connection: &mut Connection, id: MilestoneId, action: ContainerAction, allow_open_children: bool,
+) -> Result<Milestone> {
+    let transaction = connection.transaction()?;
+    let current = read_one(&transaction, &id)?.ok_or_else(|| StorageError::MilestoneNotFound { id: id.to_string() })?;
+    let next_status = current
+        .status
+        .apply("milestone", action)
+        .map_err(StorageError::InvalidMilestone)?;
+    if next_status == current.status {
+        return Ok(current);
+    }
+    let has_open_children: bool = transaction.query_row(
+        "SELECT EXISTS (SELECT 1 FROM tasks WHERE milestone_id = ?1 AND status NOT IN ('completed', 'cancelled'))",
+        params![id.to_string()],
+        |row| row.get(0),
+    )?;
+    if !allow_open_children && has_open_children {
+        return Err(StorageError::InvalidMilestone(DomainError::OpenDescendants {
+            entity: "milestone",
+            id: id.to_string(),
+            action: action.as_str(),
+        }));
+    }
+    transaction.execute(
+        "UPDATE milestones SET status = ?1 WHERE id = ?2",
+        params![next_status.as_str(), id.to_string()],
+    )?;
+    transaction.commit()?;
+    Ok(Milestone { status: next_status, ..current })
 }
 
 fn read_one(connection: &Connection, id: &MilestoneId) -> Result<Option<Milestone>> {

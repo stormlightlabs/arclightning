@@ -100,6 +100,34 @@ same milestone, and cyclic reparenting is rejected before any rows change.
 Milestone and task mutation commands support the same human, plain, quiet, and
 versioned JSON output modes as the earlier entity commands.
 
+## Lifecycle
+
+Move tasks through their explicit lifecycle:
+
+```sh
+arcl task start arcl-t-01J...
+arcl task park arcl-t-01J...
+arcl task unpark arcl-t-01J...   # always returns to pending
+arcl task complete arcl-t-01J...
+arcl task cancel arcl-t-01J...
+```
+
+Tasks can complete from `pending` or `in_progress`; parked tasks must be unparked
+first. Completion and cancellation are terminal. Repeating the same terminal
+command is safe, but changing from completed to cancelled or vice versa is rejected.
+
+Releases, epics, and milestones support `complete` and `cancel`. A parent task or
+container cannot become terminal while any descendant is non-terminal unless the
+command includes `--allow-open-children`:
+
+```sh
+arcl milestone complete arcl-m-01J...
+arcl epic cancel arcl-e-01J... --allow-open-children
+arcl release complete arcl-r-01J...
+```
+
+The override changes only the selected record; it never cascades to descendants.
+
 ## Automation output
 
 Mutations use concise output by default.
