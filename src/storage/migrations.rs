@@ -10,9 +10,10 @@ struct Migration {
 const MIGRATIONS: &[Migration] = &[
     Migration { version: 1, sql: include_str!("migrations/001_foundation.sql") },
     Migration { version: 2, sql: include_str!("migrations/002_ideas.sql") },
+    Migration { version: 3, sql: include_str!("migrations/003_releases_epics.sql") },
 ];
 
-pub(super) fn apply(connection: &mut Connection) -> Result<(), StorageError> {
+pub fn apply(connection: &mut Connection) -> Result<(), StorageError> {
     let current: i32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if current > CURRENT_VERSION {
         return Err(StorageError::NewerDatabase { found: current, latest: CURRENT_VERSION });

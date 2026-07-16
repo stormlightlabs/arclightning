@@ -4,18 +4,18 @@ use crate::domain::{DomainError, Idea, IdeaAction, IdeaId, IdeaStatus, validate_
 
 use super::StorageError;
 
-pub(super) fn find(connection: &Connection, id: &IdeaId) -> Result<Option<Idea>, StorageError> {
+pub fn find(connection: &Connection, id: &IdeaId) -> Result<Option<Idea>, StorageError> {
     read_one(connection, id)
 }
 
-pub(super) fn list(connection: &Connection) -> Result<Vec<Idea>, StorageError> {
+pub fn list(connection: &Connection) -> Result<Vec<Idea>, StorageError> {
     let mut statement = connection.prepare("SELECT id, title, description, status FROM ideas ORDER BY id")?;
     let rows = statement.query_map([], row_to_raw_idea)?;
     let raw_ideas = rows.collect::<Result<Vec<_>, _>>()?;
     raw_ideas.into_iter().map(decode_idea).collect()
 }
 
-pub(super) fn create(connection: &mut Connection, title: String, description: String) -> Result<Idea, StorageError> {
+pub fn create(connection: &mut Connection, title: String, description: String) -> Result<Idea, StorageError> {
     let idea = Idea::new(title, description)?;
     let transaction = connection.transaction()?;
     transaction.execute(
@@ -26,7 +26,7 @@ pub(super) fn create(connection: &mut Connection, title: String, description: St
     Ok(idea)
 }
 
-pub(super) fn update(
+pub fn update(
     connection: &mut Connection, id: IdeaId, title: Option<String>, description: Option<String>,
 ) -> Result<Idea, StorageError> {
     if title.is_none() && description.is_none() {
@@ -53,7 +53,7 @@ pub(super) fn update(
     Ok(Idea { id, title: next_title.to_owned(), description: next_description.to_owned(), status: current.status })
 }
 
-pub(super) fn discard(connection: &mut Connection, id: IdeaId) -> Result<Idea, StorageError> {
+pub fn discard(connection: &mut Connection, id: IdeaId) -> Result<Idea, StorageError> {
     let transaction = connection.transaction()?;
     let current = read_one(&transaction, &id)?.ok_or_else(|| StorageError::IdeaNotFound { id: id.to_string() })?;
     let next_status = current.status.apply(IdeaAction::Discard)?;

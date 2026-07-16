@@ -56,6 +56,29 @@ arcl idea discard arcl-i-01J...
 Discard is idempotent and soft-deletes it, preserving it as `discarded`; discarded ideas
 cannot be updated or reopened.
 
+## Releases and Specs
+
+Group spec-backed work into releases and epics:
+
+```sh
+arcl release create "Spring release" --description "Ship the next planning slice."
+arcl epic create "Keyboard navigation" --spec specs/keyboard-navigation.md \
+  --release arcl-r-01J...
+arcl release update arcl-r-01J... --title "Updated spring release"
+arcl epic update arcl-e-01J... --description "Refined scope"
+```
+
+Epic spec paths are resolved from the current directory and stored relative to the
+Git worktree root.
+
+The target must be an existing regular Markdown file inside the
+worktree; absolute paths, `..` traversal, symlink escapes, duplicate specs, and
+non-Markdown files are rejected.
+
+Updating an epic changes tracker metadata only and never edits its linked spec.
+
+Use `--no-release` to remove an epic's release association.
+
 ## Automation output
 
 Mutations use concise output by default.

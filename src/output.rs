@@ -5,7 +5,7 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::cli::ColorChoice;
-use crate::domain::Idea;
+use crate::domain::{Epic, Idea, Release};
 
 /// The output format for a command result.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -22,6 +22,52 @@ pub enum IdeaMutation {
     Created,
     Updated,
     Discarded,
+}
+
+/// The mutation represented by a release command's output.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReleaseMutation {
+    Created,
+    Updated,
+}
+
+impl ReleaseMutation {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Updated => "updated",
+        }
+    }
+
+    const fn human_verb(self) -> &'static str {
+        match self {
+            Self::Created => "Created",
+            Self::Updated => "Updated",
+        }
+    }
+}
+
+/// The mutation represented by an epic command's output.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EpicMutation {
+    Created,
+    Updated,
+}
+
+impl EpicMutation {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Updated => "updated",
+        }
+    }
+
+    const fn human_verb(self) -> &'static str {
+        match self {
+            Self::Created => "Created",
+            Self::Updated => "Updated",
+        }
+    }
 }
 
 impl IdeaMutation {
@@ -157,7 +203,48 @@ impl Renderer {
         }))
     }
 
-    // TODO: remove this
+    /// Render one release mutation and include the affected record in JSON mode.
+    pub fn render_release(&self, mutation: ReleaseMutation, release: &Release) -> Result<Option<String>, OutputError> {
+        let id = release.id.to_string();
+        let message = match self.mode {
+            OutputMode::Human => format!("{} release `{id}`: {}", mutation.human_verb(), release.title),
+            OutputMode::Plain | OutputMode::Quiet => id,
+            OutputMode::Json => serde_json::to_string(&Envelope {
+                format_version: 1,
+                data: ReleaseMutationData { action: mutation.as_str(), release },
+            })?,
+        };
+
+        Ok(Some(match (self.mode, self.color) {
+            (OutputMode::Human, ColorChoice::Always) => message.bright_blue().to_string(),
+            (OutputMode::Human, ColorChoice::Auto) => message
+                .if_supports_color(Stream::Stdout, |text| text.bright_blue())
+                .to_string(),
+            _ => message,
+        }))
+    }
+
+    /// Render one epic mutation and include the affected record in JSON mode.
+    pub fn render_epic(&self, mutation: EpicMutation, epic: &Epic) -> Result<Option<String>, OutputError> {
+        let id = epic.id.to_string();
+        let message = match self.mode {
+            OutputMode::Human => format!("{} epic `{id}`: {}", mutation.human_verb(), epic.title),
+            OutputMode::Plain | OutputMode::Quiet => id,
+            OutputMode::Json => serde_json::to_string(&Envelope {
+                format_version: 1,
+                data: EpicMutationData { action: mutation.as_str(), epic },
+            })?,
+        };
+
+        Ok(Some(match (self.mode, self.color) {
+            (OutputMode::Human, ColorChoice::Always) => message.bright_blue().to_string(),
+            (OutputMode::Human, ColorChoice::Auto) => message
+                .if_supports_color(Stream::Stdout, |text| text.bright_blue())
+                .to_string(),
+            _ => message,
+        }))
+    }
+
     fn human_message(&self) -> String {
         const MESSAGE: &str = "Arc Lightning foundation ready";
         match self.color {
@@ -198,6 +285,18 @@ struct IdeaMutationData<'a> {
 #[derive(Debug, Serialize)]
 struct IdeaListData<'a> {
     ideas: &'a [Idea],
+}
+
+#[derive(Debug, Serialize)]
+struct ReleaseMutationData<'a> {
+    action: &'static str,
+    release: &'a Release,
+}
+
+#[derive(Debug, Serialize)]
+struct EpicMutationData<'a> {
+    action: &'static str,
+    epic: &'a Epic,
 }
 
 #[cfg(test)]

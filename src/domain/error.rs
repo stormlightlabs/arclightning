@@ -9,6 +9,8 @@ type Result<T> = std::result::Result<T, DomainError>;
 pub enum DomainError {
     #[error("title cannot be empty")]
     EmptyTitle,
+    #[error("spec path cannot be empty")]
+    EmptySpecPath,
     #[error("{entity} update requires at least one field")]
     NoFieldsToUpdate { entity: &'static str },
     #[error("invalid {entity} status `{value}`")]
@@ -33,6 +35,6 @@ pub fn validate_position(position: i64) -> Result<()> {
     if position < 0 { Err(DomainError::InvalidPosition { position }) } else { Ok(()) }
 }
 
-pub(super) fn invalid_transition(entity: &'static str, action: &'static str, from: impl Into<String>) -> DomainError {
+pub fn invalid_transition(entity: &'static str, action: &'static str, from: impl Into<String>) -> DomainError {
     DomainError::InvalidTransition { entity, action, from: from.into() }
 }

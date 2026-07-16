@@ -36,6 +36,16 @@ pub enum Command {
         #[command(subcommand)]
         command: IdeaCommand,
     },
+    /// Group epics into releases.
+    Release {
+        #[command(subcommand)]
+        command: ReleaseCommand,
+    },
+    /// Track one Markdown specification as an epic.
+    Epic {
+        #[command(subcommand)]
+        command: EpicCommand,
+    },
 }
 
 /// Idea inbox commands.
@@ -65,6 +75,65 @@ pub enum IdeaCommand {
     },
     /// List all ideas in the project inbox.
     List,
+}
+
+/// Release container commands.
+#[derive(Clone, Debug, Subcommand)]
+pub enum ReleaseCommand {
+    /// Create an open release.
+    Create {
+        /// The release title.
+        title: String,
+        #[command(flatten)]
+        description: DescriptionArgs,
+    },
+    /// Update a release title or Markdown description.
+    Update {
+        /// The release ID to update.
+        id: String,
+        /// Replace the release title.
+        #[arg(long, value_name = "TITLE")]
+        title: Option<String>,
+        #[command(flatten)]
+        description: DescriptionArgs,
+    },
+}
+
+/// Spec-backed epic commands.
+#[derive(Clone, Debug, Subcommand)]
+pub enum EpicCommand {
+    /// Create an open epic for an existing Markdown spec.
+    Create {
+        /// The epic title.
+        title: String,
+        /// The Markdown spec path, relative to the current directory.
+        #[arg(long, value_name = "PATH")]
+        spec: PathBuf,
+        /// Associate the epic with a release.
+        #[arg(long, value_name = "ID")]
+        release: Option<String>,
+        #[command(flatten)]
+        description: DescriptionArgs,
+    },
+    /// Update an epic without modifying its linked spec.
+    Update {
+        /// The epic ID to update.
+        id: String,
+        /// Replace the epic title.
+        #[arg(long, value_name = "TITLE")]
+        title: Option<String>,
+        /// Replace the linked Markdown spec.
+        #[arg(long, value_name = "PATH")]
+        spec: Option<PathBuf>,
+        /// Associate the epic with a release.
+        #[arg(long, value_name = "ID", conflicts_with = "no_release")]
+        release: Option<String>,
+        /// Remove the epic's release association.
+        #[arg(long, conflicts_with = "release")]
+        no_release: bool,
+        #[command(flatten)]
+        description: DescriptionArgs,
+    },
 }
 
 /// Mutually exclusive sources for an idea's Markdown description.

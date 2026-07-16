@@ -94,14 +94,14 @@ discarding ideas with Markdown descriptions.
 
 **Acceptance criteria:**
 
-- [ ] Add validated release and epic IDs and the corresponding roadmap migrations.
-- [ ] Implement release create and update commands.
-- [ ] Implement epic create and update commands, including optional release association.
-- [ ] Require each epic to reference one unique, existing regular `.md` file inside the worktree.
-- [ ] Normalize stored spec paths relative to the worktree and reject absolute paths,
+- [x] Add validated release and epic IDs and the corresponding roadmap migrations.
+- [x] Implement release create and update commands.
+- [x] Implement epic create and update commands, including optional release association.
+- [x] Require each epic to reference one unique, existing regular `.md` file inside the worktree.
+- [x] Normalize stored spec paths relative to the worktree and reject absolute paths,
       traversal, symlink escapes, duplicates, and non-Markdown targets.
-- [ ] Updating an epic never edits the linked spec.
-- [ ] Missing or invalid release associations roll back the entire mutation.
+- [x] Updating an epic never edits the linked spec.
+- [x] Missing or invalid release associations roll back the entire mutation.
 
 **Verification:**
 

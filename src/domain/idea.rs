@@ -76,9 +76,7 @@ impl Idea {
         Ok(Self { id: IdeaId::new(), title, description, status: IdeaStatus::Captured })
     }
 
-    pub(crate) fn from_parts(
-        id: IdeaId, title: String, description: String, status: IdeaStatus,
-    ) -> Result<Self, DomainError> {
+    pub fn from_parts(id: IdeaId, title: String, description: String, status: IdeaStatus) -> Result<Self, DomainError> {
         validate_title(&title)?;
         Ok(Self { id, title, description, status })
     }

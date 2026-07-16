@@ -82,6 +82,16 @@ impl ContainerStatus {
         }
     }
 
+    /// Parse a persisted container status while preserving the entity name in errors.
+    pub fn parse(entity: &'static str, value: &str) -> Result<Self, DomainError> {
+        match value {
+            "open" => Ok(Self::Open),
+            "completed" => Ok(Self::Completed),
+            "cancelled" => Ok(Self::Cancelled),
+            _ => Err(DomainError::InvalidStatus { entity, value: value.to_owned() }),
+        }
+    }
+
     pub fn apply(self, action: ContainerAction) -> Result<Self, DomainError> {
         match (self, action) {
             (Self::Open, ContainerAction::Complete) => Ok(Self::Completed),

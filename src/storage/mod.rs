@@ -1,14 +1,16 @@
+mod epics;
 mod ideas;
 mod migrations;
+mod releases;
 
 use std::{path::Path, time::Duration};
 
 use rusqlite::Connection;
 use thiserror::Error;
 
-use crate::domain::{DomainError, Idea, IdeaId};
+use crate::domain::{DomainError, Epic, EpicId, Idea, IdeaId, Release, ReleaseId};
 
-pub const CURRENT_VERSION: i32 = 2;
+pub const CURRENT_VERSION: i32 = 3;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -19,8 +21,18 @@ pub enum StorageError {
     Sqlite(#[from] rusqlite::Error),
     #[error("stored idea is invalid: {0}")]
     InvalidIdea(#[from] DomainError),
+    #[error("stored release is invalid: {0}")]
+    InvalidRelease(DomainError),
+    #[error("stored epic is invalid: {0}")]
+    InvalidEpic(DomainError),
     #[error("idea `{id}` was not found")]
     IdeaNotFound { id: String },
+    #[error("release `{id}` was not found")]
+    ReleaseNotFound { id: String },
+    #[error("epic `{id}` was not found")]
+    EpicNotFound { id: String },
+    #[error("spec path `{path}` is already linked to another epic")]
+    DuplicateSpec { path: String },
     #[error("database user_version {found} is newer than this application supports (latest {latest})")]
     NewerDatabase { found: i32, latest: i32 },
     #[error("migration sequence is missing version {expected} before version {found}")]
@@ -76,8 +88,55 @@ impl Database {
         ideas::discard(&mut self.connection, id)
     }
 
+    /// Read one release by its validated identifier.
+    pub fn release(&self, id: ReleaseId) -> Result<Option<Release>, StorageError> {
+        releases::find(&self.connection, &id)
+    }
+
+    /// Read all releases in deterministic identifier order.
+    pub fn releases(&self) -> Result<Vec<Release>, StorageError> {
+        releases::list(&self.connection)
+    }
+
+    /// Create an open release in a transaction.
+    pub fn create_release(&mut self, title: String, description: String) -> Result<Release, StorageError> {
+        releases::create(&mut self.connection, title, description)
+    }
+
+    /// Update a release's title and/or Markdown description in a transaction.
+    pub fn update_release(
+        &mut self, id: ReleaseId, title: Option<String>, description: Option<String>,
+    ) -> Result<Release, StorageError> {
+        releases::update(&mut self.connection, id, title, description)
+    }
+
+    /// Read one epic by its validated identifier.
+    pub fn epic(&self, id: EpicId) -> Result<Option<Epic>, StorageError> {
+        epics::find(&self.connection, &id)
+    }
+
+    /// Read all epics in deterministic identifier order.
+    pub fn epics(&self) -> Result<Vec<Epic>, StorageError> {
+        epics::list(&self.connection)
+    }
+
+    /// Create an open epic after validating its release association and unique spec path.
+    pub fn create_epic(
+        &mut self, title: String, description: String, spec_path: String, release_id: Option<ReleaseId>,
+    ) -> Result<Epic, StorageError> {
+        epics::create(&mut self.connection, title, description, spec_path, release_id)
+    }
+
+    /// Update an epic without modifying the linked Markdown file.
+    pub fn update_epic(
+        &mut self, id: EpicId, title: Option<String>, description: Option<String>, spec_path: Option<String>,
+        release_change: Option<Option<ReleaseId>>,
+    ) -> Result<Epic, StorageError> {
+        epics::update(&mut self.connection, id, title, description, spec_path, release_change)
+    }
+
     #[cfg(test)]
-    pub(crate) fn connection(&self) -> &Connection {
+    pub fn connection(&self) -> &Connection {
         &self.connection
     }
 }
@@ -128,5 +187,15 @@ mod tests {
             )
             .expect("ideas migration creates the ideas table");
         assert_eq!(ideas_table, "ideas");
+
+        let epics_table: String = database
+            .connection()
+            .query_row(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'epics'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("epics migration creates the epics table");
+        assert_eq!(epics_table, "epics");
     }
 }

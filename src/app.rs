@@ -1,15 +1,16 @@
+use std::ffi::OsStr;
 use std::io::{IsTerminal, Read};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::{fs, io};
 use std::{fs::OpenOptions, io::Write};
 
-use anyhow::{Context, Result};
+use anyhow::Context;
 use thiserror::Error;
 
-use crate::domain::{DomainError, Idea, IdeaId, validate_title};
-use crate::output::{IdeaMutation, OutputMode, Renderer};
+use crate::domain::{DomainError, Epic, EpicId, Idea, IdeaId, Release, ReleaseId, validate_title};
+use crate::output::{EpicMutation, IdeaMutation, OutputMode, ReleaseMutation, Renderer};
 use crate::{
-    cli::{Cli, Command, DescriptionArgs, IdeaCommand},
+    cli::{Cli, Command, DescriptionArgs, EpicCommand, IdeaCommand, ReleaseCommand},
     snapshot::{ProjectConfig, SnapshotError},
     storage::{Database, StorageError},
     vcs::{GixVcs, Vcs, VcsError},
@@ -20,6 +21,10 @@ const CONFIG_FILE: &str = "config.toml";
 const DATABASE_FILE: &str = "arcl.db";
 const GITIGNORE_FILE: &str = ".gitignore";
 const REQUIRED_GITIGNORE_ENTRIES: &[&str] = &["/arcl.db", "/arcl.db-*", "/*.tmp", "/conflicts/"];
+
+type CResult<T> = std::result::Result<T, CommandError>;
+type SResult<T> = std::result::Result<T, SpecPathError>;
+type IResult<T> = std::result::Result<T, InitError>;
 
 /// A typed application failure carrying the roadmap's process exit category.
 #[derive(Debug, Error)]
@@ -112,6 +117,8 @@ enum CommandError {
     Domain(#[from] DomainError),
     #[error(transparent)]
     Storage(#[from] StorageError),
+    #[error(transparent)]
+    InvalidSpecPath(#[from] SpecPathError),
     #[error("description file `{path}` could not be read: {source}")]
     ReadDescription { path: PathBuf, source: io::Error },
     #[error("description file `{path}` is not valid UTF-8")]
@@ -137,25 +144,71 @@ impl CommandError {
             | Self::ReadDescription { .. }
             | Self::ReadStdin { .. }
             | Self::OpenDatabase { source: StorageError::Sqlite(_), .. } => 1,
-            Self::OpenDatabase { source, .. } => storage_exit_code(source),
-            Self::Storage(error) => storage_exit_code(error),
-            Self::InvalidDescription { .. } | Self::InvalidStdin => 3,
+            Self::OpenDatabase { source, .. } => u8::from(source),
+            Self::Storage(error) => u8::from(error),
+            Self::InvalidDescription { .. } | Self::InvalidStdin | Self::InvalidSpecPath(_) => 3,
             Self::StdinIsTerminal => 3,
         }
     }
 }
 
-fn storage_exit_code(error: &StorageError) -> u8 {
-    match error {
-        StorageError::IdeaNotFound { .. } => 5,
-        StorageError::InvalidIdea(_) | StorageError::NewerDatabase { .. } | StorageError::MigrationGap { .. } => 3,
-        StorageError::Sqlite(_) => 1,
+impl From<&StorageError> for u8 {
+    fn from(value: &StorageError) -> Self {
+        match value {
+            StorageError::IdeaNotFound { .. } => 5,
+            StorageError::ReleaseNotFound { .. } | StorageError::EpicNotFound { .. } => 5,
+            StorageError::InvalidIdea(_)
+            | StorageError::InvalidRelease(_)
+            | StorageError::InvalidEpic(_)
+            | StorageError::DuplicateSpec { .. }
+            | StorageError::NewerDatabase { .. }
+            | StorageError::MigrationGap { .. } => 3,
+            StorageError::Sqlite(_) => 1,
+        }
     }
 }
 
 enum IdeaCommandResult {
     Mutation { action: IdeaMutation, idea: Idea },
     List(Vec<Idea>),
+}
+
+enum ReleaseCommandResult {
+    Mutation { action: ReleaseMutation, release: Release },
+}
+
+enum EpicCommandResult {
+    Mutation { action: EpicMutation, epic: Epic },
+}
+
+#[derive(Debug, Error)]
+enum SpecPathError {
+    #[error("spec path cannot be empty")]
+    Empty,
+    #[error("spec path `{path}` must be relative to the current directory")]
+    Absolute { path: PathBuf },
+    #[error("spec path `{path}` cannot contain `..` path components")]
+    Traversal { path: PathBuf },
+    #[error("could not resolve the Git worktree root `{path}`: {source}")]
+    CanonicalizeRoot { path: PathBuf, source: io::Error },
+    #[error("could not resolve current directory `{path}`: {source}")]
+    CanonicalizeCurrentDirectory { path: PathBuf, source: io::Error },
+    #[error("could not resolve spec path `{path}`: {source}")]
+    Resolve { path: PathBuf, source: io::Error },
+    #[error("spec path `{path}` resolves outside the Git worktree")]
+    OutsideWorktree { path: PathBuf },
+    #[error("spec path `{path}` is not a regular file")]
+    NotRegularFile { path: PathBuf },
+    #[error("spec path `{path}` is not a Markdown file ending in `.md`")]
+    NotMarkdown { path: PathBuf },
+    #[error("spec path `{path}` is not valid UTF-8")]
+    NonUtf8 { path: PathBuf },
+}
+
+struct OpenProject {
+    root: PathBuf,
+    current_dir: PathBuf,
+    database: Database,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -165,7 +218,7 @@ struct Initialization {
 }
 
 /// Run one parsed CLI invocation at the application boundary.
-pub fn run(cli: Cli) -> Result<()> {
+pub fn run(cli: Cli) -> anyhow::Result<()> {
     let mode = if cli.json {
         OutputMode::Json
     } else if cli.plain {
@@ -188,7 +241,7 @@ pub fn run(cli: Cli) -> Result<()> {
             write_output(message)
         }
         Some(Command::Idea { command }) => {
-            let result = execute_idea(command).map_err(ApplicationError::from_command)?;
+            let result = exec_idea(command).map_err(ApplicationError::from_command)?;
             let message = match result {
                 IdeaCommandResult::Mutation { action, idea } => renderer.render_idea(action, &idea),
                 IdeaCommandResult::List(ideas) => renderer.render_ideas(&ideas),
@@ -196,11 +249,25 @@ pub fn run(cli: Cli) -> Result<()> {
             .context("rendering idea output")?;
             write_output(message)
         }
+        Some(Command::Release { command }) => {
+            let result = exec_release(command).map_err(ApplicationError::from_command)?;
+            let ReleaseCommandResult::Mutation { action, release } = result;
+            let message = renderer
+                .render_release(action, &release)
+                .context("rendering release output")?;
+            write_output(message)
+        }
+        Some(Command::Epic { command }) => {
+            let result = exec_epic(command).map_err(ApplicationError::from_command)?;
+            let EpicCommandResult::Mutation { action, epic } = result;
+            let message = renderer.render_epic(action, &epic).context("rendering epic output")?;
+            write_output(message)
+        }
         None => write_output(renderer.render_startup().context("rendering CLI output")?),
     }
 }
 
-fn write_output(message: Option<String>) -> Result<()> {
+fn write_output(message: Option<String>) -> anyhow::Result<()> {
     if let Some(message) = message {
         let stdout = io::stdout();
         let mut stdout = stdout.lock();
@@ -209,8 +276,8 @@ fn write_output(message: Option<String>) -> Result<()> {
     Ok(())
 }
 
-fn execute_idea(command: IdeaCommand) -> std::result::Result<IdeaCommandResult, CommandError> {
-    match command {
+fn exec_idea(cmd: IdeaCommand) -> CResult<IdeaCommandResult> {
+    match cmd {
         IdeaCommand::Create { title, description } => {
             validate_title(&title)?;
             let description = resolve_description(description)?.unwrap_or_default();
@@ -244,7 +311,87 @@ fn execute_idea(command: IdeaCommand) -> std::result::Result<IdeaCommandResult, 
     }
 }
 
-fn open_database() -> std::result::Result<Database, CommandError> {
+fn exec_release(cmd: ReleaseCommand) -> CResult<ReleaseCommandResult> {
+    match cmd {
+        ReleaseCommand::Create { title, description } => {
+            validate_title(&title)?;
+            let description = resolve_description(description)?.unwrap_or_default();
+            let mut database = open_database()?;
+            let release = database.create_release(title, description)?;
+            Ok(ReleaseCommandResult::Mutation { action: ReleaseMutation::Created, release })
+        }
+        ReleaseCommand::Update { id, title, description } => {
+            let id = ReleaseId::parse(&id).map_err(DomainError::from)?;
+            if let Some(title) = &title {
+                validate_title(title)?;
+            }
+            let description = resolve_description(description)?;
+            if title.is_none() && description.is_none() {
+                return Err(CommandError::Domain(DomainError::NoFieldsToUpdate {
+                    entity: "release",
+                }));
+            }
+            let mut database = open_database()?;
+            let release = database.update_release(id, title, description)?;
+            Ok(ReleaseCommandResult::Mutation { action: ReleaseMutation::Updated, release })
+        }
+    }
+}
+
+fn exec_epic(command: EpicCommand) -> CResult<EpicCommandResult> {
+    match command {
+        EpicCommand::Create { title, spec, release, description } => {
+            validate_title(&title)?;
+            let release_id = release
+                .as_deref()
+                .map(ReleaseId::parse)
+                .transpose()
+                .map_err(DomainError::from)?;
+            let description = resolve_description(description)?.unwrap_or_default();
+            let mut project = open_project()?;
+            let spec_path = resolve_spec_path(&project.root, &project.current_dir, &spec)?;
+            let epic = project
+                .database
+                .create_epic(title, description, spec_path, release_id)?;
+            Ok(EpicCommandResult::Mutation { action: EpicMutation::Created, epic })
+        }
+        EpicCommand::Update { id, title, spec, release, no_release, description } => {
+            let id = EpicId::parse(&id).map_err(DomainError::from)?;
+            if let Some(title) = &title {
+                validate_title(title)?;
+            }
+            let description = resolve_description(description)?;
+            let release_change = if no_release {
+                Some(None)
+            } else {
+                release
+                    .as_deref()
+                    .map(ReleaseId::parse)
+                    .transpose()
+                    .map_err(DomainError::from)?
+                    .map(Some)
+            };
+            if title.is_none() && spec.is_none() && description.is_none() && release_change.is_none() {
+                return Err(CommandError::Domain(DomainError::NoFieldsToUpdate { entity: "epic" }));
+            }
+            let mut project = open_project()?;
+            let spec_path = spec
+                .as_ref()
+                .map(|spec| resolve_spec_path(&project.root, &project.current_dir, spec))
+                .transpose()?;
+            let epic = project
+                .database
+                .update_epic(id, title, description, spec_path, release_change)?;
+            Ok(EpicCommandResult::Mutation { action: EpicMutation::Updated, epic })
+        }
+    }
+}
+
+fn open_database() -> CResult<Database> {
+    Ok(open_project()?.database)
+}
+
+fn open_project() -> CResult<OpenProject> {
     let start = std::env::current_dir().map_err(|source| CommandError::CurrentDirectory { source })?;
     let vcs = GixVcs::discover(&start)?;
     let root = vcs.worktree_root()?.to_owned();
@@ -259,10 +406,72 @@ fn open_database() -> std::result::Result<Database, CommandError> {
     let config = fs::read_to_string(&config_path)
         .map_err(|source| CommandError::ReadConfig { path: config_path.clone(), source })?;
     ProjectConfig::parse(&config).map_err(|source| CommandError::InvalidConfig { path: config_path, source })?;
-    Database::open(&database_path).map_err(|source| CommandError::OpenDatabase { path: database_path, source })
+    let database =
+        Database::open(&database_path).map_err(|source| CommandError::OpenDatabase { path: database_path, source })?;
+    Ok(OpenProject { root, current_dir: start, database })
 }
 
-fn resolve_description(args: DescriptionArgs) -> std::result::Result<Option<String>, CommandError> {
+fn resolve_spec_path(root: &Path, current_dir: &Path, input: &Path) -> SResult<String> {
+    if input.as_os_str().is_empty() {
+        return Err(SpecPathError::Empty);
+    }
+
+    let relative = normalize_relative_path(input)?;
+    let canonical_root =
+        fs::canonicalize(root).map_err(|source| SpecPathError::CanonicalizeRoot { path: root.to_owned(), source })?;
+    let canonical_current = fs::canonicalize(current_dir)
+        .map_err(|source| SpecPathError::CanonicalizeCurrentDirectory { path: current_dir.to_owned(), source })?;
+    if !canonical_current.starts_with(&canonical_root) {
+        return Err(SpecPathError::OutsideWorktree { path: current_dir.to_owned() });
+    }
+
+    let candidate = canonical_current.join(&relative);
+    let resolved =
+        fs::canonicalize(&candidate).map_err(|source| SpecPathError::Resolve { path: input.to_owned(), source })?;
+    if !resolved.starts_with(&canonical_root) {
+        return Err(SpecPathError::OutsideWorktree { path: input.to_owned() });
+    }
+
+    let metadata =
+        fs::metadata(&resolved).map_err(|source| SpecPathError::Resolve { path: input.to_owned(), source })?;
+    if !metadata.is_file() {
+        return Err(SpecPathError::NotRegularFile { path: input.to_owned() });
+    }
+    if resolved.extension() != Some(OsStr::new("md")) {
+        return Err(SpecPathError::NotMarkdown { path: input.to_owned() });
+    }
+
+    let root_relative = resolved
+        .strip_prefix(&canonical_root)
+        .map_err(|_| SpecPathError::OutsideWorktree { path: input.to_owned() })?;
+    path_to_slash_string(root_relative).ok_or_else(|| SpecPathError::NonUtf8 { path: input.to_owned() })
+}
+
+fn normalize_relative_path(input: &Path) -> SResult<PathBuf> {
+    let mut normalized = PathBuf::new();
+    for component in input.components() {
+        match component {
+            Component::Normal(part) => normalized.push(part),
+            Component::CurDir => {}
+            Component::ParentDir => return Err(SpecPathError::Traversal { path: input.to_owned() }),
+            Component::RootDir | Component::Prefix(_) => {
+                return Err(SpecPathError::Absolute { path: input.to_owned() });
+            }
+        }
+    }
+    if normalized.as_os_str().is_empty() { Err(SpecPathError::Empty) } else { Ok(normalized) }
+}
+
+fn path_to_slash_string(path: &Path) -> Option<String> {
+    let mut components = Vec::new();
+    for component in path.components() {
+        let Component::Normal(part) = component else { return None };
+        components.push(part.to_str()?);
+    }
+    (!components.is_empty()).then(|| components.join("/"))
+}
+
+fn resolve_description(args: DescriptionArgs) -> CResult<Option<String>> {
     if let Some(description) = args.description {
         return Ok(Some(description));
     }
@@ -280,7 +489,7 @@ fn resolve_description(args: DescriptionArgs) -> std::result::Result<Option<Stri
         .map_err(|_| CommandError::InvalidDescription { path })
 }
 
-fn read_stdin_description() -> std::result::Result<Option<String>, CommandError> {
+fn read_stdin_description() -> CResult<Option<String>> {
     let stdin = io::stdin();
     if stdin.is_terminal() {
         return Err(CommandError::StdinIsTerminal);
@@ -296,7 +505,7 @@ fn read_stdin_description() -> std::result::Result<Option<String>, CommandError>
         .map_err(|_| CommandError::InvalidStdin)
 }
 
-fn initialize(start: &Path, snapshot: bool) -> std::result::Result<Initialization, InitError> {
+fn initialize(start: &Path, snapshot: bool) -> IResult<Initialization> {
     let vcs = GixVcs::discover(start)?;
     let root = vcs.worktree_root()?.to_owned();
     let arcl_directory = root.join(ARCL_DIRECTORY);
@@ -315,7 +524,7 @@ fn initialize(start: &Path, snapshot: bool) -> std::result::Result<Initializatio
     Ok(Initialization { root, snapshot_enabled: config.snapshot.enabled })
 }
 
-fn load_or_create_config(path: &Path, snapshot: bool) -> std::result::Result<ProjectConfig, InitError> {
+fn load_or_create_config(path: &Path, snapshot: bool) -> IResult<ProjectConfig> {
     match fs::read_to_string(path) {
         Ok(input) => {
             ProjectConfig::parse(&input).map_err(|source| InitError::InvalidConfig { path: path.to_owned(), source })
@@ -334,7 +543,7 @@ fn load_or_create_config(path: &Path, snapshot: bool) -> std::result::Result<Pro
     }
 }
 
-fn ensure_gitignore(path: &Path) -> std::result::Result<(), InitError> {
+fn ensure_gitignore(path: &Path) -> IResult<()> {
     let existing = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {

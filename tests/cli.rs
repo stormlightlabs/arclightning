@@ -1,6 +1,7 @@
 use std::{fs, path::Path};
 
 use arcl::{
+    domain::ReleaseId,
     storage::Database,
     vcs::{GixVcs, Vcs},
 };
@@ -130,7 +131,7 @@ fn init_discovers_the_worktree_from_a_nested_directory() {
     );
 
     let database = Database::open(arcl_directory.join("arcl.db")).expect("initialized database reopens");
-    assert_eq!(database.schema_version().expect("schema version is readable"), 2);
+    assert_eq!(database.schema_version().expect("schema version is readable"), 3);
 }
 
 #[test]
@@ -380,4 +381,285 @@ fn idea_descriptions_accept_exact_utf8_stdin_and_invalid_inputs_do_not_write() {
         .query_row("SELECT count(*) FROM ideas", [], |row| row.get(0))
         .expect("idea count is readable");
     assert_eq!(count_after, count_before);
+}
+
+fn release_id_from_json(output: &[u8]) -> String {
+    serde_json::from_slice::<Value>(output).expect("JSON output parses")["data"]["release"]["id"]
+        .as_str()
+        .expect("JSON output contains a release ID")
+        .to_owned()
+}
+
+fn epic_id_from_json(output: &[u8]) -> String {
+    serde_json::from_slice::<Value>(output).expect("JSON output parses")["data"]["epic"]["id"]
+        .as_str()
+        .expect("JSON output contains an epic ID")
+        .to_owned()
+}
+
+#[test]
+fn releases_and_epics_round_trip_from_a_nested_directory() {
+    let repository = worktree("ref: refs/heads/main\n");
+    let specs = repository.path().join("specs");
+    fs::create_dir_all(&specs).expect("spec directory can be created");
+    let spec = specs.join("feature.md");
+    let spec_contents = "# Feature\n\nKeep this file unchanged.\n";
+    fs::write(&spec, spec_contents).expect("spec can be written");
+
+    let initialized = arcl_in(repository.path())
+        .args(["--color", "never", "init"])
+        .output()
+        .expect("arcl init runs");
+    assert!(initialized.status.success());
+
+    let release = arcl_in(repository.path())
+        .args([
+            "--json",
+            "release",
+            "create",
+            "Spring release",
+            "--description",
+            "Ship it.",
+        ])
+        .output()
+        .expect("release create runs");
+    assert!(
+        release.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&release.stderr)
+    );
+    let release_id = release_id_from_json(&release.stdout);
+
+    let release_update = arcl_in(repository.path())
+        .args(["--json", "release", "update", &release_id, "--title", "Updated release"])
+        .output()
+        .expect("release update runs");
+    assert!(
+        release_update.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&release_update.stderr)
+    );
+    let release_payload: Value = serde_json::from_slice(&release_update.stdout).expect("release update JSON parses");
+    assert_eq!(release_payload["data"]["release"]["title"], "Updated release");
+    assert_eq!(release_payload["data"]["release"]["description"], "Ship it.");
+
+    let epic = arcl_in(&specs)
+        .args([
+            "--json",
+            "epic",
+            "create",
+            "Feature epic",
+            "--spec",
+            "feature.md",
+            "--release",
+            &release_id,
+            "--description",
+            "Track the feature.",
+        ])
+        .output()
+        .expect("epic create runs");
+    assert!(
+        epic.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&epic.stderr)
+    );
+    let epic_payload: Value = serde_json::from_slice(&epic.stdout).expect("epic JSON parses");
+    let epic_id = epic_id_from_json(&epic.stdout);
+    assert_eq!(epic_payload["data"]["epic"]["spec_path"], "specs/feature.md");
+    assert_eq!(epic_payload["data"]["epic"]["release_id"], release_id);
+
+    let updated = arcl_in(&specs)
+        .args([
+            "--json",
+            "epic",
+            "update",
+            &epic_id,
+            "--title",
+            "Renamed feature epic",
+            "--description",
+            "Updated tracker text.",
+            "--no-release",
+        ])
+        .output()
+        .expect("epic update runs");
+    assert!(
+        updated.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&updated.stderr)
+    );
+    let updated_payload: Value = serde_json::from_slice(&updated.stdout).expect("epic update JSON parses");
+    assert_eq!(updated_payload["data"]["epic"]["title"], "Renamed feature epic");
+    assert_eq!(updated_payload["data"]["epic"]["description"], "Updated tracker text.");
+    assert!(updated_payload["data"]["epic"]["release_id"].is_null());
+    assert_eq!(updated_payload["data"]["epic"]["spec_path"], "specs/feature.md");
+    assert_eq!(fs::read_to_string(&spec).expect("spec remains readable"), spec_contents);
+
+    let database = rusqlite::Connection::open(repository.path().join(".arcl/arcl.db")).expect("database opens");
+    let stored_path: String = database
+        .query_row("SELECT spec_path FROM epics WHERE id = ?1", [&epic_id], |row| {
+            row.get(0)
+        })
+        .expect("epic spec path is stored");
+    assert_eq!(stored_path, "specs/feature.md");
+}
+
+#[test]
+fn epic_release_association_failures_roll_back_mutations() {
+    let repository = initialized_repository();
+    let spec = repository.path().join("feature.md");
+    fs::write(&spec, "# Feature\n").expect("spec can be written");
+    let missing_release = ReleaseId::new().to_string();
+
+    let create = arcl_in(repository.path())
+        .args([
+            "epic",
+            "create",
+            "Feature",
+            "--spec",
+            "feature.md",
+            "--release",
+            &missing_release,
+        ])
+        .output()
+        .expect("invalid epic create runs");
+    assert_eq!(create.status.code(), Some(5));
+    assert!(String::from_utf8_lossy(&create.stderr).contains("release"));
+
+    let database_path = repository.path().join(".arcl/arcl.db");
+    let database = rusqlite::Connection::open(&database_path).expect("database opens");
+    let count: i64 = database
+        .query_row("SELECT count(*) FROM epics", [], |row| row.get(0))
+        .expect("epic count is readable");
+    assert_eq!(count, 0);
+    drop(database);
+
+    let release = arcl_in(repository.path())
+        .args(["--json", "release", "create", "Release"])
+        .output()
+        .expect("release create runs");
+    assert!(release.status.success());
+    let release_id = release_id_from_json(&release.stdout);
+    let created = arcl_in(repository.path())
+        .args([
+            "--json",
+            "epic",
+            "create",
+            "Feature",
+            "--spec",
+            "feature.md",
+            "--release",
+            &release_id,
+        ])
+        .output()
+        .expect("epic create runs");
+    assert!(
+        created.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    let epic_id = epic_id_from_json(&created.stdout);
+
+    let failed_update = arcl_in(repository.path())
+        .args([
+            "epic",
+            "update",
+            &epic_id,
+            "--title",
+            "Must not be saved",
+            "--release",
+            &missing_release,
+        ])
+        .output()
+        .expect("invalid epic update runs");
+    assert_eq!(failed_update.status.code(), Some(5));
+
+    let database = rusqlite::Connection::open(database_path).expect("database reopens");
+    let (title, stored_release): (String, String) = database
+        .query_row("SELECT title, release_id FROM epics WHERE id = ?1", [&epic_id], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .expect("epic remains readable");
+    assert_eq!(title, "Feature");
+    assert_eq!(stored_release, release_id);
+}
+
+#[test]
+fn epic_rejects_invalid_spec_paths_and_duplicates() {
+    let repository = initialized_repository();
+    let spec = repository.path().join("feature.md");
+    let text_file = repository.path().join("notes.txt");
+    fs::write(&spec, "# Feature\n").expect("spec can be written");
+    fs::write(&text_file, "not a spec\n").expect("text file can be written");
+
+    let absolute = arcl_in(repository.path())
+        .args([
+            "epic",
+            "create",
+            "Absolute",
+            "--spec",
+            spec.to_str().expect("spec path is UTF-8"),
+        ])
+        .output()
+        .expect("absolute spec command runs");
+    assert_eq!(absolute.status.code(), Some(3));
+
+    let traversal = arcl_in(repository.path())
+        .args(["epic", "create", "Traversal", "--spec", "../feature.md"])
+        .output()
+        .expect("traversal spec command runs");
+    assert_eq!(traversal.status.code(), Some(3));
+
+    let non_markdown = arcl_in(repository.path())
+        .args(["epic", "create", "Text", "--spec", "notes.txt"])
+        .output()
+        .expect("non-Markdown spec command runs");
+    assert_eq!(non_markdown.status.code(), Some(3));
+
+    let missing = arcl_in(repository.path())
+        .args(["epic", "create", "Missing", "--spec", "missing.md"])
+        .output()
+        .expect("missing spec command runs");
+    assert_eq!(missing.status.code(), Some(3));
+
+    let created = arcl_in(repository.path())
+        .args(["--json", "epic", "create", "First", "--spec", "feature.md"])
+        .output()
+        .expect("first epic create runs");
+    assert!(
+        created.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+
+    let duplicate = arcl_in(repository.path())
+        .args(["epic", "create", "Duplicate", "--spec", "./feature.md"])
+        .output()
+        .expect("duplicate spec command runs");
+    assert_eq!(duplicate.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&duplicate.stderr).contains("already linked"));
+
+    let database = rusqlite::Connection::open(repository.path().join(".arcl/arcl.db")).expect("database opens");
+    let count: i64 = database
+        .query_row("SELECT count(*) FROM epics", [], |row| row.get(0))
+        .expect("epic count is readable");
+    assert_eq!(count, 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn epic_rejects_a_symlink_escape() {
+    use std::os::unix::fs::symlink;
+
+    let repository = initialized_repository();
+    let outside = tempfile::tempdir().expect("outside directory can be created");
+    let outside_spec = outside.path().join("outside.md");
+    fs::write(&outside_spec, "# Outside\n").expect("outside spec can be written");
+    symlink(&outside_spec, repository.path().join("escape.md")).expect("symlink can be created");
+
+    let output = arcl_in(repository.path())
+        .args(["epic", "create", "Escape", "--spec", "escape.md"])
+        .output()
+        .expect("symlink escape command runs");
+    assert_eq!(output.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("outside the Git worktree"));
 }
