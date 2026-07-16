@@ -131,7 +131,7 @@ fn init_discovers_the_worktree_from_a_nested_directory() {
     );
 
     let database = Database::open(arcl_directory.join("arcl.db")).expect("initialized database reopens");
-    assert_eq!(database.schema_version().expect("schema version is readable"), 3);
+    assert_eq!(database.schema_version().expect("schema version is readable"), 5);
 }
 
 #[test]
@@ -394,6 +394,20 @@ fn epic_id_from_json(output: &[u8]) -> String {
     serde_json::from_slice::<Value>(output).expect("JSON output parses")["data"]["epic"]["id"]
         .as_str()
         .expect("JSON output contains an epic ID")
+        .to_owned()
+}
+
+fn milestone_id_from_json(output: &[u8]) -> String {
+    serde_json::from_slice::<Value>(output).expect("JSON output parses")["data"]["milestone"]["id"]
+        .as_str()
+        .expect("JSON output contains a milestone ID")
+        .to_owned()
+}
+
+fn task_id_from_json(output: &[u8]) -> String {
+    serde_json::from_slice::<Value>(output).expect("JSON output parses")["data"]["task"]["id"]
+        .as_str()
+        .expect("JSON output contains a task ID")
         .to_owned()
 }
 
@@ -662,4 +676,142 @@ fn epic_rejects_a_symlink_escape() {
         .expect("symlink escape command runs");
     assert_eq!(output.status.code(), Some(3));
     assert!(String::from_utf8_lossy(&output.stderr).contains("outside the Git worktree"));
+}
+
+#[test]
+fn milestones_tasks_and_subtasks_round_trip_with_atomic_moves() {
+    let repository = initialized_repository();
+    fs::write(repository.path().join("feature.md"), "# Feature\n").expect("spec can be written");
+    let epic = arcl_in(repository.path())
+        .args(["--json", "epic", "create", "Feature", "--spec", "feature.md"])
+        .output()
+        .expect("epic create runs");
+    assert!(
+        epic.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&epic.stderr)
+    );
+    let epic_id = epic_id_from_json(&epic.stdout);
+
+    let milestone = arcl_in(repository.path())
+        .args([
+            "--json",
+            "milestone",
+            "create",
+            "Foundation",
+            "--epic",
+            &epic_id,
+            "--position",
+            "10",
+        ])
+        .output()
+        .expect("milestone create runs");
+    assert!(
+        milestone.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&milestone.stderr)
+    );
+    let first_milestone = milestone_id_from_json(&milestone.stdout);
+    let second = arcl_in(repository.path())
+        .args([
+            "--json",
+            "milestone",
+            "create",
+            "Follow-up",
+            "--epic",
+            &epic_id,
+            "--position",
+            "10",
+        ])
+        .output()
+        .expect("second milestone create runs");
+    assert!(
+        second.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let second_milestone = milestone_id_from_json(&second.stdout);
+
+    let parent = arcl_in(repository.path())
+        .args([
+            "--json",
+            "task",
+            "create",
+            "Parent",
+            "--milestone",
+            &first_milestone,
+            "--priority",
+            "high",
+            "--position",
+            "10",
+        ])
+        .output()
+        .expect("task create runs");
+    assert!(
+        parent.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&parent.stderr)
+    );
+    let parent_id = task_id_from_json(&parent.stdout);
+    let child = arcl_in(repository.path())
+        .args([
+            "--json",
+            "task",
+            "create",
+            "Child",
+            "--milestone",
+            &first_milestone,
+            "--parent",
+            &parent_id,
+            "--description",
+            "- [ ] prose only",
+        ])
+        .output()
+        .expect("subtask create runs");
+    assert!(
+        child.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&child.stderr)
+    );
+    let child_id = task_id_from_json(&child.stdout);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&child.stdout).expect("child JSON parses")["data"]["task"]["parent_id"],
+        parent_id
+    );
+
+    let moved = arcl_in(repository.path())
+        .args([
+            "--json",
+            "task",
+            "update",
+            &parent_id,
+            "--milestone",
+            &second_milestone,
+            "--no-parent",
+        ])
+        .output()
+        .expect("task subtree move runs");
+    assert!(
+        moved.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&moved.stderr)
+    );
+    let moved_payload: Value = serde_json::from_slice(&moved.stdout).expect("move JSON parses");
+    assert_eq!(moved_payload["data"]["task"]["milestone_id"], second_milestone);
+
+    let database = rusqlite::Connection::open(repository.path().join(".arcl/arcl.db")).expect("database opens");
+    let moved_child_milestone: String = database
+        .query_row("SELECT milestone_id FROM tasks WHERE id = ?1", [&child_id], |row| {
+            row.get(0)
+        })
+        .expect("child milestone is readable");
+    assert_eq!(moved_child_milestone, second_milestone);
+    drop(database);
+
+    let rejected = arcl_in(repository.path())
+        .args(["task", "update", &parent_id, "--parent", &child_id])
+        .output()
+        .expect("cyclic reparent command runs");
+    assert_eq!(rejected.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("cycle"));
 }

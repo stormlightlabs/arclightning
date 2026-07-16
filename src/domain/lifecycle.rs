@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use serde::{Deserialize, Serialize};
 
 use super::error::{DomainError, invalid_transition};
@@ -39,6 +41,21 @@ impl TaskStatus {
             }
         };
         Ok(next)
+    }
+}
+
+impl FromStr for TaskStatus {
+    type Err = DomainError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "pending" => Ok(Self::Pending),
+            "in_progress" => Ok(Self::InProgress),
+            "parked" => Ok(Self::Parked),
+            "completed" => Ok(Self::Completed),
+            "cancelled" => Ok(Self::Cancelled),
+            _ => Err(DomainError::InvalidStatus { entity: "task", value: s.to_owned() }),
+        }
     }
 }
 
@@ -120,6 +137,29 @@ pub enum TaskPriority {
     #[default]
     Normal,
     Low,
+}
+
+impl TaskPriority {
+    /// Return the stable value stored in SQLite and exposed by JSON output.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Critical => "critical",
+            Self::High => "high",
+            Self::Normal => "normal",
+            Self::Low => "low",
+        }
+    }
+
+    /// Parse a persisted or command-line task priority.
+    pub fn parse(value: &str) -> Result<Self, DomainError> {
+        match value {
+            "critical" => Ok(Self::Critical),
+            "high" => Ok(Self::High),
+            "normal" => Ok(Self::Normal),
+            "low" => Ok(Self::Low),
+            _ => Err(DomainError::InvalidPriority { value: value.to_owned() }),
+        }
+    }
 }
 
 #[cfg(test)]

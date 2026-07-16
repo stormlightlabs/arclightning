@@ -17,6 +17,16 @@ pub enum DomainError {
     InvalidStatus { entity: &'static str, value: String },
     #[error("position {position} is invalid; positions must be non-negative")]
     InvalidPosition { position: i64 },
+    #[error("invalid task priority `{value}`")]
+    InvalidPriority { value: String },
+    #[error("task `{task}` cannot be its own parent")]
+    SelfParent { task: String },
+    #[error("task `{task}` and parent `{parent}` must belong to the same milestone")]
+    DifferentMilestone { task: String, parent: String },
+    #[error("parenting task `{task}` to `{parent}` would create a cycle")]
+    ParentCycle { task: String, parent: String },
+    #[error("task subtree rooted at `{task}` contains tasks from different milestones")]
+    SubtreeDifferentMilestones { task: String },
     #[error("cannot {action} {entity} while it is {from}")]
     InvalidTransition {
         entity: &'static str,

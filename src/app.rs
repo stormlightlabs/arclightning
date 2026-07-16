@@ -7,12 +7,17 @@ use std::{fs::OpenOptions, io::Write};
 use anyhow::Context;
 use thiserror::Error;
 
-use crate::domain::{DomainError, Epic, EpicId, Idea, IdeaId, Release, ReleaseId, validate_title};
-use crate::output::{EpicMutation, IdeaMutation, OutputMode, ReleaseMutation, Renderer};
+use crate::domain::{
+    DomainError, Epic, EpicId, Idea, IdeaId, Milestone, MilestoneId, Release, ReleaseId, Task, TaskId, TaskPriority,
+    validate_title,
+};
+use crate::output::{
+    EpicMutation, IdeaMutation, MilestoneMutation, OutputMode, ReleaseMutation, Renderer, TaskMutation,
+};
 use crate::{
-    cli::{Cli, Command, DescriptionArgs, EpicCommand, IdeaCommand, ReleaseCommand},
+    cli::{Cli, Command, DescriptionArgs, EpicCommand, IdeaCommand, MilestoneCommand, ReleaseCommand, TaskCommand},
     snapshot::{ProjectConfig, SnapshotError},
-    storage::{Database, StorageError},
+    storage::{Database, StorageError, TaskUpdate},
     vcs::{GixVcs, Vcs, VcsError},
 };
 
@@ -156,10 +161,15 @@ impl From<&StorageError> for u8 {
     fn from(value: &StorageError) -> Self {
         match value {
             StorageError::IdeaNotFound { .. } => 5,
-            StorageError::ReleaseNotFound { .. } | StorageError::EpicNotFound { .. } => 5,
+            StorageError::ReleaseNotFound { .. }
+            | StorageError::EpicNotFound { .. }
+            | StorageError::MilestoneNotFound { .. }
+            | StorageError::TaskNotFound { .. } => 5,
             StorageError::InvalidIdea(_)
             | StorageError::InvalidRelease(_)
             | StorageError::InvalidEpic(_)
+            | StorageError::InvalidMilestone(_)
+            | StorageError::InvalidTask(_)
             | StorageError::DuplicateSpec { .. }
             | StorageError::NewerDatabase { .. }
             | StorageError::MigrationGap { .. } => 3,
@@ -179,6 +189,17 @@ enum ReleaseCommandResult {
 
 enum EpicCommandResult {
     Mutation { action: EpicMutation, epic: Epic },
+}
+
+enum MilestoneCommandResult {
+    Mutation {
+        action: MilestoneMutation,
+        milestone: Milestone,
+    },
+}
+
+enum TaskCommandResult {
+    Mutation { action: TaskMutation, task: Task },
 }
 
 #[derive(Debug, Error)]
@@ -261,6 +282,20 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
             let result = exec_epic(command).map_err(ApplicationError::from_command)?;
             let EpicCommandResult::Mutation { action, epic } = result;
             let message = renderer.render_epic(action, &epic).context("rendering epic output")?;
+            write_output(message)
+        }
+        Some(Command::Milestone { command }) => {
+            let result = exec_milestone(command).map_err(ApplicationError::from_command)?;
+            let MilestoneCommandResult::Mutation { action, milestone } = result;
+            let message = renderer
+                .render_milestone(action, &milestone)
+                .context("rendering milestone output")?;
+            write_output(message)
+        }
+        Some(Command::Task { command }) => {
+            let result = exec_task(command).map_err(ApplicationError::from_command)?;
+            let TaskCommandResult::Mutation { action, task } = result;
+            let message = renderer.render_task(action, &task).context("rendering task output")?;
             write_output(message)
         }
         None => write_output(renderer.render_startup().context("rendering CLI output")?),
@@ -383,6 +418,91 @@ fn exec_epic(command: EpicCommand) -> CResult<EpicCommandResult> {
                 .database
                 .update_epic(id, title, description, spec_path, release_change)?;
             Ok(EpicCommandResult::Mutation { action: EpicMutation::Updated, epic })
+        }
+    }
+}
+
+fn exec_milestone(command: MilestoneCommand) -> CResult<MilestoneCommandResult> {
+    match command {
+        MilestoneCommand::Create { title, epic, position, description } => {
+            validate_title(&title)?;
+            let epic_id = EpicId::parse(&epic).map_err(DomainError::from)?;
+            let description = resolve_description(description)?.unwrap_or_default();
+            let mut database = open_database()?;
+            let milestone = database.create_milestone(epic_id, title, description, position)?;
+            Ok(MilestoneCommandResult::Mutation { action: MilestoneMutation::Created, milestone })
+        }
+        MilestoneCommand::Update { id, title, position, description } => {
+            let id = MilestoneId::parse(&id).map_err(DomainError::from)?;
+            if let Some(title) = &title {
+                validate_title(title)?;
+            }
+            let description = resolve_description(description)?;
+            if title.is_none() && position.is_none() && description.is_none() {
+                return Err(CommandError::Domain(DomainError::NoFieldsToUpdate {
+                    entity: "milestone",
+                }));
+            }
+            let mut database = open_database()?;
+            let milestone = database.update_milestone(id, title, description, position)?;
+            Ok(MilestoneCommandResult::Mutation { action: MilestoneMutation::Updated, milestone })
+        }
+    }
+}
+
+fn exec_task(command: TaskCommand) -> CResult<TaskCommandResult> {
+    match command {
+        TaskCommand::Create { title, milestone, parent, priority, position, description } => {
+            validate_title(&title)?;
+            let milestone_id = MilestoneId::parse(&milestone).map_err(DomainError::from)?;
+            let parent_id = parent
+                .as_deref()
+                .map(TaskId::parse)
+                .transpose()
+                .map_err(DomainError::from)?;
+            let priority = TaskPriority::parse(&priority)?;
+            let description = resolve_description(description)?.unwrap_or_default();
+            let mut database = open_database()?;
+            let task = database.create_task(milestone_id, parent_id, title, description, priority, position)?;
+            Ok(TaskCommandResult::Mutation { action: TaskMutation::Created, task })
+        }
+        TaskCommand::Update { id, title, priority, position, milestone, parent, no_parent, description } => {
+            let id = TaskId::parse(&id).map_err(DomainError::from)?;
+            if let Some(title) = &title {
+                validate_title(title)?;
+            }
+            let priority = priority.as_deref().map(TaskPriority::parse).transpose()?;
+            let milestone_id = milestone
+                .as_deref()
+                .map(MilestoneId::parse)
+                .transpose()
+                .map_err(DomainError::from)?;
+            let parent_change = if no_parent {
+                Some(None)
+            } else {
+                parent
+                    .as_deref()
+                    .map(TaskId::parse)
+                    .transpose()
+                    .map_err(DomainError::from)?
+                    .map(Some)
+            };
+            let description = resolve_description(description)?;
+            if title.is_none()
+                && priority.is_none()
+                && position.is_none()
+                && milestone_id.is_none()
+                && parent_change.is_none()
+                && description.is_none()
+            {
+                return Err(CommandError::Domain(DomainError::NoFieldsToUpdate { entity: "task" }));
+            }
+            let mut database = open_database()?;
+            let task = database.update_task(
+                id,
+                TaskUpdate { title, description, priority, position, milestone_id, parent_change },
+            )?;
+            Ok(TaskCommandResult::Mutation { action: TaskMutation::Updated, task })
         }
     }
 }

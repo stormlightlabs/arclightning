@@ -79,6 +79,27 @@ Updating an epic changes tracker metadata only and never edits its linked spec.
 
 Use `--no-release` to remove an epic's release association.
 
+## Planning milestones and tasks
+
+Break an epic into ordered milestones, then add tasks and independently tracked subtasks:
+
+```sh
+arcl milestone create "Foundation" --epic arcl-e-01J... --position 10
+arcl task create "Add schema" --milestone arcl-m-01J... --priority high --position 10 \
+  --description "Create the tables needed by the tracker."
+arcl task create "Add migration test" --milestone arcl-m-01J... \
+  --parent arcl-t-01J... --description-file notes.md
+```
+
+Tasks and subtasks share the `arcl-t-<ulid>` identifier format. A subtask is a task
+row with `parent_id`; Markdown checkboxes in descriptions remain prose. Update a
+task's milestone to move its complete descendant subtree, or use `--parent` and
+`--no-parent` to change its hierarchy. Parent and child rows must remain in the
+same milestone, and cyclic reparenting is rejected before any rows change.
+
+Milestone and task mutation commands support the same human, plain, quiet, and
+versioned JSON output modes as the earlier entity commands.
+
 ## Automation output
 
 Mutations use concise output by default.

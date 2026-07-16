@@ -5,7 +5,7 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::cli::ColorChoice;
-use crate::domain::{Epic, Idea, Release};
+use crate::domain::{Epic, Idea, Milestone, Release, Task};
 
 /// The output format for a command result.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -54,7 +54,53 @@ pub enum EpicMutation {
     Updated,
 }
 
+/// The mutation represented by a milestone command's output.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MilestoneMutation {
+    Created,
+    Updated,
+}
+
+/// The mutation represented by a task command's output.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TaskMutation {
+    Created,
+    Updated,
+}
+
 impl EpicMutation {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Updated => "updated",
+        }
+    }
+
+    const fn human_verb(self) -> &'static str {
+        match self {
+            Self::Created => "Created",
+            Self::Updated => "Updated",
+        }
+    }
+}
+
+impl MilestoneMutation {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Updated => "updated",
+        }
+    }
+
+    const fn human_verb(self) -> &'static str {
+        match self {
+            Self::Created => "Created",
+            Self::Updated => "Updated",
+        }
+    }
+}
+
+impl TaskMutation {
     const fn as_str(self) -> &'static str {
         match self {
             Self::Created => "created",
@@ -245,6 +291,50 @@ impl Renderer {
         }))
     }
 
+    /// Render one milestone mutation and include the affected record in JSON mode.
+    pub fn render_milestone(
+        &self, mutation: MilestoneMutation, milestone: &Milestone,
+    ) -> Result<Option<String>, OutputError> {
+        let id = milestone.id.to_string();
+        let message = match self.mode {
+            OutputMode::Human => format!("{} milestone `{id}`: {}", mutation.human_verb(), milestone.title),
+            OutputMode::Plain | OutputMode::Quiet => id,
+            OutputMode::Json => serde_json::to_string(&Envelope {
+                format_version: 1,
+                data: MilestoneMutationData { action: mutation.as_str(), milestone },
+            })?,
+        };
+
+        Ok(Some(match (self.mode, self.color) {
+            (OutputMode::Human, ColorChoice::Always) => message.bright_blue().to_string(),
+            (OutputMode::Human, ColorChoice::Auto) => message
+                .if_supports_color(Stream::Stdout, |text| text.bright_blue())
+                .to_string(),
+            _ => message,
+        }))
+    }
+
+    /// Render one task mutation and include the affected record in JSON mode.
+    pub fn render_task(&self, mutation: TaskMutation, task: &Task) -> Result<Option<String>, OutputError> {
+        let id = task.id.to_string();
+        let message = match self.mode {
+            OutputMode::Human => format!("{} task `{id}`: {}", mutation.human_verb(), task.title),
+            OutputMode::Plain | OutputMode::Quiet => id,
+            OutputMode::Json => serde_json::to_string(&Envelope {
+                format_version: 1,
+                data: TaskMutationData { action: mutation.as_str(), task },
+            })?,
+        };
+
+        Ok(Some(match (self.mode, self.color) {
+            (OutputMode::Human, ColorChoice::Always) => message.bright_blue().to_string(),
+            (OutputMode::Human, ColorChoice::Auto) => message
+                .if_supports_color(Stream::Stdout, |text| text.bright_blue())
+                .to_string(),
+            _ => message,
+        }))
+    }
+
     fn human_message(&self) -> String {
         const MESSAGE: &str = "Arc Lightning foundation ready";
         match self.color {
@@ -297,6 +387,18 @@ struct ReleaseMutationData<'a> {
 struct EpicMutationData<'a> {
     action: &'static str,
     epic: &'a Epic,
+}
+
+#[derive(Debug, Serialize)]
+struct MilestoneMutationData<'a> {
+    action: &'static str,
+    milestone: &'a Milestone,
+}
+
+#[derive(Debug, Serialize)]
+struct TaskMutationData<'a> {
+    action: &'static str,
+    task: &'a Task,
 }
 
 #[cfg(test)]

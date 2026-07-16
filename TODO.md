@@ -118,13 +118,13 @@ discarding ideas with Markdown descriptions.
 
 **Acceptance criteria:**
 
-- [ ] Add validated milestone and task IDs and the corresponding roadmap migrations.
-- [ ] Implement milestone create and update commands with epic ownership and non-negative position.
-- [ ] Implement task create and update commands with milestone, optional parent, priority, position, title, and Markdown description.
-- [ ] Represent subtasks as task rows with `parent_id`; do not infer tracked work from Markdown checkboxes.
-- [ ] Enforce same-milestone parentage, reject self-parenting and parent cycles, and validate a moved subtree before changing milestone or parent.
-- [ ] Accept duplicate positions and sort ties by ULID.
-- [ ] Roll back multi-row moves when any descendant would violate an invariant.
+- [x] Add validated milestone and task IDs and the corresponding roadmap migrations.
+- [x] Implement milestone create and update commands with epic ownership and non-negative position.
+- [x] Implement task create and update commands with milestone, optional parent, priority, position, title, and Markdown description.
+- [x] Represent subtasks as task rows with `parent_id`; do not infer tracked work from Markdown checkboxes.
+- [x] Enforce same-milestone parentage, reject self-parenting and parent cycles, and validate a moved subtree before changing milestone or parent.
+- [x] Accept duplicate positions and sort ties by ULID.
+- [x] Roll back multi-row moves when any descendant would violate an invariant.
 
 **Verification:**
 

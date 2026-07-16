@@ -1,16 +1,22 @@
 mod epics;
 mod ideas;
 mod migrations;
+mod milestones;
 mod releases;
+mod tasks;
+
+pub use tasks::TaskUpdate;
 
 use std::{path::Path, time::Duration};
 
 use rusqlite::Connection;
 use thiserror::Error;
 
-use crate::domain::{DomainError, Epic, EpicId, Idea, IdeaId, Release, ReleaseId};
+use crate::domain::{
+    DomainError, Epic, EpicId, Idea, IdeaId, Milestone, MilestoneId, Release, ReleaseId, Task, TaskId, TaskPriority,
+};
 
-pub const CURRENT_VERSION: i32 = 3;
+pub const CURRENT_VERSION: i32 = 5;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -25,12 +31,20 @@ pub enum StorageError {
     InvalidRelease(DomainError),
     #[error("stored epic is invalid: {0}")]
     InvalidEpic(DomainError),
+    #[error("stored milestone is invalid: {0}")]
+    InvalidMilestone(DomainError),
+    #[error("stored task is invalid: {0}")]
+    InvalidTask(DomainError),
     #[error("idea `{id}` was not found")]
     IdeaNotFound { id: String },
     #[error("release `{id}` was not found")]
     ReleaseNotFound { id: String },
     #[error("epic `{id}` was not found")]
     EpicNotFound { id: String },
+    #[error("milestone `{id}` was not found")]
+    MilestoneNotFound { id: String },
+    #[error("task `{id}` was not found")]
+    TaskNotFound { id: String },
     #[error("spec path `{path}` is already linked to another epic")]
     DuplicateSpec { path: String },
     #[error("database user_version {found} is newer than this application supports (latest {latest})")]
@@ -133,6 +147,61 @@ impl Database {
         release_change: Option<Option<ReleaseId>>,
     ) -> Result<Epic, StorageError> {
         epics::update(&mut self.connection, id, title, description, spec_path, release_change)
+    }
+
+    /// Read one milestone by its validated identifier.
+    pub fn milestone(&self, id: MilestoneId) -> Result<Option<Milestone>, StorageError> {
+        milestones::find(&self.connection, &id)
+    }
+
+    /// Read milestones in position order, breaking ties by ULID.
+    pub fn milestones(&self) -> Result<Vec<Milestone>, StorageError> {
+        milestones::list(&self.connection)
+    }
+
+    /// Create an open milestone owned by an existing epic.
+    pub fn create_milestone(
+        &mut self, epic_id: EpicId, title: String, description: String, position: i64,
+    ) -> Result<Milestone, StorageError> {
+        milestones::create(&mut self.connection, epic_id, title, description, position)
+    }
+
+    /// Update a milestone's title, Markdown description, and position atomically.
+    pub fn update_milestone(
+        &mut self, id: MilestoneId, title: Option<String>, description: Option<String>, position: Option<i64>,
+    ) -> Result<Milestone, StorageError> {
+        milestones::update(&mut self.connection, id, title, description, position)
+    }
+
+    /// Read one task or subtask by its validated identifier.
+    pub fn task(&self, id: TaskId) -> Result<Option<Task>, StorageError> {
+        tasks::find(&self.connection, &id)
+    }
+
+    /// Read tasks in milestone, position, and ULID order.
+    pub fn tasks(&self) -> Result<Vec<Task>, StorageError> {
+        tasks::list(&self.connection)
+    }
+
+    /// Create a pending task, validating its milestone and optional parent.
+    pub fn create_task(
+        &mut self, milestone_id: MilestoneId, parent_id: Option<TaskId>, title: String, description: String,
+        priority: TaskPriority, position: i64,
+    ) -> Result<Task, StorageError> {
+        tasks::create(
+            &mut self.connection,
+            milestone_id,
+            parent_id,
+            title,
+            description,
+            priority,
+            position,
+        )
+    }
+
+    /// Update a task and atomically move its complete descendant subtree when needed.
+    pub fn update_task(&mut self, id: TaskId, update: TaskUpdate) -> Result<Task, StorageError> {
+        tasks::update(&mut self.connection, id, update)
     }
 
     #[cfg(test)]

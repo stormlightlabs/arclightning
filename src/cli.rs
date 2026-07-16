@@ -46,6 +46,16 @@ pub enum Command {
         #[command(subcommand)]
         command: EpicCommand,
     },
+    /// Organize an epic into ordered milestones.
+    Milestone {
+        #[command(subcommand)]
+        command: MilestoneCommand,
+    },
+    /// Track tasks and subtasks inside milestones.
+    Task {
+        #[command(subcommand)]
+        command: TaskCommand,
+    },
 }
 
 /// Idea inbox commands.
@@ -136,11 +146,97 @@ pub enum EpicCommand {
     },
 }
 
+/// Milestone container commands.
+#[derive(Clone, Debug, Subcommand)]
+pub enum MilestoneCommand {
+    /// Create an open milestone owned by an epic.
+    Create {
+        /// The milestone title.
+        title: String,
+        /// The owning epic ID.
+        #[arg(long, value_name = "ID")]
+        epic: String,
+        /// The display position within the epic.
+        #[arg(long, default_value_t = 0, value_name = "N")]
+        position: i64,
+        #[command(flatten)]
+        description: DescriptionArgs,
+    },
+    /// Update a milestone's title, Markdown description, or position.
+    Update {
+        /// The milestone ID to update.
+        id: String,
+        /// Replace the milestone title.
+        #[arg(long, value_name = "TITLE")]
+        title: Option<String>,
+        /// Replace the display position within the epic.
+        #[arg(long, value_name = "N")]
+        position: Option<i64>,
+        #[command(flatten)]
+        description: DescriptionArgs,
+    },
+}
+
+/// Task and subtask commands.
+#[derive(Clone, Debug, Subcommand)]
+pub enum TaskCommand {
+    /// Create a pending task or subtask.
+    Create {
+        /// The task title.
+        title: String,
+        /// The owning milestone ID.
+        #[arg(long, value_name = "ID")]
+        milestone: String,
+        /// Attach the row as a subtask of this task.
+        #[arg(long, value_name = "ID")]
+        parent: Option<String>,
+        /// The task priority.
+        #[arg(long, default_value = "normal", value_name = "PRIORITY")]
+        priority: String,
+        /// The display position within the milestone or parent.
+        #[arg(long, default_value_t = 0, value_name = "N")]
+        position: i64,
+        #[command(flatten)]
+        description: DescriptionArgs,
+    },
+    /// Update task metadata and optionally move a task subtree.
+    Update {
+        /// The task ID to update.
+        id: String,
+        /// Replace the task title.
+        #[arg(long, value_name = "TITLE")]
+        title: Option<String>,
+        /// Replace the task priority.
+        #[arg(long, value_name = "PRIORITY")]
+        priority: Option<String>,
+        /// Replace the display position.
+        #[arg(long, value_name = "N")]
+        position: Option<i64>,
+        /// Move the task and descendants to this milestone.
+        #[arg(long, value_name = "ID")]
+        milestone: Option<String>,
+        /// Reparent the task to another task in the same milestone.
+        #[arg(long, value_name = "ID", conflicts_with = "no_parent")]
+        parent: Option<String>,
+        /// Remove the task's parent.
+        #[arg(long, conflicts_with = "parent")]
+        no_parent: bool,
+        #[command(flatten)]
+        description: DescriptionArgs,
+    },
+}
+
 /// Mutually exclusive sources for an idea's Markdown description.
 #[derive(Clone, Debug, Default, Args)]
 pub struct DescriptionArgs {
     /// Use this inline Markdown description.
-    #[arg(short = 'd', long, value_name = "MARKDOWN", conflicts_with = "description_file")]
+    #[arg(
+        short = 'd',
+        long,
+        value_name = "MARKDOWN",
+        allow_hyphen_values = true,
+        conflicts_with = "description_file"
+    )]
     pub description: Option<String>,
     /// Read the UTF-8 description from a file, or `-` for standard input.
     #[arg(long, value_name = "PATH|-", conflicts_with = "description")]
