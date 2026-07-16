@@ -26,118 +26,21 @@ arcl init --snapshot
 └── arcl.db
 ```
 
-## Ideating
+## Local development
 
-Capture an idea in the local inbox:
-
-```sh
-arcl idea create "Add keyboard shortcuts" \
-  --description "Support the most common navigation actions."
-```
-
-Descriptions can come from a UTF-8 Markdown file or piped in via stdin.
+Build and check the CLI from the repository root:
 
 ```sh
-arcl idea create "Document recovery" --description-file notes.md
-printf '# Recovery\n\nWrite down the restore steps.\n' \
-  | arcl idea create "Document recovery" --description-file -
+cargo build
+cargo test --workspace --all-features
 ```
 
-The command prints the generated ID, such as `arcl-i-01J...`. Use that ID to
-edit, list, or discard the idea:
+Run the documentation site locally with pnpm:
 
 ```sh
-arcl idea update arcl-i-01J... --title "Document database recovery"
-arcl idea update arcl-i-01J... --description-file notes.md
-arcl idea list
-arcl idea discard arcl-i-01J...
+pnpm --dir website install
+pnpm --dir website dev
 ```
 
-Discard is idempotent and soft-deletes it, preserving it as `discarded`; discarded ideas
-cannot be updated or reopened.
-
-## Releases and Specs
-
-Group spec-backed work into releases and epics:
-
-```sh
-arcl release create "Spring release" --description "Ship the next planning slice."
-arcl epic create "Keyboard navigation" --spec specs/keyboard-navigation.md \
-  --release arcl-r-01J...
-arcl release update arcl-r-01J... --title "Updated spring release"
-arcl epic update arcl-e-01J... --description "Refined scope"
-```
-
-Epic spec paths are resolved from the current directory and stored relative to the
-Git worktree root.
-
-The target must be an existing regular Markdown file inside the
-worktree; absolute paths, `..` traversal, symlink escapes, duplicate specs, and
-non-Markdown files are rejected.
-
-Updating an epic changes tracker metadata only and never edits its linked spec.
-
-Use `--no-release` to remove an epic's release association.
-
-## Planning milestones and tasks
-
-Break an epic into ordered milestones, then add tasks and independently tracked subtasks:
-
-```sh
-arcl milestone create "Foundation" --epic arcl-e-01J... --position 10
-arcl task create "Add schema" --milestone arcl-m-01J... --priority high --position 10 \
-  --description "Create the tables needed by the tracker."
-arcl task create "Add migration test" --milestone arcl-m-01J... \
-  --parent arcl-t-01J... --description-file notes.md
-```
-
-Tasks and subtasks share the `arcl-t-<ulid>` identifier format. A subtask is a task
-row with `parent_id`; Markdown checkboxes in descriptions remain prose. Update a
-task's milestone to move its complete descendant subtree, or use `--parent` and
-`--no-parent` to change its hierarchy. Parent and child rows must remain in the
-same milestone, and cyclic reparenting is rejected before any rows change.
-
-Milestone and task mutation commands support the same human, plain, quiet, and
-versioned JSON output modes as the earlier entity commands.
-
-## Lifecycle
-
-Move tasks through their explicit lifecycle:
-
-```sh
-arcl task start arcl-t-01J...
-arcl task park arcl-t-01J...
-arcl task unpark arcl-t-01J...   # always returns to pending
-arcl task complete arcl-t-01J...
-arcl task cancel arcl-t-01J...
-```
-
-Tasks can complete from `pending` or `in_progress`; parked tasks must be unparked
-first. Completion and cancellation are terminal. Repeating the same terminal
-command is safe, but changing from completed to cancelled or vice versa is rejected.
-
-Releases, epics, and milestones support `complete` and `cancel`. A parent task or
-container cannot become terminal while any descendant is non-terminal unless the
-command includes `--allow-open-children`:
-
-```sh
-arcl milestone complete arcl-m-01J...
-arcl epic cancel arcl-e-01J... --allow-open-children
-arcl release complete arcl-r-01J...
-```
-
-The override changes only the selected record; it never cascades to descendants.
-
-## Automation output
-
-Mutations use concise output by default.
-
-Use `--json` for a stable, versioned and machine readable output containing the record:
-
-```sh
-arcl --json idea create "Automate this" --description "Details"
-```
-
-The JSON response has `format_version: 1`, an action, and the idea fields
-(`id`, `title`, `description`, and `status`). `--plain` prints one idea ID per
-line, while `--quiet` prints only the affected ID for mutations.
+Documentation content lives in `website/src/content/docs/`. The site build can
+be verified with `pnpm --dir website build`.

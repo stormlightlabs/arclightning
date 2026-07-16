@@ -1,0 +1,116 @@
+/* Arc Lightning docs use Thunderus typography and layout tokens with Iceberg colors. */
+:root,
+:root[data-theme="light"] {
+  color-scheme: dark;
+
+  --arcl-bg-dark: #161821;
+  --arcl-bg: #1e2132;
+  --arcl-bg-highlight: #2e334f;
+  --arcl-fg: #c6c8d1;
+  --arcl-fg-muted: #a6a8b5;
+  --arcl-comment: #6b7089;
+  --arcl-cyan: #89b8c2;
+  --arcl-green: #b4be82;
+  --arcl-purple: #a093c7;
+  --arcl-pink: #e98989;
+  --arcl-yellow: #e2a478;
+  --arcl-orange: #e2a478;
+  --arcl-red: #e27878;
+
+  --sl-font: "IBM Plex Sans Variable";
+  --sl-content-width: 48rem;
+  --sl-line-height: 1.75;
+
+  --sl-color-white: var(--arcl-fg);
+  --sl-color-gray-1: #d2d4de;
+  --sl-color-gray-2: var(--arcl-fg-muted);
+  --sl-color-gray-3: var(--arcl-comment);
+  --sl-color-gray-4: #5e658c;
+  --sl-color-gray-5: #444b71;
+  --sl-color-gray-6: var(--arcl-bg);
+  --sl-color-gray-7: var(--arcl-bg-highlight);
+  --sl-color-black: var(--arcl-bg-dark);
+
+  --sl-color-accent-low: #26344d;
+  --sl-color-accent: #84a0c6;
+  --sl-color-accent-high: var(--arcl-cyan);
+  --sl-color-text: var(--arcl-fg-muted);
+  --sl-color-text-accent: var(--arcl-cyan);
+  --sl-color-text-invert: var(--arcl-bg-dark);
+  --sl-color-bg: var(--arcl-bg-dark);
+  --sl-color-bg-nav: var(--arcl-bg);
+  --sl-color-bg-sidebar: var(--arcl-bg);
+  --sl-color-bg-inline-code: var(--arcl-bg-highlight);
+  --sl-color-bg-accent: var(--arcl-cyan);
+  --sl-color-hairline-light: var(--arcl-bg-highlight);
+  --sl-color-hairline: #24283d;
+  --sl-color-hairline-shade: #0f101a;
+  --sl-color-backdrop-overlay: rgb(15 16 26 / 72%);
+
+  --sl-color-orange-low: #3d302c;
+  --sl-color-orange: var(--arcl-orange);
+  --sl-color-orange-high: #e9b189;
+  --sl-color-green-low: #253a34;
+  --sl-color-green: var(--arcl-green);
+  --sl-color-green-high: #c0ca8e;
+  --sl-color-blue-low: #26364b;
+  --sl-color-blue: #84a0c6;
+  --sl-color-blue-high: #91acd1;
+  --sl-color-purple-low: #312d4c;
+  --sl-color-purple: var(--arcl-purple);
+  --sl-color-purple-high: #ada0d3;
+  --sl-color-red-low: #422d35;
+  --sl-color-red: var(--arcl-red);
+  --sl-color-red-high: var(--arcl-pink);
+}
+
+html {
+  background: var(--arcl-bg-dark);
+}
+
+body {
+  background:
+    radial-gradient(circle at 90% 0%, rgb(46 51 79 / 34%), transparent 34rem),
+    var(--arcl-bg-dark);
+  -webkit-font-smoothing: antialiased;
+}
+
+:where(h1, h2, h3, h4, h5, h6) {
+  color: var(--arcl-fg);
+  font-family: "Literata Variable", var(--__sl-font);
+  font-weight: 500;
+  text-wrap: balance;
+}
+
+:where(p, li) {
+  text-wrap: pretty;
+}
+
+:where(a:not(.sl-link-button)) {
+  text-decoration-color: rgb(137 184 194 / 42%);
+  text-underline-offset: 0.15em;
+}
+
+:where(a:not(.sl-link-button)):hover {
+  color: var(--arcl-cyan);
+  text-decoration-color: currentColor;
+}
+
+:where(code):not(:where(pre *)) {
+    border: 0.875px solid var(--sl-color-hairline-light);
+  border-radius: 0.25rem;
+  color: var(--arcl-orange);
+}
+
+:where(pre, .expressive-code .frame) {
+  border-color: var(--sl-color-hairline-light);
+}
+
+[aria-current="page"]:hover {
+  color: var(--sl-color-text-invert);
+}
+
+/* Let splash card glyphs share the Iceberg accent used by their tile. */
+.arc-splash-cards .card .icon {
+  color: var(--sl-card-border);
+}
