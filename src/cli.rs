@@ -56,6 +56,21 @@ pub enum Command {
         #[command(subcommand)]
         command: TaskCommand,
     },
+    /// Add and remove task blocking relationships.
+    Dependency {
+        #[command(subcommand)]
+        command: DependencyCommand,
+    },
+    /// List actionable leaf tasks in deterministic order.
+    Ready {
+        #[command(flatten)]
+        filters: ReadyArgs,
+    },
+    /// Show the first actionable leaf task, if one exists.
+    Next {
+        #[command(flatten)]
+        filters: ReadyArgs,
+    },
 }
 
 /// Idea inbox commands.
@@ -244,6 +259,9 @@ pub enum TaskCommand {
         /// The display position within the milestone or parent.
         #[arg(long, default_value_t = 0, value_name = "N")]
         position: i64,
+        /// Add a direct blocker relationship after creating the task.
+        #[arg(long = "blocked-by", value_name = "ID", num_args = 1..)]
+        blocked_by: Vec<String>,
         #[command(flatten)]
         description: DescriptionArgs,
     },
@@ -303,6 +321,47 @@ pub enum TaskCommand {
         #[arg(long)]
         allow_open_children: bool,
     },
+}
+
+/// Task dependency commands.
+#[derive(Clone, Debug, Subcommand)]
+pub enum DependencyCommand {
+    /// Make one task wait for another task to complete.
+    Add {
+        /// The task that is blocked.
+        task_id: String,
+        /// The task that blocks it.
+        #[arg(long = "blocked-by", value_name = "ID")]
+        blocker_id: String,
+    },
+    /// Remove one task blocking relationship.
+    Remove {
+        /// The task that is blocked.
+        task_id: String,
+        /// The task that blocks it.
+        #[arg(long = "blocked-by", value_name = "ID")]
+        blocker_id: String,
+    },
+}
+
+/// Filters accepted by the ready-work and next-work queries.
+#[derive(Clone, Debug, Default, Args)]
+pub struct ReadyArgs {
+    /// Restrict results to one or more priorities.
+    #[arg(long, value_name = "PRIORITY", num_args = 1..)]
+    pub priority: Vec<String>,
+    /// Restrict results to an epic's release.
+    #[arg(long, value_name = "ID")]
+    pub release: Option<String>,
+    /// Restrict results to one epic.
+    #[arg(long, value_name = "ID")]
+    pub epic: Option<String>,
+    /// Restrict results to one milestone.
+    #[arg(long, value_name = "ID")]
+    pub milestone: Option<String>,
+    /// Restrict results to direct children of one task.
+    #[arg(long, value_name = "ID")]
+    pub parent: Option<String>,
 }
 
 /// Mutually exclusive sources for an idea's Markdown description.

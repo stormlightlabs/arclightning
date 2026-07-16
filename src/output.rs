@@ -5,7 +5,7 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::cli::ColorChoice;
-use crate::domain::{Epic, Idea, Milestone, Release, Task};
+use crate::domain::{Epic, Idea, Milestone, Release, Task, TaskDependency};
 
 /// The output format for a command result.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -83,6 +83,29 @@ pub enum TaskMutation {
     Cancelled,
 }
 
+/// The relationship change represented by a dependency command.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DependencyMutation {
+    Added,
+    Removed,
+}
+
+impl DependencyMutation {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Added => "added",
+            Self::Removed => "removed",
+        }
+    }
+
+    const fn verb(self) -> &'static str {
+        match self {
+            Self::Added => "Added",
+            Self::Removed => "Removed",
+        }
+    }
+}
+
 impl EpicMutation {
     const fn as_str(self) -> &'static str {
         match self {
@@ -93,7 +116,7 @@ impl EpicMutation {
         }
     }
 
-    const fn human_verb(self) -> &'static str {
+    const fn verb(self) -> &'static str {
         match self {
             Self::Created => "Created",
             Self::Updated => "Updated",
@@ -113,7 +136,7 @@ impl MilestoneMutation {
         }
     }
 
-    const fn human_verb(self) -> &'static str {
+    const fn verb(self) -> &'static str {
         match self {
             Self::Created => "Created",
             Self::Updated => "Updated",
@@ -136,7 +159,7 @@ impl TaskMutation {
         }
     }
 
-    const fn human_verb(self) -> &'static str {
+    const fn verb(self) -> &'static str {
         match self {
             Self::Created => "Created",
             Self::Updated => "Updated",
@@ -158,7 +181,7 @@ impl IdeaMutation {
         }
     }
 
-    const fn human_verb(self) -> &'static str {
+    const fn verb(self) -> &'static str {
         match self {
             Self::Created => "Created",
             Self::Updated => "Updated",
@@ -189,7 +212,7 @@ impl Renderer {
     /// Render the result of starting the foundation-only application.
     pub fn render_startup(&self) -> Result<Option<String>, OutputError> {
         let message = match self.mode {
-            OutputMode::Human => self.human_message(),
+            OutputMode::Human => self.msg(),
             OutputMode::Plain => "ready".to_owned(),
             OutputMode::Json => serde_json::to_string(&Envelope {
                 format_version: 1,
@@ -232,7 +255,7 @@ impl Renderer {
         let message = match self.mode {
             OutputMode::Human => match mutation {
                 IdeaMutation::Discarded => format!("Discarded idea `{id}`"),
-                _ => format!("{} idea `{id}`: {}", mutation.human_verb(), idea.title),
+                _ => format!("{} idea `{id}`: {}", mutation.verb(), idea.title),
             },
             OutputMode::Plain | OutputMode::Quiet => id,
             OutputMode::Json => serde_json::to_string(&Envelope {
@@ -307,7 +330,7 @@ impl Renderer {
     pub fn render_epic(&self, mutation: EpicMutation, epic: &Epic) -> Result<Option<String>, OutputError> {
         let id = epic.id.to_string();
         let message = match self.mode {
-            OutputMode::Human => format!("{} epic `{id}`: {}", mutation.human_verb(), epic.title),
+            OutputMode::Human => format!("{} epic `{id}`: {}", mutation.verb(), epic.title),
             OutputMode::Plain | OutputMode::Quiet => id,
             OutputMode::Json => serde_json::to_string(&Envelope {
                 format_version: 1,
@@ -330,7 +353,7 @@ impl Renderer {
     ) -> Result<Option<String>, OutputError> {
         let id = milestone.id.to_string();
         let message = match self.mode {
-            OutputMode::Human => format!("{} milestone `{id}`: {}", mutation.human_verb(), milestone.title),
+            OutputMode::Human => format!("{} milestone `{id}`: {}", mutation.verb(), milestone.title),
             OutputMode::Plain | OutputMode::Quiet => id,
             OutputMode::Json => serde_json::to_string(&Envelope {
                 format_version: 1,
@@ -351,7 +374,7 @@ impl Renderer {
     pub fn render_task(&self, mutation: TaskMutation, task: &Task) -> Result<Option<String>, OutputError> {
         let id = task.id.to_string();
         let message = match self.mode {
-            OutputMode::Human => format!("{} task `{id}`: {}", mutation.human_verb(), task.title),
+            OutputMode::Human => format!("{} task `{id}`: {}", mutation.verb(), task.title),
             OutputMode::Plain | OutputMode::Quiet => id,
             OutputMode::Json => serde_json::to_string(&Envelope {
                 format_version: 1,
@@ -368,7 +391,111 @@ impl Renderer {
         }))
     }
 
-    fn human_message(&self) -> String {
+    /// Render one dependency relationship change.
+    pub fn render_dependency(
+        &self, mutation: DependencyMutation, dependency: &TaskDependency,
+    ) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human => format!(
+                "{} dependency `{}` blocked by `{}`",
+                mutation.verb(),
+                dependency.task_id,
+                dependency.blocker_id
+            ),
+            OutputMode::Plain | OutputMode::Quiet => dependency.task_id.to_string(),
+            OutputMode::Json => serde_json::to_string(&Envelope {
+                format_version: 1,
+                data: DependencyMutationData { action: mutation.as_str(), dependency },
+            })?,
+        };
+
+        Ok(Some(match (self.mode, self.color) {
+            (OutputMode::Human, ColorChoice::Always) => message.bright_blue().to_string(),
+            (OutputMode::Human, ColorChoice::Auto) => message
+                .if_supports_color(Stream::Stdout, |text| text.bright_blue())
+                .to_string(),
+            _ => message,
+        }))
+    }
+
+    /// Render all derived ready-work results.
+    pub fn render_ready_tasks(&self, tasks: &[Task]) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human => {
+                if tasks.is_empty() {
+                    "No ready work.".to_owned()
+                } else {
+                    tasks
+                        .iter()
+                        .map(|task| {
+                            format!(
+                                "{}\t[{}]\t{}\t{}",
+                                task.id,
+                                task.priority.as_str(),
+                                task.status.as_str(),
+                                task.title
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                }
+            }
+            OutputMode::Plain => {
+                if tasks.is_empty() {
+                    return Ok(None);
+                }
+                tasks
+                    .iter()
+                    .map(|task| task.id.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+            OutputMode::Json => serde_json::to_string(&Envelope { format_version: 1, data: ReadyData { tasks } })?,
+            OutputMode::Quiet => return Ok(None),
+        };
+
+        Ok(Some(match (self.mode, self.color) {
+            (OutputMode::Human, ColorChoice::Always) => message.bright_blue().to_string(),
+            (OutputMode::Human, ColorChoice::Auto) => message
+                .if_supports_color(Stream::Stdout, |text| text.bright_blue())
+                .to_string(),
+            _ => message,
+        }))
+    }
+
+    /// Render the first ready task or a stable empty result.
+    pub fn render_next_task(&self, task: Option<&Task>) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human => task.map_or_else(
+                || "No ready work.".to_owned(),
+                |task| {
+                    format!(
+                        "{}\t[{}]\t{}\t{}",
+                        task.id,
+                        task.priority.as_str(),
+                        task.status.as_str(),
+                        task.title
+                    )
+                },
+            ),
+            OutputMode::Plain => task.map(|task| task.id.to_string()).unwrap_or_default(),
+            OutputMode::Json => serde_json::to_string(&Envelope { format_version: 1, data: NextData { task } })?,
+            OutputMode::Quiet => return Ok(None),
+        };
+
+        if self.mode == OutputMode::Plain && task.is_none() {
+            return Ok(None);
+        }
+        Ok(Some(match (self.mode, self.color) {
+            (OutputMode::Human, ColorChoice::Always) => message.bright_blue().to_string(),
+            (OutputMode::Human, ColorChoice::Auto) => message
+                .if_supports_color(Stream::Stdout, |text| text.bright_blue())
+                .to_string(),
+            _ => message,
+        }))
+    }
+
+    fn msg(&self) -> String {
         const MESSAGE: &str = "Arc Lightning foundation ready";
         match self.color {
             ColorChoice::Always => MESSAGE.bright_blue().to_string(),
@@ -432,6 +559,22 @@ struct MilestoneMutationData<'a> {
 struct TaskMutationData<'a> {
     action: &'static str,
     task: &'a Task,
+}
+
+#[derive(Debug, Serialize)]
+struct DependencyMutationData<'a> {
+    action: &'static str,
+    dependency: &'a TaskDependency,
+}
+
+#[derive(Debug, Serialize)]
+struct ReadyData<'a> {
+    tasks: &'a [Task],
+}
+
+#[derive(Debug, Serialize)]
+struct NextData<'a> {
+    task: Option<&'a Task>,
 }
 
 #[cfg(test)]

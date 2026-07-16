@@ -62,14 +62,14 @@ tracked subtasks.
 
 **Acceptance criteria:**
 
-- [ ] Add the `task_dependencies` migration with foreign keys and composite uniqueness.
-- [ ] Implement dependency add and remove commands.
-- [ ] Reject missing targets, self-dependencies, duplicates, and direct or transitive dependency cycles before writing.
-- [ ] Compute blocked and ready state instead of storing either as a task status.
-- [ ] A cancelled blocker remains unsatisfied; only a completed blocker satisfies a dependency.
-- [ ] Exclude parent tasks with non-terminal children and descendants of parked or terminal ancestors from ready work.
-- [ ] Respect open container state and sort ready work by priority, milestone position, task position, and ULID.
-- [ ] Implement `arcl ready` and `arcl next`, including the empty-result case.
+- [x] Add the `task_dependencies` migration with foreign keys and composite uniqueness.
+- [x] Implement dependency add and remove commands.
+- [x] Reject missing targets, self-dependencies, duplicates, and direct or transitive dependency cycles before writing.
+- [x] Compute blocked and ready state instead of storing either as a task status.
+- [x] A cancelled blocker remains unsatisfied; only a completed blocker satisfies a dependency.
+- [x] Exclude parent tasks with non-terminal children and descendants of parked or terminal ancestors from ready work.
+- [x] Respect open container state and sort ready work by priority, milestone position, task position, and ULID.
+- [x] Implement `arcl ready` and `arcl next`, including the empty-result case.
 
 **Verification:**
 

@@ -7,7 +7,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::domain::{self, DomainError, MilestoneId, Task, TaskAction, TaskId, TaskPriority, TaskStatus};
 
-use super::{Result, StorageError};
+use super::{Result, StorageError, dependencies};
 
 /// Optional fields accepted by a task update.
 #[derive(Clone, Debug, Default)]
@@ -26,7 +26,26 @@ pub struct TaskUpdate {
     pub parent_change: Option<Option<TaskId>>,
 }
 
-struct RawTask {
+/// Fields used to create a task and its optional direct blockers atomically.
+#[derive(Clone, Debug)]
+pub struct TaskCreate {
+    /// Owning milestone.
+    pub milestone_id: MilestoneId,
+    /// Optional parent task.
+    pub parent_id: Option<TaskId>,
+    /// Task title.
+    pub title: String,
+    /// Markdown description.
+    pub description: String,
+    /// Task priority.
+    pub priority: TaskPriority,
+    /// Display position.
+    pub position: i64,
+    /// Direct blockers that must be completed before this task is ready.
+    pub blockers: Vec<TaskId>,
+}
+
+pub(super) struct RawTask {
     id: String,
     milestone_id: String,
     parent_id: Option<String>,
@@ -38,7 +57,7 @@ struct RawTask {
 }
 
 impl RawTask {
-    fn decode(self) -> Result<Task> {
+    pub(super) fn decode(self) -> Result<Task> {
         let id = TaskId::parse(&self.id)
             .map_err(DomainError::from)
             .map_err(StorageError::InvalidTask)?;
@@ -87,6 +106,14 @@ pub fn create(
     connection: &mut Connection, milestone_id: MilestoneId, parent_id: Option<TaskId>, title: String,
     description: String, priority: TaskPriority, position: i64,
 ) -> Result<Task> {
+    create_with_dependencies(
+        connection,
+        TaskCreate { milestone_id, parent_id, title, description, priority, position, blockers: Vec::new() },
+    )
+}
+
+pub fn create_with_dependencies(connection: &mut Connection, create: TaskCreate) -> Result<Task> {
+    let TaskCreate { milestone_id, parent_id, title, description, priority, position, blockers } = create;
     let task = Task::new(milestone_id, parent_id, title, description, priority, position)
         .map_err(StorageError::InvalidTask)?;
     let transaction = connection.transaction()?;
@@ -97,6 +124,9 @@ pub fn create(
         validate_parent_milestone(task.id, task.milestone_id, parent.id, parent.milestone_id)?;
     }
     insert_task(&transaction, &task)?;
+    for blocker_id in blockers {
+        dependencies::add_to_transaction(&transaction, task.id, blocker_id)?;
+    }
     transaction.commit()?;
     Ok(task)
 }
@@ -250,7 +280,7 @@ fn read_one(conn: &Connection, id: &TaskId) -> Result<Option<Task>> {
     raw_task.map(|r| r.decode()).transpose()
 }
 
-fn row_to_raw_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawTask> {
+pub(super) fn row_to_raw_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawTask> {
     Ok(RawTask {
         id: row.get(0)?,
         milestone_id: row.get(1)?,

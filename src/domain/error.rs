@@ -25,6 +25,12 @@ pub enum DomainError {
     DifferentMilestone { task: String, parent: String },
     #[error("parenting task `{task}` to `{parent}` would create a cycle")]
     ParentCycle { task: String, parent: String },
+    #[error("task `{task}` cannot depend on itself")]
+    SelfDependency { task: String },
+    #[error("adding dependency from task `{task}` to blocker `{blocker}` would create a cycle")]
+    DependencyCycle { task: String, blocker: String },
+    #[error("task `{task}` is already blocked by `{blocker}`")]
+    DuplicateDependency { task: String, blocker: String },
     #[error("task subtree rooted at `{task}` contains tasks from different milestones")]
     SubtreeDifferentMilestones { task: String },
     #[error("cannot {action} {entity} while it is {from}")]

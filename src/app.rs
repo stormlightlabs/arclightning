@@ -7,19 +7,11 @@ use std::{fs::OpenOptions, io::Write};
 use anyhow::Context;
 use thiserror::Error;
 
-use crate::domain::{
-    ContainerAction, DomainError, Epic, EpicId, Idea, IdeaId, Milestone, MilestoneId, Release, ReleaseId, Task,
-    TaskAction, TaskId, TaskPriority, validate_title,
-};
-use crate::output::{
-    EpicMutation, IdeaMutation, MilestoneMutation, OutputMode, ReleaseMutation, Renderer, TaskMutation,
-};
-use crate::{
-    cli::{Cli, Command, DescriptionArgs, EpicCommand, IdeaCommand, MilestoneCommand, ReleaseCommand, TaskCommand},
-    snapshot::{ProjectConfig, SnapshotError},
-    storage::{Database, StorageError, TaskUpdate},
-    vcs::{GixVcs, Vcs, VcsError},
-};
+use crate::{cli::*, domain::*, output::*};
+
+use crate::snapshot::{ProjectConfig, SnapshotError};
+use crate::storage::{Database, ReadyFilter, StorageError, TaskCreate, TaskUpdate};
+use crate::vcs::{GixVcs, Vcs, VcsError};
 
 const ARCL_DIRECTORY: &str = ".arcl";
 const CONFIG_FILE: &str = "config.toml";
@@ -170,9 +162,11 @@ impl From<&StorageError> for u8 {
             | StorageError::InvalidEpic(_)
             | StorageError::InvalidMilestone(_)
             | StorageError::InvalidTask(_)
+            | StorageError::InvalidDependency(_)
             | StorageError::DuplicateSpec { .. }
             | StorageError::NewerDatabase { .. }
             | StorageError::MigrationGap { .. } => 3,
+            StorageError::DependencyNotFound { .. } => 5,
             StorageError::Sqlite(_) => 1,
         }
     }
@@ -200,6 +194,13 @@ enum MilestoneCommandResult {
 
 enum TaskCommandResult {
     Mutation { action: TaskMutation, task: Task },
+}
+
+enum DependencyCommandResult {
+    Mutation {
+        action: DependencyMutation,
+        dependency: TaskDependency,
+    },
 }
 
 #[derive(Debug, Error)]
@@ -296,6 +297,31 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
             let result = exec_task(command).map_err(ApplicationError::from_command)?;
             let TaskCommandResult::Mutation { action, task } = result;
             let message = renderer.render_task(action, &task).context("rendering task output")?;
+            write_output(message)
+        }
+        Some(Command::Dependency { command }) => {
+            let result = exec_dependency(command).map_err(ApplicationError::from_command)?;
+            let DependencyCommandResult::Mutation { action, dependency } = result;
+            let message = renderer
+                .render_dependency(action, &dependency)
+                .context("rendering dependency output")?;
+            write_output(message)
+        }
+        Some(Command::Ready { filters }) => {
+            let tasks = exec_ready(filters).map_err(ApplicationError::from_command)?;
+            let message = renderer
+                .render_ready_tasks(&tasks)
+                .context("rendering ready-work output")?;
+            write_output(message)
+        }
+        Some(Command::Next { filters }) => {
+            let task = exec_ready(filters)
+                .map_err(ApplicationError::from_command)?
+                .into_iter()
+                .next();
+            let message = renderer
+                .render_next_task(task.as_ref())
+                .context("rendering next-work output")?;
             write_output(message)
         }
         None => write_output(renderer.render_startup().context("rendering CLI output")?),
@@ -505,7 +531,7 @@ fn transition_milestone(
 
 fn exec_task(command: TaskCommand) -> CResult<TaskCommandResult> {
     match command {
-        TaskCommand::Create { title, milestone, parent, priority, position, description } => {
+        TaskCommand::Create { title, milestone, parent, priority, position, blocked_by, description } => {
             validate_title(&title)?;
             let milestone_id = MilestoneId::parse(&milestone).map_err(DomainError::from)?;
             let parent_id = parent
@@ -513,10 +539,22 @@ fn exec_task(command: TaskCommand) -> CResult<TaskCommandResult> {
                 .map(TaskId::parse)
                 .transpose()
                 .map_err(DomainError::from)?;
+            let blockers = blocked_by
+                .iter()
+                .map(|id| TaskId::parse(id).map_err(DomainError::from))
+                .collect::<Result<Vec<_>, _>>()?;
             let priority = TaskPriority::parse(&priority)?;
             let description = resolve_description(description)?.unwrap_or_default();
             let mut database = open_database()?;
-            let task = database.create_task(milestone_id, parent_id, title, description, priority, position)?;
+            let task = database.create_task_with_dependencies(TaskCreate {
+                milestone_id,
+                parent_id,
+                title,
+                description,
+                priority,
+                position,
+                blockers,
+            })?;
             Ok(TaskCommandResult::Mutation { action: TaskMutation::Created, task })
         }
         TaskCommand::Update { id, title, priority, position, milestone, parent, no_parent, description } => {
@@ -565,6 +603,60 @@ fn exec_task(command: TaskCommand) -> CResult<TaskCommandResult> {
         }
         TaskCommand::Cancel { id, allow_open_children } => transition_task(id, TaskAction::Cancel, allow_open_children),
     }
+}
+
+fn exec_dependency(command: DependencyCommand) -> CResult<DependencyCommandResult> {
+    let (task_id, blocker_id, action) = match command {
+        DependencyCommand::Add { task_id, blocker_id } => (task_id, blocker_id, DependencyMutation::Added),
+        DependencyCommand::Remove { task_id, blocker_id } => (task_id, blocker_id, DependencyMutation::Removed),
+    };
+    let task_id = TaskId::parse(&task_id).map_err(DomainError::from)?;
+    let blocker_id = TaskId::parse(&blocker_id).map_err(DomainError::from)?;
+    let mut database = open_database()?;
+    let dependency = match action {
+        DependencyMutation::Added => database.add_dependency(task_id, blocker_id)?,
+        DependencyMutation::Removed => database.remove_dependency(task_id, blocker_id)?,
+    };
+    Ok(DependencyCommandResult::Mutation { action, dependency })
+}
+
+fn exec_ready(args: ReadyArgs) -> CResult<Vec<Task>> {
+    let filter = resolve_ready_filter(args)?;
+    let database = open_database()?;
+    Ok(database.ready_tasks_filtered(&filter)?)
+}
+
+fn resolve_ready_filter(args: ReadyArgs) -> CResult<ReadyFilter> {
+    let priorities = args
+        .priority
+        .iter()
+        .map(|priority| TaskPriority::parse(priority))
+        .collect::<Result<Vec<_>, _>>()?;
+    let release_id = args
+        .release
+        .as_deref()
+        .map(ReleaseId::parse)
+        .transpose()
+        .map_err(DomainError::from)?;
+    let epic_id = args
+        .epic
+        .as_deref()
+        .map(EpicId::parse)
+        .transpose()
+        .map_err(DomainError::from)?;
+    let milestone_id = args
+        .milestone
+        .as_deref()
+        .map(MilestoneId::parse)
+        .transpose()
+        .map_err(DomainError::from)?;
+    let parent_id = args
+        .parent
+        .as_deref()
+        .map(TaskId::parse)
+        .transpose()
+        .map_err(DomainError::from)?;
+    Ok(ReadyFilter { priorities, release_id, epic_id, milestone_id, parent_id })
 }
 
 fn transition_task(id: String, action: TaskAction, allow_open_children: bool) -> CResult<TaskCommandResult> {

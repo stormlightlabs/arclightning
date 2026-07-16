@@ -28,7 +28,10 @@ export default defineConfig({
         },
         {
           label: "Reference",
-          items: [{ autogenerate: { directory: "reference" } }],
+          items: [
+            { label: "Dependencies", slug: "reference/deps" },
+            { label: "Manual", slug: "reference/manual" },
+          ],
         },
       ],
     }),

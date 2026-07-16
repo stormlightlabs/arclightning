@@ -1,3 +1,4 @@
+mod dependencies;
 mod epics;
 mod ideas;
 mod migrations;
@@ -5,7 +6,7 @@ mod milestones;
 mod releases;
 mod tasks;
 
-pub use tasks::TaskUpdate;
+pub use tasks::{TaskCreate, TaskUpdate};
 
 use std::{path::Path, time::Duration};
 
@@ -14,10 +15,10 @@ use thiserror::Error;
 
 use crate::domain::{
     ContainerAction, DomainError, Epic, EpicId, Idea, IdeaId, Milestone, MilestoneId, Release, ReleaseId, Task,
-    TaskAction, TaskId, TaskPriority,
+    TaskAction, TaskDependency, TaskId, TaskPriority,
 };
 
-pub const CURRENT_VERSION: i32 = 5;
+pub const CURRENT_VERSION: i32 = 6;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -38,6 +39,8 @@ pub enum StorageError {
     InvalidMilestone(DomainError),
     #[error("stored task is invalid: {0}")]
     InvalidTask(DomainError),
+    #[error("stored task dependency is invalid: {0}")]
+    InvalidDependency(DomainError),
     #[error("idea `{id}` was not found")]
     IdeaNotFound { id: String },
     #[error("release `{id}` was not found")]
@@ -48,6 +51,8 @@ pub enum StorageError {
     MilestoneNotFound { id: String },
     #[error("task `{id}` was not found")]
     TaskNotFound { id: String },
+    #[error("dependency from task `{task}` to blocker `{blocker}` was not found")]
+    DependencyNotFound { task: String, blocker: String },
     #[error("spec path `{path}` is already linked to another epic")]
     DuplicateSpec { path: String },
     #[error("database user_version {found} is newer than this application supports (latest {latest})")]
@@ -219,6 +224,11 @@ impl Database {
         )
     }
 
+    /// Create a pending task and its blocking relationships atomically.
+    pub fn create_task_with_dependencies(&mut self, create: TaskCreate) -> Result<Task> {
+        tasks::create_with_dependencies(&mut self.connection, create)
+    }
+
     /// Update a task and atomically move its complete descendant subtree when needed.
     pub fn update_task(&mut self, id: TaskId, update: TaskUpdate) -> Result<Task> {
         tasks::update(&mut self.connection, id, update)
@@ -227,6 +237,46 @@ impl Database {
     /// Apply one task lifecycle action, guarding descendants for terminal transitions.
     pub fn transition_task(&mut self, id: TaskId, action: TaskAction, allow_open_children: bool) -> Result<Task> {
         tasks::transition(&mut self.connection, id, action, allow_open_children)
+    }
+
+    /// Add a validated blocking relationship in a transaction.
+    pub fn add_dependency(&mut self, task_id: TaskId, blocker_id: TaskId) -> Result<TaskDependency> {
+        dependencies::add(&mut self.connection, task_id, blocker_id)
+    }
+
+    /// Remove a validated blocking relationship in a transaction.
+    pub fn remove_dependency(&mut self, task_id: TaskId, blocker_id: TaskId) -> Result<TaskDependency> {
+        dependencies::remove(&mut self.connection, task_id, blocker_id)
+    }
+
+    /// Read every blocking relationship in deterministic order.
+    pub fn task_dependencies(&self) -> Result<Vec<TaskDependency>> {
+        dependencies::list(&self.connection)
+    }
+
+    /// Read the direct blockers attached to one task.
+    pub fn dependencies(&self, task_id: TaskId) -> Result<Vec<TaskDependency>> {
+        dependencies::list_for_task(&self.connection, task_id)
+    }
+
+    /// Compute whether a task has an unfinished direct blocker.
+    pub fn task_is_blocked(&self, task_id: TaskId) -> Result<bool> {
+        dependencies::is_blocked(&self.connection, task_id)
+    }
+
+    /// Read all tasks with an unfinished direct blocker.
+    pub fn blocked_tasks(&self) -> Result<Vec<Task>> {
+        dependencies::blocked(&self.connection)
+    }
+
+    /// Read all actionable leaf tasks using the default ready-work filters.
+    pub fn ready_tasks(&self) -> Result<Vec<Task>> {
+        dependencies::ready(&self.connection, &ReadyFilter::default())
+    }
+
+    /// Read actionable leaf tasks matching the supplied filters.
+    pub fn ready_tasks_filtered(&self, filter: &ReadyFilter) -> Result<Vec<Task>> {
+        dependencies::ready(&self.connection, filter)
     }
 
     #[cfg(test)]
@@ -239,6 +289,21 @@ fn configure(connection: &mut Connection) -> Result<()> {
     connection.pragma_update(None, "foreign_keys", true)?;
     connection.busy_timeout(BUSY_TIMEOUT)?;
     Ok(())
+}
+
+/// Optional filters for derived ready-work queries.
+#[derive(Clone, Debug, Default)]
+pub struct ReadyFilter {
+    /// Restrict results to one or more task priorities.
+    pub priorities: Vec<TaskPriority>,
+    /// Restrict results to tasks belonging to an epic's release.
+    pub release_id: Option<ReleaseId>,
+    /// Restrict results to one epic.
+    pub epic_id: Option<EpicId>,
+    /// Restrict results to one milestone.
+    pub milestone_id: Option<MilestoneId>,
+    /// Restrict results to direct children of one parent task.
+    pub parent_id: Option<TaskId>,
 }
 
 #[cfg(test)]
@@ -293,6 +358,16 @@ mod tests {
             )
             .expect("epics migration creates the epics table");
         assert_eq!(epics_table, "epics");
+
+        let dependencies_table: String = database
+            .connection()
+            .query_row(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'task_dependencies'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("dependency migration creates the task_dependencies table");
+        assert_eq!(dependencies_table, "task_dependencies");
     }
 
     #[test]

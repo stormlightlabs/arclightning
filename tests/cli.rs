@@ -131,7 +131,7 @@ fn init_discovers_the_worktree_from_a_nested_directory() {
     );
 
     let database = Database::open(arcl_directory.join("arcl.db")).expect("initialized database reopens");
-    assert_eq!(database.schema_version().expect("schema version is readable"), 5);
+    assert_eq!(database.schema_version().expect("schema version is readable"), 6);
 }
 
 #[test]
@@ -935,4 +935,115 @@ fn lifecycle_commands_enforce_transitions_guards_and_non_cascading_overrides() {
         .query_row("SELECT status FROM tasks WHERE id = ?1", [&child_id], |row| row.get(0))
         .expect("child status reads");
     assert_eq!(child_status, "pending");
+}
+
+#[test]
+fn dependency_and_ready_commands_compute_and_render_derived_work() {
+    let repository = initialized_repository();
+    fs::write(repository.path().join("feature.md"), "# Feature\n").expect("spec can be written");
+
+    let epic = arcl_in(repository.path())
+        .args(["--json", "epic", "create", "Epic", "--spec", "feature.md"])
+        .output()
+        .expect("epic create runs");
+    assert!(epic.status.success());
+    let epic_id = epic_id_from_json(&epic.stdout);
+    let milestone = arcl_in(repository.path())
+        .args(["--json", "milestone", "create", "Milestone", "--epic", &epic_id])
+        .output()
+        .expect("milestone create runs");
+    assert!(milestone.status.success());
+    let milestone_id = milestone_id_from_json(&milestone.stdout);
+
+    let blocker = arcl_in(repository.path())
+        .args(["--json", "task", "create", "Blocker", "--milestone", &milestone_id])
+        .output()
+        .expect("blocker create runs");
+    assert!(blocker.status.success());
+    let blocker_id = task_id_from_json(&blocker.stdout);
+    let blocked = arcl_in(repository.path())
+        .args(["--json", "task", "create", "Blocked", "--milestone", &milestone_id])
+        .output()
+        .expect("blocked task create runs");
+    assert!(blocked.status.success());
+    let blocked_id = task_id_from_json(&blocked.stdout);
+
+    let added = arcl_in(repository.path())
+        .args(["--json", "dependency", "add", &blocked_id, "--blocked-by", &blocker_id])
+        .output()
+        .expect("dependency add runs");
+    assert!(
+        added.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&added.stderr)
+    );
+    let added_payload: Value = serde_json::from_slice(&added.stdout).expect("dependency JSON parses");
+    assert_eq!(added_payload["data"]["action"], "added");
+    assert_eq!(added_payload["data"]["dependency"]["task_id"], blocked_id);
+
+    let duplicate = arcl_in(repository.path())
+        .args(["dependency", "add", &blocked_id, "--blocked-by", &blocker_id])
+        .output()
+        .expect("duplicate dependency command runs");
+    assert_eq!(duplicate.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&duplicate.stderr).contains("already blocked"));
+
+    let ready_before = arcl_in(repository.path())
+        .args(["--plain", "ready"])
+        .output()
+        .expect("ready query runs");
+    assert!(ready_before.status.success());
+    assert_eq!(String::from_utf8_lossy(&ready_before.stdout).trim(), blocker_id);
+
+    let next_before = arcl_in(repository.path())
+        .args(["--json", "next"])
+        .output()
+        .expect("next query runs");
+    assert!(next_before.status.success());
+    let next_payload: Value = serde_json::from_slice(&next_before.stdout).expect("next JSON parses");
+    assert_eq!(next_payload["data"]["task"]["id"], blocker_id);
+
+    let removed = arcl_in(repository.path())
+        .args([
+            "--json",
+            "dependency",
+            "remove",
+            &blocked_id,
+            "--blocked-by",
+            &blocker_id,
+        ])
+        .output()
+        .expect("dependency remove runs");
+    assert!(removed.status.success());
+    let removed_payload: Value = serde_json::from_slice(&removed.stdout).expect("remove JSON parses");
+    assert_eq!(removed_payload["data"]["action"], "removed");
+
+    let readded = arcl_in(repository.path())
+        .args(["dependency", "add", &blocked_id, "--blocked-by", &blocker_id])
+        .output()
+        .expect("dependency re-add runs");
+    assert!(readded.status.success());
+    let completed = arcl_in(repository.path())
+        .args(["task", "complete", &blocker_id])
+        .output()
+        .expect("blocker completion runs");
+    assert!(completed.status.success());
+    let ready_after = arcl_in(repository.path())
+        .args(["--plain", "ready"])
+        .output()
+        .expect("ready query after completion runs");
+    assert_eq!(String::from_utf8_lossy(&ready_after.stdout).trim(), blocked_id);
+
+    let completed = arcl_in(repository.path())
+        .args(["task", "complete", &blocked_id])
+        .output()
+        .expect("blocked task completion runs");
+    assert!(completed.status.success());
+    let empty_next = arcl_in(repository.path())
+        .args(["--json", "next"])
+        .output()
+        .expect("empty next query runs");
+    assert!(empty_next.status.success());
+    let empty_payload: Value = serde_json::from_slice(&empty_next.stdout).expect("empty next JSON parses");
+    assert!(empty_payload["data"]["task"].is_null());
 }
