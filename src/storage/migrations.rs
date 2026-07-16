@@ -7,7 +7,10 @@ struct Migration {
     sql: &'static str,
 }
 
-const MIGRATIONS: &[Migration] = &[Migration { version: 1, sql: include_str!("migrations/001_foundation.sql") }];
+const MIGRATIONS: &[Migration] = &[
+    Migration { version: 1, sql: include_str!("migrations/001_foundation.sql") },
+    Migration { version: 2, sql: include_str!("migrations/002_ideas.sql") },
+];
 
 pub(super) fn apply(connection: &mut Connection) -> Result<(), StorageError> {
     let current: i32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;

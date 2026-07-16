@@ -73,12 +73,12 @@ discarding ideas with Markdown descriptions.
 
 **Acceptance criteria:**
 
-- [ ] Add validated `arcl-i-<ulid>` IDs and the `ideas` migration from the roadmap.
-- [ ] Implement `arcl idea create`, `arcl idea update`, and `arcl idea discard` with the specified lifecycle rules.
-- [ ] Support inline descriptions and UTF-8 descriptions read from a file or standard input.
-- [ ] Reject empty titles, malformed IDs, invalid transitions, and ambiguous description inputs without partial writes.
-- [ ] Repeating discard is idempotent; discarded ideas cannot return to `captured`.
-- [ ] Mutations print useful human output and expose the created or updated record as versioned JSON.
+- [x] Add validated `arcl-i-<ulid>` IDs and the `ideas` migration from the roadmap.
+- [x] Implement `arcl idea create`, `arcl idea update`, and `arcl idea discard` with the specified lifecycle rules.
+- [x] Support inline descriptions and UTF-8 descriptions read from a file or standard input.
+- [x] Reject empty titles, malformed IDs, invalid transitions, and ambiguous description inputs without partial writes.
+- [x] Repeating discard is idempotent; discarded ideas cannot return to `captured`.
+- [x] Mutations print useful human output and expose the created or updated record as versioned JSON.
 
 **Verification:**
 

@@ -5,6 +5,7 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::cli::ColorChoice;
+use crate::domain::Idea;
 
 /// The output format for a command result.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -13,6 +14,32 @@ pub enum OutputMode {
     Plain,
     Json,
     Quiet,
+}
+
+/// The mutation represented by an idea command's output.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IdeaMutation {
+    Created,
+    Updated,
+    Discarded,
+}
+
+impl IdeaMutation {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Updated => "updated",
+            Self::Discarded => "discarded",
+        }
+    }
+
+    const fn human_verb(self) -> &'static str {
+        match self {
+            Self::Created => "Created",
+            Self::Updated => "Updated",
+            Self::Discarded => "Discarded",
+        }
+    }
 }
 
 /// Output failures that can occur before the application boundary adds context.
@@ -74,6 +101,63 @@ impl Renderer {
         }))
     }
 
+    /// Render one idea mutation and include the affected record in JSON mode.
+    pub fn render_idea(&self, mutation: IdeaMutation, idea: &Idea) -> Result<Option<String>, OutputError> {
+        let id = idea.id.to_string();
+        let message = match self.mode {
+            OutputMode::Human => match mutation {
+                IdeaMutation::Discarded => format!("Discarded idea `{id}`"),
+                _ => format!("{} idea `{id}`: {}", mutation.human_verb(), idea.title),
+            },
+            OutputMode::Plain | OutputMode::Quiet => id,
+            OutputMode::Json => serde_json::to_string(&Envelope {
+                format_version: 1,
+                data: IdeaMutationData { action: mutation.as_str(), idea },
+            })?,
+        };
+
+        Ok(Some(match (self.mode, self.color) {
+            (OutputMode::Human, ColorChoice::Always) => message.bright_blue().to_string(),
+            (OutputMode::Human, ColorChoice::Auto) => message
+                .if_supports_color(Stream::Stdout, |text| text.bright_blue())
+                .to_string(),
+            _ => message,
+        }))
+    }
+
+    /// Render the current idea inbox.
+    pub fn render_ideas(&self, ideas: &[Idea]) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human => {
+                if ideas.is_empty() {
+                    "No ideas.".to_owned()
+                } else {
+                    ideas
+                        .iter()
+                        .map(|idea| format!("{}\t[{}]\t{}", idea.id, idea.status.as_str(), idea.title))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                }
+            }
+            OutputMode::Plain => ideas
+                .iter()
+                .map(|idea| idea.id.to_string())
+                .collect::<Vec<_>>()
+                .join("\n"),
+            OutputMode::Json => serde_json::to_string(&Envelope { format_version: 1, data: IdeaListData { ideas } })?,
+            OutputMode::Quiet => return Ok(None),
+        };
+
+        Ok(Some(match (self.mode, self.color) {
+            (OutputMode::Human, ColorChoice::Always) => message.bright_blue().to_string(),
+            (OutputMode::Human, ColorChoice::Auto) => message
+                .if_supports_color(Stream::Stdout, |text| text.bright_blue())
+                .to_string(),
+            _ => message,
+        }))
+    }
+
+    // TODO: remove this
     fn human_message(&self) -> String {
         const MESSAGE: &str = "Arc Lightning foundation ready";
         match self.color {
@@ -105,6 +189,17 @@ struct InitData<'a> {
     snapshot_enabled: bool,
 }
 
+#[derive(Debug, Serialize)]
+struct IdeaMutationData<'a> {
+    action: &'static str,
+    idea: &'a Idea,
+}
+
+#[derive(Debug, Serialize)]
+struct IdeaListData<'a> {
+    ideas: &'a [Idea],
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,5 +224,18 @@ mod tests {
                 .expect("rendering succeeds"),
             None
         );
+    }
+
+    #[test]
+    fn idea_json_output_is_versioned_and_contains_the_record() {
+        let idea = Idea::new("A thought".to_owned(), "Details".to_owned()).expect("idea is valid");
+        let rendered = Renderer::new(OutputMode::Json, ColorChoice::Always)
+            .render_idea(IdeaMutation::Created, &idea)
+            .expect("rendering succeeds")
+            .expect("JSON output is present");
+
+        assert!(rendered.contains("\"format_version\":1"));
+        assert!(rendered.contains(&idea.id.to_string()));
+        assert!(!rendered.contains('\u{1b}'));
     }
 }

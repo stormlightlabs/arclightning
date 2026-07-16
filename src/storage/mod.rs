@@ -1,3 +1,4 @@
+mod ideas;
 mod migrations;
 
 use std::{path::Path, time::Duration};
@@ -5,7 +6,9 @@ use std::{path::Path, time::Duration};
 use rusqlite::Connection;
 use thiserror::Error;
 
-pub const CURRENT_VERSION: i32 = 1;
+use crate::domain::{DomainError, Idea, IdeaId};
+
+pub const CURRENT_VERSION: i32 = 2;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -14,6 +17,10 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 pub enum StorageError {
     #[error("SQLite operation failed: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[error("stored idea is invalid: {0}")]
+    InvalidIdea(#[from] DomainError),
+    #[error("idea `{id}` was not found")]
+    IdeaNotFound { id: String },
     #[error("database user_version {found} is newer than this application supports (latest {latest})")]
     NewerDatabase { found: i32, latest: i32 },
     #[error("migration sequence is missing version {expected} before version {found}")]
@@ -45,6 +52,28 @@ impl Database {
         Ok(self
             .connection
             .pragma_query_value(None, "user_version", |row| row.get(0))?)
+    }
+
+    pub fn idea(&self, id: IdeaId) -> Result<Option<Idea>, StorageError> {
+        ideas::find(&self.connection, &id)
+    }
+
+    pub fn ideas(&self) -> Result<Vec<Idea>, StorageError> {
+        ideas::list(&self.connection)
+    }
+
+    pub fn create_idea(&mut self, title: String, description: String) -> Result<Idea, StorageError> {
+        ideas::create(&mut self.connection, title, description)
+    }
+
+    pub fn update_idea(
+        &mut self, id: IdeaId, title: Option<String>, description: Option<String>,
+    ) -> Result<Idea, StorageError> {
+        ideas::update(&mut self.connection, id, title, description)
+    }
+
+    pub fn discard_idea(&mut self, id: IdeaId) -> Result<Idea, StorageError> {
+        ideas::discard(&mut self.connection, id)
     }
 
     #[cfg(test)]
@@ -89,5 +118,15 @@ mod tests {
             )
             .expect("foundation migration creates the format marker");
         assert_eq!(format_version, CURRENT_VERSION.to_string());
+
+        let ideas_table: String = database
+            .connection()
+            .query_row(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'ideas'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("ideas migration creates the ideas table");
+        assert_eq!(ideas_table, "ideas");
     }
 }

@@ -9,6 +9,10 @@ type Result<T> = std::result::Result<T, DomainError>;
 pub enum DomainError {
     #[error("title cannot be empty")]
     EmptyTitle,
+    #[error("{entity} update requires at least one field")]
+    NoFieldsToUpdate { entity: &'static str },
+    #[error("invalid {entity} status `{value}`")]
+    InvalidStatus { entity: &'static str, value: String },
     #[error("position {position} is invalid; positions must be non-negative")]
     InvalidPosition { position: i64 },
     #[error("cannot {action} {entity} while it is {from}")]
