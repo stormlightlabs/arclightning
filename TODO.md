@@ -17,16 +17,16 @@ dependencies, module boundaries, error strategy, and a CLI-focused test harness.
 
 **Acceptance criteria:**
 
-- [ ] Add the production dependencies and feature selections approved in the roadmap,
+- [x] Add the production dependencies and feature selections approved in the roadmap,
       including `clap`, `gix`, `owo-colors`, `rusqlite`, `serde`, `toml`, `ulid`, `thiserror`, and `anyhow`.
-- [ ] Keep the application synchronous and omit Tokio and all `gix` network-client features.
-- [ ] Establish the roadmap's application, domain, storage, snapshot, plan, output, and
+- [x] Keep the application synchronous and omit Tokio and all `gix` network-client features.
+- [x] Establish the roadmap's application, domain, storage, snapshot, plan, output, and
       VCS module boundaries without placeholder production APIs.
-- [ ] Restrict `anyhow` to the binary/application boundary and define typed infrastructure
+- [x] Restrict `anyhow` to the binary/application boundary and define typed infrastructure
       and domain error categories with `thiserror`.
-- [ ] Add the minimum test-only dependencies and helpers needed to run the binary in isolated temporary directories.
-- [ ] `arcl --help` and `arcl --version` succeed from the compiled binary.
-- [ ] Review `cargo tree -e features` and document the selected minimal `gix` feature set.
+- [x] Add the minimum test-only dependencies and helpers needed to run the binary in isolated temporary directories.
+- [x] `arcl --help` and `arcl --version` succeed from the compiled binary.
+- [x] Review `cargo tree -e features` and document the selected minimal `gix` feature set.
 
 **Verification:**
 

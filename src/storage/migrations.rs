@@ -1,0 +1,34 @@
+use rusqlite::Connection;
+
+use super::{CURRENT_VERSION, StorageError};
+
+struct Migration {
+    version: i32,
+    sql: &'static str,
+}
+
+const MIGRATIONS: &[Migration] = &[Migration { version: 1, sql: include_str!("migrations/001_foundation.sql") }];
+
+pub(super) fn apply(connection: &mut Connection) -> Result<(), StorageError> {
+    let current: i32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if current > CURRENT_VERSION {
+        return Err(StorageError::NewerDatabase { found: current, latest: CURRENT_VERSION });
+    }
+
+    let mut expected = current + 1;
+    for migration in MIGRATIONS {
+        if migration.version < expected {
+            continue;
+        }
+        if migration.version != expected {
+            return Err(StorageError::MigrationGap { expected, found: migration.version });
+        }
+
+        let transaction = connection.transaction()?;
+        transaction.execute_batch(migration.sql)?;
+        transaction.pragma_update(None, "user_version", migration.version)?;
+        transaction.commit()?;
+        expected += 1;
+    }
+    Ok(())
+}
