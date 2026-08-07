@@ -12,6 +12,7 @@ pub struct TaskParts {
     pub status: TaskStatus,
     pub priority: TaskPriority,
     pub position: i64,
+    pub plan_key: Option<String>,
     pub handoff: String,
     pub evidence: String,
 }
@@ -27,6 +28,9 @@ pub struct Task {
     pub status: TaskStatus,
     pub priority: TaskPriority,
     pub position: i64,
+    /// The optional plan key used to match this task during plan application.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan_key: Option<String>,
     /// The latest Markdown note left for the next person to resume work.
     pub handoff: String,
     /// Optional Markdown evidence recorded when work was completed.
@@ -50,6 +54,7 @@ impl Task {
             status: TaskStatus::Pending,
             priority,
             position,
+            plan_key: None,
             handoff: String::new(),
             evidence: String::new(),
         })
@@ -71,6 +76,7 @@ impl TryFrom<TaskParts> for Task {
             status: parts.status,
             priority: parts.priority,
             position: parts.position,
+            plan_key: parts.plan_key,
             handoff: parts.handoff,
             evidence: parts.evidence,
         })

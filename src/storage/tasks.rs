@@ -54,6 +54,7 @@ pub(super) struct RawTask {
     status: String,
     priority: String,
     position: i64,
+    plan_key: Option<String>,
     handoff: String,
     evidence: String,
 }
@@ -85,6 +86,7 @@ impl RawTask {
             status,
             priority,
             position: self.position,
+            plan_key: self.plan_key,
             handoff: self.handoff,
             evidence: self.evidence,
         })
@@ -98,7 +100,7 @@ pub fn find(conn: &Connection, id: &TaskId) -> Result<Option<Task>> {
 
 pub fn list(conn: &Connection) -> Result<Vec<Task>> {
     let mut statement = conn.prepare(
-        "SELECT id, milestone_id, parent_id, title, description, status, priority, position, handoff, evidence
+        "SELECT id, milestone_id, parent_id, title, description, status, priority, position, plan_key, handoff, evidence
          FROM tasks ORDER BY milestone_id, position, id",
     )?;
     let rows = statement.query_map([], row_to_raw_task)?;
@@ -232,6 +234,7 @@ pub fn update(conn: &mut Connection, id: TaskId, update: TaskUpdate) -> Result<T
         status: current.status,
         priority: next_priority,
         position: next_position,
+        plan_key: current.plan_key,
         handoff: current.handoff,
         evidence: current.evidence,
     })
@@ -303,7 +306,7 @@ pub fn handoff(connection: &mut Connection, id: TaskId, note: String) -> Result<
 fn read_one(conn: &Connection, id: &TaskId) -> Result<Option<Task>> {
     let raw_task = conn
         .query_row(
-            "SELECT id, milestone_id, parent_id, title, description, status, priority, position, handoff, evidence
+            "SELECT id, milestone_id, parent_id, title, description, status, priority, position, plan_key, handoff, evidence
              FROM tasks WHERE id = ?1",
             params![id.to_string()],
             row_to_raw_task,
@@ -322,16 +325,17 @@ pub(super) fn row_to_raw_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawTa
         status: row.get(5)?,
         priority: row.get(6)?,
         position: row.get(7)?,
-        handoff: row.get(8)?,
-        evidence: row.get(9)?,
+        plan_key: row.get(8)?,
+        handoff: row.get(9)?,
+        evidence: row.get(10)?,
     })
 }
 
 fn insert_task(connection: &Connection, task: &Task) -> Result<()> {
     connection.execute(
         "INSERT INTO tasks
-         (id, milestone_id, parent_id, title, description, status, priority, position, handoff, evidence)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+         (id, milestone_id, parent_id, title, description, status, priority, position, plan_key, handoff, evidence)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             task.id.to_string(),
             task.milestone_id.to_string(),
@@ -341,6 +345,7 @@ fn insert_task(connection: &Connection, task: &Task) -> Result<()> {
             task.status.as_str(),
             task.priority.as_str(),
             task.position,
+            task.plan_key,
             task.handoff,
             task.evidence,
         ],

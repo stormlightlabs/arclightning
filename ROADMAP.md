@@ -305,7 +305,7 @@ The domain layer must enforce same-milestone parentage and prevent parent cycles
 
 The composite primary key is `(task_id, blocker_id)`. Self-dependencies and dependency cycles are rejected by the domain layer.
 
-### `snapshot_base`
+### `snapshot_files`
 
 | Column    | Type   | Rules                                                  |
 | --------- | ------ | ------------------------------------------------------ |
@@ -413,7 +413,7 @@ Validation is all-or-nothing. An invalid snapshot does not mutate SQLite or rewr
 
 Arc Lightning compares three states before ordinary commands when snapshots are enabled:
 
-- `B`: exact files stored in `snapshot_base`, the last common state;
+- `B`: exact files stored in `snapshot_files`, the last common state;
 - `D`: the current semantic database projection; and
 - `S`: the current parsed snapshot projection.
 
@@ -437,7 +437,7 @@ All successful mutating commands must:
 2. apply the database mutation in a transaction;
 3. commit the database transaction;
 4. export changed snapshot records through temporary files and atomic per-file renames;
-5. update `snapshot_base` only after export succeeds; and
+5. update the merge base in `snapshot_files` only after export succeeds; and
 6. report any incomplete export as a recoverable synchronization state on the next invocation.
 
 Before replacing a snapshot file, the exporter verifies that its current content still matches the content observed at command start.

@@ -88,6 +88,11 @@ pub enum Command {
     },
     /// Validate database and graph invariants.
     Check,
+    /// Inspect or synchronize the version-controlled snapshot.
+    Snapshot {
+        #[command(subcommand)]
+        command: SnapshotCommand,
+    },
     /// List actionable leaf tasks in deterministic order.
     Ready {
         #[command(flatten)]
@@ -376,6 +381,15 @@ pub enum TaskCommand {
         #[arg(long)]
         allow_open_children: bool,
     },
+}
+
+/// Explicit snapshot commands.
+#[derive(Clone, Debug, Subcommand)]
+pub enum SnapshotCommand {
+    /// Export the complete database graph into snapshot records.
+    Export,
+    /// Validate and import the complete snapshot graph into SQLite.
+    Import,
 }
 
 /// Task dependency commands.

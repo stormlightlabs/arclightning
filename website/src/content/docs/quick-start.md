@@ -51,6 +51,9 @@ snapshot setting enabled:
 arcl init --snapshot
 ```
 
+See [Version-control project snapshots](/guides/snapshots/) for the export,
+import, and Git workflow.
+
 ## Capture an idea
 
 Ideas are useful while the shape of the work is still changing:

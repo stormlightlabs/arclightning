@@ -12,9 +12,6 @@ run from the repository root or any directory below it.
 ```sh
 # From a new or existing Git worktree
 arcl init
-
-# Initialize with the version-controlled snapshot feature enabled
-arcl init --snapshot
 ```
 
 `init` creates the following structure in your project:

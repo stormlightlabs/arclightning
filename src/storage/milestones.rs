@@ -4,13 +4,15 @@ use crate::domain::{ContainerAction, ContainerStatus, DomainError, EpicId, Miles
 
 use super::{Result, StorageError};
 
+type RawMilestoneRow = (String, String, Option<String>, String, String, String, i64);
+
 pub fn find(connection: &Connection, id: &MilestoneId) -> Result<Option<Milestone>> {
     read_one(connection, id)
 }
 
 pub fn list(connection: &Connection) -> Result<Vec<Milestone>> {
     let mut statement = connection.prepare(
-        "SELECT id, epic_id, title, description, status, position
+        "SELECT id, epic_id, plan_key, title, description, status, position
          FROM milestones ORDER BY position, id",
     )?;
     let rows = statement.query_map([], row_to_raw_milestone)?;
@@ -75,6 +77,7 @@ pub fn update(
         description: next_description.to_owned(),
         status: current.status,
         position: next_position,
+        plan_key: current.plan_key,
     })
 }
 
@@ -113,7 +116,7 @@ pub fn transition(
 fn read_one(connection: &Connection, id: &MilestoneId) -> Result<Option<Milestone>> {
     let raw_milestone = connection
         .query_row(
-            "SELECT id, epic_id, title, description, status, position FROM milestones WHERE id = ?1",
+            "SELECT id, epic_id, plan_key, title, description, status, position FROM milestones WHERE id = ?1",
             params![id.to_string()],
             row_to_raw_milestone,
         )
@@ -121,7 +124,7 @@ fn read_one(connection: &Connection, id: &MilestoneId) -> Result<Option<Mileston
     raw_milestone.map(decode_milestone).transpose()
 }
 
-fn row_to_raw_milestone(row: &rusqlite::Row<'_>) -> rusqlite::Result<(String, String, String, String, String, i64)> {
+fn row_to_raw_milestone(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawMilestoneRow> {
     Ok((
         row.get(0)?,
         row.get(1)?,
@@ -129,11 +132,12 @@ fn row_to_raw_milestone(row: &rusqlite::Row<'_>) -> rusqlite::Result<(String, St
         row.get(3)?,
         row.get(4)?,
         row.get(5)?,
+        row.get(6)?,
     ))
 }
 
 fn decode_milestone(
-    (id, epic_id, title, description, status, position): (String, String, String, String, String, i64),
+    (id, epic_id, plan_key, title, description, status, position): RawMilestoneRow,
 ) -> Result<Milestone> {
     let id = MilestoneId::parse(&id)
         .map_err(DomainError::from)
@@ -142,7 +146,8 @@ fn decode_milestone(
         .map_err(DomainError::from)
         .map_err(StorageError::InvalidMilestone)?;
     let status = ContainerStatus::parse("milestone", &status).map_err(StorageError::InvalidMilestone)?;
-    Milestone::from_parts(id, epic_id, title, description, status, position).map_err(StorageError::InvalidMilestone)
+    Milestone::from_parts(id, epic_id, title, description, status, position, plan_key)
+        .map_err(StorageError::InvalidMilestone)
 }
 
 fn ensure_epic_exists(connection: &Connection, epic_id: EpicId) -> Result<()> {

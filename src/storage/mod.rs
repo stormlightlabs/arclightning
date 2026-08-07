@@ -22,11 +22,21 @@ use crate::domain::{
     TaskAction, TaskDependency, TaskId, TaskPriority,
 };
 
-pub const CURRENT_VERSION: i32 = 7;
+/// The newest SQLite schema version understood by the application.
+pub const CURRENT_VERSION: i32 = 8;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub type Result<T> = std::result::Result<T, StorageError>;
+
+/// One exact file stored as the last successful snapshot base.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SnapshotBaseFile {
+    /// The path relative to the snapshot root.
+    pub path: String,
+    /// The exact bytes observed after the successful export.
+    pub content: Vec<u8>,
+}
 
 /// Infrastructure failures from the SQLite storage boundary.
 #[derive(Debug, Error)]
@@ -94,6 +104,145 @@ impl Database {
         Ok(self
             .connection
             .pragma_query_value(None, "user_version", |row| row.get(0))?)
+    }
+
+    /// Read the exact files recorded by the last successful snapshot export.
+    pub fn snapshot_base(&self) -> Result<Vec<SnapshotBaseFile>> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT path, content FROM snapshot_files ORDER BY path")?;
+        let rows = statement.query_map([], |row| {
+            Ok(SnapshotBaseFile { path: row.get(0)?, content: row.get(1)? })
+        })?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    /// Replace the complete work graph and refresh its snapshot base in one transaction.
+    pub fn replace_graph_and_snapshot_base(&mut self, graph: &Graph, files: &[SnapshotBaseFile]) -> Result<()> {
+        let transaction = self.connection.transaction()?;
+        transaction.execute_batch(
+            "DELETE FROM task_dependencies;
+             DELETE FROM idea_promotions;
+             UPDATE tasks SET parent_id = NULL;
+             DELETE FROM tasks;
+             DELETE FROM milestones;
+             DELETE FROM epics;
+             DELETE FROM releases;
+             DELETE FROM ideas;",
+        )?;
+
+        for release in &graph.releases {
+            transaction.execute(
+                "INSERT INTO releases (id, title, description, status) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![
+                    release.id.to_string(),
+                    release.title,
+                    release.description,
+                    release.status.as_str()
+                ],
+            )?;
+        }
+        for idea in &graph.ideas {
+            transaction.execute(
+                "INSERT INTO ideas (id, title, description, status) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![idea.id.to_string(), idea.title, idea.description, idea.status.as_str()],
+            )?;
+        }
+        for epic in &graph.epics {
+            transaction.execute(
+                "INSERT INTO epics (id, release_id, title, description, spec_path, status)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![
+                    epic.id.to_string(),
+                    epic.release_id.map(|id| id.to_string()),
+                    epic.title,
+                    epic.description,
+                    epic.spec_path,
+                    epic.status.as_str(),
+                ],
+            )?;
+        }
+        for idea in &graph.ideas {
+            if let Some(epic_id) = idea.promoted_to {
+                transaction.execute(
+                    "INSERT INTO idea_promotions (idea_id, epic_id) VALUES (?1, ?2)",
+                    rusqlite::params![idea.id.to_string(), epic_id.to_string()],
+                )?;
+            }
+        }
+        for milestone in &graph.milestones {
+            transaction.execute(
+                "INSERT INTO milestones (id, epic_id, plan_key, title, description, status, position)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![
+                    milestone.id.to_string(),
+                    milestone.epic_id.to_string(),
+                    milestone.plan_key,
+                    milestone.title,
+                    milestone.description,
+                    milestone.status.as_str(),
+                    milestone.position,
+                ],
+            )?;
+        }
+        for task in &graph.tasks {
+            transaction.execute(
+                "INSERT INTO tasks
+                 (id, milestone_id, parent_id, plan_key, title, description, status, priority, position, handoff, evidence)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                rusqlite::params![
+                    task.id.to_string(),
+                    task.milestone_id.to_string(),
+                    Option::<String>::None,
+                    task.plan_key,
+                    task.title,
+                    task.description,
+                    task.status.as_str(),
+                    task.priority.as_str(),
+                    task.position,
+                    task.handoff,
+                    task.evidence,
+                ],
+            )?;
+        }
+        for task in &graph.tasks {
+            if let Some(parent_id) = task.parent_id {
+                transaction.execute(
+                    "UPDATE tasks SET parent_id = ?2 WHERE id = ?1",
+                    rusqlite::params![task.id.to_string(), parent_id.to_string()],
+                )?;
+            }
+        }
+        for dependency in &graph.dependencies {
+            transaction.execute(
+                "INSERT INTO task_dependencies (task_id, blocker_id) VALUES (?1, ?2)",
+                rusqlite::params![dependency.task_id.to_string(), dependency.blocker_id.to_string()],
+            )?;
+        }
+
+        transaction.execute("DELETE FROM snapshot_files", [])?;
+        for file in files {
+            transaction.execute(
+                "INSERT INTO snapshot_files (path, content) VALUES (?1, ?2)",
+                rusqlite::params![&file.path, &file.content],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Replace the stored snapshot base after filesystem export has completed.
+    pub fn replace_snapshot_base(&mut self, files: &[SnapshotBaseFile]) -> Result<()> {
+        let transaction = self.connection.transaction()?;
+        transaction.execute("DELETE FROM snapshot_files", [])?;
+        for file in files {
+            transaction.execute(
+                "INSERT INTO snapshot_files (path, content) VALUES (?1, ?2)",
+                rusqlite::params![&file.path, &file.content],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
     }
 
     pub fn idea(&self, id: IdeaId) -> Result<Option<Idea>> {

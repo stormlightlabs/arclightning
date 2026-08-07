@@ -9,8 +9,13 @@ use thiserror::Error;
 
 use crate::{cli::*, domain::*, output::*};
 
-use crate::snapshot::{ProjectConfig, SnapshotError};
-use crate::storage::{Database, Graph, ListFilter, Promotion, ReadyFilter, StorageError, TaskCreate, TaskUpdate};
+use crate::snapshot::{
+    ProjectConfig, SnapshotError, SnapshotExportError, SnapshotImportError, SnapshotManifest, encode_manifest,
+    export_graph, import_snapshot,
+};
+use crate::storage::{
+    Database, Graph, ListFilter, Promotion, ReadyFilter, SnapshotBaseFile, StorageError, TaskCreate, TaskUpdate,
+};
 use crate::vcs::{GixVcs, Vcs, VcsError};
 
 const ARCL_DIRECTORY: &str = ".arcl";
@@ -18,6 +23,7 @@ const CONFIG_FILE: &str = "config.toml";
 const DATABASE_FILE: &str = "arcl.db";
 const GITIGNORE_FILE: &str = ".gitignore";
 const REQUIRED_GITIGNORE_ENTRIES: &[&str] = &["/arcl.db", "/arcl.db-*", "/*.tmp", "/conflicts/"];
+const SNAPSHOT_DIRECTORIES: &[&str] = &["ideas", "releases", "epics", "milestones", "tasks"];
 
 type CResult<T> = std::result::Result<T, CommandError>;
 type SResult<T> = std::result::Result<T, SpecPathError>;
@@ -63,6 +69,12 @@ enum InitError {
     WriteConfig { path: PathBuf, source: io::Error },
     #[error("could not render project configuration `{path}`: {source}")]
     RenderConfig { path: PathBuf, source: SnapshotError },
+    #[error("could not create snapshot directory `{path}`: {source}")]
+    CreateSnapshotDirectory { path: PathBuf, source: io::Error },
+    #[error("could not render snapshot manifest `{path}`: {source}")]
+    RenderSnapshotManifest { path: PathBuf, source: SnapshotError },
+    #[error("could not write snapshot manifest `{path}`: {source}")]
+    WriteSnapshotManifest { path: PathBuf, source: io::Error },
     #[error("could not read scoped ignore file `{path}`: {source}")]
     ReadGitignore { path: PathBuf, source: io::Error },
     #[error("could not write scoped ignore file `{path}`: {source}")]
@@ -89,6 +101,9 @@ impl InitError {
             | Self::ReadConfig { .. }
             | Self::WriteConfig { .. }
             | Self::RenderConfig { .. }
+            | Self::CreateSnapshotDirectory { .. }
+            | Self::RenderSnapshotManifest { .. }
+            | Self::WriteSnapshotManifest { .. }
             | Self::ReadGitignore { .. }
             | Self::WriteGitignore { .. }
             | Self::OpenDatabase { .. } => 1,
@@ -110,6 +125,12 @@ enum CommandError {
     InvalidConfig { path: PathBuf, source: SnapshotError },
     #[error("could not open Arc Lightning database `{path}`: {source}")]
     OpenDatabase { path: PathBuf, source: StorageError },
+    #[error("snapshot export is not enabled in project `{root}`")]
+    SnapshotDisabled { root: PathBuf },
+    #[error(transparent)]
+    SnapshotExport(#[from] SnapshotExportError),
+    #[error(transparent)]
+    SnapshotImport(Box<SnapshotImportError>),
     #[error(transparent)]
     Domain(#[from] DomainError),
     #[error(transparent)]
@@ -132,6 +153,12 @@ enum CommandError {
     Integrity { message: String },
 }
 
+impl From<SnapshotImportError> for CommandError {
+    fn from(error: SnapshotImportError) -> Self {
+        Self::SnapshotImport(Box::new(error))
+    }
+}
+
 impl CommandError {
     fn exit_code(&self) -> u8 {
         match self {
@@ -139,7 +166,15 @@ impl CommandError {
                 VcsError::Discovery { .. } | VcsError::BareRepository { .. } | VcsError::MissingWorktree { .. } => 3,
                 VcsError::PathOutsideWorktree { .. } | VcsError::Operation { .. } => 1,
             },
-            Self::NotInitialized { .. } | Self::InvalidConfig { .. } | Self::Domain(_) => 3,
+            Self::NotInitialized { .. }
+            | Self::InvalidConfig { .. }
+            | Self::SnapshotDisabled { .. }
+            | Self::Domain(_) => 3,
+            Self::SnapshotExport(error) => match error {
+                SnapshotExportError::Conflict { .. } => 4,
+                _ => 1,
+            },
+            Self::SnapshotImport(error) => error.exit_code(),
             Self::ReadConfig { .. }
             | Self::CurrentDirectory { .. }
             | Self::ReadDescription { .. }
@@ -241,7 +276,14 @@ enum SpecPathError {
 struct OpenProject {
     root: PathBuf,
     current_dir: PathBuf,
+    config: ProjectConfig,
     database: Database,
+}
+
+struct ProjectLocation {
+    root: PathBuf,
+    config: ProjectConfig,
+    database_path: PathBuf,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -384,6 +426,10 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
                 .map_err(|error| ApplicationError::from_command(CommandError::Storage(error)))?;
             write_output(renderer.render_context(&view).context("rendering context output")?)
         }
+        Some(Command::Snapshot { command }) => {
+            exec_snapshot(command).map_err(ApplicationError::from_command)?;
+            write_output(None)
+        }
         Some(Command::Check) => {
             let database = open_database().map_err(ApplicationError::from_command)?;
             let report = database
@@ -409,6 +455,45 @@ fn write_output(message: Option<String>) -> anyhow::Result<()> {
         writeln!(stdout, "{message}").context("writing CLI output")?;
     }
     Ok(())
+}
+
+fn exec_snapshot(command: SnapshotCommand) -> CResult<()> {
+    match command {
+        SnapshotCommand::Export => {
+            let mut project = open_project()?;
+            if !project.config.snapshot.enabled {
+                return Err(CommandError::SnapshotDisabled { root: project.root });
+            }
+
+            let config_path = project.root.join(ARCL_DIRECTORY).join(CONFIG_FILE);
+            let snapshot_root = crate::snapshot::resolve_snapshot_root(&project.root, &project.config.snapshot.path)
+                .map_err(|source| CommandError::InvalidConfig { path: config_path, source })?;
+            let graph = project.database.graph()?;
+            let files = export_graph(&snapshot_root, &graph)?;
+            let base = files
+                .iter()
+                .map(|file| SnapshotBaseFile {
+                    path: file.path.to_string_lossy().into_owned(),
+                    content: file.content.clone(),
+                })
+                .collect::<Vec<_>>();
+            if project.database.snapshot_base()? != base {
+                project.database.replace_snapshot_base(&base)?;
+            }
+            Ok(())
+        }
+        SnapshotCommand::Import => {
+            let project = locate_project()?;
+            if !project.config.snapshot.enabled {
+                return Err(CommandError::SnapshotDisabled { root: project.root });
+            }
+            let config_path = project.root.join(ARCL_DIRECTORY).join(CONFIG_FILE);
+            let snapshot_root = crate::snapshot::resolve_snapshot_root(&project.root, &project.config.snapshot.path)
+                .map_err(|source| CommandError::InvalidConfig { path: config_path, source })?;
+            import_snapshot(&snapshot_root, &project.root, &project.database_path)?;
+            Ok(())
+        }
+    }
 }
 
 fn exec_idea(cmd: IdeaCommand) -> CResult<IdeaCommandResult> {
@@ -934,7 +1019,7 @@ fn open_database() -> CResult<Database> {
     Ok(open_project()?.database)
 }
 
-fn open_project() -> CResult<OpenProject> {
+fn locate_project() -> CResult<ProjectLocation> {
     let start = std::env::current_dir().map_err(|source| CommandError::CurrentDirectory { source })?;
     let vcs = GixVcs::discover(&start)?;
     let root = vcs.worktree_root()?.to_owned();
@@ -942,16 +1027,26 @@ fn open_project() -> CResult<OpenProject> {
     let config_path = arcl_directory.join(CONFIG_FILE);
     let database_path = arcl_directory.join(DATABASE_FILE);
 
-    if !config_path.is_file() || !database_path.is_file() {
+    if !config_path.is_file() {
         return Err(CommandError::NotInitialized { root });
     }
 
-    let config = fs::read_to_string(&config_path)
+    let config_input = fs::read_to_string(&config_path)
         .map_err(|source| CommandError::ReadConfig { path: config_path.clone(), source })?;
-    ProjectConfig::parse(&config).map_err(|source| CommandError::InvalidConfig { path: config_path, source })?;
-    let database =
-        Database::open(&database_path).map_err(|source| CommandError::OpenDatabase { path: database_path, source })?;
-    Ok(OpenProject { root, current_dir: start, database })
+    let config = ProjectConfig::parse(&config_input)
+        .map_err(|source| CommandError::InvalidConfig { path: config_path, source })?;
+    Ok(ProjectLocation { root, config, database_path })
+}
+
+fn open_project() -> CResult<OpenProject> {
+    let start = std::env::current_dir().map_err(|source| CommandError::CurrentDirectory { source })?;
+    let location = locate_project()?;
+    if !location.database_path.is_file() {
+        return Err(CommandError::NotInitialized { root: location.root });
+    }
+    let database = Database::open(&location.database_path)
+        .map_err(|source| CommandError::OpenDatabase { path: location.database_path, source })?;
+    Ok(OpenProject { root: location.root, current_dir: start, config: location.config, database })
 }
 
 fn resolve_spec_path(root: &Path, current_dir: &Path, input: &Path) -> SResult<String> {
@@ -1063,6 +1158,9 @@ fn initialize(start: &Path, snapshot: bool) -> IResult<Initialization> {
 
     let database_path = arcl_directory.join(DATABASE_FILE);
     Database::open(&database_path).map_err(|source| InitError::OpenDatabase { path: database_path, source })?;
+    if config.snapshot.enabled {
+        ensure_snapshot_layout(&root, &config)?;
+    }
 
     Ok(Initialization { root, snapshot_enabled: config.snapshot.enabled })
 }
@@ -1070,7 +1168,16 @@ fn initialize(start: &Path, snapshot: bool) -> IResult<Initialization> {
 fn load_or_create_config(path: &Path, snapshot: bool) -> IResult<ProjectConfig> {
     match fs::read_to_string(path) {
         Ok(input) => {
-            ProjectConfig::parse(&input).map_err(|source| InitError::InvalidConfig { path: path.to_owned(), source })
+            let mut config = ProjectConfig::parse(&input)
+                .map_err(|source| InitError::InvalidConfig { path: path.to_owned(), source })?;
+            if snapshot && !config.snapshot.enabled {
+                config.snapshot.enabled = true;
+                let rendered = config
+                    .render()
+                    .map_err(|source| InitError::RenderConfig { path: path.to_owned(), source })?;
+                fs::write(path, rendered).map_err(|source| InitError::WriteConfig { path: path.to_owned(), source })?;
+            }
+            Ok(config)
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             let mut config = ProjectConfig::default();
@@ -1084,6 +1191,26 @@ fn load_or_create_config(path: &Path, snapshot: bool) -> IResult<ProjectConfig> 
         }
         Err(source) => Err(InitError::ReadConfig { path: path.to_owned(), source }),
     }
+}
+
+fn ensure_snapshot_layout(root: &Path, config: &ProjectConfig) -> IResult<()> {
+    let snapshot_root = crate::snapshot::resolve_snapshot_root(root, &config.snapshot.path)
+        .map_err(|source| InitError::InvalidConfig { path: root.join(ARCL_DIRECTORY).join(CONFIG_FILE), source })?;
+    fs::create_dir_all(&snapshot_root)
+        .map_err(|source| InitError::CreateSnapshotDirectory { path: snapshot_root.clone(), source })?;
+    for directory in SNAPSHOT_DIRECTORIES {
+        let path = snapshot_root.join(directory);
+        fs::create_dir_all(&path).map_err(|source| InitError::CreateSnapshotDirectory { path, source })?;
+    }
+
+    let manifest_path = snapshot_root.join("manifest.toml");
+    if !manifest_path.is_file() {
+        let manifest = encode_manifest(&SnapshotManifest::default())
+            .map_err(|source| InitError::RenderSnapshotManifest { path: manifest_path.clone(), source })?;
+        create_file(&manifest_path, manifest.as_bytes())
+            .map_err(|source| InitError::WriteSnapshotManifest { path: manifest_path, source })?;
+    }
+    Ok(())
 }
 
 fn ensure_gitignore(path: &Path) -> IResult<()> {

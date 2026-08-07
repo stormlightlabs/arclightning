@@ -81,7 +81,7 @@ pub fn remove(connection: &mut Connection, task_id: TaskId, blocker_id: TaskId) 
 /// Return tasks that have at least one direct blocker which is not completed.
 pub fn blocked(conn: &Connection) -> Result<Vec<Task>> {
     let mut statement = conn.prepare(
-        "SELECT id, milestone_id, parent_id, title, description, status, priority, position, handoff, evidence
+        "SELECT id, milestone_id, parent_id, title, description, status, priority, position, plan_key, handoff, evidence
          FROM tasks AS task
          WHERE EXISTS (
              SELECT 1
@@ -109,7 +109,7 @@ pub fn ready(conn: &Connection, filter: &ReadyFilter) -> Result<Vec<Task>> {
              WHERE parent.parent_id IS NOT NULL
          )
          SELECT task.id, task.milestone_id, task.parent_id, task.title, task.description,
-                task.status, task.priority, task.position, task.handoff, task.evidence
+                task.status, task.priority, task.position, task.plan_key, task.handoff, task.evidence
          FROM tasks AS task
          JOIN milestones AS milestone ON milestone.id = task.milestone_id
          JOIN epics AS epic ON epic.id = milestone.epic_id

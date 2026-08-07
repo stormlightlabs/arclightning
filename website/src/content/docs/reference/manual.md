@@ -34,6 +34,20 @@ The command creates `.arcl/config.toml`, `.arcl/arcl.db`, and a scoped
 `.arcl/.gitignore`. It rejects directories outside Git worktrees and bare
 repositories. Re-running initialization preserves existing project state.
 
+## Snapshots
+
+| Command                | Purpose                                                    |
+| ---------------------- | ---------------------------------------------------------- |
+| `arcl snapshot export` | Write the local database state to the configured snapshot. |
+| `arcl snapshot import` | Validate the snapshot and rebuild the local database.      |
+
+Snapshot commands require snapshot support to be enabled with
+`arcl init --snapshot`. A concurrent file change stops the command with status
+code `4` instead of overwriting the newer content.
+
+See [Version-control project snapshots](/guides/snapshots/) for the Git workflow
+and snapshot layout.
+
 ## Idea commands
 
 | Command                                | Purpose                                    |

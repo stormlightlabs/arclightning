@@ -1,7 +1,7 @@
 use std::{fs, path::Path};
 
 use arcl::{
-    domain::{ReleaseId, TaskId},
+    domain::{IdeaId, ReleaseId, TaskId},
     storage::Database,
     vcs::{GixVcs, Vcs},
 };
@@ -131,7 +131,7 @@ fn init_discovers_the_worktree_from_a_nested_directory() {
     );
 
     let database = Database::open(arcl_directory.join("arcl.db")).expect("initialized database reopens");
-    assert_eq!(database.schema_version().expect("schema version is readable"), 7);
+    assert_eq!(database.schema_version().expect("schema version is readable"), 8);
 }
 
 #[test]
@@ -148,6 +148,15 @@ fn init_snapshot_option_is_persisted_without_replacing_existing_state() {
     );
 
     let arcl_directory = repository.path().join(".arcl");
+    let snapshot_directory = arcl_directory.join("snapshot");
+    assert_eq!(
+        fs::read_to_string(snapshot_directory.join("manifest.toml")).expect("manifest is readable"),
+        "format-version = 1\n"
+    );
+    for directory in ["ideas", "releases", "epics", "milestones", "tasks"] {
+        assert!(snapshot_directory.join(directory).is_dir());
+    }
+
     let config_path = arcl_directory.join("config.toml");
     let config_before = fs::read_to_string(&config_path).expect("config is readable");
     assert!(config_before.contains("enabled = true"));
@@ -187,6 +196,67 @@ fn init_snapshot_option_is_persisted_without_replacing_existing_state() {
         .query_row("SELECT value FROM meta WHERE key = 'custom'", [], |row| row.get(0))
         .expect("custom database data remains");
     assert_eq!(preserved, "preserve-me");
+}
+
+#[test]
+fn snapshot_export_is_deterministic_and_records_the_successful_base() {
+    let repository = worktree("ref: refs/heads/main\n");
+    let initialized = arcl_in(repository.path())
+        .args(["--color", "never", "init", "--snapshot"])
+        .output()
+        .expect("arcl init --snapshot runs");
+    assert!(initialized.status.success());
+
+    let created = arcl_in(repository.path())
+        .args(["--json", "idea", "create", "Exported idea", "--description", "Details"])
+        .output()
+        .expect("idea create runs");
+    assert!(created.status.success());
+    let idea_id = idea_id_from_json(&created.stdout);
+
+    let first = arcl_in(repository.path())
+        .args(["--quiet", "snapshot", "export"])
+        .output()
+        .expect("snapshot export runs");
+    assert!(
+        first.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+
+    let snapshot = repository.path().join(".arcl/snapshot");
+    let manifest = fs::read(snapshot.join("manifest.toml")).expect("manifest is readable");
+    let idea = fs::read(snapshot.join("ideas").join(format!("{idea_id}.md"))).expect("idea record is readable");
+    let base = Database::open(repository.path().join(".arcl/arcl.db"))
+        .expect("database reopens")
+        .snapshot_base()
+        .expect("snapshot base is readable");
+    assert!(
+        base.iter()
+            .any(|file| file.path == "manifest.toml" && file.content == manifest)
+    );
+    assert!(
+        base.iter()
+            .any(|file| file.path == format!("ideas/{idea_id}.md") && file.content == idea)
+    );
+
+    let second = arcl_in(repository.path())
+        .args(["--quiet", "snapshot", "export"])
+        .output()
+        .expect("second snapshot export runs");
+    assert!(
+        second.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    assert_eq!(
+        fs::read(snapshot.join("manifest.toml")).expect("manifest is readable"),
+        manifest
+    );
+    assert_eq!(
+        fs::read(snapshot.join("ideas").join(format!("{idea_id}.md"))).expect("idea record is readable"),
+        idea
+    );
 }
 
 #[test]
@@ -1349,6 +1419,178 @@ fn malformed_graphs_do_not_appear_ready_or_overflow_tree_rendering() {
         .expect("tree query returns without overflowing");
     assert_eq!(tree.status.code(), Some(3));
     assert!(String::from_utf8_lossy(&tree.stderr).contains("cycle"));
+}
+
+#[test]
+fn snapshot_import_rebuilds_a_missing_database_and_normalizes_records() {
+    let repository = worktree("ref: refs/heads/main\n");
+    let initialized = arcl_in(repository.path())
+        .args(["--color", "never", "init", "--snapshot"])
+        .output()
+        .expect("arcl init --snapshot runs");
+    assert!(initialized.status.success());
+    fs::write(repository.path().join("feature.md"), "# Feature\n").expect("spec writes");
+
+    let snapshot = repository.path().join(".arcl/snapshot");
+    let epic_id = "arcl-e-01K0B2ZWTX7JX9PH7W5G1S6A9Q";
+    let milestone_id = "arcl-m-01K0B2ZWTX7JX9PH7W5G1S6A9Q";
+    let task_id = "arcl-t-01K0B31M6VGK4YH8VKT4C0D2DR";
+    fs::write(
+        snapshot.join("epics").join(format!("{epic_id}.md")),
+        format!(
+            r#"+++
+id = "{epic_id}"
+title = "Feature"
+status = "open"
+spec-path = "feature.md"
++++
+"#,
+        ),
+    )
+    .expect("epic snapshot writes");
+    fs::write(
+        snapshot.join("milestones").join(format!("{milestone_id}.md")),
+        format!(
+            r#"+++
+id = "{milestone_id}"
+title = "Foundation"
+status = "open"
+epic = "{epic_id}"
+position = 0
+plan-key = "foundation"
++++
+"#,
+        ),
+    )
+    .expect("milestone snapshot writes");
+    fs::write(
+        snapshot.join("tasks").join(format!("{task_id}.md")),
+        format!(
+            r#"+++
+id = "{task_id}"
+title = "Build feature"
+status = "pending"
+priority = "high"
+milestone = "{milestone_id}"
+position = 0
+plan-key = "build-feature"
++++
+"#,
+        ),
+    )
+    .expect("task snapshot writes");
+
+    fs::remove_file(repository.path().join(".arcl/arcl.db")).expect("local database removes");
+    let imported = arcl_in(repository.path())
+        .args(["--quiet", "snapshot", "import"])
+        .output()
+        .expect("snapshot import runs");
+    assert!(
+        imported.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+
+    let database = Database::open(repository.path().join(".arcl/arcl.db")).expect("rebuilt database opens");
+    let graph = database.graph().expect("rebuilt graph loads");
+    assert_eq!(graph.epics.len(), 1);
+    assert_eq!(graph.milestones[0].plan_key.as_deref(), Some("foundation"));
+    assert_eq!(graph.tasks[0].plan_key.as_deref(), Some("build-feature"));
+    assert!(
+        database
+            .snapshot_base()
+            .expect("base loads")
+            .iter()
+            .all(|file| { file.content == fs::read(snapshot.join(&file.path)).expect("base file reads") })
+    );
+}
+
+#[test]
+fn invalid_snapshot_import_reports_source_and_leaves_database_and_files_unchanged() {
+    let repository = initialized_repository();
+    let enabled = arcl_in(repository.path())
+        .args(["--quiet", "init", "--snapshot"])
+        .output()
+        .expect("snapshot enable runs");
+    assert!(enabled.status.success());
+    let created = arcl_in(repository.path())
+        .args(["--json", "idea", "create", "Imported idea"])
+        .output()
+        .expect("idea creates");
+    assert!(created.status.success());
+    let id = idea_id_from_json(&created.stdout);
+    assert!(
+        arcl_in(repository.path())
+            .args(["--quiet", "snapshot", "export"])
+            .output()
+            .expect("export runs")
+            .status
+            .success()
+    );
+
+    let path = repository.path().join(".arcl/snapshot/ideas").join(format!("{id}.md"));
+    let before = fs::read(&path).expect("snapshot record reads");
+    let invalid = String::from_utf8(before.clone())
+        .expect("snapshot is UTF-8")
+        .replace("title = \"Imported idea\"", "title = \"  \"");
+    fs::write(&path, &invalid).expect("invalid snapshot writes");
+    let failed = arcl_in(repository.path())
+        .args(["snapshot", "import"])
+        .output()
+        .expect("snapshot import runs");
+    assert_eq!(failed.status.code(), Some(3));
+    let stderr = String::from_utf8_lossy(&failed.stderr);
+    assert!(stderr.contains(&format!("ideas/{id}.md")));
+    assert!(stderr.contains("front matter"));
+    assert_eq!(fs::read(&path).expect("snapshot record remains"), invalid.into_bytes());
+    let database = Database::open(repository.path().join(".arcl/arcl.db")).expect("database reopens");
+    assert_eq!(
+        database
+            .idea(IdeaId::parse(&id).expect("idea ID"))
+            .expect("idea reads")
+            .expect("idea exists")
+            .title,
+        "Imported idea"
+    );
+}
+
+#[test]
+fn snapshot_import_rejects_removing_a_record_in_the_stored_base() {
+    let repository = initialized_repository();
+    let enabled = arcl_in(repository.path())
+        .args(["--quiet", "init", "--snapshot"])
+        .output()
+        .expect("snapshot enable runs");
+    assert!(enabled.status.success());
+    let created = arcl_in(repository.path())
+        .args(["--json", "idea", "create", "Protected idea"])
+        .output()
+        .expect("idea creates");
+    let id = idea_id_from_json(&created.stdout);
+    assert!(
+        arcl_in(repository.path())
+            .args(["--quiet", "snapshot", "export"])
+            .output()
+            .expect("export runs")
+            .status
+            .success()
+    );
+    let path = repository.path().join(".arcl/snapshot/ideas").join(format!("{id}.md"));
+    fs::remove_file(&path).expect("snapshot record removes");
+
+    let failed = arcl_in(repository.path())
+        .args(["snapshot", "import"])
+        .output()
+        .expect("snapshot import runs");
+    assert_eq!(failed.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("removed or renamed"));
+    assert!(
+        Database::open(repository.path().join(".arcl/arcl.db"))
+            .expect("database reopens")
+            .idea(IdeaId::parse(&id).expect("idea ID"))
+            .expect("idea reads")
+            .is_some()
+    );
 }
 
 #[test]

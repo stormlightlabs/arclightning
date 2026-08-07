@@ -87,15 +87,15 @@ and the versioned snapshot manifest.
 
 **Acceptance criteria:**
 
-- [ ] Parse and render the exact `+++`-delimited TOML-front-matter and Markdown-body format from the roadmap.
-- [ ] Support idea, release, epic, milestone, task, and subtask records with kebab-case fields.
-- [ ] Preserve optional task handoff and evidence fields through canonical snapshot round trips.
-- [ ] Use `<id>.md` filenames in the correct entity directory and keep subtasks in `tasks/`.
-- [ ] Render optional fields by omission, sort ID arrays, use LF endings, and write one trailing newline.
-- [ ] Reject malformed delimiters, invalid TOML, unknown v1 fields, invalid UTF-8,
+- [x] Parse and render the exact `+++`-delimited TOML-front-matter and Markdown-body format from the roadmap.
+- [x] Support idea, release, epic, milestone, task, and subtask records with kebab-case fields.
+- [x] Preserve optional task handoff and evidence fields through canonical snapshot round trips.
+- [x] Use `<id>.md` filenames in the correct entity directory and keep subtasks in `tasks/`.
+- [x] Render optional fields by omission, sort ID arrays, use LF endings, and write one trailing newline.
+- [x] Reject malformed delimiters, invalid TOML, unknown v1 fields, invalid UTF-8,
       mismatched directory/filename/ID type, and unsupported manifest versions.
-- [ ] Preserve Markdown bodies exactly except for the documented final-newline normalization.
-- [ ] Canonical rendering is deterministic and parse-render-parse stable.
+- [x] Preserve Markdown bodies exactly except for the documented final-newline normalization.
+- [x] Canonical rendering is deterministic and parse-render-parse stable.
 
 **Verification:**
 
@@ -112,14 +112,14 @@ into deterministic, independently mergeable record files.
 
 **Acceptance criteria:**
 
-- [ ] `arcl init --snapshot` enables the default snapshot path and creates `manifest.toml` with format version 1.
-- [ ] Add the `snapshot_base` migration and store the exact files from the last successful synchronization.
-- [ ] Implement `arcl snapshot export` for an initial export and later changed-record exports.
-- [ ] Write through same-directory temporary files and atomic per-file renames;
+- [x] `arcl init --snapshot` enables the default snapshot path and creates `manifest.toml` with format version 1.
+- [x] Add the `snapshot_files` migration and store the exact files from the last successful synchronization as the merge base.
+- [x] Implement `arcl snapshot export` for an initial export and later changed-record exports.
+- [x] Write through same-directory temporary files and atomic per-file renames;
       update the base only after all required exports succeed.
-- [ ] Verify each destination still matches the content observed at command start before replacing it.
-- [ ] Exporting unchanged state produces no content changes.
-- [ ] The exporter never writes the SQLite database or volatile generation metadata into the snapshot.
+- [x] Verify each destination still matches the content observed at command start before replacing it.
+- [x] Exporting unchanged state produces no content changes.
+- [x] The exporter never writes the SQLite database or volatile generation metadata into the snapshot.
 
 **Verification:**
 
@@ -135,15 +135,15 @@ into deterministic, independently mergeable record files.
 
 **Acceptance criteria:**
 
-- [ ] Parse every candidate record before opening a write transaction.
-- [ ] Validate IDs, required fields, enums, spec paths, relationships, promotion symmetry,
+- [x] Parse every candidate record before opening a write transaction.
+- [x] Validate IDs, required fields, enums, spec paths, relationships, promotion symmetry,
       parentage, cycles, lifecycle, and existing-record removal as one complete graph.
-- [ ] Implement `arcl snapshot import` as an all-or-nothing database replacement or update followed by base-state refresh.
-- [ ] Rebuild an absent or empty local database from a valid snapshot.
-- [ ] Accept manually added records with valid prefixed ULIDs.
-- [ ] Reject missing or renamed existing IDs because v1 has no hard deletion.
-- [ ] Normalize harmless formatting only after a successful semantic import.
-- [ ] Report the source file, field, and relationship path for validation failures.
+- [x] Implement `arcl snapshot import` as an all-or-nothing database replacement or update followed by base-state refresh.
+- [x] Rebuild an absent or empty local database from a valid snapshot.
+- [x] Accept manually added records with valid prefixed ULIDs.
+- [x] Reject missing or renamed existing IDs because v1 has no hard deletion.
+- [x] Normalize harmless formatting only after a successful semantic import.
+- [x] Report the source file, field, and relationship path for validation failures.
 
 **Verification:**
 
