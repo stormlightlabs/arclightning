@@ -54,6 +54,8 @@ pub(super) struct RawTask {
     status: String,
     priority: String,
     position: i64,
+    handoff: String,
+    evidence: String,
 }
 
 impl RawTask {
@@ -83,6 +85,8 @@ impl RawTask {
             status,
             priority,
             position: self.position,
+            handoff: self.handoff,
+            evidence: self.evidence,
         })
         .map_err(StorageError::InvalidTask)
     }
@@ -94,7 +98,7 @@ pub fn find(conn: &Connection, id: &TaskId) -> Result<Option<Task>> {
 
 pub fn list(conn: &Connection) -> Result<Vec<Task>> {
     let mut statement = conn.prepare(
-        "SELECT id, milestone_id, parent_id, title, description, status, priority, position
+        "SELECT id, milestone_id, parent_id, title, description, status, priority, position, handoff, evidence
          FROM tasks ORDER BY milestone_id, position, id",
     )?;
     let rows = statement.query_map([], row_to_raw_task)?;
@@ -228,16 +232,18 @@ pub fn update(conn: &mut Connection, id: TaskId, update: TaskUpdate) -> Result<T
         status: current.status,
         priority: next_priority,
         position: next_position,
+        handoff: current.handoff,
+        evidence: current.evidence,
     })
 }
 
 pub fn transition(
-    connection: &mut Connection, id: TaskId, action: TaskAction, allow_open_children: bool,
+    connection: &mut Connection, id: TaskId, action: TaskAction, allow_open_children: bool, evidence: Option<String>,
 ) -> Result<Task> {
     let transaction = connection.transaction()?;
     let current = read_one(&transaction, &id)?.ok_or_else(|| StorageError::TaskNotFound { id: id.to_string() })?;
     let next_status = current.status.apply(action).map_err(StorageError::InvalidTask)?;
-    if next_status == current.status {
+    if next_status == current.status && evidence.is_none() {
         return Ok(current);
     }
     if matches!(action, TaskAction::Complete | TaskAction::Cancel) && !allow_open_children {
@@ -260,18 +266,44 @@ pub fn transition(
             }));
         }
     }
+    if next_status == current.status {
+        transaction.execute(
+            "UPDATE tasks SET evidence = ?1 WHERE id = ?2",
+            params![evidence.as_deref().unwrap_or(&current.evidence), id.to_string()],
+        )?;
+    } else {
+        transaction.execute(
+            "UPDATE tasks SET status = ?1, evidence = COALESCE(?2, evidence) WHERE id = ?3",
+            params![next_status.as_str(), evidence, id.to_string()],
+        )?;
+    }
+    transaction.commit()?;
+    Ok(Task { status: next_status, evidence: evidence.unwrap_or(current.evidence), ..current })
+}
+
+/// Store a handoff note and park an in-progress task without a partial update.
+pub fn handoff(connection: &mut Connection, id: TaskId, note: String) -> Result<Task> {
+    let transaction = connection.transaction()?;
+    let current = read_one(&transaction, &id)?.ok_or_else(|| StorageError::TaskNotFound { id: id.to_string() })?;
+    if current.status != crate::domain::TaskStatus::InProgress {
+        return Err(StorageError::InvalidTask(DomainError::InvalidTransition {
+            entity: "task",
+            action: "handoff",
+            from: current.status.as_str().to_owned(),
+        }));
+    }
     transaction.execute(
-        "UPDATE tasks SET status = ?1 WHERE id = ?2",
-        params![next_status.as_str(), id.to_string()],
+        "UPDATE tasks SET handoff = ?1, status = 'parked' WHERE id = ?2",
+        params![note, id.to_string()],
     )?;
     transaction.commit()?;
-    Ok(Task { status: next_status, ..current })
+    Ok(Task { status: crate::domain::TaskStatus::Parked, handoff: note, ..current })
 }
 
 fn read_one(conn: &Connection, id: &TaskId) -> Result<Option<Task>> {
     let raw_task = conn
         .query_row(
-            "SELECT id, milestone_id, parent_id, title, description, status, priority, position
+            "SELECT id, milestone_id, parent_id, title, description, status, priority, position, handoff, evidence
              FROM tasks WHERE id = ?1",
             params![id.to_string()],
             row_to_raw_task,
@@ -290,14 +322,16 @@ pub(super) fn row_to_raw_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawTa
         status: row.get(5)?,
         priority: row.get(6)?,
         position: row.get(7)?,
+        handoff: row.get(8)?,
+        evidence: row.get(9)?,
     })
 }
 
 fn insert_task(connection: &Connection, task: &Task) -> Result<()> {
     connection.execute(
         "INSERT INTO tasks
-         (id, milestone_id, parent_id, title, description, status, priority, position)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+         (id, milestone_id, parent_id, title, description, status, priority, position, handoff, evidence)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             task.id.to_string(),
             task.milestone_id.to_string(),
@@ -307,6 +341,8 @@ fn insert_task(connection: &Connection, task: &Task) -> Result<()> {
             task.status.as_str(),
             task.priority.as_str(),
             task.position,
+            task.handoff,
+            task.evidence,
         ],
     )?;
     Ok(())
@@ -587,6 +623,87 @@ mod tests {
         assert_eq!(
             database.task(task.id).expect("task reads").expect("task exists").status,
             TaskStatus::Completed
+        );
+    }
+
+    #[test]
+    fn handoff_parks_active_work_and_completion_stores_evidence_atomically() {
+        let (mut database, milestone, _) = graph();
+        let task = database
+            .create_task(
+                milestone,
+                None,
+                "Task".to_owned(),
+                String::new(),
+                TaskPriority::Normal,
+                0,
+            )
+            .expect("task creates");
+        let error = database
+            .handoff_task(task.id, "should fail".to_owned())
+            .expect_err("pending work cannot be handed off");
+        assert!(matches!(
+            error,
+            StorageError::InvalidTask(DomainError::InvalidTransition { .. })
+        ));
+        database
+            .transition_task(task.id, TaskAction::Start, false)
+            .expect("task starts");
+        let parked = database
+            .handoff_task(task.id, "resume here".to_owned())
+            .expect("handoff parks task");
+        assert_eq!(parked.status, TaskStatus::Parked);
+        assert_eq!(parked.handoff, "resume here");
+        database
+            .transition_task(task.id, TaskAction::Unpark, false)
+            .expect("task unparks");
+        database
+            .transition_task(task.id, TaskAction::Start, false)
+            .expect("task restarts");
+        let completed = database
+            .complete_task(task.id, false, Some("verified".to_owned()))
+            .expect("task completes");
+        assert_eq!(completed.evidence, "verified");
+        assert_eq!(completed.handoff, "resume here");
+        let stored = database.task(task.id).expect("task reads").expect("task exists");
+        assert_eq!(stored.evidence, "verified");
+        assert_eq!(stored.handoff, "resume here");
+    }
+
+    #[test]
+    fn evidence_does_not_bypass_open_child_guards() {
+        let (mut database, milestone, _) = graph();
+        let parent = database
+            .create_task(
+                milestone,
+                None,
+                "Parent".to_owned(),
+                String::new(),
+                TaskPriority::Normal,
+                0,
+            )
+            .expect("parent creates");
+        database
+            .create_task(
+                milestone,
+                Some(parent.id),
+                "Child".to_owned(),
+                String::new(),
+                TaskPriority::Normal,
+                0,
+            )
+            .expect("child creates");
+        assert!(matches!(
+            database.complete_task(parent.id, false, Some("must not save".to_owned())),
+            Err(StorageError::InvalidTask(DomainError::OpenDescendants { .. }))
+        ));
+        assert_eq!(
+            database
+                .task(parent.id)
+                .expect("task reads")
+                .expect("task exists")
+                .evidence,
+            ""
         );
     }
 

@@ -9,7 +9,10 @@ pub fn find(connection: &Connection, id: &IdeaId) -> Result<Option<Idea>, Storag
 }
 
 pub fn list(connection: &Connection) -> Result<Vec<Idea>, StorageError> {
-    let mut statement = connection.prepare("SELECT id, title, description, status FROM ideas ORDER BY id")?;
+    let mut statement = connection.prepare(
+        "SELECT i.id, i.title, i.description, i.status, p.epic_id
+         FROM ideas i LEFT JOIN idea_promotions p ON p.idea_id = i.id ORDER BY i.id",
+    )?;
     let rows = statement.query_map([], row_to_raw_idea)?;
     let raw_ideas = rows.collect::<Result<Vec<_>, _>>()?;
     raw_ideas.into_iter().map(decode_idea).collect()
@@ -50,7 +53,13 @@ pub fn update(
     )?;
     transaction.commit()?;
 
-    Ok(Idea { id, title: next_title.to_owned(), description: next_description.to_owned(), status: current.status })
+    Ok(Idea {
+        id,
+        title: next_title.to_owned(),
+        description: next_description.to_owned(),
+        status: current.status,
+        promoted_to: current.promoted_to,
+    })
 }
 
 pub fn discard(connection: &mut Connection, id: IdeaId) -> Result<Idea, StorageError> {
@@ -72,7 +81,9 @@ pub fn discard(connection: &mut Connection, id: IdeaId) -> Result<Idea, StorageE
 fn read_one(connection: &Connection, id: &IdeaId) -> Result<Option<Idea>, StorageError> {
     let raw_idea = connection
         .query_row(
-            "SELECT id, title, description, status FROM ideas WHERE id = ?1",
+            "SELECT i.id, i.title, i.description, i.status, p.epic_id
+             FROM ideas i LEFT JOIN idea_promotions p ON p.idea_id = i.id
+             WHERE i.id = ?1",
             params![id.to_string()],
             row_to_raw_idea,
         )
@@ -80,18 +91,20 @@ fn read_one(connection: &Connection, id: &IdeaId) -> Result<Option<Idea>, Storag
     raw_idea.map(decode_idea).transpose()
 }
 
-fn row_to_raw_idea(row: &rusqlite::Row<'_>) -> rusqlite::Result<(String, String, String, String)> {
-    let id: String = row.get(0)?;
-    let title: String = row.get(1)?;
-    let description: String = row.get(2)?;
-    let status: String = row.get(3)?;
-    Ok((id, title, description, status))
+fn row_to_raw_idea(row: &rusqlite::Row<'_>) -> rusqlite::Result<(String, String, String, String, Option<String>)> {
+    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
 }
 
-fn decode_idea((id, title, description, status): (String, String, String, String)) -> Result<Idea, StorageError> {
+fn decode_idea(
+    (id, title, description, status, promoted_to): (String, String, String, String, Option<String>),
+) -> Result<Idea, StorageError> {
     let id = IdeaId::parse(&id).map_err(DomainError::from)?;
     let status = IdeaStatus::parse(&status)?;
-    Idea::from_parts(id, title, description, status).map_err(StorageError::from)
+    let mut idea = Idea::from_parts(id, title, description, status).map_err(StorageError::from)?;
+    idea.promoted_to = promoted_to
+        .map(|id| crate::domain::EpicId::parse(&id).map_err(DomainError::from))
+        .transpose()?;
+    Ok(idea)
 }
 
 #[cfg(test)]

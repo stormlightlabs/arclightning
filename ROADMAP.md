@@ -17,8 +17,10 @@ The first release must support a complete personal planning loop:
 4. Decompose milestones into tasks and subtasks.
 5. Express blocking dependencies.
 6. Find ready work deterministically.
-7. Track work through completion or cancellation.
-8. Share and merge the work graph through Git when snapshots are enabled.
+7. Give an agent the task, planning context, blockers, and latest handoff in one bounded response.
+8. Preserve a handoff when work pauses and evidence when work completes.
+9. Track work through completion or cancellation.
+10. Share and merge the work graph through Git when snapshots are enabled.
 
 Arc Lightning provides task-tracking mechanics. It does not prescribe how a developer interviews stakeholders,
 writes specifications, or produces implementation plans.
@@ -38,6 +40,9 @@ The developer must be able to:
 - retain provenance when promoting an idea into a spec-backed epic;
 - organize an epic into ordered milestones, tasks, and subtasks;
 - model blockers without manually maintaining a ready queue;
+- explain why a task is ready or blocked;
+- retrieve a bounded task context packet without assembling the hierarchy through several commands;
+- leave a current handoff for the next developer or agent and attach evidence to completed work;
 - obtain concise human output or stable JSON for scripts and agents; and
 - detect malformed records, broken links, cycles, and synchronization conflicts before data is overwritten.
 
@@ -55,6 +60,11 @@ v1 is usable when all of the following are true:
   and tasks can contain subtasks.
 - Ideas can be promoted idempotently into linked epics without losing the source idea.
 - Blocking and readiness are computed from validated task relationships.
+- A user can explain a task's readiness and retrieve its task, ancestor, specification, dependency,
+  handoff, and completion context in one read.
+- Handing off active work stores a resume note and parks the task atomically.
+- Completing a task can preserve Markdown evidence without making that evidence a readiness condition.
+- Plan input can be checked and diffed without writing before it is applied transactionally.
 - A snapshot-enabled project automatically imports external snapshot changes and exports successful
   local mutations when only one side has changed.
 - Arc Lightning refuses to overwrite either side when both the database and snapshot have changed since their last common state.
@@ -154,7 +164,7 @@ pending ──> in_progress ──> completed
 - `cancel` accepts any non-terminal task status.
 - `completed` and `cancelled` are terminal.
 - Repeating the same terminal transition is idempotent; changing from one terminal state to the other fails.
-- Reopening terminal work is not part of v1.
+- Terminal work cannot be reopened.
 
 ### Container status
 
@@ -281,6 +291,8 @@ Promotion creates the epic, inserts this relationship, and changes the idea stat
 | `status`       | `TEXT`    | task lifecycle value                               |
 | `priority`     | `TEXT`    | priority value                                     |
 | `position`     | `INTEGER` | not null, non-negative                             |
+| `handoff`      | `TEXT`    | not null, Markdown, default empty                  |
+| `evidence`     | `TEXT`    | not null, Markdown, default empty                  |
 
 The domain layer must enforce same-milestone parentage and prevent parent cycles before writing.
 
@@ -371,7 +383,7 @@ Required record fields and relationships are:
 | `releases`   | `id`, `title`, `status`                                      | none                               |
 | `epics`      | `id`, `title`, `status`, `spec-path`                         | `release`, `source-idea`           |
 | `milestones` | `id`, `title`, `status`, `epic`, `position`                  | `plan-key`                         |
-| `tasks`      | `id`, `title`, `status`, `priority`, `milestone`, `position` | `parent`, `plan-key`, `blocked-by` |
+| `tasks`      | `id`, `title`, `status`, `priority`, `milestone`, `position` | `parent`, `plan-key`, `blocked-by`, `handoff`, `evidence` |
 
 The directory, filename, ID prefix, and decoded entity kind must agree.
 
@@ -505,13 +517,15 @@ Required behavior:
 - identify unresolved Git conflict markers or unmerged snapshot paths before parsing; and
 - never stage, commit, switch, merge, push, fetch, or modify Git configuration.
 
-Jujutsu and Sapling are deferred adapters behind this boundary.
+The VCS boundary keeps `gix` types out of application and domain code and allows Git states to be tested without a real repository.
 
 ## Plan application
 
-Arc Lightning accepts a complete plan for an existing epic:
+Arc Lightning checks, diffs, and applies a complete plan for an existing epic:
 
 ```text
+arcl plan check <epic-id> <path|->
+arcl plan diff <epic-id> <path|->
 arcl plan apply <epic-id> <path|->
 ```
 
@@ -552,11 +566,39 @@ Plan application is transactional and additive:
 - repeating the same plan updates matching records rather than duplicating them;
 - omitted existing records remain unchanged;
 - it does not complete, cancel, move, or delete omitted work;
-- `--dry-run` shows the proposed creates and updates without writing; and
-- pruning declarative state is deferred beyond v1.
+- `check` validates the complete resulting graph and reports errors without writing;
+- `diff` emits the deterministic creates and updates without writing; and
+- `apply` writes all validated changes in one transaction.
+
+Omitted records are never pruned.
 
 Milestone `plan_key` values are unique within an epic. Task and subtask `plan_key` values are unique within a milestone.
 A dependency reference uses `<milestone-key>/<task-key>` with further `/subtask-key` segments as needed, or a full existing `arcl-t` ID.
+
+## Agent context and continuity
+
+`arcl explain <task-id>` reports whether a task is ready and lists every condition that prevents it from being ready.
+The explanation covers task state, children, ancestors, containers, active blockers, and malformed relationships.
+
+`arcl context <task-id>` returns one bounded context packet containing:
+
+- the task and its current lifecycle state;
+- its parent task, milestone, epic, release, and linked spec path;
+- direct blockers and dependents with their states;
+- derived readiness and every reason the task is not ready;
+- the current handoff note; and
+- completion evidence from completed direct blockers.
+
+The context packet is derived from existing records. It does not copy spec contents or create a stored summary.
+Human and JSON output contain the same facts, and ordering is deterministic.
+
+`arcl task handoff <id> --note <markdown>` accepts an `in_progress` task, stores the current handoff note,
+and parks the task in one transaction. `--note-file <path|->` provides the same UTF-8 input behavior as descriptions.
+Unparking retains the note until another handoff replaces it.
+
+`arcl task complete <id> --evidence <markdown>` stores optional completion evidence in the same transaction as completion.
+`--evidence-file <path|->` reads UTF-8 from a path or standard input. Evidence is descriptive provenance;
+Arc Lightning does not execute commands, open URLs, or decide whether the evidence proves correctness.
 
 ## CLI contract
 
@@ -573,7 +615,11 @@ arcl list [filters]
 arcl ready [filters]
 arcl next [filters]
 arcl tree [<id>]
-arcl plan apply <epic-id> <path|-> [--dry-run]
+arcl explain <task-id>
+arcl context <task-id>
+arcl plan check <epic-id> <path|->
+arcl plan diff <epic-id> <path|->
+arcl plan apply <epic-id> <path|->
 ```
 
 ### Entity commands
@@ -604,14 +650,15 @@ arcl task update <id> [fields]
 arcl task start <id>
 arcl task park <id>
 arcl task unpark <id>
-arcl task complete <id> [--allow-open-children]
+arcl task handoff <id> --note <markdown>|--note-file <path|->
+arcl task complete <id> [--allow-open-children] [--evidence <markdown>|--evidence-file <path|->]
 arcl task cancel <id> [--allow-open-children]
 
 arcl dependency add <task-id> --blocked-by <task-id>
 arcl dependency remove <task-id> --blocked-by <task-id>
 ```
 
-Hard deletion and reopening terminal records are deferred. v1 preserves history by status transition.
+Arc Lightning has no hard deletion or terminal-state reopening. Status transitions preserve completed and cancelled records.
 
 Update commands expose only fields meaningful to that entity:
 
@@ -704,11 +751,10 @@ When `--json` is active, failures write a structured error object to stderr with
 
 ## Rust architecture
 
-v1 is a synchronous, single-crate application. Do not add Tokio.
+v1 is a synchronous, single-crate application. Do not add Tokio or another async runtime.
 
 Local Git inspection, SQLite, and filesystem snapshot operations are blocking.
 Keeping the core synchronous preserves simple transaction and cancellation semantics.
-A future networked boundary may introduce an async runtime without changing domain or storage APIs.
 
 Recommended module boundaries:
 
@@ -732,7 +778,7 @@ Rules:
   or filesystem paths beyond validated spec path values.
 - `rusqlite::Connection` has one clear owner per command and is never shared concurrently.
 - Mutations are application services that coordinate validation, a SQLite transaction, and optional snapshot export.
-- Use concrete structs by default. The VCS boundary is a trait because Jujutsu and Sapling are planned implementations.
+- Use concrete structs by default. The VCS boundary is a trait because it isolates `gix` and provides a focused test seam.
 - Use typed IDs and enums instead of raw strings in application and domain code.
 - Production code must not use `unwrap`, `expect`, `panic!`, `todo!`, or `unimplemented!`
   for recoverable input, I/O, Git, SQLite, or snapshot failures.
@@ -749,7 +795,7 @@ Use compatible releases from these lines and commit `Cargo.lock`:
 | `clap`       | `4.6`        | `derive`; CLI parsing and help                                                   |
 | `gix`        | `0.85`       | minimal local discovery, index, status, and worktree features; no network client |
 | `owo-colors` | `4.3`        | `supports-colors`                                                                |
-| `rusqlite`   | `0.40`       | `bundled` for consistent standalone SQLite                                       |
+| `rusqlite`   | `0.39`       | `bundled` for consistent standalone SQLite on Rust 1.88                         |
 | `serde`      | `1`          | `derive`                                                                         |
 | `toml`       | `1.1`        | config, front matter, and plan parsing                                           |
 | `ulid`       | `1.2`        | `serde`                                                                          |
@@ -781,6 +827,7 @@ Cover:
 - every typed ID prefix and malformed ULID case;
 - lifecycle transitions and rejected transitions;
 - readiness ordering and each exclusion condition;
+- readiness explanations containing every applicable exclusion reason;
 - cancelled blockers remaining unsatisfied;
 - task parent and dependency cycle detection;
 - same-milestone parent enforcement;
@@ -789,7 +836,9 @@ Cover:
 - TOML front-matter parsing and canonical rendering;
 - Markdown body round trips, including empty and Unicode bodies;
 - path normalization and worktree escape attempts;
-- plan-local key resolution and idempotent plan application; and
+- deterministic context-packet assembly;
+- handoff-and-park and evidence-and-complete atomicity;
+- plan-local key resolution, check and diff output, and idempotent plan application; and
 - three-way synchronization state selection.
 
 ### SQLite tests
@@ -802,7 +851,8 @@ Use a temporary database for:
 - busy-timeout behavior without indefinite blocking;
 - uniqueness of spec paths and plan keys;
 - atomic idea promotion;
-- deterministic ready queries; and
+- deterministic ready queries;
+- atomic handoff and completion-evidence updates; and
 - rebuilding the database from a complete snapshot.
 
 ### CLI and Git tests
@@ -814,6 +864,9 @@ Create isolated temporary repositories and cover:
 - unborn and detached `HEAD`;
 - database ignore behavior without root `.gitignore` edits;
 - default, plain, quiet, and JSON output;
+- explain and context output for ready and blocked tasks;
+- handoff persistence through park and unpark transitions;
+- completion evidence preserved through snapshot round trips;
 - no ANSI output under `NO_COLOR` or non-TTY output;
 - external snapshot edits imported on the next command;
 - a branch checkout replacing snapshot content and rebuilding local state;
@@ -822,7 +875,7 @@ Create isolated temporary repositories and cover:
 - database-only crash recovery;
 - dual-side synchronization conflicts refusing writes;
 - explicit forced reconciliation;
-- plan dry runs and repeated plan application; and
+- plan checks, deterministic diffs, and repeated plan application; and
 - verification that no command changes Git index, refs, remotes, or configuration.
 
 ### Required commands
@@ -852,9 +905,10 @@ Evidence: typed-ID, lifecycle, migration, and basic create/show CLI tests pass.
 
 ### Work graph
 
-Implement releases, epics, milestones, tasks, subtasks, dependencies, lifecycle transitions, hierarchy views, and ready-work queries.
+Implement releases, epics, milestones, tasks, subtasks, dependencies, lifecycle transitions, hierarchy views,
+ready-work explanations, task context packets, handoffs, and completion evidence.
 
-Evidence: complete hierarchy and readiness workflows pass through the compiled binary.
+Evidence: complete hierarchy, readiness, context, handoff, and completion workflows pass through the compiled binary.
 
 ### Snapshot collaboration
 
@@ -865,7 +919,7 @@ Evidence: manual edits, branch switches, crash states, and dual-side conflicts p
 
 ### Planning workflow
 
-Implement ideas, idempotent promotion, release association, and additive transactional plan application.
+Implement ideas, idempotent promotion, release association, and transactional plan checking, diffing, and application.
 
 Evidence: one idea can be promoted and planned into milestones, tasks, subtasks, and dependencies without duplicate records on retry.
 
@@ -908,24 +962,6 @@ a human can complete the v1 workflow using only terminal help.
 - Treat malformed or missing relationships as ready work.
 - Store secrets or credentials in tracker configuration or snapshots.
 
-## Deferred milestones
-
-The following capabilities fit the product direction but follow a usable v1:
-
-- Jujutsu and Sapling VCS adapters.
-- Full-text search and optional SQLite indexing for large projects.
-- Reopening terminal records and carefully specified hard deletion.
-- Declarative plan pruning and richer plan-diff workflows.
-- Comments, audit trails, and historical state inspection.
-- Agent claims, sessions, handoff notes, and multi-agent coordination.
-- TUI and editor integrations.
-- Remote synchronization and hosted collaboration.
-- Importers and exporters for GitHub Issues or other trackers.
-- GraphQL, MCP, or daemon interfaces if concrete consumers justify them.
-- Time tracking, estimates, and analytics.
-
-These should reuse the v1 domain and storage contracts rather than complicating the first release in anticipation of them.
-
 ## Risks and review points
 
 ### Snapshot and database atomicity
@@ -954,8 +990,6 @@ Performance work should follow measurements from real repositories rather than i
 
 SQLite remains single-writer. A busy timeout prevents instant transient failures,
 while short transactions and conflict reporting prevent indefinite waits.
-
-Async execution would not remove this constraint.
 
 ## References
 

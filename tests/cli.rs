@@ -1,7 +1,7 @@
 use std::{fs, path::Path};
 
 use arcl::{
-    domain::ReleaseId,
+    domain::{ReleaseId, TaskId},
     storage::Database,
     vcs::{GixVcs, Vcs},
 };
@@ -131,7 +131,7 @@ fn init_discovers_the_worktree_from_a_nested_directory() {
     );
 
     let database = Database::open(arcl_directory.join("arcl.db")).expect("initialized database reopens");
-    assert_eq!(database.schema_version().expect("schema version is readable"), 6);
+    assert_eq!(database.schema_version().expect("schema version is readable"), 7);
 }
 
 #[test]
@@ -1046,4 +1046,371 @@ fn dependency_and_ready_commands_compute_and_render_derived_work() {
     assert!(empty_next.status.success());
     let empty_payload: Value = serde_json::from_slice(&empty_next.stdout).expect("empty next JSON parses");
     assert!(empty_payload["data"]["task"].is_null());
+}
+
+#[test]
+fn promotion_is_idempotent_and_query_commands_expose_provenance() {
+    let repository = initialized_repository();
+    fs::write(repository.path().join("feature.md"), "# Feature\n").expect("spec can be written");
+    let idea = arcl_in(repository.path())
+        .args(["--json", "idea", "create", "Promotable"])
+        .output()
+        .expect("idea create runs");
+    let idea_id = idea_id_from_json(&idea.stdout);
+    let first = arcl_in(repository.path())
+        .args(["--json", "idea", "promote", &idea_id, "--spec", "feature.md"])
+        .output()
+        .expect("promotion runs");
+    assert!(
+        first.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let first_payload: Value = serde_json::from_slice(&first.stdout).expect("promotion JSON parses");
+    let epic_id = first_payload["data"]["epic"]["id"]
+        .as_str()
+        .expect("epic ID")
+        .to_owned();
+    let second = arcl_in(repository.path())
+        .args(["--json", "idea", "promote", &idea_id, "--spec", "feature.md"])
+        .output()
+        .expect("repeated promotion runs");
+    assert!(second.status.success());
+    let second_payload: Value = serde_json::from_slice(&second.stdout).expect("promotion JSON parses");
+    assert_eq!(second_payload["data"]["epic"]["id"], epic_id);
+    assert_eq!(second_payload["data"]["idea"]["promoted_to"], epic_id);
+
+    let shown_idea = arcl_in(repository.path())
+        .args(["--json", "show", &idea_id])
+        .output()
+        .expect("idea show runs");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&shown_idea.stdout).expect("show JSON parses")["data"]["record"]["promoted_to"],
+        epic_id
+    );
+    let shown_epic = arcl_in(repository.path())
+        .args(["--json", "show", &epic_id])
+        .output()
+        .expect("epic show runs");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&shown_epic.stdout).expect("show JSON parses")["data"]["record"]["source_idea"],
+        idea_id
+    );
+    let listed = arcl_in(repository.path())
+        .args(["--json", "list", "--kind", "epic"])
+        .output()
+        .expect("list runs");
+    let listed_payload: Value = serde_json::from_slice(&listed.stdout).expect("list JSON parses");
+    assert_eq!(listed_payload["data"]["records"].as_array().expect("records").len(), 1);
+    assert_eq!(listed_payload["data"]["records"][0]["source_idea"], idea_id);
+}
+
+#[test]
+fn query_tree_explain_and_check_report_derived_graph_state() {
+    let repository = initialized_repository();
+    fs::write(repository.path().join("feature.md"), "# Feature\n").expect("spec can be written");
+    let epic = arcl_in(repository.path())
+        .args(["--json", "epic", "create", "Epic", "--spec", "feature.md"])
+        .output()
+        .expect("epic create runs");
+    let epic_id = epic_id_from_json(&epic.stdout);
+    let milestone = arcl_in(repository.path())
+        .args(["--json", "milestone", "create", "Milestone", "--epic", &epic_id])
+        .output()
+        .expect("milestone create runs");
+    let milestone_id = milestone_id_from_json(&milestone.stdout);
+    let blocker = arcl_in(repository.path())
+        .args(["--json", "task", "create", "Blocker", "--milestone", &milestone_id])
+        .output()
+        .expect("blocker create runs");
+    let blocker_id = task_id_from_json(&blocker.stdout);
+    let task = arcl_in(repository.path())
+        .args(["--json", "task", "create", "Blocked", "--milestone", &milestone_id])
+        .output()
+        .expect("task create runs");
+    let task_id = task_id_from_json(&task.stdout);
+    arcl_in(repository.path())
+        .args(["dependency", "add", &task_id, "--blocked-by", &blocker_id])
+        .output()
+        .expect("dependency add runs");
+
+    let explain = arcl_in(repository.path())
+        .args(["--json", "explain", &task_id])
+        .output()
+        .expect("explain runs");
+    let explain_payload: Value = serde_json::from_slice(&explain.stdout).expect("explain JSON parses");
+    assert!(
+        !explain_payload["data"]["readiness"]["ready"]
+            .as_bool()
+            .expect("ready field")
+    );
+    assert!(
+        explain_payload["data"]["readiness"]["reasons"]
+            .as_array()
+            .expect("reasons")
+            .iter()
+            .any(|reason| reason.as_str().unwrap_or_default().contains(&blocker_id))
+    );
+
+    let tree = arcl_in(repository.path())
+        .args(["--json", "tree", &epic_id])
+        .output()
+        .expect("tree runs");
+    let tree_payload: Value = serde_json::from_slice(&tree.stdout).expect("tree JSON parses");
+    assert_eq!(
+        tree_payload["data"]["nodes"][0]["children"][0]["children"][0]["id"],
+        blocker_id
+    );
+
+    let checked = arcl_in(repository.path())
+        .args(["--json", "check"])
+        .output()
+        .expect("check runs");
+    assert!(
+        checked.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    let check_payload: Value = serde_json::from_slice(&checked.stdout).expect("check JSON parses");
+    assert!(check_payload["data"]["valid"].as_bool().expect("valid field"));
+    assert!(
+        check_payload["data"]["warnings"]
+            .as_array()
+            .expect("warnings")
+            .iter()
+            .any(|warning| warning.as_str().unwrap_or_default().contains("duplicate task position"))
+    );
+}
+
+#[test]
+fn query_failures_distinguish_invalid_filters_from_missing_records() {
+    let repository = initialized_repository();
+
+    let invalid_kind = arcl_in(repository.path())
+        .args(["list", "--kind", "unknown"])
+        .output()
+        .expect("invalid kind query runs");
+    assert_eq!(invalid_kind.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&invalid_kind.stderr).contains("invalid list filter"));
+
+    let malformed_release = arcl_in(repository.path())
+        .args(["list", "--release", "not-a-release-id"])
+        .output()
+        .expect("malformed release query runs");
+    assert_eq!(malformed_release.status.code(), Some(3));
+
+    let missing_release = ReleaseId::new().to_string();
+    let missing = arcl_in(repository.path())
+        .args(["list", "--release", &missing_release])
+        .output()
+        .expect("missing release query runs");
+    assert_eq!(missing.status.code(), Some(5));
+    assert!(String::from_utf8_lossy(&missing.stderr).contains(&missing_release));
+
+    let missing_ready = arcl_in(repository.path())
+        .args(["ready", "--release", &missing_release])
+        .output()
+        .expect("missing ready target query runs");
+    assert_eq!(missing_ready.status.code(), Some(5));
+    assert!(String::from_utf8_lossy(&missing_ready.stderr).contains(&missing_release));
+}
+
+#[test]
+fn association_filters_exclude_unrelated_record_kinds() {
+    let repository = initialized_repository();
+    fs::write(repository.path().join("feature.md"), "# Feature\n").expect("spec can be written");
+    arcl_in(repository.path())
+        .args(["idea", "create", "Unrelated idea"])
+        .output()
+        .expect("idea create runs");
+    let release = arcl_in(repository.path())
+        .args(["--json", "release", "create", "Release"])
+        .output()
+        .expect("release create runs");
+    let release_payload: Value = serde_json::from_slice(&release.stdout).expect("release JSON parses");
+    let release_id = release_payload["data"]["release"]["id"].as_str().expect("release ID");
+    let epic = arcl_in(repository.path())
+        .args([
+            "--json",
+            "epic",
+            "create",
+            "Epic",
+            "--spec",
+            "feature.md",
+            "--release",
+            release_id,
+        ])
+        .output()
+        .expect("epic create runs");
+    let epic_id = epic_id_from_json(&epic.stdout);
+    let milestone = arcl_in(repository.path())
+        .args(["--json", "milestone", "create", "Milestone", "--epic", &epic_id])
+        .output()
+        .expect("milestone create runs");
+    let milestone_id = milestone_id_from_json(&milestone.stdout);
+    let task = arcl_in(repository.path())
+        .args(["--json", "task", "create", "Task", "--milestone", &milestone_id])
+        .output()
+        .expect("task create runs");
+    let task_id = task_id_from_json(&task.stdout);
+
+    let by_epic = arcl_in(repository.path())
+        .args(["--json", "list", "--epic", &epic_id])
+        .output()
+        .expect("epic-filtered list runs");
+    let payload: Value = serde_json::from_slice(&by_epic.stdout).expect("list JSON parses");
+    let kinds = payload["data"]["records"]
+        .as_array()
+        .expect("records")
+        .iter()
+        .map(|record| record["kind"].as_str().expect("record kind"))
+        .collect::<Vec<_>>();
+    assert_eq!(kinds, ["epic", "milestone", "task"]);
+
+    let by_milestone = arcl_in(repository.path())
+        .args(["--json", "list", "--milestone", &milestone_id])
+        .output()
+        .expect("milestone-filtered list runs");
+    let payload: Value = serde_json::from_slice(&by_milestone.stdout).expect("list JSON parses");
+    let kinds = payload["data"]["records"]
+        .as_array()
+        .expect("records")
+        .iter()
+        .map(|record| record["kind"].as_str().expect("record kind"))
+        .collect::<Vec<_>>();
+    assert_eq!(kinds, ["milestone", "task"]);
+
+    let shown = arcl_in(repository.path())
+        .args(["--plain", "show", &milestone_id])
+        .output()
+        .expect("plain milestone show runs");
+    assert!(String::from_utf8_lossy(&shown.stdout).contains(&task_id));
+}
+
+#[test]
+fn malformed_graphs_do_not_appear_ready_or_overflow_tree_rendering() {
+    let repository = initialized_repository();
+    fs::write(repository.path().join("feature.md"), "# Feature\n").expect("spec can be written");
+    let epic = arcl_in(repository.path())
+        .args(["--json", "epic", "create", "Epic", "--spec", "feature.md"])
+        .output()
+        .expect("epic create runs");
+    let epic_id = epic_id_from_json(&epic.stdout);
+    let milestone = arcl_in(repository.path())
+        .args(["--json", "milestone", "create", "Milestone", "--epic", &epic_id])
+        .output()
+        .expect("milestone create runs");
+    let milestone_id = milestone_id_from_json(&milestone.stdout);
+    let parent = arcl_in(repository.path())
+        .args(["--json", "task", "create", "Parent", "--milestone", &milestone_id])
+        .output()
+        .expect("parent create runs");
+    let parent_id = task_id_from_json(&parent.stdout);
+    let child = arcl_in(repository.path())
+        .args([
+            "--json",
+            "task",
+            "create",
+            "Child",
+            "--milestone",
+            &milestone_id,
+            "--parent",
+            &parent_id,
+        ])
+        .output()
+        .expect("child create runs");
+    let child_id = task_id_from_json(&child.stdout);
+
+    let database = rusqlite::Connection::open(repository.path().join(".arcl/arcl.db")).expect("database opens");
+    database
+        .pragma_update(None, "foreign_keys", false)
+        .expect("foreign keys can be disabled for corruption fixture");
+    let missing_blocker = TaskId::new().to_string();
+    database
+        .execute(
+            "INSERT INTO task_dependencies (task_id, blocker_id) VALUES (?1, ?2)",
+            [&child_id, &missing_blocker],
+        )
+        .expect("malformed dependency can be injected");
+    let ready = arcl_in(repository.path())
+        .args(["--plain", "ready"])
+        .output()
+        .expect("ready query runs");
+    assert!(ready.status.success());
+    assert!(!String::from_utf8_lossy(&ready.stdout).contains(&child_id));
+
+    database
+        .execute("UPDATE tasks SET parent_id = ?1 WHERE id = ?2", [&child_id, &parent_id])
+        .expect("parent cycle can be injected");
+    drop(database);
+    let tree = arcl_in(repository.path())
+        .args(["tree", &parent_id])
+        .output()
+        .expect("tree query returns without overflowing");
+    assert_eq!(tree.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&tree.stderr).contains("cycle"));
+}
+
+#[test]
+fn handoff_and_evidence_survive_lifecycle_and_context_output() {
+    let repository = initialized_repository();
+    fs::write(repository.path().join("feature.md"), "# Feature\n").expect("spec can be written");
+    let epic = arcl_in(repository.path())
+        .args(["--json", "epic", "create", "Epic", "--spec", "feature.md"])
+        .output()
+        .expect("epic create runs");
+    let epic_id = epic_id_from_json(&epic.stdout);
+    let milestone = arcl_in(repository.path())
+        .args(["--json", "milestone", "create", "Milestone", "--epic", &epic_id])
+        .output()
+        .expect("milestone create runs");
+    let milestone_id = milestone_id_from_json(&milestone.stdout);
+    let task = arcl_in(repository.path())
+        .args(["--json", "task", "create", "Task", "--milestone", &milestone_id])
+        .output()
+        .expect("task create runs");
+    let task_id = task_id_from_json(&task.stdout);
+    arcl_in(repository.path())
+        .args(["task", "start", &task_id])
+        .output()
+        .expect("start runs");
+    let handoff = arcl_in(repository.path())
+        .args(["--json", "task", "handoff", &task_id, "--note", "resume here"])
+        .output()
+        .expect("handoff runs");
+    let handoff_payload: Value = serde_json::from_slice(&handoff.stdout).expect("handoff JSON parses");
+    assert_eq!(handoff_payload["data"]["task"]["status"], "parked");
+    assert_eq!(handoff_payload["data"]["task"]["handoff"], "resume here");
+    arcl_in(repository.path())
+        .args(["task", "unpark", &task_id])
+        .output()
+        .expect("unpark runs");
+    arcl_in(repository.path())
+        .args(["task", "start", &task_id])
+        .output()
+        .expect("restart runs");
+    let complete = arcl_in(repository.path())
+        .args(["--json", "task", "complete", &task_id, "--evidence", "checked manually"])
+        .output()
+        .expect("complete runs");
+    let complete_payload: Value = serde_json::from_slice(&complete.stdout).expect("complete JSON parses");
+    assert_eq!(complete_payload["data"]["task"]["handoff"], "resume here");
+    assert_eq!(complete_payload["data"]["task"]["evidence"], "checked manually");
+    let context = arcl_in(repository.path())
+        .args(["--json", "context", &task_id])
+        .output()
+        .expect("context runs");
+    let context_payload: Value = serde_json::from_slice(&context.stdout).expect("context JSON parses");
+    assert_eq!(context_payload["data"]["task"]["handoff"], "resume here");
+    assert_eq!(context_payload["data"]["task"]["evidence"], "checked manually");
+
+    let human_context = arcl_in(repository.path())
+        .args(["context", &task_id])
+        .output()
+        .expect("human context runs");
+    let human_context = String::from_utf8_lossy(&human_context.stdout);
+    assert!(human_context.contains(&format!("Milestone: {milestone_id}")));
+    assert!(human_context.contains(&format!("Epic: {epic_id}")));
+    assert!(human_context.contains("Handoff: resume here"));
+    assert!(human_context.contains("Evidence: checked manually"));
 }

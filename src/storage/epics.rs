@@ -4,13 +4,17 @@ use crate::domain::{ContainerAction, ContainerStatus, DomainError, Epic, EpicId,
 
 use super::{Result, StorageError};
 
+type RawEpic = (String, Option<String>, String, String, String, String, Option<String>);
+
 pub fn find(connection: &Connection, id: &EpicId) -> Result<Option<Epic>> {
     read_one(connection, id)
 }
 
 pub fn list(connection: &Connection) -> Result<Vec<Epic>> {
-    let mut statement =
-        connection.prepare("SELECT id, release_id, title, description, spec_path, status FROM epics ORDER BY id")?;
+    let mut statement = connection.prepare(
+        "SELECT e.id, e.release_id, e.title, e.description, e.spec_path, e.status, p.idea_id
+         FROM epics e LEFT JOIN idea_promotions p ON p.epic_id = e.id ORDER BY e.id",
+    )?;
     let rows = statement.query_map([], row_to_raw_epic)?;
     let raw_epics = rows.collect::<std::result::Result<Vec<_>, _>>()?;
     raw_epics.into_iter().map(decode_epic).collect()
@@ -87,6 +91,7 @@ pub fn update(
         description: next_description.to_owned(),
         spec_path: next_spec_path.to_owned(),
         status: current.status,
+        source_idea: current.source_idea,
     })
 }
 
@@ -133,7 +138,8 @@ fn has_open_descendants(connection: &Connection, id: &EpicId) -> Result<bool> {
 fn read_one(connection: &Connection, id: &EpicId) -> Result<Option<Epic>> {
     let raw_epic = connection
         .query_row(
-            "SELECT id, release_id, title, description, spec_path, status FROM epics WHERE id = ?1",
+            "SELECT e.id, e.release_id, e.title, e.description, e.spec_path, e.status, p.idea_id
+             FROM epics e LEFT JOIN idea_promotions p ON p.epic_id = e.id WHERE e.id = ?1",
             params![id.to_string()],
             row_to_raw_epic,
         )
@@ -142,9 +148,7 @@ fn read_one(connection: &Connection, id: &EpicId) -> Result<Option<Epic>> {
 }
 
 // FIXME: this transitional tuple is awful
-fn row_to_raw_epic(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<(String, Option<String>, String, String, String, String)> {
+fn row_to_raw_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawEpic> {
     Ok((
         row.get(0)?,
         row.get(1)?,
@@ -152,12 +156,11 @@ fn row_to_raw_epic(
         row.get(3)?,
         row.get(4)?,
         row.get(5)?,
+        row.get(6)?,
     ))
 }
 
-fn decode_epic(
-    (id, release_id, title, description, spec_path, status): (String, Option<String>, String, String, String, String),
-) -> Result<Epic> {
+fn decode_epic((id, release_id, title, description, spec_path, status, source_idea): RawEpic) -> Result<Epic> {
     let id = EpicId::parse(&id)
         .map_err(DomainError::from)
         .map_err(StorageError::InvalidEpic)?;
@@ -169,7 +172,13 @@ fn decode_epic(
         })
         .transpose()?;
     let status = ContainerStatus::parse("epic", &status).map_err(StorageError::InvalidEpic)?;
-    Epic::from_parts(id, release_id, title, description, spec_path, status).map_err(StorageError::InvalidEpic)
+    let mut epic =
+        Epic::from_parts(id, release_id, title, description, spec_path, status).map_err(StorageError::InvalidEpic)?;
+    epic.source_idea = source_idea
+        .map(|id| crate::domain::IdeaId::parse(&id).map_err(DomainError::from))
+        .transpose()
+        .map_err(StorageError::InvalidEpic)?;
+    Ok(epic)
 }
 
 fn ensure_release_exists(connection: &Connection, release_id: Option<ReleaseId>) -> Result<()> {

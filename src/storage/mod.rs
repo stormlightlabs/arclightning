@@ -3,9 +3,13 @@ mod epics;
 mod ideas;
 mod migrations;
 mod milestones;
+mod promotions;
+mod queries;
 mod releases;
 mod tasks;
 
+pub use promotions::Promotion;
+pub use queries::{CheckReport, ContextView, Graph, ListFilter, ListItem, Readiness, ShowView, TaskView, TreeNode};
 pub use tasks::{TaskCreate, TaskUpdate};
 
 use std::{path::Path, time::Duration};
@@ -18,7 +22,7 @@ use crate::domain::{
     TaskAction, TaskDependency, TaskId, TaskPriority,
 };
 
-pub const CURRENT_VERSION: i32 = 6;
+pub const CURRENT_VERSION: i32 = 7;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -55,6 +59,10 @@ pub enum StorageError {
     DependencyNotFound { task: String, blocker: String },
     #[error("spec path `{path}` is already linked to another epic")]
     DuplicateSpec { path: String },
+    #[error("idea `{id}` cannot be promoted from status `{status}`")]
+    IdeaNotPromotable { id: String, status: String },
+    #[error("idea `{id}` has an inconsistent promotion relationship")]
+    InconsistentPromotion { id: String },
     #[error("database user_version {found} is newer than this application supports (latest {latest})")]
     NewerDatabase { found: i32, latest: i32 },
     #[error("migration sequence is missing version {expected} before version {found}")]
@@ -106,6 +114,13 @@ impl Database {
 
     pub fn discard_idea(&mut self, id: IdeaId) -> Result<Idea> {
         ideas::discard(&mut self.connection, id)
+    }
+
+    /// Promote an idea into a linked epic in one transaction.
+    pub fn promote_idea(
+        &mut self, id: IdeaId, title: String, description: String, spec_path: String, release_id: Option<ReleaseId>,
+    ) -> Result<Promotion> {
+        promotions::promote(&mut self.connection, id, title, description, spec_path, release_id)
     }
 
     /// Read one release by its validated identifier.
@@ -236,7 +251,23 @@ impl Database {
 
     /// Apply one task lifecycle action, guarding descendants for terminal transitions.
     pub fn transition_task(&mut self, id: TaskId, action: TaskAction, allow_open_children: bool) -> Result<Task> {
-        tasks::transition(&mut self.connection, id, action, allow_open_children)
+        tasks::transition(&mut self.connection, id, action, allow_open_children, None)
+    }
+
+    /// Complete a task and store optional Markdown evidence atomically.
+    pub fn complete_task(&mut self, id: TaskId, allow_open_children: bool, evidence: Option<String>) -> Result<Task> {
+        tasks::transition(
+            &mut self.connection,
+            id,
+            TaskAction::Complete,
+            allow_open_children,
+            evidence,
+        )
+    }
+
+    /// Store a resume note and park an in-progress task atomically.
+    pub fn handoff_task(&mut self, id: TaskId, note: String) -> Result<Task> {
+        tasks::handoff(&mut self.connection, id, note)
     }
 
     /// Add a validated blocking relationship in a transaction.
@@ -277,6 +308,31 @@ impl Database {
     /// Read actionable leaf tasks matching the supplied filters.
     pub fn ready_tasks_filtered(&self, filter: &ReadyFilter) -> Result<Vec<Task>> {
         dependencies::ready(&self.connection, filter)
+    }
+
+    /// Load the complete local graph with one read pass per entity collection.
+    pub fn graph(&self) -> Result<Graph> {
+        queries::load(&self.connection)
+    }
+
+    /// Build a task inspection view from the loaded graph.
+    pub fn task_view(&self, id: TaskId) -> Result<TaskView> {
+        queries::task_view(&self.connection, id)
+    }
+
+    /// Build a prefix-routed record inspection view.
+    pub fn show(&self, id: &str) -> Result<ShowView> {
+        queries::show(&self.connection, id)
+    }
+
+    /// Build the bounded context packet for a task.
+    pub fn context(&self, id: TaskId) -> Result<ContextView> {
+        queries::context(&self.connection, id)
+    }
+
+    /// Validate database and graph invariants without changing any rows.
+    pub fn check(&self) -> Result<CheckReport> {
+        queries::check(&self.connection)
     }
 
     #[cfg(test)]

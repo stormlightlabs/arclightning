@@ -14,6 +14,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration { version: 4, sql: include_str!("migrations/004_milestones.sql") },
     Migration { version: 5, sql: include_str!("migrations/005_tasks.sql") },
     Migration { version: 6, sql: include_str!("migrations/006_task_dependencies.sql") },
+    Migration { version: 7, sql: include_str!("migrations/007_idea_promotions.sql") },
 ];
 
 pub fn apply(connection: &mut Connection) -> Result<(), StorageError> {

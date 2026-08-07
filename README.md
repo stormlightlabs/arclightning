@@ -26,6 +26,19 @@ arcl init --snapshot
 └── arcl.db
 ```
 
+## Daily Workflow
+
+You can capture an idea, promote it once it has a specification, then create the
+first milestone and task:
+
+```sh
+arcl idea create "Improve import errors" --description "Make failures easier to fix."
+arcl idea promote arcl-i-… --spec specs/import-errors.md
+arcl milestone create "Storage" --epic arcl-e-…
+arcl task create "Validate records" --milestone arcl-m-… --priority high
+arcl ready
+```
+
 ## Local development
 
 Build and check the CLI from the repository root:

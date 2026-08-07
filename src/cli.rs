@@ -61,6 +61,33 @@ pub enum Command {
         #[command(subcommand)]
         command: DependencyCommand,
     },
+    /// Inspect one record selected by its typed ID prefix.
+    Show {
+        /// The record identifier.
+        id: String,
+    },
+    /// List records with optional graph filters.
+    List {
+        #[command(flatten)]
+        filters: ListArgs,
+    },
+    /// Display the hierarchy in deterministic order.
+    Tree {
+        /// Optional record ID to use as the tree root.
+        id: Option<String>,
+    },
+    /// Explain every condition affecting a task's readiness.
+    Explain {
+        /// The task identifier.
+        task_id: String,
+    },
+    /// Return the bounded context packet for a task.
+    Context {
+        /// The task identifier.
+        task_id: String,
+    },
+    /// Validate database and graph invariants.
+    Check,
     /// List actionable leaf tasks in deterministic order.
     Ready {
         #[command(flatten)]
@@ -100,6 +127,17 @@ pub enum IdeaCommand {
     },
     /// List all ideas in the project inbox.
     List,
+    /// Promote an idea into a spec-backed epic.
+    Promote {
+        /// The source idea identifier.
+        id: String,
+        /// The Markdown spec path.
+        #[arg(long, value_name = "PATH")]
+        spec: PathBuf,
+        /// Associate the new epic with a release.
+        #[arg(long, value_name = "ID")]
+        release: Option<String>,
+    },
 }
 
 /// Release container commands.
@@ -305,6 +343,17 @@ pub enum TaskCommand {
         /// The task ID to unpark.
         id: String,
     },
+    /// Leave a resume note and park in-progress work atomically.
+    Handoff {
+        /// The task ID to hand off.
+        id: String,
+        /// The Markdown resume note.
+        #[arg(long, conflicts_with = "note_file", allow_hyphen_values = true)]
+        note: Option<String>,
+        /// Read the Markdown resume note from a file, or `-` for standard input.
+        #[arg(long, value_name = "PATH|-", conflicts_with = "note")]
+        note_file: Option<PathBuf>,
+    },
     /// Mark work completed.
     Complete {
         /// The task ID to complete.
@@ -312,6 +361,12 @@ pub enum TaskCommand {
         /// Complete only this task even when descendants remain open.
         #[arg(long)]
         allow_open_children: bool,
+        /// Store Markdown completion evidence.
+        #[arg(long, conflicts_with = "evidence_file", allow_hyphen_values = true)]
+        evidence: Option<String>,
+        /// Read Markdown completion evidence from a file, or `-` for standard input.
+        #[arg(long, value_name = "PATH|-", conflicts_with = "evidence")]
+        evidence_file: Option<PathBuf>,
     },
     /// Mark work cancelled.
     Cancel {
@@ -342,6 +397,32 @@ pub enum DependencyCommand {
         #[arg(long = "blocked-by", value_name = "ID")]
         blocker_id: String,
     },
+}
+
+/// Filters accepted by the broad record-list query.
+#[derive(Clone, Debug, Default, Args)]
+pub struct ListArgs {
+    /// Restrict records to one kind.
+    #[arg(long, value_name = "KIND")]
+    pub kind: Option<String>,
+    /// Restrict records to one or more statuses.
+    #[arg(long, value_name = "STATUS", num_args = 1..)]
+    pub status: Vec<String>,
+    /// Restrict tasks to one or more priorities.
+    #[arg(long, value_name = "PRIORITY", num_args = 1..)]
+    pub priority: Vec<String>,
+    /// Restrict records to an epic's release.
+    #[arg(long, value_name = "ID")]
+    pub release: Option<String>,
+    /// Restrict records to one epic.
+    #[arg(long, value_name = "ID")]
+    pub epic: Option<String>,
+    /// Restrict records to one milestone.
+    #[arg(long, value_name = "ID")]
+    pub milestone: Option<String>,
+    /// Restrict tasks to children of one task.
+    #[arg(long, value_name = "ID")]
+    pub parent: Option<String>,
 }
 
 /// Filters accepted by the ready-work and next-work queries.

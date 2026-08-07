@@ -81,14 +81,14 @@ pub fn remove(connection: &mut Connection, task_id: TaskId, blocker_id: TaskId) 
 /// Return tasks that have at least one direct blocker which is not completed.
 pub fn blocked(conn: &Connection) -> Result<Vec<Task>> {
     let mut statement = conn.prepare(
-        "SELECT id, milestone_id, parent_id, title, description, status, priority, position
+        "SELECT id, milestone_id, parent_id, title, description, status, priority, position, handoff, evidence
          FROM tasks AS task
          WHERE EXISTS (
              SELECT 1
              FROM task_dependencies AS dependency
-             JOIN tasks AS blocker ON blocker.id = dependency.blocker_id
+             LEFT JOIN tasks AS blocker ON blocker.id = dependency.blocker_id
              WHERE dependency.task_id = task.id
-               AND blocker.status <> 'completed'
+               AND (blocker.id IS NULL OR blocker.status <> 'completed')
          )
          ORDER BY id",
     )?;
@@ -109,7 +109,7 @@ pub fn ready(conn: &Connection, filter: &ReadyFilter) -> Result<Vec<Task>> {
              WHERE parent.parent_id IS NOT NULL
          )
          SELECT task.id, task.milestone_id, task.parent_id, task.title, task.description,
-                task.status, task.priority, task.position
+                task.status, task.priority, task.position, task.handoff, task.evidence
          FROM tasks AS task
          JOIN milestones AS milestone ON milestone.id = task.milestone_id
          JOIN epics AS epic ON epic.id = milestone.epic_id
@@ -131,9 +131,9 @@ pub fn ready(conn: &Connection, filter: &ReadyFilter) -> Result<Vec<Task>> {
            AND NOT EXISTS (
                SELECT 1
                FROM task_dependencies AS dependency
-               JOIN tasks AS blocker ON blocker.id = dependency.blocker_id
+               LEFT JOIN tasks AS blocker ON blocker.id = dependency.blocker_id
                WHERE dependency.task_id = task.id
-                 AND blocker.status <> 'completed'
+                 AND (blocker.id IS NULL OR blocker.status <> 'completed')
            )",
     );
 
@@ -184,9 +184,9 @@ pub fn is_blocked(conn: &Connection, task_id: TaskId) -> Result<bool> {
         "SELECT EXISTS(
              SELECT 1
              FROM task_dependencies AS dependency
-             JOIN tasks AS blocker ON blocker.id = dependency.blocker_id
+             LEFT JOIN tasks AS blocker ON blocker.id = dependency.blocker_id
              WHERE dependency.task_id = ?1
-               AND blocker.status <> 'completed'
+               AND (blocker.id IS NULL OR blocker.status <> 'completed')
          )",
         [task_id.to_string()],
         |row| row.get(0),

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::error::invalid_transition;
-use super::{DomainError, IdeaId, validate_title};
+use super::{DomainError, EpicId, IdeaId, validate_title};
 
 /// The lifecycle of an idea in the local inbox.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -68,17 +68,19 @@ pub struct Idea {
     pub title: String,
     pub description: String,
     pub status: IdeaStatus,
+    /// The epic created from this idea, when it has been promoted.
+    pub promoted_to: Option<EpicId>,
 }
 
 impl Idea {
     pub fn new(title: String, description: String) -> Result<Self, DomainError> {
         validate_title(&title)?;
-        Ok(Self { id: IdeaId::new(), title, description, status: IdeaStatus::Captured })
+        Ok(Self { id: IdeaId::new(), title, description, status: IdeaStatus::Captured, promoted_to: None })
     }
 
     pub fn from_parts(id: IdeaId, title: String, description: String, status: IdeaStatus) -> Result<Self, DomainError> {
         validate_title(&title)?;
-        Ok(Self { id, title, description, status })
+        Ok(Self { id, title, description, status, promoted_to: None })
     }
 }
 

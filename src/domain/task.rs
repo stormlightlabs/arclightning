@@ -12,6 +12,8 @@ pub struct TaskParts {
     pub status: TaskStatus,
     pub priority: TaskPriority,
     pub position: i64,
+    pub handoff: String,
+    pub evidence: String,
 }
 
 /// A task or independently tracked subtask in a milestone.
@@ -25,6 +27,10 @@ pub struct Task {
     pub status: TaskStatus,
     pub priority: TaskPriority,
     pub position: i64,
+    /// The latest Markdown note left for the next person to resume work.
+    pub handoff: String,
+    /// Optional Markdown evidence recorded when work was completed.
+    pub evidence: String,
 }
 
 impl Task {
@@ -44,6 +50,8 @@ impl Task {
             status: TaskStatus::Pending,
             priority,
             position,
+            handoff: String::new(),
+            evidence: String::new(),
         })
     }
 }
@@ -63,6 +71,8 @@ impl TryFrom<TaskParts> for Task {
             status: parts.status,
             priority: parts.priority,
             position: parts.position,
+            handoff: parts.handoff,
+            evidence: parts.evidence,
         })
     }
 }

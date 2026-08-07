@@ -10,7 +10,7 @@ use thiserror::Error;
 use crate::{cli::*, domain::*, output::*};
 
 use crate::snapshot::{ProjectConfig, SnapshotError};
-use crate::storage::{Database, ReadyFilter, StorageError, TaskCreate, TaskUpdate};
+use crate::storage::{Database, Graph, ListFilter, Promotion, ReadyFilter, StorageError, TaskCreate, TaskUpdate};
 use crate::vcs::{GixVcs, Vcs, VcsError};
 
 const ARCL_DIRECTORY: &str = ".arcl";
@@ -126,6 +126,10 @@ enum CommandError {
     StdinIsTerminal,
     #[error("standard input is not valid UTF-8")]
     InvalidStdin,
+    #[error("invalid list filter: {message}")]
+    InvalidFilter { message: String },
+    #[error("database or graph integrity check failed: {message}")]
+    Integrity { message: String },
 }
 
 impl CommandError {
@@ -143,8 +147,12 @@ impl CommandError {
             | Self::OpenDatabase { source: StorageError::Sqlite(_), .. } => 1,
             Self::OpenDatabase { source, .. } => u8::from(source),
             Self::Storage(error) => u8::from(error),
-            Self::InvalidDescription { .. } | Self::InvalidStdin | Self::InvalidSpecPath(_) => 3,
-            Self::StdinIsTerminal => 3,
+            Self::InvalidDescription { .. }
+            | Self::InvalidStdin
+            | Self::InvalidSpecPath(_)
+            | Self::InvalidFilter { .. }
+            | Self::Integrity { .. }
+            | Self::StdinIsTerminal => 3,
         }
     }
 }
@@ -164,6 +172,8 @@ impl From<&StorageError> for u8 {
             | StorageError::InvalidTask(_)
             | StorageError::InvalidDependency(_)
             | StorageError::DuplicateSpec { .. }
+            | StorageError::IdeaNotPromotable { .. }
+            | StorageError::InconsistentPromotion { .. }
             | StorageError::NewerDatabase { .. }
             | StorageError::MigrationGap { .. } => 3,
             StorageError::DependencyNotFound { .. } => 5,
@@ -174,6 +184,7 @@ impl From<&StorageError> for u8 {
 
 enum IdeaCommandResult {
     Mutation { action: IdeaMutation, idea: Idea },
+    Promotion(Promotion),
     List(Vec<Idea>),
 }
 
@@ -266,6 +277,7 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
             let result = exec_idea(command).map_err(ApplicationError::from_command)?;
             let message = match result {
                 IdeaCommandResult::Mutation { action, idea } => renderer.render_idea(action, &idea),
+                IdeaCommandResult::Promotion(promotion) => renderer.render_promotion(&promotion),
                 IdeaCommandResult::List(ideas) => renderer.render_ideas(&ideas),
             }
             .context("rendering idea output")?;
@@ -324,6 +336,68 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
                 .context("rendering next-work output")?;
             write_output(message)
         }
+        Some(Command::Show { id }) => {
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            let record = database
+                .show(&id)
+                .map_err(|error| ApplicationError::from_command(CommandError::Storage(error)))?;
+            write_output(renderer.render_show(&record).context("rendering show output")?)
+        }
+        Some(Command::List { filters }) => {
+            let filter = resolve_list_filter(filters).map_err(ApplicationError::from_command)?;
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            let graph = database
+                .graph()
+                .map_err(|error| ApplicationError::from_command(CommandError::Storage(error)))?;
+            validate_list_targets(&graph, &filter).map_err(ApplicationError::from_command)?;
+            let records = graph.list_items(&filter);
+            write_output(renderer.render_list(&records).context("rendering list output")?)
+        }
+        Some(Command::Tree { id }) => {
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            let tree = database
+                .graph()
+                .map_err(|error| ApplicationError::from_command(CommandError::Storage(error)))?
+                .tree(id.as_deref())
+                .map_err(|error| ApplicationError::from_command(CommandError::Storage(error)))?;
+            write_output(renderer.render_tree(&tree).context("rendering tree output")?)
+        }
+        Some(Command::Explain { task_id }) => {
+            let task_id = TaskId::parse(&task_id)
+                .map_err(DomainError::from)
+                .map_err(CommandError::Domain)
+                .map_err(ApplicationError::from_command)?;
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            let view = database
+                .task_view(task_id)
+                .map_err(|error| ApplicationError::from_command(CommandError::Storage(error)))?;
+            write_output(renderer.render_explain(&view).context("rendering explain output")?)
+        }
+        Some(Command::Context { task_id }) => {
+            let task_id = TaskId::parse(&task_id)
+                .map_err(DomainError::from)
+                .map_err(CommandError::Domain)
+                .map_err(ApplicationError::from_command)?;
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            let view = database
+                .context(task_id)
+                .map_err(|error| ApplicationError::from_command(CommandError::Storage(error)))?;
+            write_output(renderer.render_context(&view).context("rendering context output")?)
+        }
+        Some(Command::Check) => {
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            let report = database
+                .check()
+                .map_err(|error| ApplicationError::from_command(CommandError::Storage(error)))?;
+            let valid = report.valid;
+            let details = report.errors.join("; ");
+            write_output(renderer.render_check(&report).context("rendering check output")?)?;
+            if valid {
+                Ok(())
+            } else {
+                Err(ApplicationError::from_command(CommandError::Integrity { message: details }).into())
+            }
+        }
         None => write_output(renderer.render_startup().context("rendering CLI output")?),
     }
 }
@@ -368,6 +442,24 @@ fn exec_idea(cmd: IdeaCommand) -> CResult<IdeaCommandResult> {
         IdeaCommand::List => {
             let database = open_database()?;
             Ok(IdeaCommandResult::List(database.ideas()?))
+        }
+        IdeaCommand::Promote { id, spec, release } => {
+            let id = IdeaId::parse(&id).map_err(DomainError::from)?;
+            let release_id = release
+                .as_deref()
+                .map(ReleaseId::parse)
+                .transpose()
+                .map_err(DomainError::from)?;
+            let mut project = open_project()?;
+            let idea = project
+                .database
+                .idea(id)?
+                .ok_or_else(|| StorageError::IdeaNotFound { id: id.to_string() })?;
+            let spec_path = resolve_spec_path(&project.root, &project.current_dir, &spec)?;
+            let promotion = project
+                .database
+                .promote_idea(id, idea.title, idea.description, spec_path, release_id)?;
+            Ok(IdeaCommandResult::Promotion(promotion))
         }
     }
 }
@@ -598,8 +690,21 @@ fn exec_task(command: TaskCommand) -> CResult<TaskCommandResult> {
         TaskCommand::Start { id } => transition_task(id, TaskAction::Start, false),
         TaskCommand::Park { id } => transition_task(id, TaskAction::Park, false),
         TaskCommand::Unpark { id } => transition_task(id, TaskAction::Unpark, false),
-        TaskCommand::Complete { id, allow_open_children } => {
-            transition_task(id, TaskAction::Complete, allow_open_children)
+        TaskCommand::Handoff { id, note, note_file } => {
+            let note = resolve_description(DescriptionArgs { description: note, description_file: note_file })?
+                .ok_or_else(|| CommandError::Domain(DomainError::NoFieldsToUpdate { entity: "handoff" }))?;
+            let id = TaskId::parse(&id).map_err(DomainError::from)?;
+            let mut database = open_database()?;
+            let task = database.handoff_task(id, note)?;
+            Ok(TaskCommandResult::Mutation { action: TaskMutation::HandedOff, task })
+        }
+        TaskCommand::Complete { id, allow_open_children, evidence, evidence_file } => {
+            let evidence =
+                resolve_description(DescriptionArgs { description: evidence, description_file: evidence_file })?;
+            let id = TaskId::parse(&id).map_err(DomainError::from)?;
+            let mut database = open_database()?;
+            let task = database.complete_task(id, allow_open_children, evidence)?;
+            Ok(TaskCommandResult::Mutation { action: TaskMutation::Completed, task })
         }
         TaskCommand::Cancel { id, allow_open_children } => transition_task(id, TaskAction::Cancel, allow_open_children),
     }
@@ -623,7 +728,159 @@ fn exec_dependency(command: DependencyCommand) -> CResult<DependencyCommandResul
 fn exec_ready(args: ReadyArgs) -> CResult<Vec<Task>> {
     let filter = resolve_ready_filter(args)?;
     let database = open_database()?;
+    validate_ready_targets(&database, &filter)?;
     Ok(database.ready_tasks_filtered(&filter)?)
+}
+
+fn validate_ready_targets(database: &Database, filter: &ReadyFilter) -> CResult<()> {
+    if let Some(id) = filter.release_id
+        && database.release(id)?.is_none()
+    {
+        return Err(CommandError::Storage(StorageError::ReleaseNotFound {
+            id: id.to_string(),
+        }));
+    }
+    if let Some(id) = filter.epic_id
+        && database.epic(id)?.is_none()
+    {
+        return Err(CommandError::Storage(StorageError::EpicNotFound { id: id.to_string() }));
+    }
+    if let Some(id) = filter.milestone_id
+        && database.milestone(id)?.is_none()
+    {
+        return Err(CommandError::Storage(StorageError::MilestoneNotFound {
+            id: id.to_string(),
+        }));
+    }
+    if let Some(id) = filter.parent_id
+        && database.task(id)?.is_none()
+    {
+        return Err(CommandError::Storage(StorageError::TaskNotFound { id: id.to_string() }));
+    }
+    Ok(())
+}
+
+fn resolve_list_filter(args: ListArgs) -> CResult<ListFilter> {
+    let mut kind = args.kind;
+    if let Some(value) = &kind {
+        if !matches!(value.as_str(), "idea" | "release" | "epic" | "milestone" | "task") {
+            return Err(CommandError::InvalidFilter {
+                message: format!("unknown kind `{value}`; use idea, release, epic, milestone, or task"),
+            });
+        }
+    }
+    let known_statuses = [
+        "captured",
+        "promoted",
+        "discarded",
+        "open",
+        "completed",
+        "cancelled",
+        "pending",
+        "in_progress",
+        "parked",
+    ];
+    if let Some(value) = args
+        .status
+        .iter()
+        .find(|value| !known_statuses.contains(&value.as_str()))
+    {
+        return Err(CommandError::InvalidFilter { message: format!("unknown status `{value}`") });
+    }
+    let priorities = args
+        .priority
+        .iter()
+        .map(|priority| TaskPriority::parse(priority))
+        .collect::<Result<Vec<_>, _>>()?;
+    if let Some(kind_name) = kind.as_deref() {
+        let allowed = match kind_name {
+            "idea" => ["captured", "promoted", "discarded"].as_slice(),
+            "release" | "epic" | "milestone" => ["open", "completed", "cancelled"].as_slice(),
+            "task" => ["pending", "in_progress", "parked", "completed", "cancelled"].as_slice(),
+            _ => &[][..],
+        };
+        if let Some(status) = args.status.iter().find(|status| !allowed.contains(&status.as_str())) {
+            return Err(CommandError::InvalidFilter {
+                message: format!("status `{status}` does not apply to {kind_name} records"),
+            });
+        }
+    }
+    if (!priorities.is_empty() || args.parent.is_some()) && kind.as_deref().is_some_and(|kind| kind != "task") {
+        return Err(CommandError::InvalidFilter {
+            message: "priority and parent filters apply only to tasks".to_owned(),
+        });
+    }
+    if let Some(kind_name) = kind.as_deref() {
+        let invalid = match kind_name {
+            "idea" => args.release.is_some() || args.epic.is_some() || args.milestone.is_some(),
+            "release" => args.epic.is_some() || args.milestone.is_some(),
+            "epic" => args.milestone.is_some(),
+            "milestone" => args.parent.is_some() || !priorities.is_empty(),
+            "task" => false,
+            _ => false,
+        };
+        if invalid {
+            return Err(CommandError::InvalidFilter {
+                message: format!("the supplied filters do not apply to {kind_name} records"),
+            });
+        }
+    }
+    if kind.is_none() && (!priorities.is_empty() || args.parent.is_some()) {
+        kind = Some("task".to_owned());
+    }
+    let release_id = args
+        .release
+        .as_deref()
+        .map(ReleaseId::parse)
+        .transpose()
+        .map_err(DomainError::from)?;
+    let epic_id = args
+        .epic
+        .as_deref()
+        .map(EpicId::parse)
+        .transpose()
+        .map_err(DomainError::from)?;
+    let milestone_id = args
+        .milestone
+        .as_deref()
+        .map(MilestoneId::parse)
+        .transpose()
+        .map_err(DomainError::from)?;
+    let parent_id = args
+        .parent
+        .as_deref()
+        .map(TaskId::parse)
+        .transpose()
+        .map_err(DomainError::from)?;
+    Ok(ListFilter { kind, statuses: args.status, priorities, release_id, epic_id, milestone_id, parent_id })
+}
+
+fn validate_list_targets(graph: &Graph, filter: &ListFilter) -> CResult<()> {
+    if let Some(id) = filter.release_id {
+        if !graph.releases.iter().any(|release| release.id == id) {
+            return Err(CommandError::Storage(StorageError::ReleaseNotFound {
+                id: id.to_string(),
+            }));
+        }
+    }
+    if let Some(id) = filter.epic_id {
+        if !graph.epics.iter().any(|epic| epic.id == id) {
+            return Err(CommandError::Storage(StorageError::EpicNotFound { id: id.to_string() }));
+        }
+    }
+    if let Some(id) = filter.milestone_id {
+        if !graph.milestones.iter().any(|milestone| milestone.id == id) {
+            return Err(CommandError::Storage(StorageError::MilestoneNotFound {
+                id: id.to_string(),
+            }));
+        }
+    }
+    if let Some(id) = filter.parent_id {
+        if !graph.tasks.iter().any(|task| task.id == id) {
+            return Err(CommandError::Storage(StorageError::TaskNotFound { id: id.to_string() }));
+        }
+    }
+    Ok(())
 }
 
 fn resolve_ready_filter(args: ReadyArgs) -> CResult<ReadyFilter> {

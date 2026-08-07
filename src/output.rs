@@ -6,6 +6,7 @@ use thiserror::Error;
 
 use crate::cli::ColorChoice;
 use crate::domain::{Epic, Idea, Milestone, Release, Task, TaskDependency};
+use crate::storage::{CheckReport, ContextView, ListItem, Promotion, ShowView, TaskView, TreeNode};
 
 /// The output format for a command result.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -79,6 +80,7 @@ pub enum TaskMutation {
     Started,
     Parked,
     Unparked,
+    HandedOff,
     Completed,
     Cancelled,
 }
@@ -154,6 +156,7 @@ impl TaskMutation {
             Self::Started => "started",
             Self::Parked => "parked",
             Self::Unparked => "unparked",
+            Self::HandedOff => "handed_off",
             Self::Completed => "completed",
             Self::Cancelled => "cancelled",
         }
@@ -166,6 +169,7 @@ impl TaskMutation {
             Self::Started => "Started",
             Self::Parked => "Parked",
             Self::Unparked => "Unparked",
+            Self::HandedOff => "Handed off",
             Self::Completed => "Completed",
             Self::Cancelled => "Cancelled",
         }
@@ -282,7 +286,10 @@ impl Renderer {
                 } else {
                     ideas
                         .iter()
-                        .map(|idea| format!("{}\t[{}]\t{}", idea.id, idea.status.as_str(), idea.title))
+                        .map(|idea| {
+                            let promoted = idea.promoted_to.map_or_else(String::new, |id| format!("\t-> {id}"));
+                            format!("{}\t[{}]\t{}{}", idea.id, idea.status.as_str(), idea.title, promoted)
+                        })
                         .collect::<Vec<_>>()
                         .join("\n")
                 }
@@ -495,6 +502,216 @@ impl Renderer {
         }))
     }
 
+    /// Render an idempotent idea promotion and both provenance directions.
+    pub fn render_promotion(&self, promotion: &Promotion) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human => format!(
+                "Promoted idea `{}` to epic `{}`: {}",
+                promotion.idea.id, promotion.epic.id, promotion.epic.title
+            ),
+            OutputMode::Plain | OutputMode::Quiet => promotion.epic.id.to_string(),
+            OutputMode::Json => serde_json::to_string(&Envelope {
+                format_version: 1,
+                data: PromotionData { action: "promoted", idea: &promotion.idea, epic: &promotion.epic },
+            })?,
+        };
+        Ok(Some(self.style(message)))
+    }
+
+    /// Render one enriched record selected by its typed prefix.
+    pub fn render_show(&self, view: &ShowView) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human => Some(human_show(view)),
+            OutputMode::Plain => Some(plain_show(view)),
+            OutputMode::Json => Some(serde_json::to_string(&Envelope { format_version: 1, data: view })?),
+            OutputMode::Quiet => None,
+        };
+        Ok(message.map(|message| self.style(message)))
+    }
+
+    /// Render filtered records with equivalent human, plain, and JSON data.
+    pub fn render_list(&self, records: &[ListItem]) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human => {
+                if records.is_empty() {
+                    "No records.".to_owned()
+                } else {
+                    records
+                        .iter()
+                        .map(|record| {
+                            let provenance = record
+                                .promoted_to
+                                .as_deref()
+                                .or(record.source_idea.as_deref())
+                                .map_or_else(String::new, |id| format!("\t{id}"));
+                            format!(
+                                "{}\t{}\t[{}]\t{}{}",
+                                record.kind, record.id, record.status, record.title, provenance
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                }
+            }
+            OutputMode::Plain => records.iter().map(plain_item).collect::<Vec<_>>().join("\n"),
+            OutputMode::Json => {
+                serde_json::to_string(&Envelope { format_version: 1, data: RecordListData { records } })?
+            }
+            OutputMode::Quiet => return Ok(None),
+        };
+        Ok(Some(self.style(message)))
+    }
+
+    /// Render a deterministic hierarchy.
+    pub fn render_tree(&self, tree: &[TreeNode]) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human => tree
+                .iter()
+                .map(|node| human_tree(node, 0))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            OutputMode::Plain => flatten_tree(tree, 0).join("\n"),
+            OutputMode::Json => serde_json::to_string(&Envelope { format_version: 1, data: TreeData { nodes: tree } })?,
+            OutputMode::Quiet => return Ok(None),
+        };
+        Ok(Some(self.style(message)))
+    }
+
+    /// Render every readiness reason for a task.
+    pub fn render_explain(&self, view: &TaskView) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human => {
+                if view.readiness.ready {
+                    format!("Task `{}` is ready.", view.task.id)
+                } else {
+                    format!(
+                        "Task `{}` is not ready:\n{}",
+                        view.task.id,
+                        view.readiness
+                            .reasons
+                            .iter()
+                            .map(|reason| format!("- {reason}"))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    )
+                }
+            }
+            OutputMode::Plain => {
+                let mut lines = vec![format!(
+                    "task\t{}\t{}\t{}\t{}",
+                    view.task.id,
+                    view.task.status.as_str(),
+                    view.readiness.ready,
+                    view.readiness.blocked
+                )];
+                lines.extend(
+                    view.readiness
+                        .reasons
+                        .iter()
+                        .map(|reason| format!("reason\t{}", plain_escape(reason))),
+                );
+                lines.join("\n")
+            }
+            OutputMode::Json => serde_json::to_string(&Envelope { format_version: 1, data: view })?,
+            OutputMode::Quiet => return Ok(None),
+        };
+        Ok(Some(self.style(message)))
+    }
+
+    /// Render the bounded task context packet.
+    pub fn render_context(&self, context: &ContextView) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human => human_context(context),
+            OutputMode::Plain => {
+                let mut lines = vec![
+                    format!(
+                        "task\t{}\t{}\t{}",
+                        context.task.id,
+                        context.task.status.as_str(),
+                        plain_escape(&context.task.title)
+                    ),
+                    format!("spec\t{}", plain_escape(&context.spec_path)),
+                    format!(
+                        "ready\t{}\tblocked\t{}",
+                        context.readiness.ready, context.readiness.blocked
+                    ),
+                    format!("handoff\t{}", plain_escape(&context.task.handoff)),
+                    format!("evidence\t{}", plain_escape(&context.task.evidence)),
+                ];
+                lines.extend(context.blockers.iter().map(|blocker| {
+                    format!(
+                        "blocker\t{}\t{}\t{}",
+                        blocker.task.id,
+                        blocker.task.status.as_str(),
+                        plain_escape(&blocker.evidence)
+                    )
+                }));
+                lines.extend(context.completion_evidence.iter().map(|blocker| {
+                    format!(
+                        "blocker-evidence\t{}\t{}",
+                        blocker.task.id,
+                        plain_escape(&blocker.evidence)
+                    )
+                }));
+                lines.extend(
+                    context
+                        .dependents
+                        .iter()
+                        .map(|task| format!("dependent\t{}\t{}", task.id, task.status.as_str())),
+                );
+                lines.extend(
+                    context
+                        .readiness
+                        .reasons
+                        .iter()
+                        .map(|reason| format!("reason\t{}", plain_escape(reason))),
+                );
+                lines.join("\n")
+            }
+            OutputMode::Json => serde_json::to_string(&Envelope { format_version: 1, data: context })?,
+            OutputMode::Quiet => return Ok(None),
+        };
+        Ok(Some(self.style(message)))
+    }
+
+    /// Render database and graph integrity results.
+    pub fn render_check(&self, report: &CheckReport) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human => {
+                let mut lines =
+                    vec![if report.valid { "Check passed.".to_owned() } else { "Check failed.".to_owned() }];
+                lines.extend(report.errors.iter().map(|error| format!("error: {error}")));
+                lines.extend(report.warnings.iter().map(|warning| format!("warning: {warning}")));
+                lines.join("\n")
+            }
+            OutputMode::Plain => report
+                .errors
+                .iter()
+                .map(|error| format!("error\t{}", plain_escape(error)))
+                .chain(
+                    report
+                        .warnings
+                        .iter()
+                        .map(|warning| format!("warning\t{}", plain_escape(warning))),
+                )
+                .collect::<Vec<_>>()
+                .join("\n"),
+            OutputMode::Json => serde_json::to_string(&Envelope { format_version: 1, data: report })?,
+            OutputMode::Quiet => return Ok(None),
+        };
+        Ok(Some(self.style(message)))
+    }
+
+    fn style(&self, message: String) -> String {
+        match (self.mode, self.color) {
+            (OutputMode::Human, ColorChoice::Always) => message.bright_blue().to_string(),
+            (OutputMode::Human, ColorChoice::Auto) => message
+                .if_supports_color(Stream::Stdout, |text| text.bright_blue())
+                .to_string(),
+            _ => message,
+        }
+    }
+
     fn msg(&self) -> String {
         const MESSAGE: &str = "Arc Lightning foundation ready";
         match self.color {
@@ -575,6 +792,339 @@ struct ReadyData<'a> {
 #[derive(Debug, Serialize)]
 struct NextData<'a> {
     task: Option<&'a Task>,
+}
+
+#[derive(Debug, Serialize)]
+struct PromotionData<'a> {
+    action: &'static str,
+    idea: &'a Idea,
+    epic: &'a Epic,
+}
+
+#[derive(Debug, Serialize)]
+struct RecordListData<'a> {
+    records: &'a [ListItem],
+}
+
+#[derive(Debug, Serialize)]
+struct TreeData<'a> {
+    nodes: &'a [TreeNode],
+}
+
+fn plain_escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('\t', "\\t").replace('\n', "\\n")
+}
+
+fn plain_item(item: &ListItem) -> String {
+    format!(
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        item.kind,
+        item.id,
+        item.status,
+        item.priority.as_deref().unwrap_or("-"),
+        item.blocked
+            .map_or("-", |value| if value { "blocked" } else { "unblocked" }),
+        item.ready
+            .map_or("-", |value| if value { "ready" } else { "not-ready" }),
+        plain_escape(&item.title),
+        plain_escape(item.handoff.as_deref().unwrap_or("")),
+        plain_escape(item.evidence.as_deref().unwrap_or("")),
+        plain_escape(&item.blockers.join(",")),
+        item.promoted_to.as_deref().unwrap_or(""),
+        item.source_idea.as_deref().unwrap_or(""),
+    )
+}
+
+fn plain_show(view: &ShowView) -> String {
+    match view {
+        ShowView::Idea { record } => format!(
+            "idea\t{}\t{}\t{}\t{}",
+            record.id,
+            record.status.as_str(),
+            plain_escape(&record.title),
+            record.promoted_to.map_or_else(String::new, |id| id.to_string())
+        ),
+        ShowView::Release { record, epics, progress } => format!(
+            "release\t{}\t{}\t{}\t{}\t{}/{}",
+            record.id,
+            record.status.as_str(),
+            plain_escape(&record.title),
+            epics
+                .iter()
+                .map(|epic| epic.id.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
+            progress.completed,
+            progress.total
+        ),
+        ShowView::Epic { record, milestones, progress } => format!(
+            "epic\t{}\t{}\t{}\t{}\t{}\t{}\t{}/{}",
+            record.id,
+            record.status.as_str(),
+            plain_escape(&record.title),
+            record.release_id.map_or_else(String::new, |id| id.to_string()),
+            record.source_idea.map_or_else(String::new, |id| id.to_string()),
+            milestones
+                .iter()
+                .map(|milestone| milestone.id.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
+            progress.completed,
+            progress.total
+        ),
+        ShowView::Milestone { record, tasks, progress } => format!(
+            "milestone\t{}\t{}\t{}\t{}\t{}\t{}/{}",
+            record.id,
+            record.status.as_str(),
+            plain_escape(&record.title),
+            record.epic_id,
+            tasks
+                .iter()
+                .map(|task| task.id.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
+            progress.completed,
+            progress.total
+        ),
+        ShowView::Task { record } => format!(
+            "task\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}/{}",
+            record.task.id,
+            record.task.status.as_str(),
+            record.task.priority.as_str(),
+            record.readiness.blocked,
+            record.readiness.ready,
+            plain_escape(&record.task.title),
+            plain_escape(&record.task.handoff),
+            plain_escape(&record.task.evidence),
+            plain_escape(
+                &record
+                    .blockers
+                    .iter()
+                    .map(|blocker| blocker.task.id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+            plain_escape(
+                &record
+                    .blockers
+                    .iter()
+                    .filter(|blocker| !blocker.evidence.is_empty())
+                    .map(|blocker| format!("{}:{}", blocker.task.id, blocker.evidence))
+                    .collect::<Vec<_>>()
+                    .join(";")
+            ),
+            record.milestone.id,
+            record.epic.id,
+            record
+                .release
+                .as_ref()
+                .map_or_else(String::new, |release| release.id.to_string()),
+            record
+                .children
+                .iter()
+                .map(|task| task.id.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
+            record
+                .ancestors
+                .iter()
+                .map(|task| task.id.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
+            record
+                .dependents
+                .iter()
+                .map(|task| task.id.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
+            plain_escape(&record.readiness.reasons.join(";")),
+            record.progress.completed,
+            record.progress.total
+        ),
+    }
+}
+
+fn human_context(context: &ContextView) -> String {
+    let mut lines = vec![
+        format!(
+            "Task `{}` [{}] {}",
+            context.task.id,
+            context.task.status.as_str(),
+            context.task.title
+        ),
+        format!(
+            "Ancestors: {}",
+            context
+                .ancestors
+                .iter()
+                .map(|task| task.id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        format!("Milestone: {}", context.milestone.id),
+        format!("Epic: {}", context.epic.id),
+        format!(
+            "Release: {}",
+            context
+                .release
+                .as_ref()
+                .map_or_else(|| "none".to_owned(), |release| release.id.to_string())
+        ),
+        format!("Spec: {}", context.spec_path),
+        format!("Ready: {}", context.readiness.ready),
+        format!("Blocked: {}", context.readiness.blocked),
+    ];
+    lines.extend(
+        context
+            .readiness
+            .reasons
+            .iter()
+            .map(|reason| format!("Reason: {reason}")),
+    );
+    lines.push(format!(
+        "Handoff: {}",
+        if context.task.handoff.is_empty() { "none" } else { &context.task.handoff }
+    ));
+    lines.push(format!(
+        "Evidence: {}",
+        if context.task.evidence.is_empty() { "none" } else { &context.task.evidence }
+    ));
+    lines.extend(context.blockers.iter().map(|blocker| {
+        format!(
+            "Blocker: {} [{}]{}",
+            blocker.task.id,
+            blocker.task.status.as_str(),
+            if blocker.evidence.is_empty() { String::new() } else { format!(" — {}", blocker.evidence) }
+        )
+    }));
+    lines.extend(
+        context
+            .dependents
+            .iter()
+            .map(|task| format!("Dependent: {} [{}]", task.id, task.status.as_str())),
+    );
+    lines.join("\n")
+}
+
+fn human_show(view: &ShowView) -> String {
+    match view {
+        ShowView::Idea { record } => format!(
+            "Idea `{}` [{}] {}{}",
+            record.id,
+            record.status.as_str(),
+            record.title,
+            record
+                .promoted_to
+                .map_or_else(String::new, |id| format!("\nPromoted to: {id}"))
+        ),
+        ShowView::Release { record, epics, progress } => format!(
+            "Release `{}` [{}] {}\nEpics: {}\nProgress: {}/{} completed",
+            record.id,
+            record.status.as_str(),
+            record.title,
+            epics
+                .iter()
+                .map(|epic| epic.id.to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+            progress.completed,
+            progress.total
+        ),
+        ShowView::Epic { record, milestones, progress } => format!(
+            "Epic `{}` [{}] {}\nSpec: {}\nMilestones: {}\nProgress: {}/{} completed{}",
+            record.id,
+            record.status.as_str(),
+            record.title,
+            record.spec_path,
+            milestones
+                .iter()
+                .map(|milestone| milestone.id.to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+            progress.completed,
+            progress.total,
+            record
+                .source_idea
+                .map_or_else(String::new, |id| format!("\nSource idea: {id}"))
+        ),
+        ShowView::Milestone { record, tasks, progress } => format!(
+            "Milestone `{}` [{}] {}\nEpic: {}\nTasks: {}\nProgress: {}/{} completed",
+            record.id,
+            record.status.as_str(),
+            record.title,
+            record.epic_id,
+            tasks
+                .iter()
+                .map(|task| task.id.to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+            progress.completed,
+            progress.total
+        ),
+        ShowView::Task { record } => {
+            let mut text = format!(
+                "Task `{}` [{}] {}\nReady: {}\nBlockers: {}\nProgress: {}/{} completed",
+                record.task.id,
+                record.task.status.as_str(),
+                record.task.title,
+                record.readiness.ready,
+                record
+                    .blockers
+                    .iter()
+                    .map(|blocker| blocker.task.id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                record.progress.completed,
+                record.progress.total
+            );
+            if !record.task.handoff.is_empty() {
+                text.push_str(&format!("\nHandoff: {}", record.task.handoff));
+            }
+            if !record.task.evidence.is_empty() {
+                text.push_str(&format!("\nEvidence: {}", record.task.evidence));
+            }
+            let blocker_evidence = record
+                .blockers
+                .iter()
+                .filter(|blocker| !blocker.evidence.is_empty())
+                .map(|blocker| format!("{}: {}", blocker.task.id, blocker.evidence))
+                .collect::<Vec<_>>();
+            if !blocker_evidence.is_empty() {
+                text.push_str(&format!("\nBlocker evidence: {}", blocker_evidence.join("; ")));
+            }
+            text
+        }
+    }
+}
+
+fn human_tree(node: &TreeNode, depth: usize) -> String {
+    let mut lines = vec![format!(
+        "{}{} `{}` [{}]",
+        "  ".repeat(depth),
+        node.kind,
+        node.id,
+        node.title
+    )];
+    for child in &node.children {
+        lines.push(human_tree(child, depth + 1));
+    }
+    lines.join("\n")
+}
+
+fn flatten_tree(nodes: &[TreeNode], depth: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    for node in nodes {
+        lines.push(format!(
+            "{}\t{}\t{}\t{}\t{}",
+            depth,
+            node.kind,
+            node.id,
+            node.status,
+            plain_escape(&node.title)
+        ));
+        lines.extend(flatten_tree(&node.children, depth + 1));
+    }
+    lines
 }
 
 #[cfg(test)]

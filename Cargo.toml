@@ -10,7 +10,8 @@ clap = { version = "4.6", features = ["derive"] }
 # `sha1` is required for ordinary Git repositories. Default and network-client features stay disabled.
 gix = { version = "0.85", default-features = false, features = ["status", "sha1"] }
 owo-colors = { version = "4.3", features = ["supports-colors"] }
-rusqlite = { version = "0.40", features = ["bundled"] }
+# 0.39 keeps the bundled SQLite build compatible with the repository's Rust 1.88 toolchain.
+rusqlite = { version = "0.39", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

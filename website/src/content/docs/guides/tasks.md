@@ -62,13 +62,13 @@ arcl task cancel arcl-t-01J...
 
 The allowed task statuses are:
 
-| Status | Meaning |
-| --- | --- |
-| `pending` | Ready to be started. |
-| `in_progress` | Work has started. |
-| `parked` | Open work temporarily excluded from active readiness. |
-| `completed` | Terminal success state. |
-| `cancelled` | Terminal state for work that will not continue. |
+| Status        | Meaning                                               |
+| ------------- | ----------------------------------------------------- |
+| `pending`     | Ready to be started.                                  |
+| `in_progress` | Work has started.                                     |
+| `parked`      | Open work temporarily excluded from active readiness. |
+| `completed`   | Terminal success state.                               |
+| `cancelled`   | Terminal state for work that will not continue.       |
 
 `start` moves pending work to `in_progress`. `park` accepts pending or in-progress
 work. `unpark` always returns parked work to `pending`. `complete` accepts
@@ -84,3 +84,32 @@ arcl task complete arcl-t-01J... --allow-open-children
 ```
 
 The override never cascades to child tasks.
+
+## Handoff
+
+An in-progress task can keep one current Markdown resume note:
+
+```sh
+arcl task handoff arcl-t-01J... --note "Resume at the migration test."
+arcl task handoff arcl-t-01J... --note-file handoff.md
+```
+
+`handoff` stores the note and parks the task in one transaction. Unparking and
+starting the task preserve the note until another handoff replaces it. Use
+`--note-file -` to read UTF-8 Markdown from standard input.
+
+## Record Completion
+
+Attach optional Markdown evidence when completing a task:
+
+```sh
+arcl task complete arcl-t-01J... --evidence "All tests pass."
+arcl task complete arcl-t-01J... --evidence-file evidence.md
+```
+
+Use `--evidence-file -` to read from standard input. Arc Lightning stores the
+evidence with the terminal transition; it does not run commands, open links,
+or judge whether the evidence proves completion.
+
+`arcl show` and `arcl context` include the current handoff and relevant blocker
+evidence. JSON and plain output expose the same information for agents and scripts.
