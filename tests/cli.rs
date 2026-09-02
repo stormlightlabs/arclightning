@@ -2,7 +2,7 @@ use std::{fs, path::Path};
 
 use arcl::{
     domain::{IdeaId, ReleaseId, TaskId},
-    storage::Database,
+    storage::{CURRENT_VERSION, Database},
     vcs::{GixVcs, Vcs},
 };
 use assert_cmd::Command;
@@ -135,7 +135,10 @@ fn project_discovery_uses_the_git_worktree_for_nested_initialization() {
     );
 
     let database = Database::open(arcl_directory.join("arcl.db")).expect("initialized database reopens");
-    assert_eq!(database.schema_version().expect("schema version is readable"), 9);
+    assert_eq!(
+        database.schema_version().expect("schema version is readable"),
+        CURRENT_VERSION
+    );
 }
 
 #[test]
@@ -198,7 +201,7 @@ fn init_snapshot_option_is_persisted_without_replacing_existing_state() {
     let connection = rusqlite::Connection::open(database_path).expect("database is readable");
     let preserved: String = connection
         .query_row("SELECT value FROM meta WHERE key = 'custom'", [], |row| row.get(0))
-        .expect("custom database data remains");
+        .expect("custom database data exists");
     assert_eq!(preserved, "preserve-me");
 }
 
@@ -664,7 +667,7 @@ fn releases_and_epics_round_trip_from_a_nested_directory() {
     assert_eq!(updated_payload["data"]["epic"]["description"], "Updated tracker text.");
     assert!(updated_payload["data"]["epic"]["release_id"].is_null());
     assert_eq!(updated_payload["data"]["epic"]["spec_path"], "specs/feature.md");
-    assert_eq!(fs::read_to_string(&spec).expect("spec remains readable"), spec_contents);
+    assert_eq!(fs::read_to_string(&spec).expect("spec is readable"), spec_contents);
 
     let database = rusqlite::Connection::open(repository.path().join(".arcl/arcl.db")).expect("database opens");
     let stored_path: String = database
@@ -750,7 +753,7 @@ fn epic_release_association_failures_roll_back_mutations() {
         .query_row("SELECT title, release_id FROM epics WHERE id = ?1", [&epic_id], |row| {
             Ok((row.get(0)?, row.get(1)?))
         })
-        .expect("epic remains readable");
+        .expect("epic is readable");
     assert_eq!(title, "Feature");
     assert_eq!(stored_release, release_id);
 }
@@ -1630,7 +1633,10 @@ fn invalid_snapshot_import_reports_source_and_leaves_database_and_files_unchange
     let stderr = String::from_utf8_lossy(&failed.stderr);
     assert!(stderr.contains(&format!("ideas/{id}.md")));
     assert!(stderr.contains("front matter"));
-    assert_eq!(fs::read(&path).expect("snapshot record remains"), invalid.into_bytes());
+    assert_eq!(
+        fs::read(&path).expect("snapshot record is preserved"),
+        invalid.into_bytes()
+    );
     let database = Database::open(repository.path().join(".arcl/arcl.db")).expect("database reopens");
     assert_eq!(
         database

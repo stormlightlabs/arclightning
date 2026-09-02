@@ -12,7 +12,7 @@ ready-work queries, task context, handoffs, and evidence. Snapshot encoding,
 export, and import are also implemented.
 
 This foundation is retained. Automatic snapshot reconciliation, conflict
-recovery, full plan application, MCP, desktop, and the new product model remain
+recovery, full plan application, MCP, desktop, and the new product model are
 unfinished.
 
 ## Milestone 1: Connected planning model
@@ -46,7 +46,7 @@ Deliverables:
 - core domain and application operations independent of delivery interfaces
 - separate SQLite and repository-file responsibilities
 - a CLI adapter that preserves the `arcl` binary
-- removal of duplicate legacy domain paths after migration
+- removal of duplicate domain paths after migration
 
 Exit criterion: the CLI passes through the shared Rust application layer, and
 new adapters can use the same operations without invoking the CLI

@@ -96,7 +96,7 @@ impl SnapshotManifest {
         Ok(())
     }
 
-    /// Render the canonical v1 manifest with one LF-terminated line.
+    /// Render the canonical manifest with one LF-terminated line.
     pub fn render(&self) -> Result<String> {
         self.validate()?;
         Ok(format!("format-version = {}\n", self.format_version))

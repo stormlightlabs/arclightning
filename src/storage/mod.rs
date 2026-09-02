@@ -17,20 +17,20 @@ pub use promotions::Promotion;
 pub use queries::{CheckReport, ContextView, Graph, ListFilter, ListItem, Readiness, ShowView, TaskView, TreeNode};
 pub use tasks::{TaskCreate, TaskUpdate};
 
-use std::{fs, path::Path, time::Duration};
+use std::{path::Path, time::Duration};
 
 use rusqlite::Connection;
 use thiserror::Error;
 
 use crate::domain::{
-    Capture, CaptureId, CapturePromotion, ContainerAction, DomainError, Epic, EpicId, Idea, IdeaId, LegacyIdMapping,
-    LinkedRecordKind, Milestone, MilestoneId, Note, NoteId, NoteLink, Phase, PhaseId, Plan, PlanId, PlanningTask,
-    Project, RecordLink, Release, ReleaseId, ReleaseMemberKind, ReleaseMembership, Spec, SpecId, Task, TaskAction,
-    TaskDependency, TaskId, TaskPriority,
+    Capture, CaptureId, CapturePromotion, ContainerAction, DomainError, Epic, EpicId, Idea, IdeaId, LinkedRecordKind,
+    Milestone, MilestoneId, Note, NoteId, NoteLink, Phase, PhaseId, Plan, PlanId, PlanningTask, Project, RecordLink,
+    Release, ReleaseId, ReleaseMemberKind, ReleaseMembership, Spec, SpecId, Task, TaskAction, TaskDependency, TaskId,
+    TaskPriority,
 };
 
 /// The newest SQLite schema version understood by the application.
-pub const CURRENT_VERSION: i32 = 9;
+pub const CURRENT_VERSION: i32 = 1;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -140,7 +140,6 @@ impl Database {
         let mut connection = Connection::open(path)?;
         configure(&mut connection)?;
         migrations::apply(&mut connection)?;
-        import_legacy_spec_bodies(&mut connection, path)?;
         Ok(Self { connection })
     }
 
@@ -546,11 +545,6 @@ impl Database {
         connected::record_links(&self.connection, project.id)
     }
 
-    /// Read mappings from v1 IDs to connected-model IDs.
-    pub fn legacy_id_mappings(&self) -> Result<Vec<LegacyIdMapping>> {
-        connected::legacy_id_mappings(&self.connection)
-    }
-
     pub fn idea(&self, id: IdeaId) -> Result<Option<Idea>> {
         ideas::find(&self.connection, &id)
     }
@@ -794,52 +788,6 @@ impl Database {
     pub fn connection(&self) -> &Connection {
         &self.connection
     }
-}
-
-fn import_legacy_spec_bodies(connection: &mut Connection, database_path: &Path) -> Result<()> {
-    let project_root = database_path.parent().and_then(Path::parent).map(Path::to_owned);
-    let mut statement = connection.prepare(
-        "SELECT id, legacy_spec_path, body FROM specs
-         WHERE legacy_body_imported = 0 ORDER BY id",
-    )?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-    drop(statement);
-
-    let transaction = connection.transaction()?;
-    for (id, relative_path, fallback_body) in rows {
-        let body = project_root
-            .as_deref()
-            .and_then(|root| read_legacy_spec_body(root, &relative_path))
-            .unwrap_or(fallback_body);
-        transaction.execute(
-            "UPDATE specs SET body = ?1, legacy_body_imported = 1 WHERE id = ?2",
-            rusqlite::params![body, id],
-        )?;
-    }
-    transaction.commit()?;
-    Ok(())
-}
-
-fn read_legacy_spec_body(root: &Path, relative_path: &str) -> Option<String> {
-    let canonical_root = fs::canonicalize(root).ok()?;
-    let candidate = root.join(relative_path);
-    let resolved = fs::canonicalize(candidate).ok()?;
-    if !resolved.starts_with(&canonical_root) || resolved.extension()?.to_str()? != "md" {
-        return None;
-    }
-    let metadata = fs::metadata(&resolved).ok()?;
-    if !metadata.is_file() {
-        return None;
-    }
-    String::from_utf8(fs::read(resolved).ok()?).ok()
 }
 
 fn configure(connection: &mut Connection) -> Result<()> {

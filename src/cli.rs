@@ -169,7 +169,7 @@ pub enum ReleaseCommand {
     Complete {
         /// The release ID to complete.
         id: String,
-        /// Complete only the release even when descendants remain open.
+        /// Complete only the release even when descendants are open.
         #[arg(long)]
         allow_open_children: bool,
     },
@@ -177,7 +177,7 @@ pub enum ReleaseCommand {
     Cancel {
         /// The release ID to cancel.
         id: String,
-        /// Cancel only the release even when descendants remain open.
+        /// Cancel only the release even when descendants are open.
         #[arg(long)]
         allow_open_children: bool,
     },
@@ -222,7 +222,7 @@ pub enum EpicCommand {
     Complete {
         /// The epic ID to complete.
         id: String,
-        /// Complete only the epic even when descendants remain open.
+        /// Complete only the epic even when descendants are open.
         #[arg(long)]
         allow_open_children: bool,
     },
@@ -230,7 +230,7 @@ pub enum EpicCommand {
     Cancel {
         /// The epic ID to cancel.
         id: String,
-        /// Cancel only the epic even when descendants remain open.
+        /// Cancel only the epic even when descendants are open.
         #[arg(long)]
         allow_open_children: bool,
     },
@@ -269,7 +269,7 @@ pub enum MilestoneCommand {
     Complete {
         /// The milestone ID to complete.
         id: String,
-        /// Complete only the milestone even when tasks remain open.
+        /// Complete only the milestone even when tasks are open.
         #[arg(long)]
         allow_open_children: bool,
     },
@@ -277,7 +277,7 @@ pub enum MilestoneCommand {
     Cancel {
         /// The milestone ID to cancel.
         id: String,
-        /// Cancel only the milestone even when tasks remain open.
+        /// Cancel only the milestone even when tasks are open.
         #[arg(long)]
         allow_open_children: bool,
     },
@@ -363,7 +363,7 @@ pub enum TaskCommand {
     Complete {
         /// The task ID to complete.
         id: String,
-        /// Complete only this task even when descendants remain open.
+        /// Complete only this task even when descendants are open.
         #[arg(long)]
         allow_open_children: bool,
         /// Store Markdown completion evidence.
@@ -377,7 +377,7 @@ pub enum TaskCommand {
     Cancel {
         /// The task ID to cancel.
         id: String,
-        /// Cancel only this task even when descendants remain open.
+        /// Cancel only this task even when descendants are open.
         #[arg(long)]
         allow_open_children: bool,
     },

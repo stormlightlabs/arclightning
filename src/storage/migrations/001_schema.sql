@@ -1,6 +1,7 @@
--- Expand the v1 tracker into the connected planning model. The v1 tables
--- remain readable until the contract migration; every migrated relationship is
--- copied rather than inferred by later application code.
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
@@ -10,10 +11,74 @@ CREATE TABLE IF NOT EXISTS projects (
 INSERT OR IGNORE INTO projects (id, name)
 VALUES ('arcl-pj-00000000000000000000000000', 'Project');
 
-ALTER TABLE releases ADD COLUMN project_id TEXT NOT NULL DEFAULT 'arcl-pj-00000000000000000000000000';
+CREATE TABLE IF NOT EXISTS ideas (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL CHECK (length(trim(title)) > 0),
+    description TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL CHECK (status IN ('captured', 'promoted', 'discarded'))
+);
+
+CREATE TABLE IF NOT EXISTS releases (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL DEFAULT 'arcl-pj-00000000000000000000000000' REFERENCES projects(id) ON DELETE RESTRICT,
+    title TEXT NOT NULL CHECK (length(trim(title)) > 0),
+    description TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL CHECK (status IN ('open', 'completed', 'cancelled')),
+    UNIQUE (project_id, id)
+);
 
 CREATE INDEX IF NOT EXISTS releases_project_idx ON releases(project_id);
-CREATE UNIQUE INDEX IF NOT EXISTS releases_project_id_unique ON releases(project_id, id);
+
+CREATE TABLE IF NOT EXISTS epics (
+    id TEXT PRIMARY KEY,
+    release_id TEXT REFERENCES releases(id) ON DELETE RESTRICT,
+    title TEXT NOT NULL CHECK (length(trim(title)) > 0),
+    description TEXT NOT NULL DEFAULT '',
+    spec_path TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL CHECK (status IN ('open', 'completed', 'cancelled'))
+);
+
+CREATE TABLE IF NOT EXISTS milestones (
+    id TEXT PRIMARY KEY,
+    epic_id TEXT NOT NULL REFERENCES epics(id) ON DELETE RESTRICT,
+    plan_key TEXT,
+    title TEXT NOT NULL CHECK (length(trim(title)) > 0),
+    description TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL CHECK (status IN ('open', 'completed', 'cancelled')),
+    position INTEGER NOT NULL CHECK (position >= 0),
+    UNIQUE (epic_id, plan_key)
+);
+
+CREATE TABLE IF NOT EXISTS tasks (
+    id TEXT PRIMARY KEY,
+    milestone_id TEXT NOT NULL REFERENCES milestones(id) ON DELETE RESTRICT,
+    parent_id TEXT REFERENCES tasks(id) ON DELETE RESTRICT,
+    plan_key TEXT,
+    title TEXT NOT NULL CHECK (length(trim(title)) > 0),
+    description TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL CHECK (status IN ('pending', 'in_progress', 'parked', 'completed', 'cancelled')),
+    priority TEXT NOT NULL CHECK (priority IN ('critical', 'high', 'normal', 'low')),
+    position INTEGER NOT NULL CHECK (position >= 0),
+    handoff TEXT NOT NULL DEFAULT '',
+    evidence TEXT NOT NULL DEFAULT '',
+    UNIQUE (milestone_id, plan_key)
+);
+
+CREATE TABLE IF NOT EXISTS task_dependencies (
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
+    blocker_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
+    PRIMARY KEY (task_id, blocker_id)
+);
+
+CREATE TABLE IF NOT EXISTS idea_promotions (
+    idea_id TEXT PRIMARY KEY REFERENCES ideas(id) ON DELETE RESTRICT,
+    epic_id TEXT NOT NULL UNIQUE REFERENCES epics(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS snapshot_files (
+    path TEXT PRIMARY KEY,
+    content BLOB NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS captures (
     id TEXT PRIMARY KEY,
@@ -35,9 +100,6 @@ CREATE TABLE IF NOT EXISTS specs (
     acceptance_criteria TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL CHECK (status IN ('open', 'completed', 'cancelled')),
     source_capture_id TEXT,
-    legacy_description TEXT NOT NULL DEFAULT '',
-    legacy_spec_path TEXT,
-    legacy_body_imported INTEGER NOT NULL DEFAULT 1 CHECK (legacy_body_imported IN (0, 1)),
     UNIQUE (project_id, id),
     UNIQUE (project_id, source_capture_id),
     FOREIGN KEY (project_id, source_capture_id) REFERENCES captures(project_id, id) ON DELETE RESTRICT
@@ -152,124 +214,6 @@ CREATE TABLE IF NOT EXISTS record_links (
 CREATE INDEX IF NOT EXISTS record_links_target_idx
     ON record_links(project_id, target_kind, target_id);
 
-CREATE TABLE IF NOT EXISTS legacy_id_mappings (
-    legacy_kind TEXT NOT NULL,
-    legacy_id TEXT NOT NULL,
-    current_kind TEXT NOT NULL,
-    current_id TEXT NOT NULL,
-    PRIMARY KEY (legacy_kind, legacy_id),
-    UNIQUE (current_kind, current_id)
-);
-
--- The old release-to-epic edge is now an explicit release-to-spec edge. A
--- descendant plan is not implicitly made a release member.
-INSERT INTO captures (id, project_id, title, body, status, created_at)
-SELECT 'arcl-c-' || substr(id, 8), 'arcl-pj-00000000000000000000000000', title, description, status,
-       datetime('now')
-FROM ideas;
-
-INSERT INTO specs (
-    id, project_id, title, body, acceptance_criteria, status, source_capture_id,
-    legacy_description, legacy_spec_path, legacy_body_imported
-)
-SELECT
-    'arcl-s-' || substr(e.id, 8),
-    'arcl-pj-00000000000000000000000000',
-    e.title,
-    e.description,
-    '',
-    e.status,
-    CASE WHEN p.idea_id IS NULL THEN NULL ELSE 'arcl-c-' || substr(p.idea_id, 8) END,
-    e.description,
-    e.spec_path,
-    0
-FROM epics e
-LEFT JOIN idea_promotions p ON p.epic_id = e.id;
-
-INSERT INTO plans (id, project_id, spec_id, title, body, status)
-SELECT
-    'arcl-pl-' || substr(e.id, 8),
-    'arcl-pj-00000000000000000000000000',
-    'arcl-s-' || substr(e.id, 8),
-    e.title || ' implementation plan',
-    '',
-    e.status
-FROM epics e;
-
-INSERT INTO phases (id, project_id, plan_id, title, body, status, position)
-SELECT
-    'arcl-ph-' || substr(m.id, 8),
-    'arcl-pj-00000000000000000000000000',
-    'arcl-pl-' || substr(m.epic_id, 8),
-    m.title,
-    m.description,
-    m.status,
-    m.position
-FROM milestones m;
-
--- Parent edges are added after all task rows exist so an arbitrary row order in
--- the old database cannot prevent a valid migration.
-INSERT INTO planning_tasks (
-    id, project_id, spec_id, plan_id, phase_id, parent_id, title, body, status,
-    priority, position, handoff, evidence
-)
-SELECT
-    t.id,
-    'arcl-pj-00000000000000000000000000',
-    'arcl-s-' || substr(m.epic_id, 8),
-    'arcl-pl-' || substr(m.epic_id, 8),
-    'arcl-ph-' || substr(t.milestone_id, 8),
-    NULL,
-    t.title,
-    t.description,
-    t.status,
-    t.priority,
-    t.position,
-    t.handoff,
-    t.evidence
-FROM tasks t
-JOIN milestones m ON m.id = t.milestone_id;
-
-UPDATE planning_tasks
-SET parent_id = (
-    SELECT old.parent_id
-    FROM tasks old
-    WHERE old.id = planning_tasks.id
-)
-WHERE EXISTS (SELECT 1 FROM tasks old WHERE old.id = planning_tasks.id AND old.parent_id IS NOT NULL);
-
-INSERT INTO planning_task_dependencies (project_id, task_id, blocker_id)
-SELECT 'arcl-pj-00000000000000000000000000', task_id, blocker_id
-FROM task_dependencies;
-
-INSERT INTO release_memberships (project_id, release_id, record_kind, record_id)
-SELECT
-    'arcl-pj-00000000000000000000000000',
-    e.release_id,
-    'spec',
-    'arcl-s-' || substr(e.id, 8)
-FROM epics e
-WHERE e.release_id IS NOT NULL;
-
-INSERT INTO capture_promotions (capture_id, project_id, target_kind, target_id)
-SELECT
-    'arcl-c-' || substr(p.idea_id, 8),
-    'arcl-pj-00000000000000000000000000',
-    'spec',
-    'arcl-s-' || substr(p.epic_id, 8)
-FROM idea_promotions p;
-
-INSERT INTO legacy_id_mappings (legacy_kind, legacy_id, current_kind, current_id)
-SELECT 'idea', id, 'capture', 'arcl-c-' || substr(id, 8) FROM ideas
-UNION ALL
-SELECT 'epic', id, 'spec', 'arcl-s-' || substr(id, 8) FROM epics
-UNION ALL
-SELECT 'milestone', id, 'phase', 'arcl-ph-' || substr(id, 8) FROM milestones
-UNION ALL
-SELECT 'task', id, 'task', id FROM tasks
-UNION ALL
-SELECT 'release', id, 'release', id FROM releases;
-
 CREATE TRIGGER capture_promotions_target_exists
 BEFORE INSERT ON capture_promotions
 WHEN NOT (
@@ -365,5 +309,7 @@ BEGIN
 END;
 
 INSERT INTO meta (key, value)
-VALUES ('database-format-version', '9')
+VALUES
+    ('database-format-version', '1'),
+    ('snapshot-sync-state', 'clean')
 ON CONFLICT(key) DO UPDATE SET value = excluded.value;

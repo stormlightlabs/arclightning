@@ -90,7 +90,7 @@ impl ProjectConfig {
         validate_relative_path(&self.snapshot.path)
     }
 
-    /// Render the canonical v1 configuration representation.
+    /// Render the canonical configuration representation.
     pub fn render(&self) -> Result<String> {
         toml::to_string_pretty(self).map_err(|e| e.into())
     }

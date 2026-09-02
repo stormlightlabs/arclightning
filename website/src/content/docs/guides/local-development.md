@@ -83,4 +83,4 @@ typography and layout values while using the Iceberg dark palette:
 
 Starlight loads the two Fontsource packages and the theme through
 `website/astro.config.mjs`. Keep semantic Starlight variables mapped through
-the Arc-prefixed tokens so component styles remain consistent.
+the Arc-prefixed tokens to keep component styles consistent.

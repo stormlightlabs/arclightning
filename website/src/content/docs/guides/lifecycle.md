@@ -40,7 +40,7 @@ non-terminal unless the command includes `--allow-open-children`.
 ## Close only the selected record
 
 The `--allow-open-children` override changes only the selected record. It never
-cascades to descendants, so open child work remains available for later review.
+cascades to descendants, so open child work stays available for later review.
 
 See the guides for [releases](/guides/releases/), [epics](/guides/epics/), [milestones](/guides/milestones/),
 and [tasks](/guides/tasks/) for entity-specific commands and hierarchy rules.

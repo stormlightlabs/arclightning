@@ -26,7 +26,7 @@ pub use id::{
 pub use idea::{Idea, IdeaAction, IdeaStatus};
 pub use lifecycle::{ContainerAction, ContainerStatus, TaskAction, TaskPriority, TaskStatus};
 pub use membership::{
-    CapturePromotion, CapturePromotionTarget, LegacyIdMapping, LinkedRecordKind, NoteLink, RecordLink, ReleaseMemberId,
+    CapturePromotion, CapturePromotionTarget, LinkedRecordKind, NoteLink, RecordLink, ReleaseMemberId,
     ReleaseMemberKind, ReleaseMembership,
 };
 pub use milestone::Milestone;

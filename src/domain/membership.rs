@@ -117,12 +117,3 @@ pub struct CapturePromotion {
     pub capture_id: super::CaptureId,
     pub target: CapturePromotionTarget,
 }
-
-/// A mapping from an identifier in the v1 schema to its connected-model ID.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct LegacyIdMapping {
-    pub legacy_kind: String,
-    pub legacy_id: String,
-    pub current_kind: String,
-    pub current_id: String,
-}

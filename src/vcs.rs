@@ -37,7 +37,7 @@ pub enum VcsError {
     Operation { operation: &'static str, message: String },
 }
 
-/// The gix-backed VCS implementation used by v1.
+/// The gix-backed VCS implementation.
 #[derive(Debug)]
 pub struct GixVcs {
     repository: gix::Repository,

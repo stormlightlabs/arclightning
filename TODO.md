@@ -4,8 +4,8 @@ Source: [SPEC.md](SPEC.md)
 
 Sequence: [ROADMAP.md](ROADMAP.md)
 
-Tasks are listed in dependency order. Completed v1 foundations are summarized
-in the roadmap and are not repeated here.
+Tasks are listed in dependency order. Completed foundations are summarized in
+the roadmap and are not repeated here.
 
 ## T01: Support projects outside Git worktrees
 
@@ -38,7 +38,7 @@ Blocked by: T01
 
 Acceptance criteria:
 
-- [x] Add typed records and forward-only migrations for each new entity and
+- [x] Add typed records and baseline schema definitions for each new entity and
       relationship in `SPEC.md`
 - [x] Store Markdown bodies for specs, plans, notes, and tasks in the operational
       database
@@ -46,17 +46,14 @@ Acceptance criteria:
       contradictory or cross-project ancestry
 - [x] Add many-to-many release membership for specs, plans, tasks, and notes
       without implicitly including descendants
-- [x] Migrate current ideas, epics, milestones, tasks, and links as part of the
-      new schema migration
-- [x] Preserve current identifiers when the entity type remains valid and store
-      explicit mappings where it changes
+- [x] Include ideas, epics, milestones, tasks, and links in the baseline schema
+- [x] Preserve identifiers across records that use the same entity type
 
 Verification:
 
 - `cargo test --workspace --all-features domain`
 - `cargo test --workspace --all-features migrations`
-- Create a current-format project, upgrade it, and confirm its records and
-  relationships remain available
+- Create a project and confirm its records and relationships are available
 
 ## T03: Implement capture promotion and owned planning content
 
@@ -164,7 +161,7 @@ Blocked by: T05, T06
 
 Acceptance criteria:
 
-- [ ] Remove legacy tables or fields only through a forward migration with
+- [ ] Remove superseded tables or fields through a forward migration with
       upgrade coverage in this task
 - [ ] Remove duplicate domain paths after all production callers use the new
       records

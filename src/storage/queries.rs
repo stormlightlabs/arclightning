@@ -10,7 +10,7 @@ use crate::domain::{
 
 use super::{Result, StorageError, dependencies, epics, ideas, milestones, releases, tasks};
 
-/// All v1 records loaded for one read operation.
+/// All tracker records loaded for one read operation.
 #[derive(Clone, Debug)]
 pub struct Graph {
     pub ideas: Vec<Idea>,

@@ -10,8 +10,8 @@ plans, executable tasks, and working notes in one project model.
 
 People and agents use the same model through a desktop app, command-line
 interface (CLI), Model Context Protocol (MCP) server, and optional files stored
-with the project. The SQLite database remains the operational store. Markdown
-remains the readable form for long-form content.
+with the project. The SQLite database is the operational store. Markdown is the readable form
+for long-form content.
 
 ## Product principles
 
@@ -21,9 +21,9 @@ remains the readable form for long-form content.
 - The CLI, desktop app, and MCP server are peers over the same Rust application
   operations
 - Planning documents and execution state belong to one connected model
-- Markdown bodies remain readable and editable outside Arc Lightning
+- Markdown bodies are readable and editable outside Arc Lightning
 - Readiness, blockers, lifecycle transitions, handoffs, and completion evidence
-  remain deterministic and queryable
+  are deterministic and queryable
 - Simple work does not require an empty plan or phase for ceremony
 
 ## Users and use cases
@@ -49,9 +49,8 @@ A developer can:
 The product direction is realized when:
 
 - a non-Git directory can host a complete Arc Lightning project
-- existing v1 projects can migrate without losing descriptions, relationships,
-  lifecycle state, handoffs, evidence, or stable identifiers where their type
-  remains valid
+- schema changes preserve descriptions, relationships, lifecycle state,
+  handoffs, evidence, and stable identifiers when their type is still valid
 - captures, specs, plans, optional phases, tasks, notes, and releases are
   persistent domain objects
 - releases use a general membership relationship for specs, plans, tasks, and
@@ -68,7 +67,7 @@ The product direction is realized when:
 - the Tauri app and website consume one shared UI package for design tokens and
   reusable Svelte components
 - the documentation follows the Stormlight house style described below
-- human output remains concise and machine output remains versioned and stable
+- human output is concise and machine output is versioned and stable
 - focused tests cover domain rules, storage migrations, adapters, UI behavior,
   and repository synchronization
 - Playwright screenshot tests cover stable desktop, website, and shared UI
@@ -124,8 +123,8 @@ can have more than one plan.
 A plan can contain tasks directly or group them into ordered phases. A phase is
 the successor to the current milestone container. Phases are optional.
 
-The existing plan check, diff, and apply behavior remains useful as an import
-and automation interface. Applying structured input creates or updates a
+The plan check, diff, and apply behavior provides an import and automation
+interface. Applying structured input creates or updates a
 persistent plan and its tasks transactionally.
 
 ### Task
@@ -160,14 +159,14 @@ lifecycle behavior.
 A release is an optional named collection of planned deliverables. Specs,
 plans, tasks, and notes can be release members through a many-to-many
 relationship. Membership does not implicitly include a record's descendants.
-Captures cannot join a release until they are promoted, and phases remain part
-of their plan.
+Captures cannot join a release until they are promoted, and phases belong to
+their plan.
 
 ## Interfaces
 
 ### CLI
 
-The `arcl` CLI remains a primary interface. Its vocabulary uses `capture`,
+The `arcl` CLI is a primary interface. Its vocabulary uses `capture`,
 `spec`, `plan`, `task`, and `note`. These commands replace the current `idea`,
 `epic`, and `milestone` commands without compatibility aliases.
 
@@ -196,7 +195,7 @@ The MCP server exposes the same application operations that make sense for an
 agent. It returns typed records and errors instead of parsing CLI presentation
 text.
 
-`arcl context` remains the focused task handoff for command-line agents. It
+`arcl context` is the focused task handoff for command-line agents. It
 includes the task, relevant ancestors, spec and plan context, direct blockers,
 latest handoff, and relevant evidence without returning the whole project.
 
@@ -218,7 +217,7 @@ file under a configurable workspace directory. The target layout is:
     `-- notes/
 ```
 
-The existing three-state comparison remains the synchronization rule: compare
+Synchronization uses a three-state comparison: compare
 the last common files, current database projection, and current workspace. Arc
 Lightning imports or exports one-sided changes and stops on different changes
 to both sides. It never resolves a conflict by silently choosing a side.
@@ -282,7 +281,7 @@ The website documentation follows the established patterns in `../mire`,
 The implementation should reuse the pattern, not copy another product's brand.
 The documentation shell is implemented directly in `apps/website`. It can use
 shared UI primitives, but its content navigation, search, table of contents,
-and documentation layout remain website components.
+and documentation layout belong to the website.
 
 Required characteristics are:
 
@@ -321,7 +320,7 @@ The migration must:
 - preserve working behavior before changing names or storage shapes
 - use expand, migrate, and contract steps when old and new records must coexist
 - keep database migrations forward-only and test upgrades from representative
-  v1 databases
+  databases
 - define a versioned migration for existing snapshot files before changing the
   snapshot manifest
 - avoid completing obsolete synchronization work against the old hierarchy

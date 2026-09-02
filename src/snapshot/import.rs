@@ -31,8 +31,8 @@ pub enum SnapshotImportError {
     /// The required manifest was not present.
     #[error("snapshot manifest `{path}` is missing")]
     MissingManifest { path: PathBuf },
-    /// A file or directory is outside the v1 snapshot layout.
-    #[error("snapshot entry `{path}` is not allowed in the v1 snapshot layout")]
+    /// A file or directory is outside the snapshot layout.
+    #[error("snapshot entry `{path}` is not allowed in the snapshot layout")]
     UnknownEntry { path: PathBuf },
     /// A known snapshot path is not a regular file or directory as required.
     #[error("snapshot entry `{path}` has the wrong type")]
@@ -68,7 +68,7 @@ pub enum SnapshotImportError {
         message: String,
     },
     /// An ID represented in the stored synchronization base was removed or renamed.
-    #[error("snapshot file `{path}`: record ID `{id}` was removed or renamed; v1 has no hard deletion")]
+    #[error("snapshot file `{path}`: record ID `{id}` was removed or renamed; snapshots do not support hard deletion")]
     ExistingRecordRemoved { path: PathBuf, id: String },
     /// The complete replacement could not be committed to SQLite.
     #[error(transparent)]
@@ -116,7 +116,7 @@ struct PreparedImport {
 ///
 /// All filesystem parsing and complete-graph validation happen before the SQLite
 /// replacement transaction is opened. Canonical formatting is written only while
-/// the parsed files remain unchanged, then the graph and synchronization base are
+/// the parsed files have not changed, then the graph and synchronization base are
 /// committed together.
 pub fn import_graph(root: &Path, worktree_root: &Path, database: &mut Database) -> Result<Vec<SnapshotFile>> {
     let prepared = prepare_import(root, worktree_root)?;

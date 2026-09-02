@@ -344,7 +344,7 @@ mod tests {
     }
 
     #[test]
-    fn cancelled_blockers_remain_blocked_until_completed() {
+    fn cancelled_blockers_stay_blocked_until_completed() {
         let (mut database, milestone) = graph();
         let blocker = database
             .create_task(

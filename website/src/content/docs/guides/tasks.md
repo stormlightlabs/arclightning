@@ -38,7 +38,7 @@ arcl task update arcl-t-01J... --milestone arcl-m-02J...
 ```
 
 Moving a task to another milestone moves its complete descendant subtree. A
-parent and child must remain in the same milestone.
+parent and child must belong to the same milestone.
 
 Use `--parent` to reparent a task, or `--no-parent` to make it a top-level task:
 

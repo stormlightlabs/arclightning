@@ -143,7 +143,7 @@ mod tests {
             StorageError::InvalidIdea(DomainError::InvalidTransition { .. })
         ));
         assert_eq!(
-            database.idea(idea.id).expect("idea reads").expect("idea remains").title,
+            database.idea(idea.id).expect("idea reads").expect("idea exists").title,
             "Renamed"
         );
     }

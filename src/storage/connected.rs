@@ -4,9 +4,9 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::domain::{
     Capture, CaptureId, CapturePromotion, CapturePromotionTarget, CaptureStatus, ContainerStatus, DomainError,
-    LegacyIdMapping, LinkedRecordKind, Note, NoteId, NoteLink, Phase, PhaseId, Plan, PlanId, PlanningTask, Project,
-    ProjectId, RecordLink, Release, ReleaseId, ReleaseMemberKind, ReleaseMembership, Spec, SpecId, TaskDependency,
-    TaskId, TaskPriority, TaskStatus, validate_position, validate_title,
+    LinkedRecordKind, Note, NoteId, NoteLink, Phase, PhaseId, Plan, PlanId, PlanningTask, Project, ProjectId,
+    RecordLink, Release, ReleaseId, ReleaseMemberKind, ReleaseMembership, Spec, SpecId, TaskDependency, TaskId,
+    TaskPriority, TaskStatus, validate_position, validate_title,
 };
 
 use super::{Result, StorageError, releases};
@@ -880,20 +880,6 @@ pub fn note_links(connection: &Connection, project_id: ProjectId) -> Result<Vec<
         Ok(NoteLink { project_id, note_id, record_kind: linked_kind(&kind)?, record_id: record })
     })
     .collect()
-}
-
-/// Read all explicit mappings from v1 IDs to connected IDs.
-pub fn legacy_id_mappings(connection: &Connection) -> Result<Vec<LegacyIdMapping>> {
-    let mut statement = connection.prepare("SELECT legacy_kind, legacy_id, current_kind, current_id FROM legacy_id_mappings ORDER BY legacy_kind, legacy_id")?;
-    let rows = statement.query_map([], |row| {
-        Ok(LegacyIdMapping {
-            legacy_kind: row.get(0)?,
-            legacy_id: row.get(1)?,
-            current_kind: row.get(2)?,
-            current_id: row.get(3)?,
-        })
-    })?;
-    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
 fn raw_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<(String, String, String, String, String, String)> {

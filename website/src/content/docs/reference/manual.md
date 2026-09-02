@@ -123,7 +123,7 @@ Task creation accepts `--parent <ID>`, `--priority <critical|high|normal|low>`
 `--no-parent` are mutually exclusive.
 
 Moving a task between milestones moves its entire descendant subtree. Parent and
-child rows must remain in the same milestone, and cyclic reparenting is rejected
+child rows must belong to the same milestone, and cyclic reparenting is rejected
 before storage changes.
 
 `handoff` requires either `--note <MARKDOWN>` or `--note-file <PATH|->`.
@@ -153,7 +153,7 @@ See [Inspecting Work](/guides/inspect-work/) for the query workflow and context 
 ## Lifecycle
 
 Container records—releases, epics, and milestones—use `open`, `completed`, and
-`cancelled`. A container cannot become terminal while a descendant remains
+`cancelled`. A container cannot become terminal while a descendant is
 non-terminal unless the command includes `--allow-open-children`.
 
 Task records use `pending`, `in_progress`, `parked`, `completed`, and
