@@ -6,14 +6,11 @@ use anyhow::Context;
 use thiserror::Error;
 
 use arcl_core::domain::*;
-use arcl_repo::snapshot::{
-    ProjectConfig, SnapshotError, SnapshotExportError, SnapshotImportError, SnapshotManifest, encode_manifest,
-    export_graph, import_snapshot, resolve_snapshot_root,
-};
+use arcl_repo::snapshot::{ProjectConfig, SnapshotError, SnapshotManifest, encode_manifest, resolve_snapshot_root};
 use arcl_repo::vcs::{GixVcs, Vcs, VcsError};
 use arcl_store::{
-    CaptureTaskPromotion, CaptureUpdate, ConnectedGraph, Database, ListFilter, NoteUpdate, PhaseUpdate, PlanUpdate,
-    PlanningReadyFilter, PlanningTaskCreate, PlanningTaskUpdate, SnapshotBaseFile, SpecUpdate, StorageError,
+    CaptureTaskPromotion, CaptureUpdate, ConnectedGraph, Database, NoteUpdate, PhaseUpdate, PlanUpdate,
+    PlanningReadyFilter, PlanningTaskCreate, PlanningTaskUpdate, SpecUpdate, StorageError,
 };
 
 use crate::{cli::*, output::*};
@@ -131,12 +128,8 @@ enum CommandError {
     InvalidConfig { path: PathBuf, source: SnapshotError },
     #[error("could not open Arc Lightning database `{path}`: {source}")]
     OpenDatabase { path: PathBuf, source: StorageError },
-    #[error("snapshot export is not enabled in project `{root}`")]
-    SnapshotDisabled { root: PathBuf },
-    #[error(transparent)]
-    SnapshotExport(#[from] SnapshotExportError),
-    #[error(transparent)]
-    SnapshotImport(Box<SnapshotImportError>),
+    #[error("snapshot import and export require migration to the connected workspace format")]
+    SnapshotMigrationRequired,
     #[error(transparent)]
     Domain(#[from] DomainError),
     #[error(transparent)]
@@ -157,12 +150,6 @@ enum CommandError {
     Integrity { message: String },
 }
 
-impl From<SnapshotImportError> for CommandError {
-    fn from(error: SnapshotImportError) -> Self {
-        Self::SnapshotImport(Box::new(error))
-    }
-}
-
 impl CommandError {
     fn exit_code(&self) -> u8 {
         match self {
@@ -172,13 +159,8 @@ impl CommandError {
             },
             Self::NotInitialized { .. }
             | Self::InvalidConfig { .. }
-            | Self::SnapshotDisabled { .. }
+            | Self::SnapshotMigrationRequired
             | Self::Domain(_) => 3,
-            Self::SnapshotExport(error) => match error {
-                SnapshotExportError::Conflict { .. } => 4,
-                _ => 1,
-            },
-            Self::SnapshotImport(error) => error.exit_code(),
             Self::ReadConfig { .. }
             | Self::ReadMarkdown { .. }
             | Self::ReadStdin { .. }
@@ -198,12 +180,7 @@ impl CommandError {
 fn storage_exit_code(value: &StorageError) -> u8 {
     match value {
         StorageError::ProjectNotFound => 3,
-        StorageError::IdeaNotFound { .. }
-        | StorageError::ReleaseNotFound { .. }
-        | StorageError::EpicNotFound { .. }
-        | StorageError::MilestoneNotFound { .. }
-        | StorageError::TaskNotFound { .. }
-        | StorageError::DependencyNotFound { .. }
+        StorageError::ReleaseNotFound { .. }
         | StorageError::CaptureNotFound { .. }
         | StorageError::SpecNotFound { .. }
         | StorageError::PlanNotFound { .. }
@@ -224,34 +201,15 @@ fn storage_exit_code(value: &StorageError) -> u8 {
         | StorageError::InvalidMembership(_)
         | StorageError::InvalidLink(_)
         | StorageError::InvalidPlanningDependency(_)
-        | StorageError::InvalidIdea(_)
         | StorageError::InvalidRelease(_)
-        | StorageError::InvalidEpic(_)
-        | StorageError::InvalidMilestone(_)
-        | StorageError::InvalidTask(_)
-        | StorageError::InvalidDependency(_)
-        | StorageError::DuplicateSpec { .. }
         | StorageError::CaptureNotPromotable { .. }
         | StorageError::AmbiguousCapturePromotion { .. }
+        | StorageError::InconsistentCapturePromotion { .. }
         | StorageError::InvalidPlanInput(_)
-        | StorageError::IdeaNotPromotable { .. }
-        | StorageError::InconsistentPromotion { .. }
         | StorageError::NewerDatabase { .. }
         | StorageError::MigrationGap { .. } => 3,
         StorageError::Sqlite(_) => 1,
     }
-}
-
-struct OpenProject {
-    root: PathBuf,
-    config: ProjectConfig,
-    database: Database,
-}
-
-struct ProjectLocation {
-    root: PathBuf,
-    config: ProjectConfig,
-    database_path: PathBuf,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1704,6 +1662,17 @@ fn task_ancestry_with_seen(
     Ok(ancestry)
 }
 
+struct ListFilter {
+    kind: Option<String>,
+    statuses: Vec<String>,
+    priorities: Vec<TaskPriority>,
+    release_id: Option<ReleaseId>,
+    spec_id: Option<SpecId>,
+    plan_id: Option<PlanId>,
+    phase_id: Option<PhaseId>,
+    parent_id: Option<TaskId>,
+}
+
 fn resolve_list_filter(args: ListArgs) -> CResult<ListFilter> {
     let known = ["capture", "release", "spec", "plan", "phase", "task", "note"];
     if let Some(kind) = &args.kind
@@ -1763,8 +1732,6 @@ fn resolve_list_filter(args: ListArgs) -> CResult<ListFilter> {
         statuses: args.status,
         priorities,
         release_id,
-        epic_id: None,
-        milestone_id: None,
         parent_id,
         spec_id,
         plan_id,
@@ -2057,21 +2024,6 @@ fn open_database() -> CResult<Database> {
     Database::open(&database_path).map_err(|source| CommandError::OpenDatabase { path: database_path, source })
 }
 
-fn locate_project() -> CResult<ProjectLocation> {
-    let start = std::env::current_dir().map_err(|source| CommandError::CurrentDirectory { source })?;
-    let Some(root) = nearest_project_root(&start) else {
-        return Err(CommandError::NotInitialized { root: start });
-    };
-    let arcl_directory = root.join(ARCL_DIRECTORY);
-    let config_path = arcl_directory.join(CONFIG_FILE);
-    let database_path = arcl_directory.join(DATABASE_FILE);
-    let input = fs::read_to_string(&config_path)
-        .map_err(|source| CommandError::ReadConfig { path: config_path.clone(), source })?;
-    let config =
-        ProjectConfig::parse(&input).map_err(|source| CommandError::InvalidConfig { path: config_path, source })?;
-    Ok(ProjectLocation { root, config, database_path })
-}
-
 fn nearest_project_root(start: &Path) -> Option<PathBuf> {
     start
         .ancestors()
@@ -2079,47 +2031,6 @@ fn nearest_project_root(start: &Path) -> Option<PathBuf> {
         .map(Path::to_owned)
 }
 
-fn open_project() -> CResult<OpenProject> {
-    let location = locate_project()?;
-    let database = Database::open(&location.database_path)
-        .map_err(|source| CommandError::OpenDatabase { path: location.database_path.clone(), source })?;
-    Ok(OpenProject { root: location.root, config: location.config, database })
-}
-
-fn exec_snapshot(command: SnapshotCommand) -> CResult<()> {
-    match command {
-        SnapshotCommand::Export => {
-            let mut project = open_project()?;
-            if !project.config.snapshot.enabled {
-                return Err(CommandError::SnapshotDisabled { root: project.root });
-            }
-            let config_path = project.root.join(ARCL_DIRECTORY).join(CONFIG_FILE);
-            let snapshot_root = resolve_snapshot_root(&project.root, &project.config.snapshot.path)
-                .map_err(|source| CommandError::InvalidConfig { path: config_path, source })?;
-            let graph = project.database.graph()?;
-            let files = export_graph(&snapshot_root, &graph)?;
-            let base = files
-                .iter()
-                .map(|file| SnapshotBaseFile {
-                    path: file.path.to_string_lossy().into_owned(),
-                    content: file.content.clone(),
-                })
-                .collect::<Vec<_>>();
-            if project.database.snapshot_base()? != base {
-                project.database.replace_snapshot_base(&base)?;
-            }
-            Ok(())
-        }
-        SnapshotCommand::Import => {
-            let project = locate_project()?;
-            if !project.config.snapshot.enabled {
-                return Err(CommandError::SnapshotDisabled { root: project.root });
-            }
-            let config_path = project.root.join(ARCL_DIRECTORY).join(CONFIG_FILE);
-            let snapshot_root = resolve_snapshot_root(&project.root, &project.config.snapshot.path)
-                .map_err(|source| CommandError::InvalidConfig { path: config_path, source })?;
-            import_snapshot(&snapshot_root, &project.root, &project.database_path)?;
-            Ok(())
-        }
-    }
+fn exec_snapshot(_command: SnapshotCommand) -> CResult<()> {
+    Err(CommandError::SnapshotMigrationRequired)
 }

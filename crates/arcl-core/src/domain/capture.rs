@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{CaptureId, DomainError, IdeaStatus, ProjectId, validate_title};
+use super::{CaptureId, DomainError, ProjectId, validate_title};
 
 /// The lifecycle of an inbox capture.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -56,16 +56,6 @@ impl CaptureAction {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Discard => "discard",
-        }
-    }
-}
-
-impl From<IdeaStatus> for CaptureStatus {
-    fn from(status: IdeaStatus) -> Self {
-        match status {
-            IdeaStatus::Captured => Self::Captured,
-            IdeaStatus::Promoted => Self::Promoted,
-            IdeaStatus::Discarded => Self::Discarded,
         }
     }
 }

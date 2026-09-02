@@ -87,15 +87,17 @@ pub fn transition(
 fn has_open_descendants(connection: &Connection, id: &ReleaseId) -> Result<bool, StorageError> {
     Ok(connection.query_row(
         "SELECT EXISTS (
-             SELECT 1 FROM epics e WHERE e.release_id = ?1 AND e.status = 'open'
+             SELECT 1 FROM release_memberships member
+             JOIN specs record ON member.record_kind = 'spec' AND record.id = member.record_id
+             WHERE member.release_id = ?1 AND record.status = 'open'
              UNION ALL
-             SELECT 1 FROM milestones m JOIN epics e ON e.id = m.epic_id
-             WHERE e.release_id = ?1 AND m.status = 'open'
+             SELECT 1 FROM release_memberships member
+             JOIN plans record ON member.record_kind = 'plan' AND record.id = member.record_id
+             WHERE member.release_id = ?1 AND record.status = 'open'
              UNION ALL
-             SELECT 1 FROM tasks t
-             JOIN milestones m ON m.id = t.milestone_id
-             JOIN epics e ON e.id = m.epic_id
-             WHERE e.release_id = ?1 AND t.status NOT IN ('completed', 'cancelled')
+             SELECT 1 FROM release_memberships member
+             JOIN planning_tasks record ON member.record_kind = 'task' AND record.id = member.record_id
+             WHERE member.release_id = ?1 AND record.status NOT IN ('completed', 'cancelled')
          )",
         params![id.to_string()],
         |row| row.get(0),

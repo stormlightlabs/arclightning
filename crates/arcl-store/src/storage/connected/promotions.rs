@@ -123,7 +123,7 @@ pub(super) fn promote_capture(
             Err(StorageError::CaptureNotPromotable { id: id.to_string(), status: current.status.as_str().to_owned() })
         }
         (CaptureStatus::Promoted, None) | (CaptureStatus::Captured, Some(_)) => {
-            Err(StorageError::InconsistentPromotion { id: id.to_string() })
+            Err(StorageError::InconsistentCapturePromotion { id: id.to_string() })
         }
         (CaptureStatus::Promoted, Some((existing_kind, target_id))) => {
             let target = promotion_target(&existing_kind, &target_id)?;
@@ -201,19 +201,19 @@ fn read_promotion_record(
         CapturePromotionTarget::Spec(id) => {
             let record = spec(connection, id)?
                 .filter(|record| record.project_id == project_id)
-                .ok_or_else(|| StorageError::InconsistentPromotion { id: capture_id.to_string() })?;
+                .ok_or_else(|| StorageError::InconsistentCapturePromotion { id: capture_id.to_string() })?;
             Ok(CapturePromotionRecord::Spec(record))
         }
         CapturePromotionTarget::Task(id) => {
             let record = planning_task(connection, id)?
                 .filter(|record| record.project_id == project_id)
-                .ok_or_else(|| StorageError::InconsistentPromotion { id: capture_id.to_string() })?;
+                .ok_or_else(|| StorageError::InconsistentCapturePromotion { id: capture_id.to_string() })?;
             Ok(CapturePromotionRecord::Task(record))
         }
         CapturePromotionTarget::Note(id) => {
             let record = note(connection, id)?
                 .filter(|record| record.project_id == project_id)
-                .ok_or_else(|| StorageError::InconsistentPromotion { id: capture_id.to_string() })?;
+                .ok_or_else(|| StorageError::InconsistentCapturePromotion { id: capture_id.to_string() })?;
             Ok(CapturePromotionRecord::Note(record))
         }
     }

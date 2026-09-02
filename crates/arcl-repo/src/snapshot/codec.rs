@@ -3,7 +3,7 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use arcl_core::domain::{
-    ContainerStatus, EpicId, IdeaId, IdeaStatus, MilestoneId, ReleaseId, TaskId, TaskPriority, TaskStatus,
+    CaptureStatus, ContainerStatus, EpicId, IdeaId, MilestoneId, ReleaseId, TaskId, TaskPriority, TaskStatus,
 };
 
 use super::{Result, SNAPSHOT_FORMAT_VERSION, SnapshotError};
@@ -108,7 +108,7 @@ impl SnapshotManifest {
 pub struct IdeaRecord {
     pub id: IdeaId,
     pub title: String,
-    pub status: IdeaStatus,
+    pub status: CaptureStatus,
     pub promoted_to: Option<EpicId>,
     pub description: String,
 }
@@ -270,7 +270,7 @@ pub fn encode_record(path: &Path, record: &SnapshotRecord) -> Result<String> {
 struct IdeaFrontMatter {
     id: IdeaId,
     title: String,
-    status: IdeaStatus,
+    status: CaptureStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     promoted_to: Option<EpicId>,
 }

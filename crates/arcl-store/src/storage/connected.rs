@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{collections::HashSet, str::FromStr};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -43,6 +43,15 @@ pub struct ConnectedGraph {
     pub release_memberships: Vec<ReleaseMembership>,
     /// Explicit record links.
     pub links: Vec<RecordLink>,
+}
+
+/// Result of validating SQLite and connected-graph integrity.
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize)]
+pub struct CheckReport {
+    /// Whether every integrity check passed.
+    pub valid: bool,
+    /// Human-readable validation failures.
+    pub errors: Vec<String>,
 }
 
 /// Fields used to create a task at any supported planning level.
@@ -177,6 +186,31 @@ pub fn project(connection: &Connection) -> Result<Project> {
         .map_err(DomainError::from)
         .map_err(StorageError::InvalidProject)?;
     Project::from_parts(id, name).map_err(StorageError::InvalidProject)
+}
+
+/// Validate SQLite constraints and the connected planning graph.
+pub fn check(connection: &Connection) -> Result<CheckReport> {
+    let mut errors = Vec::new();
+    let integrity: String = connection.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
+    if integrity != "ok" {
+        errors.push(format!("SQLite integrity check: {integrity}"));
+    }
+    let mut statement = connection.prepare("PRAGMA foreign_key_check")?;
+    let violations = statement.query_map([], |row| row.get::<_, String>(0))?;
+    for table in violations {
+        errors.push(format!("foreign-key violation in `{}`", table?));
+    }
+
+    let graph = graph(connection)?;
+    for task in &graph.tasks {
+        if has_parent_cycle(&graph.tasks, task.id) {
+            errors.push(format!("parent cycle includes `{}`", task.id));
+        }
+        if has_dependency_cycle(&graph.dependencies, task.id) {
+            errors.push(format!("dependency cycle includes `{}`", task.id));
+        }
+    }
+    Ok(CheckReport { valid: errors.is_empty(), errors })
 }
 
 pub fn graph(connection: &Connection) -> Result<ConnectedGraph> {
@@ -1534,6 +1568,40 @@ fn ensure_link_target(c: &Connection, p: ProjectId, kind: LinkedRecordKind, id: 
                 .map_err(StorageError::InvalidLink)?,
         ),
     }
+}
+
+fn has_parent_cycle(tasks: &[PlanningTask], start: TaskId) -> bool {
+    let mut seen = HashSet::new();
+    let mut current = Some(start);
+    while let Some(id) = current {
+        if !seen.insert(id) {
+            return true;
+        }
+        current = tasks.iter().find(|task| task.id == id).and_then(|task| task.parent_id);
+    }
+    false
+}
+
+fn has_dependency_cycle(dependencies: &[TaskDependency], start: TaskId) -> bool {
+    fn visit(
+        dependencies: &[TaskDependency], current: TaskId, visited: &mut HashSet<TaskId>, active: &mut HashSet<TaskId>,
+    ) -> bool {
+        if active.contains(&current) {
+            return true;
+        }
+        if !visited.insert(current) {
+            return false;
+        }
+        active.insert(current);
+        let cycle = dependencies
+            .iter()
+            .filter(|edge| edge.task_id == current)
+            .any(|edge| visit(dependencies, edge.blocker_id, visited, active));
+        active.remove(&current);
+        cycle
+    }
+
+    visit(dependencies, start, &mut HashSet::new(), &mut HashSet::new())
 }
 
 #[cfg(test)]

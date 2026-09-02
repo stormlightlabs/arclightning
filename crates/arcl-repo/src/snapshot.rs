@@ -7,15 +7,11 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 mod codec;
-pub mod export;
-pub mod import;
 
 pub use codec::{
     EpicRecord, IdeaRecord, Manifest, MilestoneRecord, RecordKind, ReleaseRecord, SnapshotManifest, SnapshotRecord,
     TaskRecord, decode_manifest, decode_record, encode_manifest, encode_record,
 };
-pub use export::{SnapshotExportError, SnapshotFile, export_graph, project_graph};
-pub use import::{SnapshotImportError, import_graph, import_snapshot};
 
 pub const CONFIG_FORMAT_VERSION: u32 = 1;
 /// The version of the on-disk snapshot format implemented by this crate.

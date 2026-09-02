@@ -161,11 +161,11 @@ Blocked by: T05, T06
 
 Acceptance criteria:
 
-- [ ] Remove superseded tables or fields through a forward migration with
+- [x] Remove superseded tables or fields through a forward migration with
       upgrade coverage in this task
-- [ ] Remove duplicate domain paths after all production callers use the new
+- [x] Remove duplicate domain paths after all production callers use the new
       records
-- [ ] Confirm upgraded projects retain all supported Markdown, relationships,
+- [x] Confirm upgraded projects retain all supported Markdown, relationships,
       handoffs, and evidence
 
 Verification:
