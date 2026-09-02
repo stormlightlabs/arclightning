@@ -9,10 +9,7 @@ mod queries;
 mod releases;
 mod tasks;
 
-pub use connected::{
-    CaptureUpdate, ConnectedGraph, DEFAULT_PROJECT_ID, NoteUpdate, PhaseUpdate, PlanUpdate, PlanningTaskCreate,
-    PlanningTaskUpdate, SpecUpdate,
-};
+pub use connected::*;
 pub use promotions::Promotion;
 pub use queries::{CheckReport, ContextView, Graph, ListFilter, ListItem, Readiness, ShowView, TaskView, TreeNode};
 pub use tasks::{TaskCreate, TaskUpdate};
@@ -22,15 +19,10 @@ use std::{path::Path, time::Duration};
 use rusqlite::Connection;
 use thiserror::Error;
 
-use crate::domain::{
-    Capture, CaptureId, CapturePromotion, ContainerAction, DomainError, Epic, EpicId, Idea, IdeaId, LinkedRecordKind,
-    Milestone, MilestoneId, Note, NoteId, NoteLink, Phase, PhaseId, Plan, PlanId, PlanningTask, Project, RecordLink,
-    Release, ReleaseId, ReleaseMemberKind, ReleaseMembership, Spec, SpecId, Task, TaskAction, TaskDependency, TaskId,
-    TaskPriority,
-};
+use crate::domain::*;
 
 /// The newest SQLite schema version understood by the application.
-pub const CURRENT_VERSION: i32 = 1;
+pub const CURRENT_VERSION: i32 = 2;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -118,6 +110,16 @@ pub enum StorageError {
     PlanningDependencyNotFound { task: String, blocker: String },
     #[error("spec path `{path}` is already linked to another epic")]
     DuplicateSpec { path: String },
+    #[error("capture `{id}` cannot be promoted from status `{status}`")]
+    CaptureNotPromotable { id: String, status: String },
+    #[error("capture `{capture}` is already promoted to {existing}; cannot promote it to {requested}")]
+    AmbiguousCapturePromotion {
+        capture: String,
+        existing: &'static str,
+        requested: &'static str,
+    },
+    #[error("structured plan input is invalid: {0}")]
+    InvalidPlanInput(#[from] crate::plan::PlanError),
     #[error("idea `{id}` cannot be promoted from status `{status}`")]
     IdeaNotPromotable { id: String, status: String },
     #[error("idea `{id}` has an inconsistent promotion relationship")]
@@ -338,6 +340,39 @@ impl Database {
         connected::discard_capture(&mut self.connection, id)
     }
 
+    /// Apply an inbox lifecycle action.
+    pub fn transition_capture(&mut self, id: CaptureId, action: CaptureAction) -> Result<Capture> {
+        match action {
+            CaptureAction::Discard => self.discard_capture(id),
+        }
+    }
+
+    /// Promote a capture to one owned record and preserve its provenance.
+    pub fn promote_capture(&mut self, id: CaptureId, input: CapturePromotionInput) -> Result<CapturePromotionResult> {
+        connected::promote_capture(&mut self.connection, id, input)
+    }
+
+    /// Promote a capture to an owned specification.
+    pub fn promote_capture_to_spec(
+        &mut self, id: CaptureId, title: String, body: String, acceptance_criteria: String,
+    ) -> Result<CapturePromotionResult> {
+        self.promote_capture(id, CapturePromotionInput::Spec { title, body, acceptance_criteria })
+    }
+
+    /// Promote a capture directly to a project task.
+    pub fn promote_capture_to_task(
+        &mut self, id: CaptureId, input: CaptureTaskPromotion,
+    ) -> Result<CapturePromotionResult> {
+        self.promote_capture(id, CapturePromotionInput::Task(input))
+    }
+
+    /// Promote a capture to an owned note.
+    pub fn promote_capture_to_note(
+        &mut self, id: CaptureId, title: String, body: String,
+    ) -> Result<CapturePromotionResult> {
+        self.promote_capture(id, CapturePromotionInput::Note { title, body })
+    }
+
     /// Read all owned specifications.
     pub fn specs(&self) -> Result<Vec<Spec>> {
         let project = self.project()?;
@@ -358,6 +393,11 @@ impl Database {
     /// Update owned specification content and acceptance criteria.
     pub fn update_spec(&mut self, id: SpecId, update: SpecUpdate) -> Result<Spec> {
         connected::update_spec(&mut self.connection, id, update)
+    }
+
+    /// Complete or cancel a specification while guarding its open descendants.
+    pub fn transition_spec(&mut self, id: SpecId, action: ContainerAction, allow_open_children: bool) -> Result<Spec> {
+        connected::transition_spec(&mut self.connection, id, action, allow_open_children)
     }
 
     /// Read all persistent plans.
@@ -382,6 +422,34 @@ impl Database {
         connected::update_plan(&mut self.connection, id, update)
     }
 
+    /// Complete or cancel a plan while guarding its open descendants.
+    pub fn transition_plan(&mut self, id: PlanId, action: ContainerAction, allow_open_children: bool) -> Result<Plan> {
+        connected::transition_plan(&mut self.connection, id, action, allow_open_children)
+    }
+
+    /// Check structured plan input without changing the database.
+    pub fn check_plan(&self, id: PlanId, document: &crate::plan::PlanDocument) -> Result<PlanDiff> {
+        connected::check_plan(&self.connection, id, document)
+    }
+
+    /// Return the changes structured plan input would make.
+    pub fn diff_plan(&self, id: PlanId, document: &crate::plan::PlanDocument) -> Result<PlanDiff> {
+        connected::diff_plan(&self.connection, id, document)
+    }
+
+    /// Apply structured plan input transactionally and avoid duplicate keyed records.
+    pub fn apply_plan(&mut self, id: PlanId, document: &crate::plan::PlanDocument) -> Result<PlanApplyResult> {
+        connected::apply_plan(&mut self.connection, id, document)
+    }
+
+    /// Create a plan and apply structured phases and tasks in one transaction.
+    pub fn create_and_apply_plan(
+        &mut self, spec_id: SpecId, title: String, body: String, document: &crate::plan::PlanDocument,
+    ) -> Result<PlanApplyResult> {
+        let project = self.project()?;
+        connected::create_and_apply_plan(&mut self.connection, project.id, spec_id, title, body, document)
+    }
+
     /// Read all optional plan phases.
     pub fn phases(&self) -> Result<Vec<Phase>> {
         let project = self.project()?;
@@ -402,6 +470,13 @@ impl Database {
     /// Update phase content and ordering.
     pub fn update_phase(&mut self, id: PhaseId, update: PhaseUpdate) -> Result<Phase> {
         connected::update_phase(&mut self.connection, id, update)
+    }
+
+    /// Complete or cancel a phase while guarding its open tasks.
+    pub fn transition_phase(
+        &mut self, id: PhaseId, action: ContainerAction, allow_open_children: bool,
+    ) -> Result<Phase> {
+        connected::transition_phase(&mut self.connection, id, action, allow_open_children)
     }
 
     /// Read all flexible connected-model tasks.

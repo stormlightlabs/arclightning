@@ -64,14 +64,14 @@ Blocked by: T02
 
 Acceptance criteria:
 
-- [ ] Create, show, update, list, and transition captures, specs, plans, phases,
+- [x] Create, show, update, list, and transition captures, specs, plans, phases,
       and notes through application operations
-- [ ] Promote a capture transactionally to a spec, task, or note
-- [ ] Make repeated promotion to the same target idempotent and reject an
+- [x] Promote a capture transactionally to a spec, task, or note
+- [x] Make repeated promotion to the same target idempotent and reject an
       ambiguous second target
-- [ ] Check, diff, and apply structured plan input against a persistent plan
+- [x] Check, diff, and apply structured plan input against a persistent plan
       without duplicating tasks on repeated application
-- [ ] Return validation errors without partial writes
+- [x] Return validation errors without partial writes
 
 Verification:
 

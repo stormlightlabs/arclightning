@@ -18,6 +18,9 @@ pub struct PlanningTask {
     pub plan_id: Option<PlanId>,
     pub phase_id: Option<PhaseId>,
     pub parent_id: Option<TaskId>,
+    /// The optional stable key used by structured plan application.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan_key: Option<String>,
     pub title: String,
     /// The editable Markdown task body.
     pub body: String,
@@ -46,6 +49,7 @@ impl PlanningTask {
             plan_id,
             phase_id,
             parent_id,
+            plan_key: None,
             title,
             body,
             status: TaskStatus::Pending,

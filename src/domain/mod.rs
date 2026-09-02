@@ -16,7 +16,7 @@ mod release;
 mod spec;
 mod task;
 
-pub use capture::{Capture, CaptureStatus};
+pub use capture::{Capture, CaptureAction, CaptureStatus};
 pub use dependency::TaskDependency;
 pub use epic::Epic;
 pub use error::{DomainError, validate_position, validate_title};

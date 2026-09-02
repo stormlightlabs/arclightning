@@ -228,6 +228,9 @@ impl From<&StorageError> for u8 {
             | StorageError::InvalidTask(_)
             | StorageError::InvalidDependency(_)
             | StorageError::DuplicateSpec { .. }
+            | StorageError::CaptureNotPromotable { .. }
+            | StorageError::AmbiguousCapturePromotion { .. }
+            | StorageError::InvalidPlanInput(_)
             | StorageError::IdeaNotPromotable { .. }
             | StorageError::InconsistentPromotion { .. }
             | StorageError::NewerDatabase { .. }

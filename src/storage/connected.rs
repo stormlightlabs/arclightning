@@ -2,14 +2,17 @@ use std::{collections::HashSet, str::FromStr};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::domain::{
-    Capture, CaptureId, CapturePromotion, CapturePromotionTarget, CaptureStatus, ContainerStatus, DomainError,
-    LinkedRecordKind, Note, NoteId, NoteLink, Phase, PhaseId, Plan, PlanId, PlanningTask, Project, ProjectId,
-    RecordLink, Release, ReleaseId, ReleaseMemberKind, ReleaseMembership, Spec, SpecId, TaskDependency, TaskId,
-    TaskPriority, TaskStatus, validate_position, validate_title,
-};
-
 use super::{Result, StorageError, releases};
+use crate::domain::*;
+
+mod plan_ops;
+mod promotions;
+
+pub use plan_ops::{
+    PlanApplyResult, PlanChange, PlanDependencyDiff, PlanDiff, PlanDiffItem, apply_plan, check_plan,
+    create_and_apply_plan, diff_plan,
+};
+pub use promotions::{CapturePromotionInput, CapturePromotionRecord, CapturePromotionResult, CaptureTaskPromotion};
 
 /// The stable project ID created for every operational database.
 pub const DEFAULT_PROJECT_ID: &str = "arcl-pj-00000000000000000000000000";
@@ -95,6 +98,34 @@ pub struct CaptureUpdate {
     pub body: Option<String>,
 }
 
+struct RawPhase {
+    id: String,
+    project: String,
+    plan: String,
+    plan_key: Option<String>,
+    title: String,
+    body: String,
+    status: String,
+    position: i64,
+}
+
+struct RawTask {
+    id: String,
+    project: String,
+    spec: Option<String>,
+    plan: Option<String>,
+    phase: Option<String>,
+    parent: Option<String>,
+    plan_key: Option<String>,
+    title: String,
+    body: String,
+    status: String,
+    priority: String,
+    position: i64,
+    handoff: String,
+    evidence: String,
+}
+
 pub fn project(connection: &Connection) -> Result<Project> {
     let (id, name) = connection
         .query_row("SELECT id, name FROM projects ORDER BY id LIMIT 1", [], |row| {
@@ -171,52 +202,7 @@ pub fn create_capture(
 
 /// Read capture promotion provenance as explicit typed relationships.
 pub fn capture_promotions(connection: &Connection, project_id: ProjectId) -> Result<Vec<CapturePromotion>> {
-    let mut statement = connection.prepare(
-        "SELECT project_id, capture_id, target_kind, target_id
-         FROM capture_promotions WHERE project_id = ?1 ORDER BY capture_id",
-    )?;
-    let rows = statement.query_map([project_id.to_string()], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?,
-        ))
-    })?;
-    rows.map(|row| {
-        let (project, capture, kind, target) = row?;
-        let project_id = ProjectId::parse(&project)
-            .map_err(DomainError::from)
-            .map_err(StorageError::InvalidCapture)?;
-        let capture_id = CaptureId::parse(&capture)
-            .map_err(DomainError::from)
-            .map_err(StorageError::InvalidCapture)?;
-        let target = match kind.as_str() {
-            "spec" => CapturePromotionTarget::Spec(
-                SpecId::parse(&target)
-                    .map_err(DomainError::from)
-                    .map_err(StorageError::InvalidCapture)?,
-            ),
-            "task" => CapturePromotionTarget::Task(
-                TaskId::parse(&target)
-                    .map_err(DomainError::from)
-                    .map_err(StorageError::InvalidCapture)?,
-            ),
-            "note" => CapturePromotionTarget::Note(
-                NoteId::parse(&target)
-                    .map_err(DomainError::from)
-                    .map_err(StorageError::InvalidCapture)?,
-            ),
-            _ => {
-                return Err(StorageError::InvalidCapture(DomainError::InvalidStatus {
-                    entity: "capture promotion target",
-                    value: kind,
-                }));
-            }
-        };
-        Ok(CapturePromotion { project_id, capture_id, target })
-    })
-    .collect()
+    promotions::capture_promotions(connection, project_id)
 }
 
 pub fn update_capture(connection: &mut Connection, id: CaptureId, update: CaptureUpdate) -> Result<Capture> {
@@ -250,21 +236,25 @@ pub fn update_capture(connection: &mut Connection, id: CaptureId, update: Captur
 pub fn discard_capture(connection: &mut Connection, id: CaptureId) -> Result<Capture> {
     let tx = connection.transaction()?;
     let current = capture(&tx, id)?.ok_or_else(|| StorageError::CaptureNotFound { id: id.to_string() })?;
-    if current.status == CaptureStatus::Promoted {
-        return Err(StorageError::InvalidCapture(DomainError::InvalidTransition {
-            entity: "capture",
-            action: "discard",
-            from: current.status.as_str().to_owned(),
-        }));
-    }
-    if current.status == CaptureStatus::Captured {
+    let next_status = current
+        .status
+        .apply(CaptureAction::Discard)
+        .map_err(StorageError::InvalidCapture)?;
+    if next_status != current.status {
         tx.execute(
-            "UPDATE captures SET status = 'discarded' WHERE id = ?1",
-            [id.to_string()],
+            "UPDATE captures SET status = ?1 WHERE id = ?2",
+            params![next_status.as_str(), id.to_string()],
         )?;
     }
     tx.commit()?;
-    Ok(Capture { status: CaptureStatus::Discarded, ..current })
+    Ok(Capture { status: next_status, ..current })
+}
+
+/// Promote a capture through the connected promotion workflow.
+pub fn promote_capture(
+    connection: &mut Connection, id: CaptureId, input: CapturePromotionInput,
+) -> Result<CapturePromotionResult> {
+    promotions::promote_capture(connection, id, input)
 }
 
 pub fn specs(connection: &Connection, project_id: ProjectId) -> Result<Vec<Spec>> {
@@ -337,6 +327,49 @@ pub fn update_spec(connection: &mut Connection, id: SpecId, update: SpecUpdate) 
     })
 }
 
+/// Complete or cancel a specification after checking its descendants.
+pub fn transition_spec(
+    connection: &mut Connection, id: SpecId, action: ContainerAction, allow_open_children: bool,
+) -> Result<Spec> {
+    let tx = connection.transaction()?;
+    let current = spec(&tx, id)?.ok_or_else(|| StorageError::SpecNotFound { id: id.to_string() })?;
+    let next_status = current
+        .status
+        .apply("spec", action)
+        .map_err(StorageError::InvalidSpec)?;
+    if next_status == current.status {
+        return Ok(current);
+    }
+    if !allow_open_children && has_open_spec_descendants(&tx, id)? {
+        return Err(StorageError::InvalidSpec(DomainError::OpenDescendants {
+            entity: "spec",
+            id: id.to_string(),
+            action: action.as_str(),
+        }));
+    }
+    tx.execute(
+        "UPDATE specs SET status = ?1 WHERE id = ?2",
+        params![next_status.as_str(), id.to_string()],
+    )?;
+    tx.commit()?;
+    Ok(Spec { status: next_status, ..current })
+}
+
+fn has_open_spec_descendants(connection: &Connection, id: SpecId) -> Result<bool> {
+    Ok(connection.query_row(
+        "SELECT EXISTS (
+             SELECT 1 FROM plans WHERE spec_id = ?1 AND status = 'open'
+             UNION ALL
+             SELECT 1 FROM planning_tasks WHERE spec_id = ?1 AND status NOT IN ('completed', 'cancelled')
+             UNION ALL
+             SELECT 1 FROM planning_tasks t JOIN plans p ON p.id = t.plan_id
+             WHERE p.spec_id = ?1 AND t.status NOT IN ('completed', 'cancelled')
+         )",
+        [id.to_string()],
+        |row| row.get(0),
+    )?)
+}
+
 pub fn plans(connection: &Connection, project_id: ProjectId) -> Result<Vec<Plan>> {
     let mut statement = connection.prepare(
         "SELECT id, project_id, spec_id, title, body, status FROM plans
@@ -400,8 +433,48 @@ pub fn update_plan(connection: &mut Connection, id: PlanId, update: PlanUpdate) 
     Ok(Plan { title: title.to_owned(), body: body.to_owned(), ..current })
 }
 
+/// Complete or cancel a persistent plan after checking phases and tasks.
+pub fn transition_plan(
+    connection: &mut Connection, id: PlanId, action: ContainerAction, allow_open_children: bool,
+) -> Result<Plan> {
+    let tx = connection.transaction()?;
+    let current = plan(&tx, id)?.ok_or_else(|| StorageError::PlanNotFound { id: id.to_string() })?;
+    let next_status = current
+        .status
+        .apply("plan", action)
+        .map_err(StorageError::InvalidPlan)?;
+    if next_status == current.status {
+        return Ok(current);
+    }
+    if !allow_open_children && has_open_plan_descendants(&tx, id)? {
+        return Err(StorageError::InvalidPlan(DomainError::OpenDescendants {
+            entity: "plan",
+            id: id.to_string(),
+            action: action.as_str(),
+        }));
+    }
+    tx.execute(
+        "UPDATE plans SET status = ?1 WHERE id = ?2",
+        params![next_status.as_str(), id.to_string()],
+    )?;
+    tx.commit()?;
+    Ok(Plan { status: next_status, ..current })
+}
+
+fn has_open_plan_descendants(connection: &Connection, id: PlanId) -> Result<bool> {
+    Ok(connection.query_row(
+        "SELECT EXISTS (
+             SELECT 1 FROM phases WHERE plan_id = ?1 AND status = 'open'
+             UNION ALL
+             SELECT 1 FROM planning_tasks WHERE plan_id = ?1 AND status NOT IN ('completed', 'cancelled')
+         )",
+        [id.to_string()],
+        |row| row.get(0),
+    )?)
+}
+
 pub fn phases(connection: &Connection, project_id: ProjectId) -> Result<Vec<Phase>> {
-    let mut statement = connection.prepare("SELECT id, project_id, plan_id, title, body, status, position FROM phases WHERE project_id = ?1 ORDER BY plan_id, position, id")?;
+    let mut statement = connection.prepare("SELECT id, project_id, plan_id, plan_key, title, body, status, position FROM phases WHERE project_id = ?1 ORDER BY plan_id, position, id")?;
     let rows = statement.query_map([project_id.to_string()], raw_phase)?;
     rows.map(|row| decode_phase(row?)).collect()
 }
@@ -409,7 +482,7 @@ pub fn phases(connection: &Connection, project_id: ProjectId) -> Result<Vec<Phas
 pub fn phase(connection: &Connection, id: PhaseId) -> Result<Option<Phase>> {
     let raw = connection
         .query_row(
-            "SELECT id, project_id, plan_id, title, body, status, position FROM phases WHERE id = ?1",
+            "SELECT id, project_id, plan_id, plan_key, title, body, status, position FROM phases WHERE id = ?1",
             [id.to_string()],
             raw_phase,
         )
@@ -454,9 +527,48 @@ pub fn update_phase(connection: &mut Connection, id: PhaseId, update: PhaseUpdat
     Ok(Phase { title: title.to_owned(), body: body.to_owned(), position, ..current })
 }
 
+/// Complete or cancel a phase after checking its tasks.
+pub fn transition_phase(
+    connection: &mut Connection, id: PhaseId, action: ContainerAction, allow_open_children: bool,
+) -> Result<Phase> {
+    let tx = connection.transaction()?;
+    let current = phase(&tx, id)?.ok_or_else(|| StorageError::PhaseNotFound { id: id.to_string() })?;
+    let next_status = current
+        .status
+        .apply("phase", action)
+        .map_err(StorageError::InvalidPhase)?;
+    if next_status == current.status {
+        return Ok(current);
+    }
+    if !allow_open_children && has_open_phase_descendants(&tx, id)? {
+        return Err(StorageError::InvalidPhase(DomainError::OpenDescendants {
+            entity: "phase",
+            id: id.to_string(),
+            action: action.as_str(),
+        }));
+    }
+    tx.execute(
+        "UPDATE phases SET status = ?1 WHERE id = ?2",
+        params![next_status.as_str(), id.to_string()],
+    )?;
+    tx.commit()?;
+    Ok(Phase { status: next_status, ..current })
+}
+
+fn has_open_phase_descendants(connection: &Connection, id: PhaseId) -> Result<bool> {
+    Ok(connection.query_row(
+        "SELECT EXISTS (
+             SELECT 1 FROM planning_tasks WHERE phase_id = ?1 AND status NOT IN ('completed', 'cancelled')
+         )",
+        [id.to_string()],
+        |row| row.get(0),
+    )?)
+}
+
+/// Check a structured plan against an existing persistent plan without writing.
 pub fn planning_tasks(connection: &Connection, project_id: ProjectId) -> Result<Vec<PlanningTask>> {
     let mut statement = connection.prepare(
-        "SELECT id, project_id, spec_id, plan_id, phase_id, parent_id, title, body, status, priority, position, handoff, evidence
+        "SELECT id, project_id, spec_id, plan_id, phase_id, parent_id, plan_key, title, body, status, priority, position, handoff, evidence
          FROM planning_tasks WHERE project_id = ?1
          ORDER BY COALESCE(phase_id, ''), COALESCE(plan_id, ''), COALESCE(spec_id, ''), COALESCE(parent_id, ''), position, id",
     )?;
@@ -466,7 +578,7 @@ pub fn planning_tasks(connection: &Connection, project_id: ProjectId) -> Result<
 
 pub fn planning_task(connection: &Connection, id: TaskId) -> Result<Option<PlanningTask>> {
     let raw = connection.query_row(
-        "SELECT id, project_id, spec_id, plan_id, phase_id, parent_id, title, body, status, priority, position, handoff, evidence FROM planning_tasks WHERE id = ?1",
+        "SELECT id, project_id, spec_id, plan_id, phase_id, parent_id, plan_key, title, body, status, priority, position, handoff, evidence FROM planning_tasks WHERE id = ?1",
         [id.to_string()], raw_task,
     ).optional()?;
     raw.map(decode_task).transpose()
@@ -523,6 +635,7 @@ pub fn update_planning_task(
         plan_id: update.plan_id.unwrap_or(current.plan_id),
         phase_id: update.phase_id.unwrap_or(current.phase_id),
         parent_id: update.parent_id.unwrap_or(current.parent_id),
+        plan_key: current.plan_key,
         title: update.title.unwrap_or(current.title),
         body: update.body.unwrap_or(current.body),
         status: current.status,
@@ -968,19 +1081,20 @@ fn decode_plan(raw: (String, String, String, String, String, String)) -> Result<
     value.status = status;
     Ok(value)
 }
-fn raw_phase(row: &rusqlite::Row<'_>) -> rusqlite::Result<(String, String, String, String, String, String, i64)> {
-    Ok((
-        row.get(0)?,
-        row.get(1)?,
-        row.get(2)?,
-        row.get(3)?,
-        row.get(4)?,
-        row.get(5)?,
-        row.get(6)?,
-    ))
+fn raw_phase(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawPhase> {
+    Ok(RawPhase {
+        id: row.get(0)?,
+        project: row.get(1)?,
+        plan: row.get(2)?,
+        plan_key: row.get(3)?,
+        title: row.get(4)?,
+        body: row.get(5)?,
+        status: row.get(6)?,
+        position: row.get(7)?,
+    })
 }
-fn decode_phase(raw: (String, String, String, String, String, String, i64)) -> Result<Phase> {
-    let (id, project, plan, title, body, status, position) = raw;
+fn decode_phase(raw: RawPhase) -> Result<Phase> {
+    let RawPhase { id, project, plan, plan_key, title, body, status, position } = raw;
     let id = PhaseId::parse(&id)
         .map_err(DomainError::from)
         .map_err(StorageError::InvalidPhase)?;
@@ -993,25 +1107,11 @@ fn decode_phase(raw: (String, String, String, String, String, String, i64)) -> R
     let status = ContainerStatus::parse("phase", &status).map_err(StorageError::InvalidPhase)?;
     let mut value = Phase::new(project_id, plan_id, title, body, position).map_err(StorageError::InvalidPhase)?;
     value.id = id;
+    value.plan_key = plan_key;
     value.status = status;
     Ok(value)
 }
 
-struct RawTask {
-    id: String,
-    project: String,
-    spec: Option<String>,
-    plan: Option<String>,
-    phase: Option<String>,
-    parent: Option<String>,
-    title: String,
-    body: String,
-    status: String,
-    priority: String,
-    position: i64,
-    handoff: String,
-    evidence: String,
-}
 fn raw_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawTask> {
     Ok(RawTask {
         id: row.get(0)?,
@@ -1020,13 +1120,14 @@ fn raw_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawTask> {
         plan: row.get(3)?,
         phase: row.get(4)?,
         parent: row.get(5)?,
-        title: row.get(6)?,
-        body: row.get(7)?,
-        status: row.get(8)?,
-        priority: row.get(9)?,
-        position: row.get(10)?,
-        handoff: row.get(11)?,
-        evidence: row.get(12)?,
+        plan_key: row.get(6)?,
+        title: row.get(7)?,
+        body: row.get(8)?,
+        status: row.get(9)?,
+        priority: row.get(10)?,
+        position: row.get(11)?,
+        handoff: row.get(12)?,
+        evidence: row.get(13)?,
     })
 }
 fn decode_task(raw: RawTask) -> Result<PlanningTask> {
@@ -1049,6 +1150,7 @@ fn decode_task(raw: RawTask) -> Result<PlanningTask> {
         plan_id,
         phase_id,
         parent_id,
+        plan_key: raw.plan_key,
         title: raw.title,
         body: raw.body,
         status,
@@ -1235,11 +1337,11 @@ fn contradictory(task: &PlanningTask, relationship: &str) -> StorageError {
     })
 }
 fn insert_task(c: &Connection, task: &PlanningTask) -> Result<()> {
-    c.execute("INSERT INTO planning_tasks (id, project_id, spec_id, plan_id, phase_id, parent_id, title, body, status, priority, position, handoff, evidence) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)", params![task.id.to_string(), task.project_id.to_string(), task.spec_id.map(|x|x.to_string()), task.plan_id.map(|x|x.to_string()), task.phase_id.map(|x|x.to_string()), task.parent_id.map(|x|x.to_string()), task.title, task.body, task.status.as_str(), task.priority.as_str(), task.position, task.handoff, task.evidence])?;
+    c.execute("INSERT INTO planning_tasks (id, project_id, spec_id, plan_id, phase_id, parent_id, plan_key, title, body, status, priority, position, handoff, evidence) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)", params![task.id.to_string(), task.project_id.to_string(), task.spec_id.map(|x|x.to_string()), task.plan_id.map(|x|x.to_string()), task.phase_id.map(|x|x.to_string()), task.parent_id.map(|x|x.to_string()), task.plan_key, task.title, task.body, task.status.as_str(), task.priority.as_str(), task.position, task.handoff, task.evidence])?;
     Ok(())
 }
 fn insert_phase(c: &Connection, phase: &Phase) -> Result<()> {
-    c.execute("INSERT INTO phases (id, project_id, plan_id, title, body, status, position) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", params![phase.id.to_string(), phase.project_id.to_string(), phase.plan_id.to_string(), phase.title, phase.body, phase.status.as_str(), phase.position])?;
+    c.execute("INSERT INTO phases (id, project_id, plan_id, plan_key, title, body, status, position) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)", params![phase.id.to_string(), phase.project_id.to_string(), phase.plan_id.to_string(), phase.plan_key, phase.title, phase.body, phase.status.as_str(), phase.position])?;
     Ok(())
 }
 
@@ -1371,8 +1473,11 @@ fn ensure_link_target(c: &Connection, p: ProjectId, kind: LinkedRecordKind, id: 
 #[cfg(test)]
 mod tests {
 
-    use super::super::{Database, PlanningTaskCreate, StorageError};
-    use crate::domain::{DomainError, LinkedRecordKind, ProjectId, ReleaseMemberKind, TaskPriority};
+    use super::super::{
+        CapturePromotionInput, CapturePromotionRecord, CaptureTaskPromotion, Database, PlanningTaskCreate, StorageError,
+    };
+    use crate::domain::{ContainerAction, DomainError, LinkedRecordKind, ProjectId, ReleaseMemberKind, TaskPriority};
+    use crate::plan::{PlanDocument, PlanPhase, PlanTask};
 
     #[test]
     fn connected_records_keep_markdown_and_allow_each_task_placement() {
@@ -1532,6 +1637,296 @@ mod tests {
             error,
             StorageError::InvalidPlanningTask(DomainError::DifferentProject { .. })
         ));
+    }
+
+    #[test]
+    fn capture_promotion_preserves_provenance_and_rejects_a_second_destination() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let capture = database
+            .create_capture("Captured idea".to_owned(), "Original **Markdown**".to_owned())
+            .expect("capture creates");
+        let first = database
+            .promote_capture(
+                capture.id,
+                CapturePromotionInput::Spec {
+                    title: "Owned spec".to_owned(),
+                    body: "Spec body".to_owned(),
+                    acceptance_criteria: "- [ ] works".to_owned(),
+                },
+            )
+            .expect("capture promotes");
+        let CapturePromotionRecord::Spec(spec) = &first.record else {
+            panic!("promotion creates a spec");
+        };
+        assert_eq!(first.capture.status.as_str(), "promoted");
+        assert_eq!(spec.source_capture_id, Some(capture.id));
+        assert_eq!(database.capture_promotions().expect("provenance reads").len(), 1);
+
+        let repeated = database
+            .promote_capture(
+                capture.id,
+                CapturePromotionInput::Spec {
+                    title: "Ignored title".to_owned(),
+                    body: "Ignored body".to_owned(),
+                    acceptance_criteria: String::new(),
+                },
+            )
+            .expect("same destination is idempotent");
+        let CapturePromotionRecord::Spec(repeated_spec) = repeated.record else {
+            panic!("repeated promotion returns a spec");
+        };
+        assert_eq!(repeated_spec.id, spec.id);
+        assert_eq!(database.specs().expect("specs read").len(), 1);
+
+        let error = database
+            .promote_capture(
+                capture.id,
+                CapturePromotionInput::Note { title: "Other destination".to_owned(), body: String::new() },
+            )
+            .expect_err("a second destination is ambiguous");
+        assert!(matches!(error, StorageError::AmbiguousCapturePromotion { .. }));
+        assert!(database.notes().expect("notes read").is_empty());
+    }
+
+    #[test]
+    fn capture_to_task_and_note_are_atomic_and_keep_the_source_content() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let spec = database
+            .create_spec("Spec".to_owned(), String::new(), String::new())
+            .expect("spec creates");
+        let capture = database
+            .create_capture("Task thought".to_owned(), "Task details".to_owned())
+            .expect("capture creates");
+        let promoted = database
+            .promote_capture_to_task(
+                capture.id,
+                CaptureTaskPromotion {
+                    spec_id: Some(spec.id),
+                    plan_id: None,
+                    phase_id: None,
+                    parent_id: None,
+                    title: capture.title.clone(),
+                    body: capture.body.clone(),
+                    priority: TaskPriority::High,
+                    position: 0,
+                },
+            )
+            .expect("capture promotes to task");
+        assert!(matches!(promoted.record, CapturePromotionRecord::Task(_)));
+        assert_eq!(database.planning_tasks().expect("tasks read").len(), 1);
+        assert_eq!(
+            database
+                .capture(capture.id)
+                .expect("capture reads")
+                .expect("capture exists")
+                .body,
+            capture.body
+        );
+
+        let note_capture = database
+            .create_capture("Note thought".to_owned(), "Note details".to_owned())
+            .expect("capture creates");
+        let note = database
+            .promote_capture_to_note(note_capture.id, note_capture.title.clone(), note_capture.body.clone())
+            .expect("capture promotes to note");
+        assert!(matches!(note.record, CapturePromotionRecord::Note(_)));
+        assert_eq!(database.notes().expect("notes read").len(), 1);
+
+        let invalid = database
+            .create_capture("Invalid".to_owned(), String::new())
+            .expect("capture creates");
+        let error = database
+            .promote_capture(
+                invalid.id,
+                CapturePromotionInput::Task(CaptureTaskPromotion {
+                    spec_id: Some(spec.id),
+                    plan_id: None,
+                    phase_id: Some(crate::domain::PhaseId::new()),
+                    parent_id: None,
+                    title: "Invalid".to_owned(),
+                    body: String::new(),
+                    priority: TaskPriority::Normal,
+                    position: 0,
+                }),
+            )
+            .expect_err("invalid ancestry rejects");
+        assert!(matches!(error, StorageError::PhaseNotFound { .. }));
+        assert_eq!(
+            database
+                .capture(invalid.id)
+                .expect("capture reads")
+                .expect("capture exists")
+                .status
+                .as_str(),
+            "captured"
+        );
+        assert_eq!(database.planning_tasks().expect("tasks read").len(), 1);
+        assert_eq!(spec.project_id, database.project().expect("project remains").id);
+    }
+
+    #[test]
+    fn structured_plan_diff_and_apply_are_idempotent() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let spec = database
+            .create_spec("Spec".to_owned(), String::new(), String::new())
+            .expect("spec creates");
+        let plan = database
+            .create_plan(spec.id, "Plan".to_owned(), "Plan body".to_owned())
+            .expect("plan creates");
+        let document = PlanDocument {
+            format_version: 1,
+            phases: vec![PlanPhase {
+                key: "storage".to_owned(),
+                title: "Storage".to_owned(),
+                position: 0,
+                tasks: vec![
+                    PlanTask {
+                        key: "schema".to_owned(),
+                        title: "Update schema".to_owned(),
+                        priority: Some(TaskPriority::High),
+                        position: 0,
+                        blocked_by: Vec::new(),
+                        subtasks: Vec::new(),
+                    },
+                    PlanTask {
+                        key: "verify".to_owned(),
+                        title: "Verify changes".to_owned(),
+                        priority: None,
+                        position: 1,
+                        blocked_by: vec!["storage/schema".to_owned()],
+                        subtasks: Vec::new(),
+                    },
+                ],
+            }],
+        };
+        let first_diff = database.diff_plan(plan.id, &document).expect("diff succeeds");
+        assert!(
+            first_diff
+                .phases
+                .iter()
+                .all(|item| item.change == super::PlanChange::Create)
+        );
+        assert_eq!(first_diff.tasks.len(), 2);
+        let first = database.apply_plan(plan.id, &document).expect("plan applies");
+        assert_eq!(first.phases.len(), 1);
+        assert_eq!(first.tasks.len(), 2);
+        assert_eq!(first.dependencies.len(), 1);
+
+        let second_diff = database.check_plan(plan.id, &document).expect("check succeeds");
+        assert!(
+            second_diff
+                .phases
+                .iter()
+                .all(|item| item.change == super::PlanChange::Unchanged)
+        );
+        assert!(
+            second_diff
+                .tasks
+                .iter()
+                .all(|item| item.change == super::PlanChange::Unchanged)
+        );
+        assert!(
+            second_diff
+                .dependencies
+                .iter()
+                .all(|item| item.change == super::PlanChange::Unchanged)
+        );
+        database.apply_plan(plan.id, &document).expect("repeated plan applies");
+        assert_eq!(database.phases().expect("phases read").len(), 1);
+        assert_eq!(database.planning_tasks().expect("tasks read").len(), 2);
+        assert_eq!(database.planning_dependencies().expect("dependencies read").len(), 1);
+
+        let mut invalid = document.clone();
+        invalid.phases[0].tasks[0].blocked_by = vec!["does-not-exist".to_owned()];
+        let error = database
+            .apply_plan(plan.id, &invalid)
+            .expect_err("unknown dependency rejects");
+        assert!(matches!(error, StorageError::InvalidPlanInput(_)));
+        assert_eq!(database.planning_tasks().expect("tasks remain").len(), 2);
+    }
+
+    #[test]
+    fn creating_and_applying_a_plan_is_atomic() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let spec = database
+            .create_spec("Spec".to_owned(), String::new(), String::new())
+            .expect("spec creates");
+        let document = PlanDocument {
+            format_version: 1,
+            phases: vec![PlanPhase {
+                key: "delivery".to_owned(),
+                title: "Delivery".to_owned(),
+                position: 0,
+                tasks: vec![PlanTask {
+                    key: "ship".to_owned(),
+                    title: "Ship it".to_owned(),
+                    priority: None,
+                    position: 0,
+                    blocked_by: Vec::new(),
+                    subtasks: Vec::new(),
+                }],
+            }],
+        };
+        let applied = database
+            .create_and_apply_plan(spec.id, "Plan".to_owned(), "Plan body".to_owned(), &document)
+            .expect("plan creates and applies");
+        assert_eq!(applied.plan.spec_id, spec.id);
+        assert_eq!(database.plans().expect("plans read").len(), 1);
+        assert_eq!(database.planning_tasks().expect("tasks read").len(), 1);
+
+        let invalid = PlanDocument { format_version: 9, phases: Vec::new() };
+        let error = database
+            .create_and_apply_plan(spec.id, "Invalid".to_owned(), String::new(), &invalid)
+            .expect_err("invalid plan does not write");
+        assert!(matches!(error, StorageError::InvalidPlanInput(_)));
+        assert_eq!(database.plans().expect("plans remain").len(), 1);
+    }
+
+    #[test]
+    fn connected_containers_transition_without_partial_writes() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let spec = database
+            .create_spec("Spec".to_owned(), String::new(), String::new())
+            .expect("spec creates");
+        let plan = database
+            .create_plan(spec.id, "Plan".to_owned(), String::new())
+            .expect("plan creates");
+        let phase = database
+            .create_phase(plan.id, "Phase".to_owned(), String::new(), 0)
+            .expect("phase creates");
+        let task = database
+            .create_planning_task(PlanningTaskCreate {
+                project_id: spec.project_id,
+                spec_id: Some(spec.id),
+                plan_id: Some(plan.id),
+                phase_id: Some(phase.id),
+                parent_id: None,
+                title: "Task".to_owned(),
+                body: String::new(),
+                priority: TaskPriority::Normal,
+                position: 0,
+            })
+            .expect("task creates");
+        assert!(matches!(
+            database.transition_phase(phase.id, ContainerAction::Complete, false),
+            Err(StorageError::InvalidPhase(DomainError::OpenDescendants { .. }))
+        ));
+        database
+            .connection()
+            .execute(
+                "UPDATE planning_tasks SET status = 'completed' WHERE id = ?1",
+                [task.id.to_string()],
+            )
+            .expect("task completes");
+        database
+            .transition_phase(phase.id, ContainerAction::Complete, false)
+            .expect("phase completes");
+        database
+            .transition_plan(plan.id, ContainerAction::Complete, false)
+            .expect("plan completes");
+        database
+            .transition_spec(spec.id, ContainerAction::Complete, false)
+            .expect("spec completes");
     }
 
     #[test]

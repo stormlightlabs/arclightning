@@ -7,7 +7,10 @@ struct Migration {
     sql: &'static str,
 }
 
-const MIGRATIONS: &[Migration] = &[Migration { version: 1, sql: include_str!("migrations/001_schema.sql") }];
+const MIGRATIONS: &[Migration] = &[
+    Migration { version: 1, sql: include_str!("migrations/001_schema.sql") },
+    Migration { version: 2, sql: include_str!("migrations/002_plan_keys.sql") },
+];
 
 pub fn apply(connection: &mut Connection) -> Result<(), StorageError> {
     let current: i32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
@@ -36,6 +39,35 @@ pub fn apply(connection: &mut Connection) -> Result<(), StorageError> {
 #[cfg(test)]
 mod tests {
     use super::super::{CURRENT_VERSION, DEFAULT_PROJECT_ID, Database};
+
+    #[test]
+    fn plan_key_migration_upgrades_a_version_one_database() {
+        let mut connection = rusqlite::Connection::open_in_memory().expect("in-memory SQLite opens");
+        connection
+            .execute_batch(include_str!("migrations/001_schema.sql"))
+            .expect("version one schema creates");
+        connection
+            .pragma_update(None, "user_version", 1)
+            .expect("version one marker writes");
+
+        super::apply(&mut connection).expect("plan key migration applies");
+        let phase_key: String = connection
+            .query_row(
+                "SELECT name FROM pragma_table_info('phases') WHERE name = 'plan_key'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("phase plan key exists");
+        let task_key: String = connection
+            .query_row(
+                "SELECT name FROM pragma_table_info('planning_tasks') WHERE name = 'plan_key'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("task plan key exists");
+        assert_eq!(phase_key, "plan_key");
+        assert_eq!(task_key, "plan_key");
+    }
 
     #[test]
     fn baseline_creates_the_complete_schema() {

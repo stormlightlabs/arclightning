@@ -110,6 +110,26 @@ pub enum CapturePromotionTarget {
     Note(NoteId),
 }
 
+impl CapturePromotionTarget {
+    /// Return the stable promotion kind for this destination.
+    pub(crate) const fn promotion_kind(self) -> &'static str {
+        match self {
+            Self::Spec(_) => "spec",
+            Self::Task(_) => "task",
+            Self::Note(_) => "note",
+        }
+    }
+
+    /// Return the destination identifier in its persisted form.
+    pub(crate) fn promotion_target_id(self) -> String {
+        match self {
+            Self::Spec(id) => id.to_string(),
+            Self::Task(id) => id.to_string(),
+            Self::Note(id) => id.to_string(),
+        }
+    }
+}
+
 /// Provenance preserved when a capture becomes a planning record.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct CapturePromotion {

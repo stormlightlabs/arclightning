@@ -30,6 +30,34 @@ impl CaptureStatus {
             _ => Err(DomainError::InvalidStatus { entity: "capture", value: value.to_owned() }),
         }
     }
+
+    /// Apply an inbox lifecycle action without changing promotion provenance.
+    pub fn apply(self, action: CaptureAction) -> Result<Self, DomainError> {
+        match (self, action) {
+            (Self::Captured, CaptureAction::Discard) => Ok(Self::Discarded),
+            (Self::Discarded, CaptureAction::Discard) => Ok(Self::Discarded),
+            (status, CaptureAction::Discard) => Err(DomainError::InvalidTransition {
+                entity: "capture",
+                action: action.as_str(),
+                from: status.as_str().to_owned(),
+            }),
+        }
+    }
+}
+
+/// An inbox lifecycle operation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CaptureAction {
+    Discard,
+}
+
+impl CaptureAction {
+    /// Return the stable action name used in validation errors.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Discard => "discard",
+        }
+    }
 }
 
 impl From<IdeaStatus> for CaptureStatus {
