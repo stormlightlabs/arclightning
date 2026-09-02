@@ -16,12 +16,12 @@ Blocked by: None - can start immediately
 
 Acceptance criteria:
 
-- [ ] `arcl init` succeeds in a non-Git directory and creates a local project
-- [ ] Commands discover the nearest Arc Lightning project from descendant
+- [x] `arcl init` succeeds in a non-Git directory and creates a local project
+- [x] Commands discover the nearest Arc Lightning project from descendant
       directories without relying on Git discovery
-- [ ] Git-backed projects still report repository state when repository-native
+- [x] Git-backed projects still report repository state when repository-native
       mode uses it
-- [ ] Core domain and storage operations do not require a Git repository
+- [x] Core domain and storage operations do not require a Git repository
 
 Verification:
 

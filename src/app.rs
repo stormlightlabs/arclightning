@@ -115,7 +115,7 @@ impl InitError {
 enum CommandError {
     #[error(transparent)]
     Vcs(#[from] VcsError),
-    #[error("Arc Lightning is not initialized in Git worktree `{root}`; run `arcl init` first")]
+    #[error("Arc Lightning is not initialized in project directory `{root}`; run `arcl init` first")]
     NotInitialized { root: PathBuf },
     #[error("could not read project configuration `{path}`: {source}")]
     ReadConfig { path: PathBuf, source: io::Error },
@@ -257,13 +257,13 @@ enum SpecPathError {
     Absolute { path: PathBuf },
     #[error("spec path `{path}` cannot contain `..` path components")]
     Traversal { path: PathBuf },
-    #[error("could not resolve the Git worktree root `{path}`: {source}")]
+    #[error("could not resolve the project root `{path}`: {source}")]
     CanonicalizeRoot { path: PathBuf, source: io::Error },
     #[error("could not resolve current directory `{path}`: {source}")]
     CanonicalizeCurrentDirectory { path: PathBuf, source: io::Error },
     #[error("could not resolve spec path `{path}`: {source}")]
     Resolve { path: PathBuf, source: io::Error },
-    #[error("spec path `{path}` resolves outside the Git worktree")]
+    #[error("spec path `{path}` resolves outside the project root")]
     OutsideWorktree { path: PathBuf },
     #[error("spec path `{path}` is not a regular file")]
     NotRegularFile { path: PathBuf },
@@ -1021,21 +1021,26 @@ fn open_database() -> CResult<Database> {
 
 fn locate_project() -> CResult<ProjectLocation> {
     let start = std::env::current_dir().map_err(|source| CommandError::CurrentDirectory { source })?;
-    let vcs = GixVcs::discover(&start)?;
-    let root = vcs.worktree_root()?.to_owned();
+    let Some(root) = nearest_project_root(&start) else {
+        return Err(CommandError::NotInitialized { root: start });
+    };
     let arcl_directory = root.join(ARCL_DIRECTORY);
     let config_path = arcl_directory.join(CONFIG_FILE);
     let database_path = arcl_directory.join(DATABASE_FILE);
-
-    if !config_path.is_file() {
-        return Err(CommandError::NotInitialized { root });
-    }
 
     let config_input = fs::read_to_string(&config_path)
         .map_err(|source| CommandError::ReadConfig { path: config_path.clone(), source })?;
     let config = ProjectConfig::parse(&config_input)
         .map_err(|source| CommandError::InvalidConfig { path: config_path, source })?;
     Ok(ProjectLocation { root, config, database_path })
+}
+
+/// Find the closest initialized Arc Lightning project without consulting Git.
+fn nearest_project_root(start: &Path) -> Option<PathBuf> {
+    start
+        .ancestors()
+        .find(|candidate| candidate.join(ARCL_DIRECTORY).join(CONFIG_FILE).is_file())
+        .map(Path::to_owned)
 }
 
 fn open_project() -> CResult<OpenProject> {
@@ -1144,8 +1149,7 @@ fn read_stdin_description() -> CResult<Option<String>> {
 }
 
 fn initialize(start: &Path, snapshot: bool) -> IResult<Initialization> {
-    let vcs = GixVcs::discover(start)?;
-    let root = vcs.worktree_root()?.to_owned();
+    let root = initialization_root(start)?;
     let arcl_directory = root.join(ARCL_DIRECTORY);
     fs::create_dir_all(&arcl_directory)
         .map_err(|source| InitError::CreateDirectory { path: arcl_directory.clone(), source })?;
@@ -1163,6 +1167,20 @@ fn initialize(start: &Path, snapshot: bool) -> IResult<Initialization> {
     }
 
     Ok(Initialization { root, snapshot_enabled: config.snapshot.enabled })
+}
+
+fn initialization_root(start: &Path) -> IResult<PathBuf> {
+    if let Some(root) = nearest_project_root(start) {
+        return Ok(root);
+    }
+
+    match GixVcs::discover(start) {
+        Ok(vcs) => Ok(vcs.worktree_root()?.to_owned()),
+        // Git is an optional integration. A failed repository discovery means
+        // this is an ordinary project rooted at the directory where init ran.
+        Err(VcsError::Discovery { .. }) => Ok(start.to_owned()),
+        Err(error) => Err(InitError::Vcs(error)),
+    }
 }
 
 fn load_or_create_config(path: &Path, snapshot: bool) -> IResult<ProjectConfig> {

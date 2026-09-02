@@ -1,16 +1,17 @@
 # Arc Lightning (`arcl`)
 
-A Git-aware task tracking CLI for developers and their agents. Arc Lightning keeps
-the live tracker in `.arcl/arcl.db` and can be used from any directory inside a
-non-bare Git worktree.
+A local-first project planning and execution CLI for developers and their agents.
+Arc Lightning keeps the live tracker in `.arcl/arcl.db` and can optionally use a
+Git worktree for repository-native project files.
 
 ## Quick start
 
-Arc Lightning discovers the enclosing non-bare Git worktree, so initialization can
-run from the repository root or any directory below it.
+Arc Lightning initializes ordinary directories directly and discovers the nearest
+project when commands run from any descendant directory. Inside a non-bare Git
+worktree, initialization uses the worktree root.
 
 ```sh
-# From a new or existing Git worktree
+# From a new or existing project directory
 arcl init
 ```
 

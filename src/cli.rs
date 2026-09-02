@@ -25,7 +25,7 @@ impl fmt::Display for ColorChoice {
 /// Arc Lightning commands.
 #[derive(Clone, Debug, Subcommand)]
 pub enum Command {
-    /// Initialize or rediscover the project in the enclosing Git worktree.
+    /// Initialize or rediscover the project in the current directory or enclosing Git worktree.
     Init {
         /// Enable the optional version-controlled snapshot path when creating configuration.
         #[arg(long)]
@@ -481,7 +481,7 @@ pub struct DescriptionArgs {
 #[command(
     name = "arcl",
     version,
-    about = "Arc Lightning: a Git-aware task tracker for developers and coding agents",
+    about = "Arc Lightning: local-first project planning for developers and coding agents",
     after_help = "Examples:
 
     arcl init

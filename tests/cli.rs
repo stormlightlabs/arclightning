@@ -63,9 +63,13 @@ fn initialized_repository() -> TempDir {
 }
 
 fn idea_id_from_json(output: &[u8]) -> String {
-    serde_json::from_slice::<Value>(output).expect("JSON output parses")["data"]["idea"]["id"]
+    record_id_from_json(output, "idea")
+}
+
+fn record_id_from_json(output: &[u8], record: &str) -> String {
+    serde_json::from_slice::<Value>(output).expect("JSON output parses")["data"][record]["id"]
         .as_str()
-        .expect("JSON output contains an idea ID")
+        .expect("JSON output contains a record ID")
         .to_owned()
 }
 
@@ -98,7 +102,7 @@ fn version_succeeds_from_an_isolated_directory() {
 }
 
 #[test]
-fn init_discovers_the_worktree_from_a_nested_directory() {
+fn project_discovery_uses_the_git_worktree_for_nested_initialization() {
     let repository = worktree("ref: refs/heads/main\n");
     let nested = repository.path().join("src/nested");
     fs::create_dir_all(&nested).expect("nested directory can be created");
@@ -260,13 +264,97 @@ fn snapshot_export_is_deterministic_and_records_the_successful_base() {
 }
 
 #[test]
-fn init_outside_git_reports_an_invalid_project() {
+fn project_discovery_supports_non_git_projects_from_descendants() {
     let directory = isolated_directory();
-    let output = arcl_in(directory.path()).arg("init").output().expect("arcl init runs");
+    let initialized = arcl_in(directory.path())
+        .args(["--color", "never", "init"])
+        .output()
+        .expect("arcl init runs");
+    assert!(
+        initialized.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&initialized.stderr)
+    );
+    assert!(directory.path().join(".arcl/config.toml").is_file());
+    assert!(directory.path().join(".arcl/arcl.db").is_file());
 
-    assert_eq!(output.status.code(), Some(3));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("could not discover a Git worktree"));
-    assert!(!directory.path().join(".arcl").exists());
+    let nested = directory.path().join("src/nested");
+    fs::create_dir_all(&nested).expect("nested directory can be created");
+    fs::write(nested.join("feature.md"), "# Feature\n").expect("spec can be written");
+
+    let idea = arcl_in(&nested)
+        .args(["--json", "idea", "create", "A local thought"])
+        .output()
+        .expect("idea create runs");
+    assert!(
+        idea.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&idea.stderr)
+    );
+
+    let release = arcl_in(&nested)
+        .args(["--json", "release", "create", "Local release"])
+        .output()
+        .expect("release create runs");
+    assert!(
+        release.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&release.stderr)
+    );
+    let release_id = record_id_from_json(&release.stdout, "release");
+
+    let epic = arcl_in(&nested)
+        .args([
+            "--json",
+            "epic",
+            "create",
+            "Local epic",
+            "--spec",
+            "feature.md",
+            "--release",
+            &release_id,
+        ])
+        .output()
+        .expect("epic create runs");
+    assert!(
+        epic.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&epic.stderr)
+    );
+    let epic_id = record_id_from_json(&epic.stdout, "epic");
+
+    let milestone = arcl_in(&nested)
+        .args(["--json", "milestone", "create", "Local milestone", "--epic", &epic_id])
+        .output()
+        .expect("milestone create runs");
+    assert!(
+        milestone.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&milestone.stderr)
+    );
+    let milestone_id = record_id_from_json(&milestone.stdout, "milestone");
+
+    let task = arcl_in(&nested)
+        .args(["--json", "task", "create", "Local task", "--milestone", &milestone_id])
+        .output()
+        .expect("task create runs");
+    assert!(
+        task.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&task.stderr)
+    );
+
+    let ready = arcl_in(&nested).args(["--json", "ready"]).output().expect("ready runs");
+    assert!(
+        ready.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&ready.stderr)
+    );
+    let ready_json: Value = serde_json::from_slice(&ready.stdout).expect("ready JSON parses");
+    assert_eq!(
+        ready_json["data"]["tasks"].as_array().expect("ready tasks exist").len(),
+        1
+    );
 }
 
 #[test]
@@ -745,7 +833,7 @@ fn epic_rejects_a_symlink_escape() {
         .output()
         .expect("symlink escape command runs");
     assert_eq!(output.status.code(), Some(3));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("outside the Git worktree"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("outside the project root"));
 }
 
 #[test]
