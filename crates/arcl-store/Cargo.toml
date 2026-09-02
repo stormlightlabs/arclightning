@@ -1,0 +1,13 @@
+[package]
+name = "arcl-store"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+arcl-core = { path = "../arcl-core" }
+rusqlite.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3.23"

@@ -137,13 +137,13 @@ Blocked by: T04, T05
 
 Acceptance criteria:
 
-- [ ] Create workspace crates for domain and application operations, SQLite,
+- [x] Create workspace crates for domain and application operations, SQLite,
       repository files, and the CLI
-- [ ] Keep domain and application crates independent of Clap, terminal output,
+- [x] Keep domain and application crates independent of Clap, terminal output,
       Tauri, and MCP transports
-- [ ] Preserve the binary name, commands, exit behavior, and database
+- [x] Preserve the binary name, commands, exit behavior, and database
       compatibility
-- [ ] Move tests to the highest stable crate or CLI boundary without duplicating
+- [x] Move tests to the highest stable crate or CLI boundary without duplicating
       coverage
 
 Verification:

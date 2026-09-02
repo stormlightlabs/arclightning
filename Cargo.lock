@@ -74,21 +74,54 @@ dependencies = [
 ]
 
 [[package]]
-name = "arcl"
+name = "arcl-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arcl-core",
+ "arcl-repo",
+ "arcl-store",
  "assert_cmd",
  "clap",
- "gix",
  "owo-colors",
- "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror",
+]
+
+[[package]]
+name = "arcl-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror",
  "toml",
  "ulid",
+]
+
+[[package]]
+name = "arcl-repo"
+version = "0.1.0"
+dependencies = [
+ "arcl-core",
+ "arcl-store",
+ "gix",
+ "serde",
+ "tempfile",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
+name = "arcl-store"
+version = "0.1.0"
+dependencies = [
+ "arcl-core",
+ "rusqlite",
+ "serde",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]

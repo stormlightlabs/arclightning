@@ -1,0 +1,23 @@
+[package]
+name = "arcl-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "arcl"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+arcl-core = { path = "../arcl-core" }
+arcl-repo = { path = "../arcl-repo" }
+arcl-store = { path = "../arcl-store" }
+clap.workspace = true
+owo-colors.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+assert_cmd = "2.0"
+tempfile = "3.23"
