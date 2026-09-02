@@ -495,6 +495,13 @@ impl Database {
         connected::create_planning_task(&mut self.connection, create)
     }
 
+    /// Create a task and its blocking relationships in one transaction.
+    pub fn create_planning_task_with_dependencies(
+        &mut self, create: PlanningTaskCreate, blockers: &[TaskId],
+    ) -> Result<PlanningTask> {
+        connected::create_planning_task_with_dependencies(&mut self.connection, create, blockers)
+    }
+
     /// Update a task's body, metadata, or explicit ancestry atomically.
     pub fn update_planning_task(&mut self, id: TaskId, update: PlanningTaskUpdate) -> Result<PlanningTask> {
         connected::update_planning_task(&mut self.connection, id, update)

@@ -24,17 +24,26 @@ arcl init
 └── arcl.db
 ```
 
-## Daily Workflow
+## Daily workflow
 
-You can capture an idea, promote it once it has a specification, then create the
-first milestone and task:
+Capture a thought, promote it to an owned specification, create a plan, and add
+work to that plan:
 
 ```sh
-arcl idea create "Improve import errors" --description "Make failures easier to fix."
-arcl idea promote arcl-i-… --spec specs/import-errors.md
-arcl milestone create "Storage" --epic arcl-e-…
-arcl task create "Validate records" --milestone arcl-m-… --priority high
+capture=$(arcl --json capture create "Improve import errors" --body "Make failures easier to fix.")
+capture_id=$(printf '%s' "$capture" | jq -r '.data.capture.id')
+spec=$(arcl --json capture promote "$capture_id" spec --acceptance-criteria "Imports reject invalid records.")
+spec_id=$(printf '%s' "$spec" | jq -r '.data.spec.id')
+plan=$(arcl --json plan create "Import validation" --spec "$spec_id")
+plan_id=$(printf '%s' "$plan" | jq -r '.data.plan.id')
+arcl task create "Validate records" --plan "$plan_id" --priority high
 arcl ready
+```
+
+Small work can move directly from a capture to a task:
+
+```sh
+arcl capture promote arcl-c-… task --priority high
 ```
 
 ## Local development

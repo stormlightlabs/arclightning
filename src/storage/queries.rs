@@ -31,6 +31,12 @@ pub struct ListFilter {
     pub epic_id: Option<EpicId>,
     pub milestone_id: Option<MilestoneId>,
     pub parent_id: Option<TaskId>,
+    /// Connected-model specification filter used by the CLI adapter.
+    pub spec_id: Option<crate::domain::SpecId>,
+    /// Connected-model plan filter used by the CLI adapter.
+    pub plan_id: Option<crate::domain::PlanId>,
+    /// Connected-model phase filter used by the CLI adapter.
+    pub phase_id: Option<crate::domain::PhaseId>,
 }
 
 /// A stable summary record used by list output.

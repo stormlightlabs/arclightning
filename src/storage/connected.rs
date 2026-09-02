@@ -19,81 +19,122 @@ pub const DEFAULT_PROJECT_ID: &str = "arcl-pj-00000000000000000000000000";
 /// All connected records and explicit edges belonging to one project.
 #[derive(Clone, Debug)]
 pub struct ConnectedGraph {
+    /// The owning project.
     pub project: Project,
+    /// Inbox captures in creation order.
     pub captures: Vec<Capture>,
+    /// Capture provenance edges.
     pub capture_promotions: Vec<CapturePromotion>,
+    /// Owned specifications.
     pub specs: Vec<Spec>,
+    /// Persistent plans.
     pub plans: Vec<Plan>,
+    /// Optional plan phases.
     pub phases: Vec<Phase>,
+    /// Tasks at any supported planning level.
     pub tasks: Vec<PlanningTask>,
+    /// Task blocking relationships.
     pub dependencies: Vec<crate::domain::TaskDependency>,
+    /// Markdown notes.
     pub notes: Vec<Note>,
+    /// Named releases.
     pub releases: Vec<Release>,
+    /// Explicit release membership edges.
     pub release_memberships: Vec<ReleaseMembership>,
+    /// Explicit record links.
     pub links: Vec<RecordLink>,
 }
 
 /// Fields used to create a task at any supported planning level.
 #[derive(Clone, Debug)]
 pub struct PlanningTaskCreate {
+    /// The owning project.
     pub project_id: ProjectId,
+    /// Optional specification ancestry.
     pub spec_id: Option<SpecId>,
+    /// Optional plan ancestry.
     pub plan_id: Option<PlanId>,
+    /// Optional phase ancestry.
     pub phase_id: Option<PhaseId>,
+    /// Optional parent-task ancestry.
     pub parent_id: Option<TaskId>,
+    /// The task title.
     pub title: String,
+    /// Markdown task body.
     pub body: String,
+    /// Initial task priority.
     pub priority: TaskPriority,
+    /// Stable sibling ordering position.
     pub position: i64,
 }
 
 /// Optional fields accepted by a connected task update.
 #[derive(Clone, Debug, Default)]
 pub struct PlanningTaskUpdate {
+    /// Replacement title, when provided.
     pub title: Option<String>,
+    /// Replacement Markdown body, when provided.
     pub body: Option<String>,
+    /// Replacement priority, when provided.
     pub priority: Option<TaskPriority>,
+    /// Replacement sibling position, when provided.
     pub position: Option<i64>,
+    /// Optional replacement or clearing of specification ancestry.
     pub spec_id: Option<Option<SpecId>>,
+    /// Optional replacement or clearing of plan ancestry.
     pub plan_id: Option<Option<PlanId>>,
+    /// Optional replacement or clearing of phase ancestry.
     pub phase_id: Option<Option<PhaseId>>,
+    /// Optional replacement or clearing of parent-task ancestry.
     pub parent_id: Option<Option<TaskId>>,
 }
 
 /// Optional fields accepted by a specification update.
 #[derive(Clone, Debug, Default)]
 pub struct SpecUpdate {
+    /// Replacement title, when provided.
     pub title: Option<String>,
+    /// Replacement Markdown body, when provided.
     pub body: Option<String>,
+    /// Replacement acceptance criteria, when provided.
     pub acceptance_criteria: Option<String>,
 }
 
 /// Optional fields accepted by a plan update.
 #[derive(Clone, Debug, Default)]
 pub struct PlanUpdate {
+    /// Replacement title, when provided.
     pub title: Option<String>,
+    /// Replacement Markdown body, when provided.
     pub body: Option<String>,
 }
 
 /// Optional fields accepted by a phase update.
 #[derive(Clone, Debug, Default)]
 pub struct PhaseUpdate {
+    /// Replacement title, when provided.
     pub title: Option<String>,
+    /// Replacement Markdown body, when provided.
     pub body: Option<String>,
+    /// Replacement sibling position, when provided.
     pub position: Option<i64>,
 }
 
 /// Optional fields accepted by a note update.
 #[derive(Clone, Debug, Default)]
 pub struct NoteUpdate {
+    /// Replacement title, when provided.
     pub title: Option<String>,
+    /// Replacement Markdown body, when provided.
     pub body: Option<String>,
 }
 
 /// Optional fields accepted by a capture update.
 #[derive(Clone, Debug, Default)]
 pub struct CaptureUpdate {
+    /// Replacement title, when provided.
     pub title: Option<String>,
+    /// Replacement Markdown body, when provided.
     pub body: Option<String>,
 }
 
@@ -607,6 +648,65 @@ pub fn create_planning_task(connection: &mut Connection, create: PlanningTaskCre
     let tx = connection.transaction()?;
     validate_task_ancestry(&tx, &task)?;
     insert_task(&tx, &task)?;
+    tx.commit()?;
+    Ok(task)
+}
+
+/// Create a task and all requested blocking relationships in one transaction.
+pub fn create_planning_task_with_dependencies(
+    connection: &mut Connection, create: PlanningTaskCreate, blockers: &[TaskId],
+) -> Result<PlanningTask> {
+    let task = PlanningTask::new(
+        create.project_id,
+        create.spec_id,
+        create.plan_id,
+        create.phase_id,
+        create.parent_id,
+        create.title,
+        create.body,
+        create.priority,
+        create.position,
+    )
+    .map_err(StorageError::InvalidPlanningTask)?;
+    let tx = connection.transaction()?;
+    validate_task_ancestry(&tx, &task)?;
+    insert_task(&tx, &task)?;
+
+    for blocker_id in blockers {
+        let dependency = TaskDependency::new(task.id, *blocker_id).map_err(StorageError::InvalidPlanningDependency)?;
+        ensure_task(&tx, create.project_id, *blocker_id)?;
+        let cycle: bool = tx.query_row(
+            "WITH RECURSIVE reachable(id) AS (
+                 SELECT ?3
+                 UNION
+                 SELECT dependency.blocker_id
+                 FROM planning_task_dependencies dependency
+                 JOIN reachable ON dependency.task_id = reachable.id
+                 WHERE dependency.project_id = ?1
+             )
+             SELECT EXISTS (SELECT 1 FROM reachable WHERE id = ?2)",
+            params![
+                create.project_id.to_string(),
+                task.id.to_string(),
+                blocker_id.to_string()
+            ],
+            |row| row.get(0),
+        )?;
+        if cycle {
+            return Err(StorageError::InvalidPlanningDependency(DomainError::DependencyCycle {
+                task: task.id.to_string(),
+                blocker: blocker_id.to_string(),
+            }));
+        }
+        tx.execute(
+            "INSERT INTO planning_task_dependencies (project_id, task_id, blocker_id) VALUES (?1, ?2, ?3)",
+            params![
+                create.project_id.to_string(),
+                dependency.task_id.to_string(),
+                dependency.blocker_id.to_string()
+            ],
+        )?;
+    }
     tx.commit()?;
     Ok(task)
 }

@@ -113,14 +113,14 @@ Blocked by: T03, T04
 
 Acceptance criteria:
 
-- [ ] Add coherent `capture`, `spec`, `plan`, `task`, and `note` command groups
-- [ ] Support stable JSON for every new read operation and structured errors for
+- [x] Add coherent `capture`, `spec`, `plan`, `task`, and `note` command groups
+- [x] Support stable JSON for every new read operation and structured errors for
       expected failures
-- [ ] Remove the `idea`, `epic`, and `milestone` command groups when their
+- [x] Remove the `idea`, `epic`, and `milestone` command groups when their
       replacements ship and do not add compatibility aliases
-- [ ] Update help examples so a user can complete capture -> spec -> plan ->
+- [x] Update help examples so a user can complete capture -> spec -> plan ->
       task and capture -> task workflows
-- [ ] Keep primary results on stdout and diagnostics on stderr without ANSI
+- [x] Keep primary results on stdout and diagnostics on stderr without ANSI
       escapes in machine output
 
 Verification:

@@ -1,22 +1,20 @@
-use std::ffi::OsStr;
-use std::io::{IsTerminal, Read};
-use std::path::{Component, Path, PathBuf};
-use std::{fs, io};
-use std::{fs::OpenOptions, io::Write};
+use std::io::{self, IsTerminal, Read, Write};
+use std::path::{Path, PathBuf};
+use std::{fs, fs::OpenOptions};
 
 use anyhow::Context;
 use thiserror::Error;
 
-use crate::{cli::*, domain::*, output::*};
-
 use crate::snapshot::{
     ProjectConfig, SnapshotError, SnapshotExportError, SnapshotImportError, SnapshotManifest, encode_manifest,
-    export_graph, import_snapshot,
+    export_graph, import_snapshot, resolve_snapshot_root,
 };
 use crate::storage::{
-    Database, Graph, ListFilter, Promotion, ReadyFilter, SnapshotBaseFile, StorageError, TaskCreate, TaskUpdate,
+    CaptureTaskPromotion, CaptureUpdate, ConnectedGraph, Database, ListFilter, NoteUpdate, PhaseUpdate, PlanUpdate,
+    PlanningReadyFilter, PlanningTaskCreate, PlanningTaskUpdate, SnapshotBaseFile, SpecUpdate, StorageError,
 };
 use crate::vcs::{GixVcs, Vcs, VcsError};
+use crate::{cli::*, domain::*, output::*};
 
 const ARCL_DIRECTORY: &str = ".arcl";
 const CONFIG_FILE: &str = "config.toml";
@@ -25,11 +23,10 @@ const GITIGNORE_FILE: &str = ".gitignore";
 const REQUIRED_GITIGNORE_ENTRIES: &[&str] = &["/arcl.db", "/arcl.db-*", "/*.tmp", "/conflicts/"];
 const SNAPSHOT_DIRECTORIES: &[&str] = &["ideas", "releases", "epics", "milestones", "tasks"];
 
-type CResult<T> = std::result::Result<T, CommandError>;
-type SResult<T> = std::result::Result<T, SpecPathError>;
-type IResult<T> = std::result::Result<T, InitError>;
+type CResult<T> = Result<T, CommandError>;
+type IResult<T> = Result<T, InitError>;
 
-/// A typed application failure carrying the roadmap's process exit category.
+/// A typed application failure carrying the process exit category.
 #[derive(Debug, Error)]
 #[error("{message}")]
 pub struct ApplicationError {
@@ -38,8 +35,27 @@ pub struct ApplicationError {
 }
 
 impl ApplicationError {
+    /// Return the stable process exit category for this failure.
     pub const fn exit_code(&self) -> u8 {
         self.exit_code
+    }
+
+    /// Render a stable machine-readable error envelope.
+    pub fn json(&self) -> String {
+        serde_json::json!({
+            "format_version": 1,
+            "error": {
+                "code": match self.exit_code {
+                    3 => "invalid_request",
+                    4 => "conflict",
+                    5 => "not_found",
+                    _ => "application_error",
+                },
+                "message": self.message,
+                "exit_code": self.exit_code,
+            }
+        })
+        .to_string()
     }
 
     fn from_init(error: InitError) -> Self {
@@ -48,7 +64,11 @@ impl ApplicationError {
         Self { message, exit_code }
     }
 
-    fn from_command(error: CommandError) -> Self {
+    fn from_command<E>(error: E) -> Self
+    where
+        E: Into<CommandError>,
+    {
+        let error: CommandError = error.into();
         let exit_code = error.exit_code();
         let message = if exit_code == 3 { format!("invalid project or record: {error}") } else { error.to_string() };
         Self { message, exit_code }
@@ -83,12 +103,6 @@ enum InitError {
     OpenDatabase { path: PathBuf, source: StorageError },
 }
 
-impl From<&InitError> for u8 {
-    fn from(value: &InitError) -> Self {
-        value.exit_code()
-    }
-}
-
 impl InitError {
     fn exit_code(&self) -> u8 {
         match self {
@@ -96,17 +110,7 @@ impl InitError {
                 VcsError::Discovery { .. } | VcsError::BareRepository { .. } | VcsError::MissingWorktree { .. },
             )
             | Self::InvalidConfig { .. } => 3,
-            Self::Vcs(_)
-            | Self::CreateDirectory { .. }
-            | Self::ReadConfig { .. }
-            | Self::WriteConfig { .. }
-            | Self::RenderConfig { .. }
-            | Self::CreateSnapshotDirectory { .. }
-            | Self::RenderSnapshotManifest { .. }
-            | Self::WriteSnapshotManifest { .. }
-            | Self::ReadGitignore { .. }
-            | Self::WriteGitignore { .. }
-            | Self::OpenDatabase { .. } => 1,
+            _ => 1,
         }
     }
 }
@@ -135,15 +139,13 @@ enum CommandError {
     Domain(#[from] DomainError),
     #[error(transparent)]
     Storage(#[from] StorageError),
-    #[error(transparent)]
-    InvalidSpecPath(#[from] SpecPathError),
-    #[error("description file `{path}` could not be read: {source}")]
-    ReadDescription { path: PathBuf, source: io::Error },
-    #[error("description file `{path}` is not valid UTF-8")]
-    InvalidDescription { path: PathBuf },
+    #[error("Markdown file `{path}` could not be read: {source}")]
+    ReadMarkdown { path: PathBuf, source: io::Error },
+    #[error("Markdown file `{path}` is not valid UTF-8")]
+    InvalidMarkdown { path: PathBuf },
     #[error("standard input could not be read: {source}")]
     ReadStdin { source: io::Error },
-    #[error("standard input is a terminal; pipe UTF-8 Markdown to `--description-file -` or use `--description`")]
+    #[error("standard input is a terminal; pipe UTF-8 Markdown to a `*-file -` option or use an inline option")]
     StdinIsTerminal,
     #[error("standard input is not valid UTF-8")]
     InvalidStdin,
@@ -176,15 +178,14 @@ impl CommandError {
             },
             Self::SnapshotImport(error) => error.exit_code(),
             Self::ReadConfig { .. }
-            | Self::CurrentDirectory { .. }
-            | Self::ReadDescription { .. }
+            | Self::ReadMarkdown { .. }
             | Self::ReadStdin { .. }
-            | Self::OpenDatabase { source: StorageError::Sqlite(_), .. } => 1,
+            | Self::OpenDatabase { source: StorageError::Sqlite(_), .. }
+            | Self::CurrentDirectory { .. } => 1,
             Self::OpenDatabase { source, .. } => u8::from(source),
             Self::Storage(error) => u8::from(error),
-            Self::InvalidDescription { .. }
+            Self::InvalidMarkdown { .. }
             | Self::InvalidStdin
-            | Self::InvalidSpecPath(_)
             | Self::InvalidFilter { .. }
             | Self::Integrity { .. }
             | Self::StdinIsTerminal => 3,
@@ -196,11 +197,12 @@ impl From<&StorageError> for u8 {
     fn from(value: &StorageError) -> Self {
         match value {
             StorageError::ProjectNotFound => 3,
-            StorageError::IdeaNotFound { .. } => 5,
-            StorageError::ReleaseNotFound { .. }
+            StorageError::IdeaNotFound { .. }
+            | StorageError::ReleaseNotFound { .. }
             | StorageError::EpicNotFound { .. }
             | StorageError::MilestoneNotFound { .. }
             | StorageError::TaskNotFound { .. }
+            | StorageError::DependencyNotFound { .. }
             | StorageError::CaptureNotFound { .. }
             | StorageError::SpecNotFound { .. }
             | StorageError::PlanNotFound { .. }
@@ -235,71 +237,13 @@ impl From<&StorageError> for u8 {
             | StorageError::InconsistentPromotion { .. }
             | StorageError::NewerDatabase { .. }
             | StorageError::MigrationGap { .. } => 3,
-            StorageError::DependencyNotFound { .. } => 5,
             StorageError::Sqlite(_) => 1,
         }
     }
 }
 
-enum IdeaCommandResult {
-    Mutation { action: IdeaMutation, idea: Idea },
-    Promotion(Promotion),
-    List(Vec<Idea>),
-}
-
-enum ReleaseCommandResult {
-    Mutation { action: ReleaseMutation, release: Release },
-}
-
-enum EpicCommandResult {
-    Mutation { action: EpicMutation, epic: Epic },
-}
-
-enum MilestoneCommandResult {
-    Mutation {
-        action: MilestoneMutation,
-        milestone: Milestone,
-    },
-}
-
-enum TaskCommandResult {
-    Mutation { action: TaskMutation, task: Task },
-}
-
-enum DependencyCommandResult {
-    Mutation {
-        action: DependencyMutation,
-        dependency: TaskDependency,
-    },
-}
-
-#[derive(Debug, Error)]
-enum SpecPathError {
-    #[error("spec path cannot be empty")]
-    Empty,
-    #[error("spec path `{path}` must be relative to the current directory")]
-    Absolute { path: PathBuf },
-    #[error("spec path `{path}` cannot contain `..` path components")]
-    Traversal { path: PathBuf },
-    #[error("could not resolve the project root `{path}`: {source}")]
-    CanonicalizeRoot { path: PathBuf, source: io::Error },
-    #[error("could not resolve current directory `{path}`: {source}")]
-    CanonicalizeCurrentDirectory { path: PathBuf, source: io::Error },
-    #[error("could not resolve spec path `{path}`: {source}")]
-    Resolve { path: PathBuf, source: io::Error },
-    #[error("spec path `{path}` resolves outside the project root")]
-    OutsideWorktree { path: PathBuf },
-    #[error("spec path `{path}` is not a regular file")]
-    NotRegularFile { path: PathBuf },
-    #[error("spec path `{path}` is not a Markdown file ending in `.md`")]
-    NotMarkdown { path: PathBuf },
-    #[error("spec path `{path}` is not valid UTF-8")]
-    NonUtf8 { path: PathBuf },
-}
-
 struct OpenProject {
     root: PathBuf,
-    current_dir: PathBuf,
     config: ProjectConfig,
     database: Database,
 }
@@ -316,6 +260,20 @@ struct Initialization {
     snapshot_enabled: bool,
 }
 
+enum CaptureResult {
+    Mutation { action: &'static str, capture: Capture },
+    Promotion(Box<crate::storage::CapturePromotionResult>),
+    List(Vec<Capture>),
+}
+
+enum PlanResult {
+    Mutation { action: &'static str, plan: Plan },
+    Detail(PlanDetail),
+    Diff(crate::storage::PlanDiff),
+    Applied(crate::storage::PlanApplyResult),
+    List(Vec<Plan>),
+}
+
 /// Run one parsed CLI invocation at the application boundary.
 pub fn run(cli: Cli) -> anyhow::Result<()> {
     let mode = if cli.json {
@@ -327,148 +285,94 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
     } else {
         OutputMode::Human
     };
-
     let renderer = Renderer::new(mode, cli.color);
 
     match cli.command {
         Some(Command::Init { snapshot }) => {
             let start = std::env::current_dir().context("could not determine the current directory")?;
             let initialization = initialize(&start, snapshot).map_err(ApplicationError::from_init)?;
-            let message = renderer
-                .render_init(&initialization.root, initialization.snapshot_enabled)
-                .context("rendering initialization output")?;
-            write_output(message)
+            write_output(renderer.render_init(&initialization.root, initialization.snapshot_enabled)?)
         }
-        Some(Command::Idea { command }) => {
-            let result = exec_idea(command).map_err(ApplicationError::from_command)?;
+        Some(Command::Capture { command }) => {
+            let result = exec_capture(command).map_err(ApplicationError::from_command)?;
             let message = match result {
-                IdeaCommandResult::Mutation { action, idea } => renderer.render_idea(action, &idea),
-                IdeaCommandResult::Promotion(promotion) => renderer.render_promotion(&promotion),
-                IdeaCommandResult::List(ideas) => renderer.render_ideas(&ideas),
-            }
-            .context("rendering idea output")?;
+                CaptureResult::Mutation { action, capture } => renderer.render_capture(action, &capture),
+                CaptureResult::Promotion(result) => renderer.render_capture_promotion(&result),
+                CaptureResult::List(captures) => renderer.render_captures(&captures),
+            }?;
             write_output(message)
         }
-        Some(Command::Release { command }) => {
-            let result = exec_release(command).map_err(ApplicationError::from_command)?;
-            let ReleaseCommandResult::Mutation { action, release } = result;
-            let message = renderer
-                .render_release(action, &release)
-                .context("rendering release output")?;
-            write_output(message)
-        }
-        Some(Command::Epic { command }) => {
-            let result = exec_epic(command).map_err(ApplicationError::from_command)?;
-            let EpicCommandResult::Mutation { action, epic } = result;
-            let message = renderer.render_epic(action, &epic).context("rendering epic output")?;
-            write_output(message)
-        }
-        Some(Command::Milestone { command }) => {
-            let result = exec_milestone(command).map_err(ApplicationError::from_command)?;
-            let MilestoneCommandResult::Mutation { action, milestone } = result;
-            let message = renderer
-                .render_milestone(action, &milestone)
-                .context("rendering milestone output")?;
-            write_output(message)
-        }
-        Some(Command::Task { command }) => {
-            let result = exec_task(command).map_err(ApplicationError::from_command)?;
-            let TaskCommandResult::Mutation { action, task } = result;
-            let message = renderer.render_task(action, &task).context("rendering task output")?;
-            write_output(message)
-        }
-        Some(Command::Dependency { command }) => {
-            let result = exec_dependency(command).map_err(ApplicationError::from_command)?;
-            let DependencyCommandResult::Mutation { action, dependency } = result;
-            let message = renderer
-                .render_dependency(action, &dependency)
-                .context("rendering dependency output")?;
-            write_output(message)
-        }
-        Some(Command::Ready { filters }) => {
-            let tasks = exec_ready(filters).map_err(ApplicationError::from_command)?;
-            let message = renderer
-                .render_ready_tasks(&tasks)
-                .context("rendering ready-work output")?;
-            write_output(message)
-        }
-        Some(Command::Next { filters }) => {
-            let task = exec_ready(filters)
-                .map_err(ApplicationError::from_command)?
-                .into_iter()
-                .next();
-            let message = renderer
-                .render_next_task(task.as_ref())
-                .context("rendering next-work output")?;
-            write_output(message)
-        }
+        Some(Command::Release { command }) => exec_release(command, &renderer),
+        Some(Command::Spec { command }) => exec_spec(command, &renderer),
+        Some(Command::Plan { command }) => exec_plan(command, &renderer),
+        Some(Command::Task { command }) => exec_task(command, &renderer),
+        Some(Command::Dependency { command }) => exec_dependency(command, &renderer),
+        Some(Command::Note { command }) => exec_note(command, &renderer),
         Some(Command::Show { id }) => {
             let database = open_database().map_err(ApplicationError::from_command)?;
-            let record = database
-                .show(&id)
-                .map_err(|error| ApplicationError::from_command(CommandError::Storage(error)))?;
-            write_output(renderer.render_show(&record).context("rendering show output")?)
+            let message = show_record(&database, &id, &renderer).map_err(ApplicationError::from_command)?;
+            write_output(message)
         }
         Some(Command::List { filters }) => {
-            let filter = resolve_list_filter(filters).map_err(ApplicationError::from_command)?;
             let database = open_database().map_err(ApplicationError::from_command)?;
-            let graph = database
-                .graph()
-                .map_err(|error| ApplicationError::from_command(CommandError::Storage(error)))?;
-            validate_list_targets(&graph, &filter).map_err(ApplicationError::from_command)?;
-            let records = graph.list_items(&filter);
-            write_output(renderer.render_list(&records).context("rendering list output")?)
+            let summaries = list_connected(&database, filters).map_err(ApplicationError::from_command)?;
+            write_output(renderer.render_connected_summaries(&summaries)?)
         }
         Some(Command::Tree { id }) => {
             let database = open_database().map_err(ApplicationError::from_command)?;
-            let tree = database
-                .graph()
-                .map_err(|error| ApplicationError::from_command(CommandError::Storage(error)))?
-                .tree(id.as_deref())
-                .map_err(|error| ApplicationError::from_command(CommandError::Storage(error)))?;
-            write_output(renderer.render_tree(&tree).context("rendering tree output")?)
+            let graph = database.connected_graph().map_err(ApplicationError::from_command)?;
+            let nodes = connected_tree(&graph, id.as_deref()).map_err(ApplicationError::from_command)?;
+            write_output(renderer.render_connected_tree(&nodes)?)
         }
         Some(Command::Explain { task_id }) => {
-            let task_id = TaskId::parse(&task_id)
-                .map_err(DomainError::from)
-                .map_err(CommandError::Domain)
-                .map_err(ApplicationError::from_command)?;
+            let id = parse_task_id(&task_id).map_err(ApplicationError::from_command)?;
             let database = open_database().map_err(ApplicationError::from_command)?;
             let view = database
-                .task_view(task_id)
-                .map_err(|error| ApplicationError::from_command(CommandError::Storage(error)))?;
-            write_output(renderer.render_explain(&view).context("rendering explain output")?)
+                .planning_task_view(id)
+                .map_err(ApplicationError::from_command)?;
+            write_output(renderer.render_planning_task_view(&view)?)
         }
         Some(Command::Context { task_id }) => {
-            let task_id = TaskId::parse(&task_id)
-                .map_err(DomainError::from)
-                .map_err(CommandError::Domain)
-                .map_err(ApplicationError::from_command)?;
+            let id = parse_task_id(&task_id).map_err(ApplicationError::from_command)?;
             let database = open_database().map_err(ApplicationError::from_command)?;
-            let view = database
-                .context(task_id)
-                .map_err(|error| ApplicationError::from_command(CommandError::Storage(error)))?;
-            write_output(renderer.render_context(&view).context("rendering context output")?)
-        }
-        Some(Command::Snapshot { command }) => {
-            exec_snapshot(command).map_err(ApplicationError::from_command)?;
-            write_output(None)
+            let context = database.planning_context(id).map_err(ApplicationError::from_command)?;
+            write_output(renderer.render_planning_context(&context)?)
         }
         Some(Command::Check) => {
             let database = open_database().map_err(ApplicationError::from_command)?;
-            let report = database
-                .check()
-                .map_err(|error| ApplicationError::from_command(CommandError::Storage(error)))?;
+            let report = database.check().map_err(ApplicationError::from_command)?;
             let valid = report.valid;
             let details = report.errors.join("; ");
-            write_output(renderer.render_check(&report).context("rendering check output")?)?;
+            write_output(renderer.render_check(&report)?)?;
             if valid {
                 Ok(())
             } else {
                 Err(ApplicationError::from_command(CommandError::Integrity { message: details }).into())
             }
         }
-        None => write_output(renderer.render_startup().context("rendering CLI output")?),
+        Some(Command::Snapshot { command }) => {
+            exec_snapshot(command).map_err(ApplicationError::from_command)?;
+            write_output(None)
+        }
+        Some(Command::Ready { filters }) => {
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            let filter = resolve_ready_filter(filters).map_err(ApplicationError::from_command)?;
+            let tasks = database
+                .ready_planning_tasks_filtered(&filter)
+                .map_err(ApplicationError::from_command)?;
+            write_output(renderer.render_planning_ready_tasks(&tasks)?)
+        }
+        Some(Command::Next { filters }) => {
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            let filter = resolve_ready_filter(filters).map_err(ApplicationError::from_command)?;
+            let task = database
+                .ready_planning_tasks_filtered(&filter)
+                .map_err(ApplicationError::from_command)?
+                .into_iter()
+                .next();
+            write_output(renderer.render_next_planning_task(task.as_ref())?)
+        }
+        None => write_output(renderer.render_startup()?),
     }
 }
 
@@ -481,402 +385,1341 @@ fn write_output(message: Option<String>) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn exec_snapshot(command: SnapshotCommand) -> CResult<()> {
+fn exec_capture(command: CaptureCommand) -> CResult<CaptureResult> {
     match command {
-        SnapshotCommand::Export => {
-            let mut project = open_project()?;
-            if !project.config.snapshot.enabled {
-                return Err(CommandError::SnapshotDisabled { root: project.root });
-            }
-
-            let config_path = project.root.join(ARCL_DIRECTORY).join(CONFIG_FILE);
-            let snapshot_root = crate::snapshot::resolve_snapshot_root(&project.root, &project.config.snapshot.path)
-                .map_err(|source| CommandError::InvalidConfig { path: config_path, source })?;
-            let graph = project.database.graph()?;
-            let files = export_graph(&snapshot_root, &graph)?;
-            let base = files
-                .iter()
-                .map(|file| SnapshotBaseFile {
-                    path: file.path.to_string_lossy().into_owned(),
-                    content: file.content.clone(),
-                })
-                .collect::<Vec<_>>();
-            if project.database.snapshot_base()? != base {
-                project.database.replace_snapshot_base(&base)?;
-            }
-            Ok(())
-        }
-        SnapshotCommand::Import => {
-            let project = locate_project()?;
-            if !project.config.snapshot.enabled {
-                return Err(CommandError::SnapshotDisabled { root: project.root });
-            }
-            let config_path = project.root.join(ARCL_DIRECTORY).join(CONFIG_FILE);
-            let snapshot_root = crate::snapshot::resolve_snapshot_root(&project.root, &project.config.snapshot.path)
-                .map_err(|source| CommandError::InvalidConfig { path: config_path, source })?;
-            import_snapshot(&snapshot_root, &project.root, &project.database_path)?;
-            Ok(())
-        }
-    }
-}
-
-fn exec_idea(cmd: IdeaCommand) -> CResult<IdeaCommandResult> {
-    match cmd {
-        IdeaCommand::Create { title, description } => {
+        CaptureCommand::Create { title, body } => {
             validate_title(&title)?;
-            let description = resolve_description(description)?.unwrap_or_default();
+            let body = resolve_markdown(body)?.unwrap_or_default();
             let mut database = open_database()?;
-            let idea = database.create_idea(title, description)?;
-            Ok(IdeaCommandResult::Mutation { action: IdeaMutation::Created, idea })
+            Ok(CaptureResult::Mutation { action: "created", capture: database.create_capture(title, body)? })
         }
-        IdeaCommand::Update { id, title, description } => {
-            let id = IdeaId::parse(&id).map_err(DomainError::from)?;
-            if let Some(title) = &title {
-                validate_title(title)?;
-            }
-            let description = resolve_description(description)?;
-            if title.is_none() && description.is_none() {
-                return Err(CommandError::Domain(DomainError::NoFieldsToUpdate { entity: "idea" }));
-            }
-            let mut database = open_database()?;
-            let idea = database.update_idea(id, title, description)?;
-            Ok(IdeaCommandResult::Mutation { action: IdeaMutation::Updated, idea })
-        }
-        IdeaCommand::Discard { id } => {
-            let id = IdeaId::parse(&id).map_err(DomainError::from)?;
-            let mut database = open_database()?;
-            let idea = database.discard_idea(id)?;
-            Ok(IdeaCommandResult::Mutation { action: IdeaMutation::Discarded, idea })
-        }
-        IdeaCommand::List => {
+        CaptureCommand::Show { id } => {
+            let id = parse_capture_id(&id)?;
             let database = open_database()?;
-            Ok(IdeaCommandResult::List(database.ideas()?))
+            let capture = database
+                .capture(id)?
+                .ok_or_else(|| StorageError::CaptureNotFound { id: id.to_string() })?;
+            Ok(CaptureResult::Mutation { action: "shown", capture })
         }
-        IdeaCommand::Promote { id, spec, release } => {
-            let id = IdeaId::parse(&id).map_err(DomainError::from)?;
-            let release_id = release
-                .as_deref()
-                .map(ReleaseId::parse)
-                .transpose()
-                .map_err(DomainError::from)?;
-            let mut project = open_project()?;
-            let idea = project
-                .database
-                .idea(id)?
-                .ok_or_else(|| StorageError::IdeaNotFound { id: id.to_string() })?;
-            let spec_path = resolve_spec_path(&project.root, &project.current_dir, &spec)?;
-            let promotion = project
-                .database
-                .promote_idea(id, idea.title, idea.description, spec_path, release_id)?;
-            Ok(IdeaCommandResult::Promotion(promotion))
-        }
-    }
-}
-
-fn exec_release(cmd: ReleaseCommand) -> CResult<ReleaseCommandResult> {
-    match cmd {
-        ReleaseCommand::Create { title, description } => {
-            validate_title(&title)?;
-            let description = resolve_description(description)?.unwrap_or_default();
-            let mut database = open_database()?;
-            let release = database.create_release(title, description)?;
-            Ok(ReleaseCommandResult::Mutation { action: ReleaseMutation::Created, release })
-        }
-        ReleaseCommand::Update { id, title, description } => {
-            let id = ReleaseId::parse(&id).map_err(DomainError::from)?;
+        CaptureCommand::List => Ok(CaptureResult::List(open_database()?.captures()?)),
+        CaptureCommand::Update { id, title, body } => {
+            let id = parse_capture_id(&id)?;
             if let Some(title) = &title {
                 validate_title(title)?;
             }
-            let description = resolve_description(description)?;
-            if title.is_none() && description.is_none() {
-                return Err(CommandError::Domain(DomainError::NoFieldsToUpdate {
-                    entity: "release",
-                }));
-            }
+            let body = resolve_markdown(body)?;
             let mut database = open_database()?;
-            let release = database.update_release(id, title, description)?;
-            Ok(ReleaseCommandResult::Mutation { action: ReleaseMutation::Updated, release })
+            Ok(CaptureResult::Mutation {
+                action: "updated",
+                capture: database.update_capture(id, CaptureUpdate { title, body })?,
+            })
         }
-        ReleaseCommand::Complete { id, allow_open_children } => {
-            transition_release(id, ContainerAction::Complete, allow_open_children)
-        }
-        ReleaseCommand::Cancel { id, allow_open_children } => {
-            transition_release(id, ContainerAction::Cancel, allow_open_children)
-        }
-    }
-}
-
-fn transition_release(id: String, action: ContainerAction, allow_open_children: bool) -> CResult<ReleaseCommandResult> {
-    let id = ReleaseId::parse(&id).map_err(DomainError::from)?;
-    let mut database = open_database()?;
-    let release = database.transition_release(id, action, allow_open_children)?;
-    let action = match action {
-        ContainerAction::Complete => ReleaseMutation::Completed,
-        ContainerAction::Cancel => ReleaseMutation::Cancelled,
-    };
-    Ok(ReleaseCommandResult::Mutation { action, release })
-}
-
-fn exec_epic(command: EpicCommand) -> CResult<EpicCommandResult> {
-    match command {
-        EpicCommand::Create { title, spec, release, description } => {
-            validate_title(&title)?;
-            let release_id = release
-                .as_deref()
-                .map(ReleaseId::parse)
-                .transpose()
-                .map_err(DomainError::from)?;
-            let description = resolve_description(description)?.unwrap_or_default();
-            let mut project = open_project()?;
-            let spec_path = resolve_spec_path(&project.root, &project.current_dir, &spec)?;
-            let epic = project
-                .database
-                .create_epic(title, description, spec_path, release_id)?;
-            Ok(EpicCommandResult::Mutation { action: EpicMutation::Created, epic })
-        }
-        EpicCommand::Update { id, title, spec, release, no_release, description } => {
-            let id = EpicId::parse(&id).map_err(DomainError::from)?;
-            if let Some(title) = &title {
-                validate_title(title)?;
-            }
-            let description = resolve_description(description)?;
-            let release_change = if no_release {
-                Some(None)
-            } else {
-                release
-                    .as_deref()
-                    .map(ReleaseId::parse)
-                    .transpose()
-                    .map_err(DomainError::from)?
-                    .map(Some)
-            };
-            if title.is_none() && spec.is_none() && description.is_none() && release_change.is_none() {
-                return Err(CommandError::Domain(DomainError::NoFieldsToUpdate { entity: "epic" }));
-            }
-            let mut project = open_project()?;
-            let spec_path = spec
-                .as_ref()
-                .map(|spec| resolve_spec_path(&project.root, &project.current_dir, spec))
-                .transpose()?;
-            let epic = project
-                .database
-                .update_epic(id, title, description, spec_path, release_change)?;
-            Ok(EpicCommandResult::Mutation { action: EpicMutation::Updated, epic })
-        }
-        EpicCommand::Complete { id, allow_open_children } => {
-            transition_epic(id, ContainerAction::Complete, allow_open_children)
-        }
-        EpicCommand::Cancel { id, allow_open_children } => {
-            transition_epic(id, ContainerAction::Cancel, allow_open_children)
-        }
-    }
-}
-
-fn transition_epic(id: String, action: ContainerAction, allow_open_children: bool) -> CResult<EpicCommandResult> {
-    let id = EpicId::parse(&id).map_err(DomainError::from)?;
-    let mut database = open_database()?;
-    let epic = database.transition_epic(id, action, allow_open_children)?;
-    let action = match action {
-        ContainerAction::Complete => EpicMutation::Completed,
-        ContainerAction::Cancel => EpicMutation::Cancelled,
-    };
-    Ok(EpicCommandResult::Mutation { action, epic })
-}
-
-fn exec_milestone(command: MilestoneCommand) -> CResult<MilestoneCommandResult> {
-    match command {
-        MilestoneCommand::Create { title, epic, position, description } => {
-            validate_title(&title)?;
-            let epic_id = EpicId::parse(&epic).map_err(DomainError::from)?;
-            let description = resolve_description(description)?.unwrap_or_default();
+        CaptureCommand::Discard { id } => {
+            let id = parse_capture_id(&id)?;
             let mut database = open_database()?;
-            let milestone = database.create_milestone(epic_id, title, description, position)?;
-            Ok(MilestoneCommandResult::Mutation { action: MilestoneMutation::Created, milestone })
+            Ok(CaptureResult::Mutation { action: "discarded", capture: database.discard_capture(id)? })
         }
-        MilestoneCommand::Update { id, title, position, description } => {
-            let id = MilestoneId::parse(&id).map_err(DomainError::from)?;
-            if let Some(title) = &title {
-                validate_title(title)?;
-            }
-            let description = resolve_description(description)?;
-            if title.is_none() && position.is_none() && description.is_none() {
-                return Err(CommandError::Domain(DomainError::NoFieldsToUpdate {
-                    entity: "milestone",
-                }));
-            }
-            let mut database = open_database()?;
-            let milestone = database.update_milestone(id, title, description, position)?;
-            Ok(MilestoneCommandResult::Mutation { action: MilestoneMutation::Updated, milestone })
-        }
-        MilestoneCommand::Complete { id, allow_open_children } => {
-            transition_milestone(id, ContainerAction::Complete, allow_open_children)
-        }
-        MilestoneCommand::Cancel { id, allow_open_children } => {
-            transition_milestone(id, ContainerAction::Cancel, allow_open_children)
-        }
-    }
-}
-
-fn transition_milestone(
-    id: String, action: ContainerAction, allow_open_children: bool,
-) -> CResult<MilestoneCommandResult> {
-    let id = MilestoneId::parse(&id).map_err(DomainError::from)?;
-    let mut database = open_database()?;
-    let milestone = database.transition_milestone(id, action, allow_open_children)?;
-    let action = match action {
-        ContainerAction::Complete => MilestoneMutation::Completed,
-        ContainerAction::Cancel => MilestoneMutation::Cancelled,
-    };
-    Ok(MilestoneCommandResult::Mutation { action, milestone })
-}
-
-fn exec_task(command: TaskCommand) -> CResult<TaskCommandResult> {
-    match command {
-        TaskCommand::Create { title, milestone, parent, priority, position, blocked_by, description } => {
-            validate_title(&title)?;
-            let milestone_id = MilestoneId::parse(&milestone).map_err(DomainError::from)?;
-            let parent_id = parent
-                .as_deref()
-                .map(TaskId::parse)
-                .transpose()
-                .map_err(DomainError::from)?;
-            let blockers = blocked_by
-                .iter()
-                .map(|id| TaskId::parse(id).map_err(DomainError::from))
-                .collect::<Result<Vec<_>, _>>()?;
-            let priority = TaskPriority::parse(&priority)?;
-            let description = resolve_description(description)?.unwrap_or_default();
-            let mut database = open_database()?;
-            let task = database.create_task_with_dependencies(TaskCreate {
-                milestone_id,
-                parent_id,
-                title,
-                description,
-                priority,
-                position,
-                blockers,
+        CaptureCommand::Promote {
+            id,
+            target,
+            to,
+            title,
+            body,
+            acceptance_criteria,
+            acceptance_criteria_file,
+            spec,
+            plan,
+            phase,
+            parent,
+            priority,
+            position,
+        } => {
+            let id = parse_capture_id(&id)?;
+            let target = target.or(to).ok_or_else(|| CommandError::InvalidFilter {
+                message: "capture promotion requires a target: spec, task, or note".to_owned(),
             })?;
-            Ok(TaskCommandResult::Mutation { action: TaskMutation::Created, task })
-        }
-        TaskCommand::Update { id, title, priority, position, milestone, parent, no_parent, description } => {
-            let id = TaskId::parse(&id).map_err(DomainError::from)?;
-            if let Some(title) = &title {
-                validate_title(title)?;
-            }
-            let priority = priority.as_deref().map(TaskPriority::parse).transpose()?;
-            let milestone_id = milestone
-                .as_deref()
-                .map(MilestoneId::parse)
-                .transpose()
-                .map_err(DomainError::from)?;
-            let parent_change = if no_parent {
-                Some(None)
-            } else {
-                parent
-                    .as_deref()
-                    .map(TaskId::parse)
-                    .transpose()
-                    .map_err(DomainError::from)?
-                    .map(Some)
+            let target = target.to_ascii_lowercase();
+            let mut database = open_database()?;
+            let capture = database
+                .capture(id)?
+                .ok_or_else(|| StorageError::CaptureNotFound { id: id.to_string() })?;
+            let title = title.unwrap_or_else(|| capture.title.clone());
+            let body = resolve_markdown(body)?.unwrap_or_else(|| capture.body.clone());
+            let acceptance_criteria =
+                resolve_optional_value(acceptance_criteria, acceptance_criteria_file)?.unwrap_or_default();
+            let result = match target.as_str() {
+                "spec" => {
+                    reject_promotion_task_fields(spec, plan, phase, parent)?;
+                    database.promote_capture_to_spec(id, title, body, acceptance_criteria)?
+                }
+                "task" => {
+                    let priority = TaskPriority::parse(&priority)?;
+                    let input = CaptureTaskPromotion {
+                        spec_id: parse_optional_id(spec, SpecId::parse)?,
+                        plan_id: parse_optional_id(plan, PlanId::parse)?,
+                        phase_id: parse_optional_id(phase, PhaseId::parse)?,
+                        parent_id: parse_optional_id(parent, TaskId::parse)?,
+                        title,
+                        body,
+                        priority,
+                        position,
+                    };
+                    database.promote_capture_to_task(id, input)?
+                }
+                "note" => {
+                    reject_promotion_task_fields(spec, plan, phase, parent)?;
+                    database.promote_capture_to_note(id, title, body)?
+                }
+                _ => {
+                    return Err(CommandError::InvalidFilter {
+                        message: format!("unknown capture promotion target `{target}`; use spec, task, or note"),
+                    });
+                }
             };
-            let description = resolve_description(description)?;
-            if title.is_none()
-                && priority.is_none()
-                && position.is_none()
-                && milestone_id.is_none()
-                && parent_change.is_none()
-                && description.is_none()
-            {
-                return Err(CommandError::Domain(DomainError::NoFieldsToUpdate { entity: "task" }));
-            }
-            let mut database = open_database()?;
-            let task = database.update_task(
-                id,
-                TaskUpdate { title, description, priority, position, milestone_id, parent_change },
-            )?;
-            Ok(TaskCommandResult::Mutation { action: TaskMutation::Updated, task })
+            Ok(CaptureResult::Promotion(Box::new(result)))
         }
-        TaskCommand::Start { id } => transition_task(id, TaskAction::Start, false),
-        TaskCommand::Park { id } => transition_task(id, TaskAction::Park, false),
-        TaskCommand::Unpark { id } => transition_task(id, TaskAction::Unpark, false),
-        TaskCommand::Handoff { id, note, note_file } => {
-            let note = resolve_description(DescriptionArgs { description: note, description_file: note_file })?
-                .ok_or_else(|| CommandError::Domain(DomainError::NoFieldsToUpdate { entity: "handoff" }))?;
-            let id = TaskId::parse(&id).map_err(DomainError::from)?;
-            let mut database = open_database()?;
-            let task = database.handoff_task(id, note)?;
-            Ok(TaskCommandResult::Mutation { action: TaskMutation::HandedOff, task })
-        }
-        TaskCommand::Complete { id, allow_open_children, evidence, evidence_file } => {
-            let evidence =
-                resolve_description(DescriptionArgs { description: evidence, description_file: evidence_file })?;
-            let id = TaskId::parse(&id).map_err(DomainError::from)?;
-            let mut database = open_database()?;
-            let task = database.complete_task(id, allow_open_children, evidence)?;
-            Ok(TaskCommandResult::Mutation { action: TaskMutation::Completed, task })
-        }
-        TaskCommand::Cancel { id, allow_open_children } => transition_task(id, TaskAction::Cancel, allow_open_children),
     }
 }
 
-fn exec_dependency(command: DependencyCommand) -> CResult<DependencyCommandResult> {
-    let (task_id, blocker_id, action) = match command {
-        DependencyCommand::Add { task_id, blocker_id } => (task_id, blocker_id, DependencyMutation::Added),
-        DependencyCommand::Remove { task_id, blocker_id } => (task_id, blocker_id, DependencyMutation::Removed),
-    };
-    let task_id = TaskId::parse(&task_id).map_err(DomainError::from)?;
-    let blocker_id = TaskId::parse(&blocker_id).map_err(DomainError::from)?;
-    let mut database = open_database()?;
-    let dependency = match action {
-        DependencyMutation::Added => database.add_dependency(task_id, blocker_id)?,
-        DependencyMutation::Removed => database.remove_dependency(task_id, blocker_id)?,
-    };
-    Ok(DependencyCommandResult::Mutation { action, dependency })
-}
-
-fn exec_ready(args: ReadyArgs) -> CResult<Vec<Task>> {
-    let filter = resolve_ready_filter(args)?;
-    let database = open_database()?;
-    validate_ready_targets(&database, &filter)?;
-    Ok(database.ready_tasks_filtered(&filter)?)
-}
-
-fn validate_ready_targets(database: &Database, filter: &ReadyFilter) -> CResult<()> {
-    if let Some(id) = filter.release_id
-        && database.release(id)?.is_none()
-    {
-        return Err(CommandError::Storage(StorageError::ReleaseNotFound {
-            id: id.to_string(),
-        }));
-    }
-    if let Some(id) = filter.epic_id
-        && database.epic(id)?.is_none()
-    {
-        return Err(CommandError::Storage(StorageError::EpicNotFound { id: id.to_string() }));
-    }
-    if let Some(id) = filter.milestone_id
-        && database.milestone(id)?.is_none()
-    {
-        return Err(CommandError::Storage(StorageError::MilestoneNotFound {
-            id: id.to_string(),
-        }));
-    }
-    if let Some(id) = filter.parent_id
-        && database.task(id)?.is_none()
-    {
-        return Err(CommandError::Storage(StorageError::TaskNotFound { id: id.to_string() }));
+fn reject_promotion_task_fields(
+    spec: Option<String>, plan: Option<String>, phase: Option<String>, parent: Option<String>,
+) -> CResult<()> {
+    if spec.is_some() || plan.is_some() || phase.is_some() || parent.is_some() {
+        return Err(CommandError::InvalidFilter {
+            message: "task placement options apply only when promoting to a task".to_owned(),
+        });
     }
     Ok(())
 }
 
+fn exec_release(command: ReleaseCommand, renderer: &Renderer) -> anyhow::Result<()> {
+    let result: Result<Option<String>, ApplicationError> = (|| match command {
+        ReleaseCommand::Create { title, body } => {
+            validate_title(&title).map_err(|error| ApplicationError::from_command(CommandError::Domain(error)))?;
+            let body = resolve_markdown(body)
+                .map_err(ApplicationError::from_command)?
+                .unwrap_or_default();
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            let release = database
+                .create_release(title, body)
+                .map_err(ApplicationError::from_command)?;
+            Ok(renderer
+                .render_connected_release("created", &release)
+                .map_err(|error| {
+                    ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() })
+                })?)
+        }
+        ReleaseCommand::Show { id } => {
+            let id = parse_release_id(&id).map_err(ApplicationError::from_command)?;
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            let release = database
+                .release(id)
+                .map_err(ApplicationError::from_command)?
+                .ok_or_else(|| {
+                    ApplicationError::from_command(CommandError::Storage(StorageError::ReleaseNotFound {
+                        id: id.to_string(),
+                    }))
+                })?;
+            Ok(renderer.render_connected_release("shown", &release).map_err(|error| {
+                ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() })
+            })?)
+        }
+        ReleaseCommand::List => {
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            Ok(renderer
+                .render_releases(&database.releases().map_err(ApplicationError::from_command)?)
+                .map_err(|error| {
+                    ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() })
+                })?)
+        }
+        ReleaseCommand::Update { id, title, body } => {
+            let id = parse_release_id(&id).map_err(ApplicationError::from_command)?;
+            if let Some(title) = &title {
+                validate_title(title).map_err(|error| ApplicationError::from_command(CommandError::Domain(error)))?;
+            }
+            let body = resolve_markdown(body).map_err(ApplicationError::from_command)?;
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            let release = database
+                .update_release(id, title, body)
+                .map_err(ApplicationError::from_command)?;
+            Ok(renderer
+                .render_connected_release("updated", &release)
+                .map_err(|error| {
+                    ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() })
+                })?)
+        }
+        ReleaseCommand::Complete { id, allow_open_children } => {
+            transition_release(id, ContainerAction::Complete, allow_open_children, renderer)
+        }
+        ReleaseCommand::Cancel { id, allow_open_children } => {
+            transition_release(id, ContainerAction::Cancel, allow_open_children, renderer)
+        }
+        ReleaseCommand::Member { command } => exec_membership(command, renderer),
+    })();
+    result.map(write_output).unwrap_or_else(|error| Err(error.into()))
+}
+
+fn transition_release(
+    id: String, action: ContainerAction, allow_open_children: bool, renderer: &Renderer,
+) -> Result<Option<String>, ApplicationError> {
+    let id = parse_release_id(&id).map_err(ApplicationError::from_command)?;
+    let mut database = open_database().map_err(ApplicationError::from_command)?;
+    let release = database
+        .transition_release(id, action, allow_open_children)
+        .map_err(ApplicationError::from_command)?;
+    let action = match action {
+        ContainerAction::Complete => "completed",
+        ContainerAction::Cancel => "cancelled",
+    };
+    renderer
+        .render_connected_release(action, &release)
+        .map_err(|error| ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() }))
+}
+
+fn exec_membership(command: MembershipCommand, renderer: &Renderer) -> Result<Option<String>, ApplicationError> {
+    match command {
+        MembershipCommand::Add { release_id, kind, record_id } => {
+            let release_id = parse_release_id(&release_id).map_err(ApplicationError::from_command)?;
+            let kind = parse_member_kind(&kind).map_err(ApplicationError::from_command)?;
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            let membership = database
+                .add_release_membership(release_id, kind, record_id)
+                .map_err(ApplicationError::from_command)?;
+            renderer
+                .render_membership("added", &membership, &membership.record_id)
+                .map_err(|error| {
+                    ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() })
+                })
+        }
+        MembershipCommand::Remove { release_id, kind, record_id } => {
+            let release_id = parse_release_id(&release_id).map_err(ApplicationError::from_command)?;
+            let kind = parse_member_kind(&kind).map_err(ApplicationError::from_command)?;
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            let membership = database
+                .remove_release_membership(release_id, kind, &record_id)
+                .map_err(ApplicationError::from_command)?;
+            renderer
+                .render_membership("removed", &membership, &membership.record_id)
+                .map_err(|error| {
+                    ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() })
+                })
+        }
+        MembershipCommand::List { release_id } => {
+            let release_id = parse_release_id(&release_id).map_err(ApplicationError::from_command)?;
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            if database
+                .release(release_id)
+                .map_err(ApplicationError::from_command)?
+                .is_none()
+            {
+                return Err(ApplicationError::from_command(CommandError::Storage(
+                    StorageError::ReleaseNotFound { id: release_id.to_string() },
+                )));
+            }
+            let values = database
+                .release_memberships()
+                .map_err(ApplicationError::from_command)?
+                .into_iter()
+                .filter(|item| item.release_id == release_id)
+                .collect::<Vec<_>>();
+            let lines = values
+                .iter()
+                .map(|item| format!("{}\t{}\t{}", item.record_kind.as_str(), item.release_id, item.record_id))
+                .collect::<Vec<_>>();
+            renderer
+                .render_relationships("memberships", &values, &lines, "No release members.")
+                .map_err(|error| {
+                    ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() })
+                })
+        }
+    }
+}
+
+fn exec_spec(command: SpecCommand, renderer: &Renderer) -> anyhow::Result<()> {
+    let message = match command {
+        SpecCommand::Create { title, body, acceptance } => {
+            validate_title(&title).map_err(|error| ApplicationError::from_command(CommandError::Domain(error)))?;
+            let body = resolve_markdown(body)
+                .map_err(ApplicationError::from_command)?
+                .unwrap_or_default();
+            let acceptance = resolve_acceptance(acceptance)
+                .map_err(ApplicationError::from_command)?
+                .unwrap_or_default();
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            let spec = database
+                .create_spec(title, body, acceptance)
+                .map_err(ApplicationError::from_command)?;
+            renderer.render_spec("created", &spec).map_err(|error| {
+                ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() })
+            })?
+        }
+        SpecCommand::Show { id } => {
+            let id = parse_spec_id(&id).map_err(ApplicationError::from_command)?;
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            let spec = database
+                .spec(id)
+                .map_err(ApplicationError::from_command)?
+                .ok_or_else(|| {
+                    ApplicationError::from_command(CommandError::Storage(StorageError::SpecNotFound {
+                        id: id.to_string(),
+                    }))
+                })?;
+            renderer.render_spec("shown", &spec).map_err(|error| {
+                ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() })
+            })?
+        }
+        SpecCommand::List => {
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            renderer
+                .render_specs(&database.specs().map_err(ApplicationError::from_command)?)
+                .map_err(|error| {
+                    ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() })
+                })?
+        }
+        SpecCommand::Update { id, title, body, acceptance } => {
+            let id = parse_spec_id(&id).map_err(ApplicationError::from_command)?;
+            if let Some(title) = &title {
+                validate_title(title).map_err(|error| ApplicationError::from_command(CommandError::Domain(error)))?;
+            }
+            let body = resolve_markdown(body).map_err(ApplicationError::from_command)?;
+            let acceptance = resolve_acceptance(acceptance).map_err(ApplicationError::from_command)?;
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            let spec = database
+                .update_spec(id, SpecUpdate { title, body, acceptance_criteria: acceptance })
+                .map_err(ApplicationError::from_command)?;
+            renderer.render_spec("updated", &spec).map_err(|error| {
+                ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() })
+            })?
+        }
+        SpecCommand::Complete { id, allow_open_children } => {
+            transition_spec(id, ContainerAction::Complete, allow_open_children, renderer)?
+        }
+        SpecCommand::Cancel { id, allow_open_children } => {
+            transition_spec(id, ContainerAction::Cancel, allow_open_children, renderer)?
+        }
+    };
+    write_output(message)
+}
+
+fn transition_spec(
+    id: String, action: ContainerAction, allow_open_children: bool, renderer: &Renderer,
+) -> Result<Option<String>, ApplicationError> {
+    let id = parse_spec_id(&id).map_err(ApplicationError::from_command)?;
+    let mut database = open_database().map_err(ApplicationError::from_command)?;
+    let spec = database
+        .transition_spec(id, action, allow_open_children)
+        .map_err(ApplicationError::from_command)?;
+    let action = match action {
+        ContainerAction::Complete => "completed",
+        ContainerAction::Cancel => "cancelled",
+    };
+    renderer
+        .render_spec(action, &spec)
+        .map_err(|error| ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() }))
+}
+
+fn exec_plan(command: PlanCommand, renderer: &Renderer) -> anyhow::Result<()> {
+    let result = match command {
+        PlanCommand::Create { title, spec, body, input, no_input: _ } => {
+            validate_title(&title).map_err(|error| ApplicationError::from_command(CommandError::Domain(error)))?;
+            let spec_id = parse_spec_id(&spec).map_err(ApplicationError::from_command)?;
+            let body = resolve_markdown(body)
+                .map_err(ApplicationError::from_command)?
+                .unwrap_or_default();
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            match input {
+                Some(path) => {
+                    let document = read_plan_document(&path).map_err(ApplicationError::from_command)?;
+                    PlanResult::Applied(
+                        database
+                            .create_and_apply_plan(spec_id, title, body, &document)
+                            .map_err(ApplicationError::from_command)?,
+                    )
+                }
+                None => PlanResult::Mutation {
+                    action: "created",
+                    plan: database
+                        .create_plan(spec_id, title, body)
+                        .map_err(ApplicationError::from_command)?,
+                },
+            }
+        }
+        PlanCommand::Show { id } => {
+            let id = parse_plan_id(&id).map_err(ApplicationError::from_command)?;
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            let plan = database
+                .plan(id)
+                .map_err(ApplicationError::from_command)?
+                .ok_or_else(|| {
+                    ApplicationError::from_command(CommandError::Storage(StorageError::PlanNotFound {
+                        id: id.to_string(),
+                    }))
+                })?;
+            let graph = database.connected_graph().map_err(ApplicationError::from_command)?;
+            let tasks = graph
+                .tasks
+                .iter()
+                .map(|task| {
+                    task_ancestry(&graph, task.id).map(|(_, plan_id, _)| (plan_id == Some(id)).then(|| task.clone()))
+                })
+                .collect::<CResult<Vec<_>>>()?
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+            let task_ids = tasks
+                .iter()
+                .map(|task| task.id)
+                .collect::<std::collections::HashSet<_>>();
+            PlanResult::Detail(PlanDetail {
+                plan,
+                phases: graph.phases.into_iter().filter(|phase| phase.plan_id == id).collect(),
+                tasks,
+                dependencies: graph
+                    .dependencies
+                    .into_iter()
+                    .filter(|dependency| task_ids.contains(&dependency.task_id))
+                    .collect(),
+            })
+        }
+        PlanCommand::List => {
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            PlanResult::List(database.plans().map_err(ApplicationError::from_command)?)
+        }
+        PlanCommand::Update { id, title, body } => {
+            let id = parse_plan_id(&id).map_err(ApplicationError::from_command)?;
+            if let Some(title) = &title {
+                validate_title(title).map_err(|error| ApplicationError::from_command(CommandError::Domain(error)))?;
+            }
+            let body = resolve_markdown(body).map_err(ApplicationError::from_command)?;
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            PlanResult::Mutation {
+                action: "updated",
+                plan: database
+                    .update_plan(id, PlanUpdate { title, body })
+                    .map_err(ApplicationError::from_command)?,
+            }
+        }
+        PlanCommand::Check { id, file } => {
+            let id = parse_plan_id(&id).map_err(ApplicationError::from_command)?;
+            let document = read_plan_document(&file).map_err(ApplicationError::from_command)?;
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            PlanResult::Diff(
+                database
+                    .check_plan(id, &document)
+                    .map_err(ApplicationError::from_command)?,
+            )
+        }
+        PlanCommand::Diff { id, file } => {
+            let id = parse_plan_id(&id).map_err(ApplicationError::from_command)?;
+            let document = read_plan_document(&file).map_err(ApplicationError::from_command)?;
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            PlanResult::Diff(
+                database
+                    .diff_plan(id, &document)
+                    .map_err(ApplicationError::from_command)?,
+            )
+        }
+        PlanCommand::Apply { id, file } => {
+            let id = parse_plan_id(&id).map_err(ApplicationError::from_command)?;
+            let document = read_plan_document(&file).map_err(ApplicationError::from_command)?;
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            PlanResult::Applied(
+                database
+                    .apply_plan(id, &document)
+                    .map_err(ApplicationError::from_command)?,
+            )
+        }
+        PlanCommand::Complete { id, allow_open_children } => {
+            let id = parse_plan_id(&id).map_err(ApplicationError::from_command)?;
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            PlanResult::Mutation {
+                action: "completed",
+                plan: database
+                    .transition_plan(id, ContainerAction::Complete, allow_open_children)
+                    .map_err(ApplicationError::from_command)?,
+            }
+        }
+        PlanCommand::Cancel { id, allow_open_children } => {
+            let id = parse_plan_id(&id).map_err(ApplicationError::from_command)?;
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            PlanResult::Mutation {
+                action: "cancelled",
+                plan: database
+                    .transition_plan(id, ContainerAction::Cancel, allow_open_children)
+                    .map_err(ApplicationError::from_command)?,
+            }
+        }
+        PlanCommand::Phase { command } => return exec_phase(command, renderer),
+    };
+    let message = match result {
+        PlanResult::Mutation { action, plan } => renderer.render_plan(action, &plan),
+        PlanResult::Detail(detail) => renderer.render_plan_detail(&detail),
+        PlanResult::Diff(diff) => renderer.render_plan_diff(&diff),
+        PlanResult::Applied(result) => renderer.render_plan_apply(&result),
+        PlanResult::List(plans) => renderer.render_plans(&plans),
+    }
+    .map_err(|error| ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() }))?;
+    write_output(message)
+}
+
+fn exec_phase(command: PhaseCommand, renderer: &Renderer) -> anyhow::Result<()> {
+    let message = match command {
+        PhaseCommand::Create { title, plan, position, body } => {
+            validate_title(&title).map_err(|error| ApplicationError::from_command(CommandError::Domain(error)))?;
+            let plan_id = parse_plan_id(&plan).map_err(ApplicationError::from_command)?;
+            let body = resolve_markdown(body)
+                .map_err(ApplicationError::from_command)?
+                .unwrap_or_default();
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            let phase = database
+                .create_phase(plan_id, title, body, position)
+                .map_err(ApplicationError::from_command)?;
+            render_output(renderer.render_phase("created", &phase))
+        }
+        PhaseCommand::Show { id } => {
+            let id = parse_phase_id(&id).map_err(ApplicationError::from_command)?;
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            let phase = database
+                .phase(id)
+                .map_err(ApplicationError::from_command)?
+                .ok_or_else(|| {
+                    ApplicationError::from_command(CommandError::Storage(StorageError::PhaseNotFound {
+                        id: id.to_string(),
+                    }))
+                })?;
+            render_output(renderer.render_phase("shown", &phase))
+        }
+        PhaseCommand::List => {
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            render_output(renderer.render_phases(&database.phases().map_err(ApplicationError::from_command)?))
+        }
+        PhaseCommand::Update { id, title, position, body } => {
+            let id = parse_phase_id(&id).map_err(ApplicationError::from_command)?;
+            if let Some(title) = &title {
+                validate_title(title).map_err(|error| ApplicationError::from_command(CommandError::Domain(error)))?;
+            }
+            let body = resolve_markdown(body).map_err(ApplicationError::from_command)?;
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            render_output(
+                renderer.render_phase(
+                    "updated",
+                    &database
+                        .update_phase(id, PhaseUpdate { title, body, position })
+                        .map_err(ApplicationError::from_command)?,
+                ),
+            )
+        }
+        PhaseCommand::Complete { id, allow_open_children } => {
+            transition_phase(id, ContainerAction::Complete, allow_open_children, renderer)
+        }
+        PhaseCommand::Cancel { id, allow_open_children } => {
+            transition_phase(id, ContainerAction::Cancel, allow_open_children, renderer)
+        }
+    }?;
+    write_output(message)
+}
+
+fn transition_phase(
+    id: String, action: ContainerAction, allow_open_children: bool, renderer: &Renderer,
+) -> Result<Option<String>, ApplicationError> {
+    let id = parse_phase_id(&id).map_err(ApplicationError::from_command)?;
+    let mut database = open_database().map_err(ApplicationError::from_command)?;
+    let phase = database
+        .transition_phase(id, action, allow_open_children)
+        .map_err(ApplicationError::from_command)?;
+    let action = match action {
+        ContainerAction::Complete => "completed",
+        ContainerAction::Cancel => "cancelled",
+    };
+    render_output(renderer.render_phase(action, &phase))
+}
+
+fn exec_task(command: TaskCommand, renderer: &Renderer) -> anyhow::Result<()> {
+    let message = match command {
+        TaskCommand::Create { title, spec, plan, phase, parent, priority, position, blocked_by, body } => {
+            validate_title(&title).map_err(|error| ApplicationError::from_command(CommandError::Domain(error)))?;
+            let priority = TaskPriority::parse(&priority)
+                .map_err(|error| ApplicationError::from_command(CommandError::Domain(error)))?;
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            let project_id = database.project().map_err(ApplicationError::from_command)?.id;
+            let input = PlanningTaskCreate {
+                project_id,
+                spec_id: parse_optional_id(spec, SpecId::parse).map_err(ApplicationError::from_command)?,
+                plan_id: parse_optional_id(plan, PlanId::parse).map_err(ApplicationError::from_command)?,
+                phase_id: parse_optional_id(phase, PhaseId::parse).map_err(ApplicationError::from_command)?,
+                parent_id: parse_optional_id(parent, TaskId::parse).map_err(ApplicationError::from_command)?,
+                title,
+                body: resolve_markdown(body)
+                    .map_err(ApplicationError::from_command)?
+                    .unwrap_or_default(),
+                priority,
+                position,
+            };
+            let blockers = blocked_by
+                .iter()
+                .map(|blocker| parse_task_id(blocker))
+                .collect::<CResult<Vec<_>>>()
+                .map_err(ApplicationError::from_command)?;
+            let task = database
+                .create_planning_task_with_dependencies(input, &blockers)
+                .map_err(ApplicationError::from_command)?;
+            render_output(renderer.render_planning_task("created", &task))
+        }
+        TaskCommand::Show { id } => {
+            let id = parse_task_id(&id).map_err(ApplicationError::from_command)?;
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            render_output(
+                renderer.render_planning_task_view(
+                    &database
+                        .planning_task_view(id)
+                        .map_err(ApplicationError::from_command)?,
+                ),
+            )
+        }
+        TaskCommand::List => {
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            render_output(
+                renderer.render_planning_tasks(&database.planning_tasks().map_err(ApplicationError::from_command)?),
+            )
+        }
+        TaskCommand::Update {
+            id,
+            title,
+            body,
+            priority,
+            position,
+            spec,
+            no_spec,
+            plan,
+            no_plan,
+            phase,
+            no_phase,
+            parent,
+            no_parent,
+        } => {
+            let id = parse_task_id(&id).map_err(ApplicationError::from_command)?;
+            if let Some(title) = &title {
+                validate_title(title).map_err(|error| ApplicationError::from_command(CommandError::Domain(error)))?;
+            }
+            let priority = priority
+                .as_deref()
+                .map(TaskPriority::parse)
+                .transpose()
+                .map_err(|error| ApplicationError::from_command(CommandError::Domain(error)))?;
+            let update = PlanningTaskUpdate {
+                title,
+                body: resolve_markdown(body).map_err(ApplicationError::from_command)?,
+                priority,
+                position,
+                spec_id: relation_change(spec, no_spec, SpecId::parse).map_err(ApplicationError::from_command)?,
+                plan_id: relation_change(plan, no_plan, PlanId::parse).map_err(ApplicationError::from_command)?,
+                phase_id: relation_change(phase, no_phase, PhaseId::parse).map_err(ApplicationError::from_command)?,
+                parent_id: relation_change(parent, no_parent, TaskId::parse).map_err(ApplicationError::from_command)?,
+            };
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            render_output(
+                renderer.render_planning_task(
+                    "updated",
+                    &database
+                        .update_planning_task(id, update)
+                        .map_err(ApplicationError::from_command)?,
+                ),
+            )
+        }
+        TaskCommand::Start { id } => transition_task(id, TaskAction::Start, false, renderer),
+        TaskCommand::Park { id } => transition_task(id, TaskAction::Park, false, renderer),
+        TaskCommand::Unpark { id } => transition_task(id, TaskAction::Unpark, false, renderer),
+        TaskCommand::Handoff { id, note, note_file } => {
+            let note = resolve_optional_value(note, note_file)
+                .map_err(ApplicationError::from_command)?
+                .ok_or_else(|| {
+                    ApplicationError::from_command(CommandError::Domain(DomainError::NoFieldsToUpdate {
+                        entity: "handoff",
+                    }))
+                })?;
+            let id = parse_task_id(&id).map_err(ApplicationError::from_command)?;
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            render_output(
+                renderer.render_planning_task(
+                    "handed_off",
+                    &database
+                        .handoff_planning_task(id, note)
+                        .map_err(ApplicationError::from_command)?,
+                ),
+            )
+        }
+        TaskCommand::Complete { id, allow_open_children, evidence, evidence_file } => {
+            let evidence = resolve_optional_value(evidence, evidence_file).map_err(ApplicationError::from_command)?;
+            let id = parse_task_id(&id).map_err(ApplicationError::from_command)?;
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            render_output(
+                renderer.render_planning_task(
+                    "completed",
+                    &database
+                        .complete_planning_task(id, allow_open_children, evidence)
+                        .map_err(ApplicationError::from_command)?,
+                ),
+            )
+        }
+        TaskCommand::Cancel { id, allow_open_children } => {
+            transition_task(id, TaskAction::Cancel, allow_open_children, renderer)
+        }
+        TaskCommand::Explain { id } => {
+            let id = parse_task_id(&id).map_err(ApplicationError::from_command)?;
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            render_output(
+                renderer.render_planning_task_view(
+                    &database
+                        .planning_task_view(id)
+                        .map_err(ApplicationError::from_command)?,
+                ),
+            )
+        }
+        TaskCommand::Context { id } => {
+            let id = parse_task_id(&id).map_err(ApplicationError::from_command)?;
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            render_output(
+                renderer
+                    .render_planning_context(&database.planning_context(id).map_err(ApplicationError::from_command)?),
+            )
+        }
+    }?;
+    write_output(message)
+}
+
+fn transition_task(
+    id: String, action: TaskAction, allow_open_children: bool, renderer: &Renderer,
+) -> Result<Option<String>, ApplicationError> {
+    let id = parse_task_id(&id).map_err(ApplicationError::from_command)?;
+    let mut database = open_database().map_err(ApplicationError::from_command)?;
+    let task = database
+        .transition_planning_task(id, action, allow_open_children)
+        .map_err(ApplicationError::from_command)?;
+    let action = match action {
+        TaskAction::Start => "started",
+        TaskAction::Park => "parked",
+        TaskAction::Unpark => "unparked",
+        TaskAction::Complete => "completed",
+        TaskAction::Cancel => "cancelled",
+    };
+    render_output(renderer.render_planning_task(action, &task))
+}
+
+fn render_output(result: Result<Option<String>, OutputError>) -> Result<Option<String>, ApplicationError> {
+    result.map_err(|error| ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() }))
+}
+
+fn exec_dependency(command: DependencyCommand, renderer: &Renderer) -> anyhow::Result<()> {
+    let message = match command {
+        DependencyCommand::Add { task_id, blocker_id } => {
+            let task_id = parse_task_id(&task_id).map_err(ApplicationError::from_command)?;
+            let blocker_id = parse_task_id(&blocker_id).map_err(ApplicationError::from_command)?;
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            let dependency = database
+                .add_planning_dependency(task_id, blocker_id)
+                .map_err(ApplicationError::from_command)?;
+            renderer
+                .render_dependency(crate::output::DependencyMutation::Added, &dependency)
+                .map_err(|error| {
+                    ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() })
+                })?
+        }
+        DependencyCommand::Remove { task_id, blocker_id } => {
+            let task_id = parse_task_id(&task_id).map_err(ApplicationError::from_command)?;
+            let blocker_id = parse_task_id(&blocker_id).map_err(ApplicationError::from_command)?;
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            let dependency = database
+                .remove_planning_dependency(task_id, blocker_id)
+                .map_err(ApplicationError::from_command)?;
+            renderer
+                .render_dependency(crate::output::DependencyMutation::Removed, &dependency)
+                .map_err(|error| {
+                    ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() })
+                })?
+        }
+        DependencyCommand::List => {
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            let dependencies = database
+                .planning_dependencies()
+                .map_err(ApplicationError::from_command)?;
+            let lines = dependencies
+                .iter()
+                .map(|item| format!("{}\t{}", item.task_id, item.blocker_id))
+                .collect::<Vec<_>>();
+            renderer
+                .render_relationships("dependencies", &dependencies, &lines, "No dependencies.")
+                .map_err(|error| {
+                    ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() })
+                })?
+        }
+    };
+    write_output(message)
+}
+
+fn exec_note(command: NoteCommand, renderer: &Renderer) -> anyhow::Result<()> {
+    let message = match command {
+        NoteCommand::Create { title, body } => {
+            validate_title(&title).map_err(|error| ApplicationError::from_command(CommandError::Domain(error)))?;
+            let body = resolve_markdown(body)
+                .map_err(ApplicationError::from_command)?
+                .unwrap_or_default();
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            renderer.render_note(
+                "created",
+                &database
+                    .create_note(title, body)
+                    .map_err(ApplicationError::from_command)?,
+            )
+        }
+        NoteCommand::Show { id } => {
+            let id = parse_note_id(&id).map_err(ApplicationError::from_command)?;
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            let note = database
+                .note(id)
+                .map_err(ApplicationError::from_command)?
+                .ok_or_else(|| {
+                    ApplicationError::from_command(CommandError::Storage(StorageError::NoteNotFound {
+                        id: id.to_string(),
+                    }))
+                })?;
+            renderer.render_note("shown", &note)
+        }
+        NoteCommand::List => {
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            renderer.render_notes(&database.notes().map_err(ApplicationError::from_command)?)
+        }
+        NoteCommand::Update { id, title, body } => {
+            let id = parse_note_id(&id).map_err(ApplicationError::from_command)?;
+            if let Some(title) = &title {
+                validate_title(title).map_err(|error| ApplicationError::from_command(CommandError::Domain(error)))?;
+            }
+            let body = resolve_markdown(body).map_err(ApplicationError::from_command)?;
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            renderer.render_note(
+                "updated",
+                &database
+                    .update_note(id, NoteUpdate { title, body })
+                    .map_err(ApplicationError::from_command)?,
+            )
+        }
+        NoteCommand::Link { command } => return exec_note_link(command, renderer),
+    }
+    .map_err(|error| ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() }))?;
+    write_output(message)
+}
+
+fn exec_note_link(command: NoteLinkCommand, renderer: &Renderer) -> anyhow::Result<()> {
+    let message = match command {
+        NoteLinkCommand::Add { note_id, kind, record_id } => {
+            let note_id = parse_note_id(&note_id).map_err(ApplicationError::from_command)?;
+            let kind = parse_linked_kind(&kind).map_err(ApplicationError::from_command)?;
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            let link = database
+                .add_note_link(note_id, kind, record_id)
+                .map_err(ApplicationError::from_command)?;
+            renderer
+                .render_note_link("added", &link, &link.record_id)
+                .map_err(|error| {
+                    ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() })
+                })?
+        }
+        NoteLinkCommand::Remove { note_id, kind, record_id } => {
+            let note_id = parse_note_id(&note_id).map_err(ApplicationError::from_command)?;
+            let kind = parse_linked_kind(&kind).map_err(ApplicationError::from_command)?;
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            let link = database
+                .remove_note_link(note_id, kind, &record_id)
+                .map_err(ApplicationError::from_command)?;
+            renderer
+                .render_note_link("removed", &link, &link.record_id)
+                .map_err(|error| {
+                    ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() })
+                })?
+        }
+        NoteLinkCommand::List { note_id } => {
+            let note_id = parse_note_id(&note_id).map_err(ApplicationError::from_command)?;
+            let database = open_database().map_err(ApplicationError::from_command)?;
+            if database
+                .note(note_id)
+                .map_err(ApplicationError::from_command)?
+                .is_none()
+            {
+                return Err(
+                    ApplicationError::from_command(CommandError::Storage(StorageError::NoteNotFound {
+                        id: note_id.to_string(),
+                    }))
+                    .into(),
+                );
+            }
+            let links = database
+                .note_links()
+                .map_err(ApplicationError::from_command)?
+                .into_iter()
+                .filter(|link| link.note_id == note_id)
+                .collect::<Vec<_>>();
+            let lines = links
+                .iter()
+                .map(|link| format!("{}\t{}", link.record_kind.as_str(), link.record_id))
+                .collect::<Vec<_>>();
+            renderer
+                .render_relationships("links", &links, &lines, "No note links.")
+                .map_err(|error| {
+                    ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() })
+                })?
+        }
+    };
+    write_output(message)
+}
+
+fn show_record(database: &Database, id: &str, renderer: &Renderer) -> CResult<Option<String>> {
+    if id.starts_with(CaptureId::PREFIX) {
+        let value = parse_capture_id(id)?;
+        let record = database
+            .capture(value)?
+            .ok_or_else(|| StorageError::CaptureNotFound { id: id.to_owned() })?;
+        return renderer
+            .render_capture("shown", &record)
+            .map_err(|error| CommandError::InvalidFilter { message: error.to_string() });
+    }
+    if id.starts_with(SpecId::PREFIX) {
+        let value = parse_spec_id(id)?;
+        let record = database
+            .spec(value)?
+            .ok_or_else(|| StorageError::SpecNotFound { id: id.to_owned() })?;
+        return renderer
+            .render_spec("shown", &record)
+            .map_err(|error| CommandError::InvalidFilter { message: error.to_string() });
+    }
+    if id.starts_with(PlanId::PREFIX) {
+        let value = parse_plan_id(id)?;
+        let record = database
+            .plan(value)?
+            .ok_or_else(|| StorageError::PlanNotFound { id: id.to_owned() })?;
+        return renderer
+            .render_plan("shown", &record)
+            .map_err(|error| CommandError::InvalidFilter { message: error.to_string() });
+    }
+    if id.starts_with(PhaseId::PREFIX) {
+        let value = parse_phase_id(id)?;
+        let record = database
+            .phase(value)?
+            .ok_or_else(|| StorageError::PhaseNotFound { id: id.to_owned() })?;
+        return renderer
+            .render_phase("shown", &record)
+            .map_err(|error| CommandError::InvalidFilter { message: error.to_string() });
+    }
+    if id.starts_with(TaskId::PREFIX) {
+        let value = parse_task_id(id)?;
+        let record = database.planning_task_view(value)?;
+        return renderer
+            .render_planning_task_view(&record)
+            .map_err(|error| CommandError::InvalidFilter { message: error.to_string() });
+    }
+    if id.starts_with(NoteId::PREFIX) {
+        let value = parse_note_id(id)?;
+        let record = database
+            .note(value)?
+            .ok_or_else(|| StorageError::NoteNotFound { id: id.to_owned() })?;
+        return renderer
+            .render_note("shown", &record)
+            .map_err(|error| CommandError::InvalidFilter { message: error.to_string() });
+    }
+    if id.starts_with(ReleaseId::PREFIX) {
+        let value = parse_release_id(id)?;
+        let record = database
+            .release(value)?
+            .ok_or_else(|| StorageError::ReleaseNotFound { id: id.to_owned() })?;
+        return renderer
+            .render_connected_release("shown", &record)
+            .map_err(|error| CommandError::InvalidFilter { message: error.to_string() });
+    }
+    Err(CommandError::InvalidFilter { message: format!("unknown record ID `{id}`") })
+}
+
+fn connected_tree(graph: &ConnectedGraph, root: Option<&str>) -> CResult<Vec<ConnectedTreeNode>> {
+    let mut nodes = Vec::new();
+    for release in &graph.releases {
+        nodes.push(ConnectedTreeNode {
+            kind: "release",
+            id: release.id.to_string(),
+            title: release.title.clone(),
+            status: release.status.as_str().to_owned(),
+            children: Vec::new(),
+        });
+    }
+    for capture in &graph.captures {
+        nodes.push(ConnectedTreeNode {
+            kind: "capture",
+            id: capture.id.to_string(),
+            title: capture.title.clone(),
+            status: capture.status.as_str().to_owned(),
+            children: Vec::new(),
+        });
+    }
+    for spec in &graph.specs {
+        let mut children = graph
+            .plans
+            .iter()
+            .filter(|plan| plan.spec_id == spec.id)
+            .map(|plan| plan_tree_node(graph, plan))
+            .collect::<CResult<Vec<_>>>()?;
+        children.extend(
+            graph
+                .tasks
+                .iter()
+                .filter(|task| {
+                    task.spec_id == Some(spec.id)
+                        && task.plan_id.is_none()
+                        && task.phase_id.is_none()
+                        && task.parent_id.is_none()
+                })
+                .map(|task| task_tree_node(graph, task, &mut std::collections::HashSet::new()))
+                .collect::<CResult<Vec<_>>>()?,
+        );
+        nodes.push(ConnectedTreeNode {
+            kind: "spec",
+            id: spec.id.to_string(),
+            title: spec.title.clone(),
+            status: spec.status.as_str().to_owned(),
+            children,
+        });
+    }
+    nodes.extend(
+        graph
+            .tasks
+            .iter()
+            .filter(|task| {
+                task.spec_id.is_none() && task.plan_id.is_none() && task.phase_id.is_none() && task.parent_id.is_none()
+            })
+            .map(|task| task_tree_node(graph, task, &mut std::collections::HashSet::new()))
+            .collect::<CResult<Vec<_>>>()?,
+    );
+    for note in &graph.notes {
+        nodes.push(ConnectedTreeNode {
+            kind: "note",
+            id: note.id.to_string(),
+            title: note.title.clone(),
+            status: "available".to_owned(),
+            children: Vec::new(),
+        });
+    }
+    nodes.sort_by(|left, right| left.kind.cmp(right.kind).then_with(|| left.id.cmp(&right.id)));
+    let Some(root) = root else { return Ok(nodes) };
+    if let Some(node) = find_tree_node(&nodes, root) {
+        return Ok(vec![node.clone()]);
+    }
+    Err(tree_root_error(root))
+}
+
+fn plan_tree_node(graph: &ConnectedGraph, plan: &Plan) -> CResult<ConnectedTreeNode> {
+    let mut children = graph
+        .phases
+        .iter()
+        .filter(|phase| phase.plan_id == plan.id)
+        .map(|phase| {
+            let tasks = graph
+                .tasks
+                .iter()
+                .filter(|task| task.phase_id == Some(phase.id) && task.parent_id.is_none())
+                .map(|task| task_tree_node(graph, task, &mut std::collections::HashSet::new()))
+                .collect::<CResult<Vec<_>>>()?;
+            Ok(ConnectedTreeNode {
+                kind: "phase",
+                id: phase.id.to_string(),
+                title: phase.title.clone(),
+                status: phase.status.as_str().to_owned(),
+                children: tasks,
+            })
+        })
+        .collect::<CResult<Vec<_>>>()?;
+    children.extend(
+        graph
+            .tasks
+            .iter()
+            .filter(|task| task.plan_id == Some(plan.id) && task.phase_id.is_none() && task.parent_id.is_none())
+            .map(|task| task_tree_node(graph, task, &mut std::collections::HashSet::new()))
+            .collect::<CResult<Vec<_>>>()?,
+    );
+    children.sort_by(|left, right| left.kind.cmp(right.kind).then_with(|| left.id.cmp(&right.id)));
+    Ok(ConnectedTreeNode {
+        kind: "plan",
+        id: plan.id.to_string(),
+        title: plan.title.clone(),
+        status: plan.status.as_str().to_owned(),
+        children,
+    })
+}
+
+fn task_tree_node(
+    graph: &ConnectedGraph, task: &PlanningTask, path: &mut std::collections::HashSet<TaskId>,
+) -> CResult<ConnectedTreeNode> {
+    if !path.insert(task.id) {
+        return Err(CommandError::Storage(StorageError::InvalidPlanningTask(
+            DomainError::ParentCycle { task: task.id.to_string(), parent: task.id.to_string() },
+        )));
+    }
+    let mut children = graph
+        .tasks
+        .iter()
+        .filter(|child| child.parent_id == Some(task.id))
+        .map(|child| task_tree_node(graph, child, path))
+        .collect::<CResult<Vec<_>>>()?;
+    path.remove(&task.id);
+    children.sort_by(|left, right| left.id.cmp(&right.id));
+    Ok(ConnectedTreeNode {
+        kind: "task",
+        id: task.id.to_string(),
+        title: task.title.clone(),
+        status: task.status.as_str().to_owned(),
+        children,
+    })
+}
+
+fn find_tree_node<'a>(nodes: &'a [ConnectedTreeNode], id: &str) -> Option<&'a ConnectedTreeNode> {
+    nodes.iter().find_map(
+        |node| {
+            if node.id == id { Some(node) } else { find_tree_node(&node.children, id) }
+        },
+    )
+}
+
+fn tree_root_error(id: &str) -> CommandError {
+    if id.starts_with(CaptureId::PREFIX) {
+        return CommandError::Storage(StorageError::CaptureNotFound { id: id.to_owned() });
+    }
+    if id.starts_with(SpecId::PREFIX) {
+        return CommandError::Storage(StorageError::SpecNotFound { id: id.to_owned() });
+    }
+    if id.starts_with(PlanId::PREFIX) {
+        return CommandError::Storage(StorageError::PlanNotFound { id: id.to_owned() });
+    }
+    if id.starts_with(PhaseId::PREFIX) {
+        return CommandError::Storage(StorageError::PhaseNotFound { id: id.to_owned() });
+    }
+    if id.starts_with(TaskId::PREFIX) {
+        return CommandError::Storage(StorageError::PlanningTaskNotFound { id: id.to_owned() });
+    }
+    if id.starts_with(NoteId::PREFIX) {
+        return CommandError::Storage(StorageError::NoteNotFound { id: id.to_owned() });
+    }
+    if id.starts_with(ReleaseId::PREFIX) {
+        return CommandError::Storage(StorageError::ReleaseNotFound { id: id.to_owned() });
+    }
+    CommandError::InvalidFilter { message: format!("unknown record ID `{id}`") }
+}
+
+fn list_connected(database: &Database, args: ListArgs) -> CResult<Vec<ConnectedSummary>> {
+    let graph = database.connected_graph()?;
+    let filter = resolve_list_filter(args)?;
+    validate_list_targets(&graph, &filter)?;
+    let mut records = Vec::new();
+    for capture in &graph.captures {
+        if filter.kind.as_deref().is_none_or(|kind| kind == "capture")
+            && filter.release_id.is_none()
+            && filter.spec_id.is_none()
+            && filter.plan_id.is_none()
+            && filter.phase_id.is_none()
+            && filter.parent_id.is_none()
+            && filter.priorities.is_empty()
+            && status_matches(&filter.statuses, capture.status.as_str())
+        {
+            records.push(ConnectedSummary::new(
+                "capture",
+                capture.id.to_string(),
+                capture.title.clone(),
+                capture.status.as_str(),
+            ));
+        }
+    }
+    for release in &graph.releases {
+        if filter.kind.as_deref().is_none_or(|kind| kind == "release")
+            && filter.spec_id.is_none()
+            && filter.plan_id.is_none()
+            && filter.phase_id.is_none()
+            && filter.parent_id.is_none()
+            && filter.priorities.is_empty()
+            && status_matches(&filter.statuses, release.status.as_str())
+            && filter.release_id.is_none_or(|id| id == release.id)
+        {
+            records.push(ConnectedSummary::new(
+                "release",
+                release.id.to_string(),
+                release.title.clone(),
+                release.status.as_str(),
+            ));
+        }
+    }
+    for spec in &graph.specs {
+        if filter.kind.as_deref().is_none_or(|kind| kind == "spec")
+            && status_matches(&filter.statuses, spec.status.as_str())
+            && filter.spec_id.is_none_or(|id| id == spec.id)
+            && filter.plan_id.is_none()
+            && filter.phase_id.is_none()
+            && filter.parent_id.is_none()
+            && filter.priorities.is_empty()
+            && release_member_matches(&graph, "spec", &spec.id.to_string(), filter.release_id)
+        {
+            records.push(ConnectedSummary::new(
+                "spec",
+                spec.id.to_string(),
+                spec.title.clone(),
+                spec.status.as_str(),
+            ));
+        }
+    }
+    for plan in &graph.plans {
+        if filter.kind.as_deref().is_none_or(|kind| kind == "plan")
+            && status_matches(&filter.statuses, plan.status.as_str())
+            && filter.plan_id.is_none_or(|id| id == plan.id)
+            && filter.spec_id.is_none_or(|id| id == plan.spec_id)
+            && filter.phase_id.is_none()
+            && filter.parent_id.is_none()
+            && filter.priorities.is_empty()
+            && release_member_matches(&graph, "plan", &plan.id.to_string(), filter.release_id)
+        {
+            records.push(ConnectedSummary::new(
+                "plan",
+                plan.id.to_string(),
+                plan.title.clone(),
+                plan.status.as_str(),
+            ));
+        }
+    }
+    for phase in &graph.phases {
+        if filter.kind.as_deref().is_none_or(|kind| kind == "phase")
+            && status_matches(&filter.statuses, phase.status.as_str())
+            && filter.phase_id.is_none_or(|id| id == phase.id)
+            && filter.plan_id.is_none_or(|id| id == phase.plan_id)
+            && filter.release_id.is_none()
+            && filter.spec_id.is_none()
+            && filter.parent_id.is_none()
+            && filter.priorities.is_empty()
+        {
+            records.push(ConnectedSummary::new(
+                "phase",
+                phase.id.to_string(),
+                phase.title.clone(),
+                phase.status.as_str(),
+            ));
+        }
+    }
+    for task in &graph.tasks {
+        let ancestry = task_ancestry(&graph, task.id)?;
+        let task_matches = filter.kind.as_deref().is_none_or(|kind| kind == "task")
+            && status_matches(&filter.statuses, task.status.as_str())
+            && (filter.priorities.is_empty() || filter.priorities.contains(&task.priority))
+            && filter.spec_id.is_none_or(|id| ancestry.0 == Some(id))
+            && filter.plan_id.is_none_or(|id| ancestry.1 == Some(id))
+            && filter.phase_id.is_none_or(|id| ancestry.2 == Some(id))
+            && filter.parent_id.is_none_or(|id| task.parent_id == Some(id))
+            && release_member_matches(&graph, "task", &task.id.to_string(), filter.release_id);
+        if task_matches {
+            records.push(ConnectedSummary::new(
+                "task",
+                task.id.to_string(),
+                task.title.clone(),
+                task.status.as_str(),
+            ));
+        }
+    }
+    for note in &graph.notes {
+        if filter.kind.as_deref().is_none_or(|kind| kind == "note")
+            && filter.spec_id.is_none()
+            && filter.plan_id.is_none()
+            && filter.phase_id.is_none()
+            && filter.parent_id.is_none()
+            && filter.priorities.is_empty()
+            && filter
+                .release_id
+                .is_none_or(|id| release_member_matches(&graph, "note", &note.id.to_string(), Some(id)))
+        {
+            records.push(ConnectedSummary::new(
+                "note",
+                note.id.to_string(),
+                note.title.clone(),
+                "available",
+            ));
+        }
+    }
+    records.sort_by(|left, right| left.kind.cmp(right.kind).then_with(|| left.id.cmp(&right.id)));
+    Ok(records)
+}
+
+fn release_member_matches(graph: &ConnectedGraph, kind: &str, id: &str, release: Option<ReleaseId>) -> bool {
+    release.is_none_or(|release| {
+        graph
+            .release_memberships
+            .iter()
+            .any(|member| member.release_id == release && member.record_kind.as_str() == kind && member.record_id == id)
+    })
+}
+
+fn task_ancestry(graph: &ConnectedGraph, id: TaskId) -> CResult<(Option<SpecId>, Option<PlanId>, Option<PhaseId>)> {
+    task_ancestry_with_seen(graph, id, &mut std::collections::HashSet::new())
+}
+
+fn task_ancestry_with_seen(
+    graph: &ConnectedGraph, id: TaskId, seen: &mut std::collections::HashSet<TaskId>,
+) -> CResult<(Option<SpecId>, Option<PlanId>, Option<PhaseId>)> {
+    if !seen.insert(id) {
+        return Err(CommandError::Storage(StorageError::InvalidPlanningTask(
+            DomainError::ParentCycle { task: id.to_string(), parent: id.to_string() },
+        )));
+    }
+    let task = graph
+        .tasks
+        .iter()
+        .find(|task| task.id == id)
+        .ok_or_else(|| StorageError::PlanningTaskNotFound { id: id.to_string() })?;
+    let mut ancestry = (task.spec_id, task.plan_id, task.phase_id);
+    if let Some(phase_id) = ancestry.2 {
+        let phase = graph
+            .phases
+            .iter()
+            .find(|phase| phase.id == phase_id)
+            .ok_or_else(|| StorageError::PhaseNotFound { id: phase_id.to_string() })?;
+        ancestry.1.get_or_insert(phase.plan_id);
+    }
+    if let Some(plan_id) = ancestry.1 {
+        let plan = graph
+            .plans
+            .iter()
+            .find(|plan| plan.id == plan_id)
+            .ok_or_else(|| StorageError::PlanNotFound { id: plan_id.to_string() })?;
+        ancestry.0.get_or_insert(plan.spec_id);
+    }
+    if let Some(parent_id) = task.parent_id {
+        let parent = task_ancestry_with_seen(graph, parent_id, seen)?;
+        if ancestry.0.is_none() {
+            ancestry.0 = parent.0;
+        }
+        if ancestry.1.is_none() {
+            ancestry.1 = parent.1;
+        }
+        if ancestry.2.is_none() {
+            ancestry.2 = parent.2;
+        }
+    }
+    seen.remove(&id);
+    Ok(ancestry)
+}
+
 fn resolve_list_filter(args: ListArgs) -> CResult<ListFilter> {
-    let mut kind = args.kind;
-    if let Some(value) = &kind
-        && !matches!(value.as_str(), "idea" | "release" | "epic" | "milestone" | "task")
+    let known = ["capture", "release", "spec", "plan", "phase", "task", "note"];
+    if let Some(kind) = &args.kind
+        && !known.contains(&kind.as_str())
     {
         return Err(CommandError::InvalidFilter {
-            message: format!("unknown kind `{value}`; use idea, release, epic, milestone, or task"),
+            message: format!("unknown kind `{kind}`; use capture, release, spec, plan, phase, task, or note"),
         });
+    }
+    let priorities = args
+        .priority
+        .iter()
+        .map(|value| TaskPriority::parse(value))
+        .collect::<Result<Vec<_>, _>>()?;
+    if !priorities.is_empty() && args.kind.as_deref().is_some_and(|kind| kind != "task") {
+        return Err(CommandError::InvalidFilter { message: "priority filters apply only to tasks".to_owned() });
     }
     let known_statuses = [
         "captured",
@@ -889,82 +1732,47 @@ fn resolve_list_filter(args: ListArgs) -> CResult<ListFilter> {
         "in_progress",
         "parked",
     ];
-    if let Some(value) = args
+    if let Some(status) = args
         .status
         .iter()
-        .find(|value| !known_statuses.contains(&value.as_str()))
+        .find(|status| !known_statuses.contains(&status.as_str()))
     {
-        return Err(CommandError::InvalidFilter { message: format!("unknown status `{value}`") });
+        return Err(CommandError::InvalidFilter { message: format!("unknown status `{status}`") });
     }
-    let priorities = args
-        .priority
-        .iter()
-        .map(|priority| TaskPriority::parse(priority))
-        .collect::<Result<Vec<_>, _>>()?;
-    if let Some(kind_name) = kind.as_deref() {
-        let allowed = match kind_name {
-            "idea" => ["captured", "promoted", "discarded"].as_slice(),
-            "release" | "epic" | "milestone" => ["open", "completed", "cancelled"].as_slice(),
-            "task" => ["pending", "in_progress", "parked", "completed", "cancelled"].as_slice(),
+    if let Some(kind) = args.kind.as_deref() {
+        let allowed = match kind {
+            "capture" => &["captured", "promoted", "discarded"][..],
+            "release" | "spec" | "plan" | "phase" => &["open", "completed", "cancelled"][..],
+            "task" => &["pending", "in_progress", "parked", "completed", "cancelled"][..],
+            "note" => &[][..],
             _ => &[][..],
         };
         if let Some(status) = args.status.iter().find(|status| !allowed.contains(&status.as_str())) {
             return Err(CommandError::InvalidFilter {
-                message: format!("status `{status}` does not apply to {kind_name} records"),
+                message: format!("status `{status}` does not apply to {kind} records"),
             });
         }
     }
-    if (!priorities.is_empty() || args.parent.is_some()) && kind.as_deref().is_some_and(|kind| kind != "task") {
-        return Err(CommandError::InvalidFilter {
-            message: "priority and parent filters apply only to tasks".to_owned(),
-        });
-    }
-    if let Some(kind_name) = kind.as_deref() {
-        let invalid = match kind_name {
-            "idea" => args.release.is_some() || args.epic.is_some() || args.milestone.is_some(),
-            "release" => args.epic.is_some() || args.milestone.is_some(),
-            "epic" => args.milestone.is_some(),
-            "milestone" => args.parent.is_some() || !priorities.is_empty(),
-            "task" => false,
-            _ => false,
-        };
-        if invalid {
-            return Err(CommandError::InvalidFilter {
-                message: format!("the supplied filters do not apply to {kind_name} records"),
-            });
-        }
-    }
-    if kind.is_none() && (!priorities.is_empty() || args.parent.is_some()) {
-        kind = Some("task".to_owned());
-    }
-    let release_id = args
-        .release
-        .as_deref()
-        .map(ReleaseId::parse)
-        .transpose()
-        .map_err(DomainError::from)?;
-    let epic_id = args
-        .epic
-        .as_deref()
-        .map(EpicId::parse)
-        .transpose()
-        .map_err(DomainError::from)?;
-    let milestone_id = args
-        .milestone
-        .as_deref()
-        .map(MilestoneId::parse)
-        .transpose()
-        .map_err(DomainError::from)?;
-    let parent_id = args
-        .parent
-        .as_deref()
-        .map(TaskId::parse)
-        .transpose()
-        .map_err(DomainError::from)?;
-    Ok(ListFilter { kind, statuses: args.status, priorities, release_id, epic_id, milestone_id, parent_id })
+    let release_id = parse_optional_id(args.release, ReleaseId::parse)?;
+    let spec_id = parse_optional_id(args.spec, SpecId::parse)?;
+    let plan_id = parse_optional_id(args.plan, PlanId::parse)?;
+    let phase_id = parse_optional_id(args.phase, PhaseId::parse)?;
+    let parent_id = parse_optional_id(args.parent, TaskId::parse)?;
+    Ok(ListFilter {
+        kind: args.kind,
+        statuses: args.status,
+        priorities,
+        release_id,
+        epic_id: None,
+        milestone_id: None,
+        parent_id,
+        spec_id,
+        plan_id,
+        phase_id,
+    })
 }
 
-fn validate_list_targets(graph: &Graph, filter: &ListFilter) -> CResult<()> {
+fn validate_list_targets(graph: &ConnectedGraph, filter: &ListFilter) -> CResult<()> {
     if let Some(id) = filter.release_id
         && !graph.releases.iter().any(|release| release.id == id)
     {
@@ -972,196 +1780,137 @@ fn validate_list_targets(graph: &Graph, filter: &ListFilter) -> CResult<()> {
             id: id.to_string(),
         }));
     }
-    if let Some(id) = filter.epic_id
-        && !graph.epics.iter().any(|epic| epic.id == id)
+    if let Some(id) = filter.spec_id
+        && !graph.specs.iter().any(|spec| spec.id == id)
     {
-        return Err(CommandError::Storage(StorageError::EpicNotFound { id: id.to_string() }));
+        return Err(CommandError::Storage(StorageError::SpecNotFound { id: id.to_string() }));
     }
-    if let Some(id) = filter.milestone_id
-        && !graph.milestones.iter().any(|milestone| milestone.id == id)
+    if let Some(id) = filter.plan_id
+        && !graph.plans.iter().any(|plan| plan.id == id)
     {
-        return Err(CommandError::Storage(StorageError::MilestoneNotFound {
+        return Err(CommandError::Storage(StorageError::PlanNotFound { id: id.to_string() }));
+    }
+    if let Some(id) = filter.phase_id
+        && !graph.phases.iter().any(|phase| phase.id == id)
+    {
+        return Err(CommandError::Storage(StorageError::PhaseNotFound {
             id: id.to_string(),
         }));
     }
     if let Some(id) = filter.parent_id
         && !graph.tasks.iter().any(|task| task.id == id)
     {
-        return Err(CommandError::Storage(StorageError::TaskNotFound { id: id.to_string() }));
+        return Err(CommandError::Storage(StorageError::PlanningTaskNotFound {
+            id: id.to_string(),
+        }));
     }
     Ok(())
 }
 
-fn resolve_ready_filter(args: ReadyArgs) -> CResult<ReadyFilter> {
-    let priorities = args
-        .priority
-        .iter()
-        .map(|priority| TaskPriority::parse(priority))
-        .collect::<Result<Vec<_>, _>>()?;
-    let release_id = args
-        .release
-        .as_deref()
-        .map(ReleaseId::parse)
-        .transpose()
-        .map_err(DomainError::from)?;
-    let epic_id = args
-        .epic
-        .as_deref()
-        .map(EpicId::parse)
-        .transpose()
-        .map_err(DomainError::from)?;
-    let milestone_id = args
-        .milestone
-        .as_deref()
-        .map(MilestoneId::parse)
-        .transpose()
-        .map_err(DomainError::from)?;
-    let parent_id = args
-        .parent
-        .as_deref()
-        .map(TaskId::parse)
-        .transpose()
-        .map_err(DomainError::from)?;
-    Ok(ReadyFilter { priorities, release_id, epic_id, milestone_id, parent_id })
+fn resolve_ready_filter(args: ReadyArgs) -> CResult<PlanningReadyFilter> {
+    Ok(PlanningReadyFilter {
+        priorities: args
+            .priority
+            .iter()
+            .map(|value| TaskPriority::parse(value))
+            .collect::<Result<Vec<_>, _>>()?,
+        spec_id: parse_optional_id(args.spec, SpecId::parse)?,
+        plan_id: parse_optional_id(args.plan, PlanId::parse)?,
+        phase_id: parse_optional_id(args.phase, PhaseId::parse)?,
+        parent_id: parse_optional_id(args.parent, TaskId::parse)?,
+    })
 }
 
-fn transition_task(id: String, action: TaskAction, allow_open_children: bool) -> CResult<TaskCommandResult> {
-    let id = TaskId::parse(&id).map_err(DomainError::from)?;
-    let mut database = open_database()?;
-    let task = database.transition_task(id, action, allow_open_children)?;
-    let action = match action {
-        TaskAction::Start => TaskMutation::Started,
-        TaskAction::Park => TaskMutation::Parked,
-        TaskAction::Unpark => TaskMutation::Unparked,
-        TaskAction::Complete => TaskMutation::Completed,
-        TaskAction::Cancel => TaskMutation::Cancelled,
-    };
-    Ok(TaskCommandResult::Mutation { action, task })
+fn status_matches(statuses: &[String], status: &str) -> bool {
+    statuses.is_empty() || statuses.iter().any(|candidate| candidate == status)
 }
 
-fn open_database() -> CResult<Database> {
-    Ok(open_project()?.database)
+fn parse_member_kind(value: &str) -> CResult<ReleaseMemberKind> {
+    match value {
+        "spec" => Ok(ReleaseMemberKind::Spec),
+        "plan" => Ok(ReleaseMemberKind::Plan),
+        "task" => Ok(ReleaseMemberKind::Task),
+        "note" => Ok(ReleaseMemberKind::Note),
+        _ => Err(CommandError::InvalidFilter { message: format!("unknown release member kind `{value}`") }),
+    }
 }
 
-fn locate_project() -> CResult<ProjectLocation> {
-    let start = std::env::current_dir().map_err(|source| CommandError::CurrentDirectory { source })?;
-    let Some(root) = nearest_project_root(&start) else {
-        return Err(CommandError::NotInitialized { root: start });
-    };
-    let arcl_directory = root.join(ARCL_DIRECTORY);
-    let config_path = arcl_directory.join(CONFIG_FILE);
-    let database_path = arcl_directory.join(DATABASE_FILE);
-
-    let config_input = fs::read_to_string(&config_path)
-        .map_err(|source| CommandError::ReadConfig { path: config_path.clone(), source })?;
-    let config = ProjectConfig::parse(&config_input)
-        .map_err(|source| CommandError::InvalidConfig { path: config_path, source })?;
-    Ok(ProjectLocation { root, config, database_path })
+fn parse_linked_kind(value: &str) -> CResult<LinkedRecordKind> {
+    match value {
+        "capture" => Ok(LinkedRecordKind::Capture),
+        "spec" => Ok(LinkedRecordKind::Spec),
+        "plan" => Ok(LinkedRecordKind::Plan),
+        "phase" => Ok(LinkedRecordKind::Phase),
+        "task" => Ok(LinkedRecordKind::Task),
+        "note" => Ok(LinkedRecordKind::Note),
+        "release" => Ok(LinkedRecordKind::Release),
+        _ => Err(CommandError::InvalidFilter { message: format!("unknown linked record kind `{value}`") }),
+    }
 }
 
-/// Find the closest initialized Arc Lightning project without consulting Git.
-fn nearest_project_root(start: &Path) -> Option<PathBuf> {
-    start
-        .ancestors()
-        .find(|candidate| candidate.join(ARCL_DIRECTORY).join(CONFIG_FILE).is_file())
-        .map(Path::to_owned)
+fn parse_id<T>(value: &str, parser: impl Fn(&str) -> Result<T, IdError>) -> CResult<T> {
+    parser(value).map_err(|error| CommandError::Domain(DomainError::InvalidId(error)))
 }
 
-fn open_project() -> CResult<OpenProject> {
-    let start = std::env::current_dir().map_err(|source| CommandError::CurrentDirectory { source })?;
-    let location = locate_project()?;
-    if !location.database_path.is_file() {
-        return Err(CommandError::NotInitialized { root: location.root });
-    }
-    let database = Database::open(&location.database_path)
-        .map_err(|source| CommandError::OpenDatabase { path: location.database_path, source })?;
-    Ok(OpenProject { root: location.root, current_dir: start, config: location.config, database })
+fn parse_optional_id<T>(value: Option<String>, parser: impl Fn(&str) -> Result<T, IdError>) -> CResult<Option<T>> {
+    value.as_deref().map(|value| parse_id(value, &parser)).transpose()
 }
 
-fn resolve_spec_path(root: &Path, current_dir: &Path, input: &Path) -> SResult<String> {
-    if input.as_os_str().is_empty() {
-        return Err(SpecPathError::Empty);
-    }
-
-    let relative = normalize_relative_path(input)?;
-    let canonical_root =
-        fs::canonicalize(root).map_err(|source| SpecPathError::CanonicalizeRoot { path: root.to_owned(), source })?;
-    let canonical_current = fs::canonicalize(current_dir)
-        .map_err(|source| SpecPathError::CanonicalizeCurrentDirectory { path: current_dir.to_owned(), source })?;
-    if !canonical_current.starts_with(&canonical_root) {
-        return Err(SpecPathError::OutsideWorktree { path: current_dir.to_owned() });
-    }
-
-    let candidate = canonical_current.join(&relative);
-    let resolved =
-        fs::canonicalize(&candidate).map_err(|source| SpecPathError::Resolve { path: input.to_owned(), source })?;
-    if !resolved.starts_with(&canonical_root) {
-        return Err(SpecPathError::OutsideWorktree { path: input.to_owned() });
-    }
-
-    let metadata =
-        fs::metadata(&resolved).map_err(|source| SpecPathError::Resolve { path: input.to_owned(), source })?;
-    if !metadata.is_file() {
-        return Err(SpecPathError::NotRegularFile { path: input.to_owned() });
-    }
-    if resolved.extension() != Some(OsStr::new("md")) {
-        return Err(SpecPathError::NotMarkdown { path: input.to_owned() });
-    }
-
-    let root_relative = resolved
-        .strip_prefix(&canonical_root)
-        .map_err(|_| SpecPathError::OutsideWorktree { path: input.to_owned() })?;
-    path_to_slash_string(root_relative).ok_or_else(|| SpecPathError::NonUtf8 { path: input.to_owned() })
+fn relation_change<T>(
+    value: Option<String>, clear: bool, parser: impl Fn(&str) -> Result<T, IdError>,
+) -> CResult<Option<Option<T>>> {
+    if clear { Ok(Some(None)) } else { parse_optional_id(value, parser).map(|value| value.map(Some)) }
 }
 
-fn normalize_relative_path(input: &Path) -> SResult<PathBuf> {
-    let mut normalized = PathBuf::new();
-    for component in input.components() {
-        match component {
-            Component::Normal(part) => normalized.push(part),
-            Component::CurDir => {}
-            Component::ParentDir => return Err(SpecPathError::Traversal { path: input.to_owned() }),
-            Component::RootDir | Component::Prefix(_) => {
-                return Err(SpecPathError::Absolute { path: input.to_owned() });
-            }
-        }
-    }
-    if normalized.as_os_str().is_empty() { Err(SpecPathError::Empty) } else { Ok(normalized) }
+fn parse_capture_id(value: &str) -> CResult<CaptureId> {
+    parse_id(value, CaptureId::parse)
+}
+fn parse_release_id(value: &str) -> CResult<ReleaseId> {
+    parse_id(value, ReleaseId::parse)
+}
+fn parse_spec_id(value: &str) -> CResult<SpecId> {
+    parse_id(value, SpecId::parse)
+}
+fn parse_plan_id(value: &str) -> CResult<PlanId> {
+    parse_id(value, PlanId::parse)
+}
+fn parse_phase_id(value: &str) -> CResult<PhaseId> {
+    parse_id(value, PhaseId::parse)
+}
+fn parse_task_id(value: &str) -> CResult<TaskId> {
+    parse_id(value, TaskId::parse)
+}
+fn parse_note_id(value: &str) -> CResult<NoteId> {
+    parse_id(value, NoteId::parse)
 }
 
-fn path_to_slash_string(path: &Path) -> Option<String> {
-    let mut components = Vec::new();
-    for component in path.components() {
-        let Component::Normal(part) = component else { return None };
-        components.push(part.to_str()?);
-    }
-    (!components.is_empty()).then(|| components.join("/"))
+fn resolve_markdown(args: MarkdownArgs) -> CResult<Option<String>> {
+    resolve_optional_value(args.body, args.body_file)
 }
 
-fn resolve_description(args: DescriptionArgs) -> CResult<Option<String>> {
-    if let Some(description) = args.description {
-        return Ok(Some(description));
-    }
+fn resolve_acceptance(args: AcceptanceArgs) -> CResult<Option<String>> {
+    resolve_optional_value(args.acceptance_criteria, args.acceptance_criteria_file)
+}
 
-    let Some(path) = args.description_file else {
-        return Ok(None);
-    };
+fn resolve_optional_value(value: Option<String>, path: Option<PathBuf>) -> CResult<Option<String>> {
+    if let Some(value) = value {
+        return Ok(Some(value));
+    }
+    let Some(path) = path else { return Ok(None) };
     if path == Path::new("-") {
-        return read_stdin_description();
+        return read_stdin();
     }
-
-    let bytes = fs::read(&path).map_err(|source| CommandError::ReadDescription { path: path.clone(), source })?;
+    let bytes = fs::read(&path).map_err(|source| CommandError::ReadMarkdown { path: path.clone(), source })?;
     String::from_utf8(bytes)
         .map(Some)
-        .map_err(|_| CommandError::InvalidDescription { path })
+        .map_err(|_| CommandError::InvalidMarkdown { path })
 }
 
-fn read_stdin_description() -> CResult<Option<String>> {
+fn read_stdin() -> CResult<Option<String>> {
     let stdin = io::stdin();
     if stdin.is_terminal() {
         return Err(CommandError::StdinIsTerminal);
     }
-
     let mut bytes = Vec::new();
     stdin
         .lock()
@@ -1172,24 +1921,24 @@ fn read_stdin_description() -> CResult<Option<String>> {
         .map_err(|_| CommandError::InvalidStdin)
 }
 
+fn read_plan_document(path: &Path) -> CResult<crate::plan::PlanDocument> {
+    let input = resolve_optional_value(None, Some(path.to_owned()))?.unwrap_or_default();
+    crate::plan::parse(&input).map_err(|error| CommandError::Storage(StorageError::InvalidPlanInput(error)))
+}
+
 fn initialize(start: &Path, snapshot: bool) -> IResult<Initialization> {
     let root = initialization_root(start)?;
     let arcl_directory = root.join(ARCL_DIRECTORY);
     fs::create_dir_all(&arcl_directory)
         .map_err(|source| InitError::CreateDirectory { path: arcl_directory.clone(), source })?;
-
     let config_path = arcl_directory.join(CONFIG_FILE);
     let config = load_or_create_config(&config_path, snapshot)?;
-
-    let gitignore_path = arcl_directory.join(GITIGNORE_FILE);
-    ensure_gitignore(&gitignore_path)?;
-
+    ensure_gitignore(&arcl_directory.join(GITIGNORE_FILE))?;
     let database_path = arcl_directory.join(DATABASE_FILE);
     Database::open(&database_path).map_err(|source| InitError::OpenDatabase { path: database_path, source })?;
     if config.snapshot.enabled {
         ensure_snapshot_layout(&root, &config)?;
     }
-
     Ok(Initialization { root, snapshot_enabled: config.snapshot.enabled })
 }
 
@@ -1197,11 +1946,8 @@ fn initialization_root(start: &Path) -> IResult<PathBuf> {
     if let Some(root) = nearest_project_root(start) {
         return Ok(root);
     }
-
     match GixVcs::discover(start) {
         Ok(vcs) => Ok(vcs.worktree_root()?.to_owned()),
-        // Git is an optional integration. A failed repository discovery means
-        // this is an ordinary project rooted at the directory where init ran.
         Err(VcsError::Discovery { .. }) => Ok(start.to_owned()),
         Err(error) => Err(InitError::Vcs(error)),
     }
@@ -1236,7 +1982,7 @@ fn load_or_create_config(path: &Path, snapshot: bool) -> IResult<ProjectConfig> 
 }
 
 fn ensure_snapshot_layout(root: &Path, config: &ProjectConfig) -> IResult<()> {
-    let snapshot_root = crate::snapshot::resolve_snapshot_root(root, &config.snapshot.path)
+    let snapshot_root = resolve_snapshot_root(root, &config.snapshot.path)
         .map_err(|source| InitError::InvalidConfig { path: root.join(ARCL_DIRECTORY).join(CONFIG_FILE), source })?;
     fs::create_dir_all(&snapshot_root)
         .map_err(|source| InitError::CreateSnapshotDirectory { path: snapshot_root.clone(), source })?;
@@ -1244,7 +1990,6 @@ fn ensure_snapshot_layout(root: &Path, config: &ProjectConfig) -> IResult<()> {
         let path = snapshot_root.join(directory);
         fs::create_dir_all(&path).map_err(|source| InitError::CreateSnapshotDirectory { path, source })?;
     }
-
     let manifest_path = snapshot_root.join("manifest.toml");
     if !manifest_path.is_file() {
         let manifest = encode_manifest(&SnapshotManifest::default())
@@ -1266,7 +2011,6 @@ fn ensure_gitignore(path: &Path) -> IResult<()> {
         }
         Err(source) => return Err(InitError::ReadGitignore { path: path.to_owned(), source }),
     };
-
     let mut updated = existing.clone();
     for entry in REQUIRED_GITIGNORE_ENTRIES {
         if updated.lines().any(|line| line.trim() == *entry) {
@@ -1278,7 +2022,6 @@ fn ensure_gitignore(path: &Path) -> IResult<()> {
         updated.push_str(entry);
         updated.push('\n');
     }
-
     if updated != existing {
         fs::write(path, updated).map_err(|source| InitError::WriteGitignore { path: path.to_owned(), source })?;
     }
@@ -1295,4 +2038,88 @@ fn create_file(path: &Path, content: &[u8]) -> io::Result<()> {
     let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
     file.write_all(content)?;
     file.flush()
+}
+
+fn open_database() -> CResult<Database> {
+    let start = std::env::current_dir().map_err(|source| CommandError::CurrentDirectory { source })?;
+    let Some(root) = nearest_project_root(&start) else {
+        return Err(CommandError::NotInitialized { root: start });
+    };
+    let arcl_directory = root.join(ARCL_DIRECTORY);
+    let config_path = arcl_directory.join(CONFIG_FILE);
+    let database_path = arcl_directory.join(DATABASE_FILE);
+    let input = fs::read_to_string(&config_path)
+        .map_err(|source| CommandError::ReadConfig { path: config_path.clone(), source })?;
+    ProjectConfig::parse(&input).map_err(|source| CommandError::InvalidConfig { path: config_path, source })?;
+    if !database_path.is_file() {
+        return Err(CommandError::NotInitialized { root });
+    }
+    Database::open(&database_path).map_err(|source| CommandError::OpenDatabase { path: database_path, source })
+}
+
+fn locate_project() -> CResult<ProjectLocation> {
+    let start = std::env::current_dir().map_err(|source| CommandError::CurrentDirectory { source })?;
+    let Some(root) = nearest_project_root(&start) else {
+        return Err(CommandError::NotInitialized { root: start });
+    };
+    let arcl_directory = root.join(ARCL_DIRECTORY);
+    let config_path = arcl_directory.join(CONFIG_FILE);
+    let database_path = arcl_directory.join(DATABASE_FILE);
+    let input = fs::read_to_string(&config_path)
+        .map_err(|source| CommandError::ReadConfig { path: config_path.clone(), source })?;
+    let config =
+        ProjectConfig::parse(&input).map_err(|source| CommandError::InvalidConfig { path: config_path, source })?;
+    Ok(ProjectLocation { root, config, database_path })
+}
+
+fn nearest_project_root(start: &Path) -> Option<PathBuf> {
+    start
+        .ancestors()
+        .find(|candidate| candidate.join(ARCL_DIRECTORY).join(CONFIG_FILE).is_file())
+        .map(Path::to_owned)
+}
+
+fn open_project() -> CResult<OpenProject> {
+    let location = locate_project()?;
+    let database = Database::open(&location.database_path)
+        .map_err(|source| CommandError::OpenDatabase { path: location.database_path.clone(), source })?;
+    Ok(OpenProject { root: location.root, config: location.config, database })
+}
+
+fn exec_snapshot(command: SnapshotCommand) -> CResult<()> {
+    match command {
+        SnapshotCommand::Export => {
+            let mut project = open_project()?;
+            if !project.config.snapshot.enabled {
+                return Err(CommandError::SnapshotDisabled { root: project.root });
+            }
+            let config_path = project.root.join(ARCL_DIRECTORY).join(CONFIG_FILE);
+            let snapshot_root = resolve_snapshot_root(&project.root, &project.config.snapshot.path)
+                .map_err(|source| CommandError::InvalidConfig { path: config_path, source })?;
+            let graph = project.database.graph()?;
+            let files = export_graph(&snapshot_root, &graph)?;
+            let base = files
+                .iter()
+                .map(|file| SnapshotBaseFile {
+                    path: file.path.to_string_lossy().into_owned(),
+                    content: file.content.clone(),
+                })
+                .collect::<Vec<_>>();
+            if project.database.snapshot_base()? != base {
+                project.database.replace_snapshot_base(&base)?;
+            }
+            Ok(())
+        }
+        SnapshotCommand::Import => {
+            let project = locate_project()?;
+            if !project.config.snapshot.enabled {
+                return Err(CommandError::SnapshotDisabled { root: project.root });
+            }
+            let config_path = project.root.join(ARCL_DIRECTORY).join(CONFIG_FILE);
+            let snapshot_root = resolve_snapshot_root(&project.root, &project.config.snapshot.path)
+                .map_err(|source| CommandError::InvalidConfig { path: config_path, source })?;
+            import_snapshot(&snapshot_root, &project.root, &project.database_path)?;
+            Ok(())
+        }
+    }
 }

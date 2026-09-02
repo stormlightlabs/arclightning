@@ -25,33 +25,33 @@ impl fmt::Display for ColorChoice {
 /// Arc Lightning commands.
 #[derive(Clone, Debug, Subcommand)]
 pub enum Command {
-    /// Initialize or rediscover the project in the current directory or enclosing Git worktree.
+    /// Initialize or rediscover a project.
     Init {
         /// Enable the optional version-controlled snapshot path when creating configuration.
         #[arg(long)]
         snapshot: bool,
     },
-    /// Capture and manage ideas in the project inbox.
-    Idea {
+    /// Capture and manage unstructured inbox records.
+    Capture {
         #[command(subcommand)]
-        command: IdeaCommand,
+        command: CaptureCommand,
     },
-    /// Group epics into releases.
+    /// Manage named releases.
     Release {
         #[command(subcommand)]
         command: ReleaseCommand,
     },
-    /// Track one Markdown specification as an epic.
-    Epic {
+    /// Create and manage owned Markdown specifications.
+    Spec {
         #[command(subcommand)]
-        command: EpicCommand,
+        command: SpecCommand,
     },
-    /// Organize an epic into ordered milestones.
-    Milestone {
+    /// Create and apply persistent implementation plans.
+    Plan {
         #[command(subcommand)]
-        command: MilestoneCommand,
+        command: PlanCommand,
     },
-    /// Track tasks and subtasks inside milestones.
+    /// Create and execute tasks in the connected planning model.
     Task {
         #[command(subcommand)]
         command: TaskCommand,
@@ -61,17 +61,22 @@ pub enum Command {
         #[command(subcommand)]
         command: DependencyCommand,
     },
+    /// Create and manage Markdown notes.
+    Note {
+        #[command(subcommand)]
+        command: NoteCommand,
+    },
     /// Inspect one record selected by its typed ID prefix.
     Show {
         /// The record identifier.
         id: String,
     },
-    /// List records with optional graph filters.
+    /// List connected records with optional graph filters.
     List {
         #[command(flatten)]
         filters: ListArgs,
     },
-    /// Display the hierarchy in deterministic order.
+    /// Display the connected planning hierarchy in deterministic order.
     Tree {
         /// Optional record ID to use as the tree root.
         id: Option<String>,
@@ -105,47 +110,86 @@ pub enum Command {
     },
 }
 
-/// Idea inbox commands.
+/// Inbox capture commands.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Subcommand)]
-pub enum IdeaCommand {
-    /// Capture a new idea.
+pub enum CaptureCommand {
+    /// Capture a new Markdown thought.
     Create {
-        /// The idea title.
+        /// The capture title.
         title: String,
         #[command(flatten)]
-        description: DescriptionArgs,
+        body: MarkdownArgs,
     },
-    /// Update an existing idea.
-    Update {
-        /// The idea ID to update.
+    /// Show one capture.
+    Show {
+        /// The capture ID to show.
         id: String,
-        /// Replace the idea title.
+    },
+    /// List captures in creation order.
+    List,
+    /// Update an existing capture.
+    Update {
+        /// The capture ID to update.
+        id: String,
+        /// Replace the capture title.
         #[arg(long, value_name = "TITLE")]
         title: Option<String>,
         #[command(flatten)]
-        description: DescriptionArgs,
+        body: MarkdownArgs,
     },
-    /// Discard an idea without deleting its history.
+    /// Discard a capture without deleting its provenance.
     Discard {
-        /// The idea ID to discard.
+        /// The capture ID to discard.
         id: String,
     },
-    /// List all ideas in the project inbox.
-    List,
-    /// Promote an idea into a spec-backed epic.
+    /// Promote a capture to a spec, task, or note.
     Promote {
-        /// The source idea identifier.
+        /// The source capture identifier.
         id: String,
-        /// The Markdown spec path.
-        #[arg(long, value_name = "PATH")]
-        spec: PathBuf,
-        /// Associate the new epic with a release.
+        /// Promotion target (`spec`, `task`, or `note`).
+        target: Option<String>,
+        /// Promotion target supplied as an option.
+        #[arg(long, value_name = "KIND", conflicts_with = "target")]
+        to: Option<String>,
+        /// Override the destination title; otherwise use the capture title.
+        #[arg(long, value_name = "TITLE")]
+        title: Option<String>,
+        #[command(flatten)]
+        body: MarkdownArgs,
+        /// Markdown acceptance criteria for a promoted specification.
+        #[arg(
+            long,
+            value_name = "MARKDOWN",
+            allow_hyphen_values = true,
+            conflicts_with = "acceptance_criteria_file"
+        )]
+        acceptance_criteria: Option<String>,
+        /// Read specification acceptance criteria from a file, or `-` for standard input.
+        #[arg(long, value_name = "PATH|-", conflicts_with = "acceptance_criteria")]
+        acceptance_criteria_file: Option<PathBuf>,
+        /// Attach a promoted task to a specification.
         #[arg(long, value_name = "ID")]
-        release: Option<String>,
+        spec: Option<String>,
+        /// Attach a promoted task to a plan.
+        #[arg(long, value_name = "ID")]
+        plan: Option<String>,
+        /// Attach a promoted task to a phase.
+        #[arg(long, value_name = "ID")]
+        phase: Option<String>,
+        /// Attach a promoted task below another task.
+        #[arg(long, value_name = "ID")]
+        parent: Option<String>,
+        /// The priority for a promoted task.
+        #[arg(long, default_value = "normal", value_name = "PRIORITY")]
+        priority: String,
+        /// The display position for a promoted task.
+        #[arg(long, default_value_t = 0, value_name = "N")]
+        position: i64,
     },
 }
 
-/// Release container commands.
+/// Release commands.
 #[derive(Clone, Debug, Subcommand)]
 pub enum ReleaseCommand {
     /// Create an open release.
@@ -153,9 +197,16 @@ pub enum ReleaseCommand {
         /// The release title.
         title: String,
         #[command(flatten)]
-        description: DescriptionArgs,
+        body: MarkdownArgs,
     },
-    /// Update a release title or Markdown description.
+    /// Show one release.
+    Show {
+        /// The release ID to show.
+        id: String,
+    },
+    /// List releases.
+    List,
+    /// Update a release title or Markdown body.
     Update {
         /// The release ID to update.
         id: String,
@@ -163,7 +214,7 @@ pub enum ReleaseCommand {
         #[arg(long, value_name = "TITLE")]
         title: Option<String>,
         #[command(flatten)]
-        description: DescriptionArgs,
+        body: MarkdownArgs,
     },
     /// Mark a release completed.
     Complete {
@@ -181,103 +232,226 @@ pub enum ReleaseCommand {
         #[arg(long)]
         allow_open_children: bool,
     },
+    /// Manage explicit release membership.
+    Member {
+        #[command(subcommand)]
+        command: MembershipCommand,
+    },
 }
 
-/// Spec-backed epic commands.
+/// Explicit release membership commands.
 #[derive(Clone, Debug, Subcommand)]
-pub enum EpicCommand {
-    /// Create an open epic for an existing Markdown spec.
-    Create {
-        /// The epic title.
-        title: String,
-        /// The Markdown spec path, relative to the current directory.
-        #[arg(long, value_name = "PATH")]
-        spec: PathBuf,
-        /// Associate the epic with a release.
+pub enum MembershipCommand {
+    /// Add one spec, plan, task, or note to a release.
+    Add {
+        /// The release ID to update.
+        release_id: String,
+        /// Member kind: `spec`, `plan`, `task`, or `note`.
+        #[arg(long, value_name = "KIND")]
+        kind: String,
+        /// The member's typed ID.
         #[arg(long, value_name = "ID")]
-        release: Option<String>,
-        #[command(flatten)]
-        description: DescriptionArgs,
+        record_id: String,
     },
-    /// Update an epic without modifying its linked spec.
-    Update {
-        /// The epic ID to update.
+    /// Remove one explicit release member.
+    Remove {
+        /// The release ID to update.
+        release_id: String,
+        /// Member kind: `spec`, `plan`, `task`, or `note`.
+        #[arg(long, value_name = "KIND")]
+        kind: String,
+        /// The member's typed ID.
+        #[arg(long, value_name = "ID")]
+        record_id: String,
+    },
+    /// List explicit members without expanding descendants.
+    List {
+        /// The release ID to list.
+        release_id: String,
+    },
+}
+
+/// Specification commands.
+#[derive(Clone, Debug, Subcommand)]
+pub enum SpecCommand {
+    /// Create an open specification.
+    Create {
+        /// The specification title.
+        title: String,
+        #[command(flatten)]
+        body: MarkdownArgs,
+        #[command(flatten)]
+        acceptance: AcceptanceArgs,
+    },
+    /// Show one specification.
+    Show {
+        /// The specification ID to show.
         id: String,
-        /// Replace the epic title.
+    },
+    /// List specifications.
+    List,
+    /// Update an owned specification.
+    Update {
+        /// The specification ID to update.
+        id: String,
+        /// Replace the specification title.
         #[arg(long, value_name = "TITLE")]
         title: Option<String>,
-        /// Replace the linked Markdown spec.
-        #[arg(long, value_name = "PATH")]
-        spec: Option<PathBuf>,
-        /// Associate the epic with a release.
-        #[arg(long, value_name = "ID", conflicts_with = "no_release")]
-        release: Option<String>,
-        /// Remove the epic's release association.
-        #[arg(long, conflicts_with = "release")]
-        no_release: bool,
         #[command(flatten)]
-        description: DescriptionArgs,
+        body: MarkdownArgs,
+        #[command(flatten)]
+        acceptance: AcceptanceArgs,
     },
-    /// Mark an epic completed.
+    /// Mark a specification completed.
     Complete {
-        /// The epic ID to complete.
+        /// The specification ID to complete.
         id: String,
-        /// Complete only the epic even when descendants are open.
+        /// Complete only the specification even when descendants are open.
         #[arg(long)]
         allow_open_children: bool,
     },
-    /// Mark an epic cancelled.
+    /// Mark a specification cancelled.
     Cancel {
-        /// The epic ID to cancel.
+        /// The specification ID to cancel.
         id: String,
-        /// Cancel only the epic even when descendants are open.
+        /// Cancel only the specification even when descendants are open.
         #[arg(long)]
         allow_open_children: bool,
     },
 }
 
-/// Milestone container commands.
+/// Plan commands.
 #[derive(Clone, Debug, Subcommand)]
-pub enum MilestoneCommand {
-    /// Create an open milestone owned by an epic.
+pub enum PlanCommand {
+    /// Create an open plan owned by a specification.
     Create {
-        /// The milestone title.
+        /// The plan title.
         title: String,
-        /// The owning epic ID.
+        /// The owning specification ID.
         #[arg(long, value_name = "ID")]
-        epic: String,
-        /// The display position within the epic.
+        spec: String,
+        #[command(flatten)]
+        body: MarkdownArgs,
+        /// Apply structured phases and tasks from a TOML file after creating the plan.
+        #[arg(long, value_name = "PATH|-", conflicts_with = "no_input")]
+        input: Option<PathBuf>,
+        /// Create only the plan, without applying structured input.
+        #[arg(long, conflicts_with = "input")]
+        no_input: bool,
+    },
+    /// Show one plan and its explicit phases, tasks, and dependencies.
+    Show {
+        /// The plan ID to show.
+        id: String,
+    },
+    /// List plans.
+    List,
+    /// Update a persistent plan.
+    Update {
+        /// The plan ID to update.
+        id: String,
+        /// Replace the plan title.
+        #[arg(long, value_name = "TITLE")]
+        title: Option<String>,
+        #[command(flatten)]
+        body: MarkdownArgs,
+    },
+    /// Check structured input without writing.
+    Check {
+        /// The plan ID to check.
+        id: String,
+        /// The structured plan file, or `-` for standard input.
+        #[arg(long, value_name = "PATH|-")]
+        file: PathBuf,
+    },
+    /// Show the changes structured input would make.
+    Diff {
+        /// The plan ID to compare.
+        id: String,
+        /// The structured plan file, or `-` for standard input.
+        #[arg(long, value_name = "PATH|-")]
+        file: PathBuf,
+    },
+    /// Apply structured input transactionally.
+    Apply {
+        /// The plan ID to update.
+        id: String,
+        /// The structured plan file, or `-` for standard input.
+        #[arg(long, value_name = "PATH|-")]
+        file: PathBuf,
+    },
+    /// Mark a plan completed.
+    Complete {
+        /// The plan ID to complete.
+        id: String,
+        /// Complete only the plan even when descendants are open.
+        #[arg(long)]
+        allow_open_children: bool,
+    },
+    /// Mark a plan cancelled.
+    Cancel {
+        /// The plan ID to cancel.
+        id: String,
+        /// Cancel only the plan even when descendants are open.
+        #[arg(long)]
+        allow_open_children: bool,
+    },
+    /// Manage optional ordered phases.
+    Phase {
+        #[command(subcommand)]
+        command: PhaseCommand,
+    },
+}
+
+/// Optional plan phase commands.
+#[derive(Clone, Debug, Subcommand)]
+pub enum PhaseCommand {
+    /// Create an open phase in a plan.
+    Create {
+        /// The phase title.
+        title: String,
+        /// The owning plan ID.
+        #[arg(long, value_name = "ID")]
+        plan: String,
+        /// The display position within the plan.
         #[arg(long, default_value_t = 0, value_name = "N")]
         position: i64,
         #[command(flatten)]
-        description: DescriptionArgs,
+        body: MarkdownArgs,
     },
-    /// Update a milestone's title, Markdown description, or position.
-    Update {
-        /// The milestone ID to update.
+    /// Show one phase.
+    Show {
+        /// The phase ID to show.
         id: String,
-        /// Replace the milestone title.
+    },
+    /// List phases.
+    List,
+    /// Update a phase.
+    Update {
+        /// The phase ID to update.
+        id: String,
+        /// Replace the phase title.
         #[arg(long, value_name = "TITLE")]
         title: Option<String>,
-        /// Replace the display position within the epic.
+        /// Replace the display position within the plan.
         #[arg(long, value_name = "N")]
         position: Option<i64>,
         #[command(flatten)]
-        description: DescriptionArgs,
+        body: MarkdownArgs,
     },
-    /// Mark a milestone completed.
+    /// Mark a phase completed.
     Complete {
-        /// The milestone ID to complete.
+        /// The phase ID to complete.
         id: String,
-        /// Complete only the milestone even when tasks are open.
+        /// Complete only the phase even when tasks are open.
         #[arg(long)]
         allow_open_children: bool,
     },
-    /// Mark a milestone cancelled.
+    /// Mark a phase cancelled.
     Cancel {
-        /// The milestone ID to cancel.
+        /// The phase ID to cancel.
         id: String,
-        /// Cancel only the milestone even when tasks are open.
+        /// Cancel only the phase even when tasks are open.
         #[arg(long)]
         allow_open_children: bool,
     },
@@ -286,59 +460,87 @@ pub enum MilestoneCommand {
 /// Task and subtask commands.
 #[derive(Clone, Debug, Subcommand)]
 pub enum TaskCommand {
-    /// Create a pending task or subtask.
+    /// Create a pending task at any supported planning level.
     Create {
         /// The task title.
         title: String,
-        /// The owning milestone ID.
+        /// Attach the task to a specification.
         #[arg(long, value_name = "ID")]
-        milestone: String,
-        /// Attach the row as a subtask of this task.
+        spec: Option<String>,
+        /// Attach the task to a plan.
+        #[arg(long, value_name = "ID")]
+        plan: Option<String>,
+        /// Attach the task to a phase.
+        #[arg(long, value_name = "ID")]
+        phase: Option<String>,
+        /// Attach the task below another task.
         #[arg(long, value_name = "ID")]
         parent: Option<String>,
         /// The task priority.
         #[arg(long, default_value = "normal", value_name = "PRIORITY")]
         priority: String,
-        /// The display position within the milestone or parent.
+        /// The display position within its container or parent.
         #[arg(long, default_value_t = 0, value_name = "N")]
         position: i64,
-        /// Add a direct blocker relationship after creating the task.
+        /// Add direct blocker relationships after creating the task.
         #[arg(long = "blocked-by", value_name = "ID", num_args = 1..)]
         blocked_by: Vec<String>,
         #[command(flatten)]
-        description: DescriptionArgs,
+        body: MarkdownArgs,
     },
-    /// Update task metadata and optionally move a task subtree.
+    /// Show one task with readiness, ancestry, blockers, and dependents.
+    Show {
+        /// The task ID to show.
+        id: String,
+    },
+    /// List tasks.
+    List,
+    /// Update task metadata, Markdown, or ancestry.
     Update {
         /// The task ID to update.
         id: String,
         /// Replace the task title.
         #[arg(long, value_name = "TITLE")]
         title: Option<String>,
+        #[command(flatten)]
+        body: MarkdownArgs,
         /// Replace the task priority.
         #[arg(long, value_name = "PRIORITY")]
         priority: Option<String>,
         /// Replace the display position.
         #[arg(long, value_name = "N")]
         position: Option<i64>,
-        /// Move the task and descendants to this milestone.
-        #[arg(long, value_name = "ID")]
-        milestone: Option<String>,
-        /// Reparent the task to another task in the same milestone.
+        /// Attach the task to a specification.
+        #[arg(long, value_name = "ID", conflicts_with = "no_spec")]
+        spec: Option<String>,
+        /// Remove the task's specification association.
+        #[arg(long)]
+        no_spec: bool,
+        /// Attach the task to a plan.
+        #[arg(long, value_name = "ID", conflicts_with = "no_plan")]
+        plan: Option<String>,
+        /// Remove the task's plan association.
+        #[arg(long)]
+        no_plan: bool,
+        /// Attach the task to a phase.
+        #[arg(long, value_name = "ID", conflicts_with = "no_phase")]
+        phase: Option<String>,
+        /// Remove the task's phase association.
+        #[arg(long)]
+        no_phase: bool,
+        /// Reparent the task below another task.
         #[arg(long, value_name = "ID", conflicts_with = "no_parent")]
         parent: Option<String>,
         /// Remove the task's parent.
-        #[arg(long, conflicts_with = "parent")]
+        #[arg(long)]
         no_parent: bool,
-        #[command(flatten)]
-        description: DescriptionArgs,
     },
     /// Start pending work.
     Start {
         /// The task ID to start.
         id: String,
     },
-    /// Temporarily exclude pending or in-progress work from readiness.
+    /// Temporarily exclude work from readiness.
     Park {
         /// The task ID to park.
         id: String,
@@ -381,15 +583,16 @@ pub enum TaskCommand {
         #[arg(long)]
         allow_open_children: bool,
     },
-}
-
-/// Explicit snapshot commands.
-#[derive(Clone, Debug, Subcommand)]
-pub enum SnapshotCommand {
-    /// Export the complete database graph into snapshot records.
-    Export,
-    /// Validate and import the complete snapshot graph into SQLite.
-    Import,
+    /// Explain readiness for one task.
+    Explain {
+        /// The task ID to explain.
+        id: String,
+    },
+    /// Return the focused context packet for one task.
+    Context {
+        /// The task ID to contextualize.
+        id: String,
+    },
 }
 
 /// Task dependency commands.
@@ -411,12 +614,89 @@ pub enum DependencyCommand {
         #[arg(long = "blocked-by", value_name = "ID")]
         blocker_id: String,
     },
+    /// List connected task dependencies.
+    List,
 }
 
-/// Filters accepted by the broad record-list query.
+/// Markdown note commands.
+#[derive(Clone, Debug, Subcommand)]
+pub enum NoteCommand {
+    /// Create a Markdown note.
+    Create {
+        /// The note title.
+        title: String,
+        #[command(flatten)]
+        body: MarkdownArgs,
+    },
+    /// Show one note.
+    Show {
+        /// The note ID to show.
+        id: String,
+    },
+    /// List notes.
+    List,
+    /// Update a note.
+    Update {
+        /// The note ID to update.
+        id: String,
+        /// Replace the note title.
+        #[arg(long, value_name = "TITLE")]
+        title: Option<String>,
+        #[command(flatten)]
+        body: MarkdownArgs,
+    },
+    /// Add an explicit note relationship.
+    Link {
+        #[command(subcommand)]
+        command: NoteLinkCommand,
+    },
+}
+
+/// Note relationship commands.
+#[derive(Clone, Debug, Subcommand)]
+pub enum NoteLinkCommand {
+    /// Link a note to another project record.
+    Add {
+        /// The note ID to update.
+        note_id: String,
+        /// Target record kind: capture, spec, plan, phase, task, note, or release.
+        #[arg(long, value_name = "KIND")]
+        kind: String,
+        /// The target record's typed ID.
+        #[arg(long, value_name = "ID")]
+        record_id: String,
+    },
+    /// Remove a note relationship.
+    Remove {
+        /// The note ID to update.
+        note_id: String,
+        /// Target record kind: capture, spec, plan, phase, task, note, or release.
+        #[arg(long, value_name = "KIND")]
+        kind: String,
+        /// The target record's typed ID.
+        #[arg(long, value_name = "ID")]
+        record_id: String,
+    },
+    /// List relationships for a note.
+    List {
+        /// The note ID to list.
+        note_id: String,
+    },
+}
+
+/// Explicit snapshot commands.
+#[derive(Clone, Debug, Subcommand)]
+pub enum SnapshotCommand {
+    /// Export the complete database graph into snapshot records.
+    Export,
+    /// Validate and import the complete snapshot graph into SQLite.
+    Import,
+}
+
+/// Filters accepted by broad connected-record queries.
 #[derive(Clone, Debug, Default, Args)]
 pub struct ListArgs {
-    /// Restrict records to one kind.
+    /// Restrict records to one kind: capture, release, spec, plan, phase, task, or note.
     #[arg(long, value_name = "KIND")]
     pub kind: Option<String>,
     /// Restrict records to one or more statuses.
@@ -425,55 +705,74 @@ pub struct ListArgs {
     /// Restrict tasks to one or more priorities.
     #[arg(long, value_name = "PRIORITY", num_args = 1..)]
     pub priority: Vec<String>,
-    /// Restrict records to an epic's release.
+    /// Restrict records to one release.
     #[arg(long, value_name = "ID")]
     pub release: Option<String>,
-    /// Restrict records to one epic.
+    /// Restrict records to one specification ancestry.
     #[arg(long, value_name = "ID")]
-    pub epic: Option<String>,
-    /// Restrict records to one milestone.
+    pub spec: Option<String>,
+    /// Restrict records to one plan ancestry.
     #[arg(long, value_name = "ID")]
-    pub milestone: Option<String>,
+    pub plan: Option<String>,
+    /// Restrict records to one phase ancestry.
+    #[arg(long, value_name = "ID")]
+    pub phase: Option<String>,
     /// Restrict tasks to children of one task.
     #[arg(long, value_name = "ID")]
     pub parent: Option<String>,
 }
 
-/// Filters accepted by the ready-work and next-work queries.
+/// Filters accepted by ready-work and next-work queries.
 #[derive(Clone, Debug, Default, Args)]
 pub struct ReadyArgs {
     /// Restrict results to one or more priorities.
     #[arg(long, value_name = "PRIORITY", num_args = 1..)]
     pub priority: Vec<String>,
-    /// Restrict results to an epic's release.
+    /// Restrict results to one specification ancestry.
     #[arg(long, value_name = "ID")]
-    pub release: Option<String>,
-    /// Restrict results to one epic.
+    pub spec: Option<String>,
+    /// Restrict results to one plan ancestry.
     #[arg(long, value_name = "ID")]
-    pub epic: Option<String>,
-    /// Restrict results to one milestone.
+    pub plan: Option<String>,
+    /// Restrict results to one phase ancestry.
     #[arg(long, value_name = "ID")]
-    pub milestone: Option<String>,
+    pub phase: Option<String>,
     /// Restrict results to direct children of one task.
     #[arg(long, value_name = "ID")]
     pub parent: Option<String>,
 }
 
-/// Mutually exclusive sources for an idea's Markdown description.
+/// Mutually exclusive sources for Markdown content.
 #[derive(Clone, Debug, Default, Args)]
-pub struct DescriptionArgs {
-    /// Use this inline Markdown description.
+pub struct MarkdownArgs {
+    /// Use this inline Markdown body.
     #[arg(
-        short = 'd',
+        short = 'b',
         long,
         value_name = "MARKDOWN",
         allow_hyphen_values = true,
-        conflicts_with = "description_file"
+        conflicts_with = "body_file"
     )]
-    pub description: Option<String>,
-    /// Read the UTF-8 description from a file, or `-` for standard input.
-    #[arg(long, value_name = "PATH|-", conflicts_with = "description")]
-    pub description_file: Option<PathBuf>,
+    pub body: Option<String>,
+    /// Read UTF-8 Markdown from a file, or `-` for standard input.
+    #[arg(long, value_name = "PATH|-", conflicts_with = "body")]
+    pub body_file: Option<PathBuf>,
+}
+
+/// Mutually exclusive sources for specification acceptance criteria.
+#[derive(Clone, Debug, Default, Args)]
+pub struct AcceptanceArgs {
+    /// Use inline Markdown acceptance criteria.
+    #[arg(
+        long,
+        value_name = "MARKDOWN",
+        allow_hyphen_values = true,
+        conflicts_with = "acceptance_criteria_file"
+    )]
+    pub acceptance_criteria: Option<String>,
+    /// Read acceptance criteria from a file, or `-` for standard input.
+    #[arg(long, value_name = "PATH|-", conflicts_with = "acceptance_criteria")]
+    pub acceptance_criteria_file: Option<PathBuf>,
 }
 
 /// Arc Lightning's command-line options.
@@ -482,13 +781,19 @@ pub struct DescriptionArgs {
     name = "arcl",
     version,
     about = "Arc Lightning: local-first project planning for developers and coding agents",
-    after_help = "Examples:
+    after_help = r#"Examples:
 
     arcl init
     arcl init --snapshot
     arcl --help
     arcl --version
-"
+    arcl capture create "Improve import errors" --body "Make failures easier to fix."
+    arcl capture promote arcl-c-… spec
+    arcl capture promote arcl-c-… task --priority high
+    arcl plan create "Import validation" --spec arcl-s-…
+    arcl task create "Validate records" --plan arcl-pl-…
+    arcl ready
+"#
 )]
 pub struct Cli {
     /// Choose when human output may use ANSI colors.
