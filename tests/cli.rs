@@ -135,7 +135,7 @@ fn project_discovery_uses_the_git_worktree_for_nested_initialization() {
     );
 
     let database = Database::open(arcl_directory.join("arcl.db")).expect("initialized database reopens");
-    assert_eq!(database.schema_version().expect("schema version is readable"), 8);
+    assert_eq!(database.schema_version().expect("schema version is readable"), 9);
 }
 
 #[test]

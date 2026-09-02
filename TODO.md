@@ -38,17 +38,17 @@ Blocked by: T01
 
 Acceptance criteria:
 
-- [ ] Add typed records and forward-only migrations for each new entity and
+- [x] Add typed records and forward-only migrations for each new entity and
       relationship in `SPEC.md`
-- [ ] Store Markdown bodies for specs, plans, notes, and tasks in the operational
+- [x] Store Markdown bodies for specs, plans, notes, and tasks in the operational
       database
-- [ ] Allow a task under a project, spec, plan, phase, or parent task and reject
+- [x] Allow a task under a project, spec, plan, phase, or parent task and reject
       contradictory or cross-project ancestry
-- [ ] Add many-to-many release membership for specs, plans, tasks, and notes
+- [x] Add many-to-many release membership for specs, plans, tasks, and notes
       without implicitly including descendants
-- [ ] Migrate current ideas, epics, milestones, tasks, and links as part of the
+- [x] Migrate current ideas, epics, milestones, tasks, and links as part of the
       new schema migration
-- [ ] Preserve current identifiers when the entity type remains valid and store
+- [x] Preserve current identifiers when the entity type remains valid and store
       explicit mappings where it changes
 
 Verification:

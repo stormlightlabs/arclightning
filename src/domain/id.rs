@@ -101,6 +101,12 @@ define_id!(ReleaseId, "release", "arcl-r-");
 define_id!(EpicId, "epic", "arcl-e-");
 define_id!(MilestoneId, "milestone", "arcl-m-");
 define_id!(TaskId, "task", "arcl-t-");
+define_id!(ProjectId, "project", "arcl-pj-");
+define_id!(CaptureId, "capture", "arcl-c-");
+define_id!(SpecId, "spec", "arcl-s-");
+define_id!(PlanId, "plan", "arcl-pl-");
+define_id!(PhaseId, "phase", "arcl-ph-");
+define_id!(NoteId, "note", "arcl-n-");
 
 #[cfg(test)]
 mod tests {

@@ -839,17 +839,15 @@ fn readiness(graph: &Graph, task: &Task) -> Readiness {
     if epic.is_none_or(|epic| epic.status != ContainerStatus::Open) {
         reasons.push("epic is not open".to_owned());
     }
-    if let Some(epic) = epic {
-        if let Some(release_id) = epic.release_id {
-            if graph
-                .releases
-                .iter()
-                .find(|release| release.id == release_id)
-                .is_none_or(|release| release.status != ContainerStatus::Open)
-            {
-                reasons.push("release is not open".to_owned());
-            }
-        }
+    if let Some(epic) = epic
+        && let Some(release_id) = epic.release_id
+        && graph
+            .releases
+            .iter()
+            .find(|release| release.id == release_id)
+            .is_none_or(|release| release.status != ContainerStatus::Open)
+    {
+        reasons.push("release is not open".to_owned());
     }
     let mut blocked = false;
     for dependency in graph
@@ -908,12 +906,12 @@ pub fn check(connection: &Connection) -> Result<CheckReport> {
     let epic_ids = graph.epics.iter().map(|epic| epic.id).collect::<HashSet<_>>();
     let release_ids = graph.releases.iter().map(|release| release.id).collect::<HashSet<_>>();
     for epic in &graph.epics {
-        if let Some(release_id) = epic.release_id {
-            if !release_ids.contains(&release_id) {
-                report
-                    .errors
-                    .push(format!("epic `{}` references missing release `{release_id}`", epic.id));
-            }
+        if let Some(release_id) = epic.release_id
+            && !release_ids.contains(&release_id)
+        {
+            report
+                .errors
+                .push(format!("epic `{}` references missing release `{release_id}`", epic.id));
         }
     }
     for task in &graph.tasks {
@@ -962,17 +960,16 @@ pub fn check(connection: &Connection) -> Result<CheckReport> {
     }
     for idea in &graph.ideas {
         match (idea.status, idea.promoted_to) {
-            (crate::domain::IdeaStatus::Promoted, Some(epic_id)) => {
+            (crate::domain::IdeaStatus::Promoted, Some(epic_id))
                 if graph
                     .epics
                     .iter()
                     .find(|epic| epic.id == epic_id)
-                    .is_none_or(|epic| epic.source_idea != Some(idea.id))
-                {
-                    report
-                        .errors
-                        .push(format!("idea `{}` promotion is not symmetric", idea.id));
-                }
+                    .is_none_or(|epic| epic.source_idea != Some(idea.id)) =>
+            {
+                report
+                    .errors
+                    .push(format!("idea `{}` promotion is not symmetric", idea.id));
             }
             (crate::domain::IdeaStatus::Promoted, None) => {
                 report.errors.push(format!("promoted idea `{}` has no epic", idea.id))
@@ -984,17 +981,16 @@ pub fn check(connection: &Connection) -> Result<CheckReport> {
         }
     }
     for epic in &graph.epics {
-        if let Some(idea_id) = epic.source_idea {
-            if graph
+        if let Some(idea_id) = epic.source_idea
+            && graph
                 .ideas
                 .iter()
                 .find(|idea| idea.id == idea_id)
                 .is_none_or(|idea| idea.promoted_to != Some(epic.id))
-            {
-                report
-                    .errors
-                    .push(format!("epic `{}` source-idea link is not symmetric", epic.id));
-            }
+        {
+            report
+                .errors
+                .push(format!("epic `{}` source-idea link is not symmetric", epic.id));
         }
     }
     duplicate_positions(&graph, &mut report);

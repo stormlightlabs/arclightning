@@ -784,10 +784,12 @@ fn task_from_record(record: &TaskRecord) -> crate::domain::Task {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-
     use super::*;
-    use crate::domain::{ContainerStatus, EpicId, IdeaId, IdeaStatus, MilestoneId, TaskPriority, TaskStatus};
+    use crate::{
+        domain::{ContainerStatus, EpicId, IdeaId, IdeaStatus, MilestoneId, TaskPriority, TaskStatus},
+        snapshot::SnapshotExportError,
+    };
+    use std::fs;
 
     const IDEA_ID: &str = "arcl-i-01K0B3N4QSC9R7K6W8X2M5YH1Z";
     const EPIC_ID: &str = "arcl-e-01K0B2ZWTX7JX9PH7W5G1S6A9Q";
@@ -928,7 +930,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            SnapshotImportError::Export(super::super::SnapshotExportError::Conflict { .. })
+            SnapshotImportError::Export(SnapshotExportError::Conflict { .. })
         ));
         assert!(database.graph().expect("graph loads").ideas.is_empty());
         assert_eq!(
@@ -1023,9 +1025,8 @@ mod tests {
 
     #[test]
     fn concurrent_import_conflicts_use_the_conflict_exit_code() {
-        let error = SnapshotImportError::Export(super::super::SnapshotExportError::Conflict {
-            path: PathBuf::from("ideas/changed.md"),
-        });
+        let error =
+            SnapshotImportError::Export(SnapshotExportError::Conflict { path: PathBuf::from("ideas/changed.md") });
 
         assert_eq!(error.exit_code(), 4);
     }

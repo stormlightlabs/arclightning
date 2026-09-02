@@ -166,9 +166,8 @@ fn ensure_epic_exists(connection: &Connection, epic_id: EpicId) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::{DomainError, MilestoneId};
-
     use super::super::{Database, StorageError};
+    use crate::domain::{DomainError, MilestoneId};
 
     #[test]
     fn milestone_mutations_validate_ownership_and_order_ties_by_id() {

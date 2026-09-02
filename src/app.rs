@@ -195,12 +195,33 @@ impl CommandError {
 impl From<&StorageError> for u8 {
     fn from(value: &StorageError) -> Self {
         match value {
+            StorageError::ProjectNotFound => 3,
             StorageError::IdeaNotFound { .. } => 5,
             StorageError::ReleaseNotFound { .. }
             | StorageError::EpicNotFound { .. }
             | StorageError::MilestoneNotFound { .. }
-            | StorageError::TaskNotFound { .. } => 5,
-            StorageError::InvalidIdea(_)
+            | StorageError::TaskNotFound { .. }
+            | StorageError::CaptureNotFound { .. }
+            | StorageError::SpecNotFound { .. }
+            | StorageError::PlanNotFound { .. }
+            | StorageError::PhaseNotFound { .. }
+            | StorageError::PlanningTaskNotFound { .. }
+            | StorageError::NoteNotFound { .. }
+            | StorageError::ReleaseMembershipNotFound { .. }
+            | StorageError::NoteLinkNotFound { .. }
+            | StorageError::RecordLinkNotFound { .. }
+            | StorageError::PlanningDependencyNotFound { .. } => 5,
+            StorageError::InvalidProject(_)
+            | StorageError::InvalidCapture(_)
+            | StorageError::InvalidSpec(_)
+            | StorageError::InvalidPlan(_)
+            | StorageError::InvalidPhase(_)
+            | StorageError::InvalidPlanningTask(_)
+            | StorageError::InvalidNote(_)
+            | StorageError::InvalidMembership(_)
+            | StorageError::InvalidLink(_)
+            | StorageError::InvalidPlanningDependency(_)
+            | StorageError::InvalidIdea(_)
             | StorageError::InvalidRelease(_)
             | StorageError::InvalidEpic(_)
             | StorageError::InvalidMilestone(_)
@@ -847,12 +868,12 @@ fn validate_ready_targets(database: &Database, filter: &ReadyFilter) -> CResult<
 
 fn resolve_list_filter(args: ListArgs) -> CResult<ListFilter> {
     let mut kind = args.kind;
-    if let Some(value) = &kind {
-        if !matches!(value.as_str(), "idea" | "release" | "epic" | "milestone" | "task") {
-            return Err(CommandError::InvalidFilter {
-                message: format!("unknown kind `{value}`; use idea, release, epic, milestone, or task"),
-            });
-        }
+    if let Some(value) = &kind
+        && !matches!(value.as_str(), "idea" | "release" | "epic" | "milestone" | "task")
+    {
+        return Err(CommandError::InvalidFilter {
+            message: format!("unknown kind `{value}`; use idea, release, epic, milestone, or task"),
+        });
     }
     let known_statuses = [
         "captured",
@@ -941,29 +962,29 @@ fn resolve_list_filter(args: ListArgs) -> CResult<ListFilter> {
 }
 
 fn validate_list_targets(graph: &Graph, filter: &ListFilter) -> CResult<()> {
-    if let Some(id) = filter.release_id {
-        if !graph.releases.iter().any(|release| release.id == id) {
-            return Err(CommandError::Storage(StorageError::ReleaseNotFound {
-                id: id.to_string(),
-            }));
-        }
+    if let Some(id) = filter.release_id
+        && !graph.releases.iter().any(|release| release.id == id)
+    {
+        return Err(CommandError::Storage(StorageError::ReleaseNotFound {
+            id: id.to_string(),
+        }));
     }
-    if let Some(id) = filter.epic_id {
-        if !graph.epics.iter().any(|epic| epic.id == id) {
-            return Err(CommandError::Storage(StorageError::EpicNotFound { id: id.to_string() }));
-        }
+    if let Some(id) = filter.epic_id
+        && !graph.epics.iter().any(|epic| epic.id == id)
+    {
+        return Err(CommandError::Storage(StorageError::EpicNotFound { id: id.to_string() }));
     }
-    if let Some(id) = filter.milestone_id {
-        if !graph.milestones.iter().any(|milestone| milestone.id == id) {
-            return Err(CommandError::Storage(StorageError::MilestoneNotFound {
-                id: id.to_string(),
-            }));
-        }
+    if let Some(id) = filter.milestone_id
+        && !graph.milestones.iter().any(|milestone| milestone.id == id)
+    {
+        return Err(CommandError::Storage(StorageError::MilestoneNotFound {
+            id: id.to_string(),
+        }));
     }
-    if let Some(id) = filter.parent_id {
-        if !graph.tasks.iter().any(|task| task.id == id) {
-            return Err(CommandError::Storage(StorageError::TaskNotFound { id: id.to_string() }));
-        }
+    if let Some(id) = filter.parent_id
+        && !graph.tasks.iter().any(|task| task.id == id)
+    {
+        return Err(CommandError::Storage(StorageError::TaskNotFound { id: id.to_string() }));
     }
     Ok(())
 }

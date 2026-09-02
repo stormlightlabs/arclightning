@@ -23,6 +23,14 @@ pub enum DomainError {
     SelfParent { task: String },
     #[error("task `{task}` and parent `{parent}` must belong to the same milestone")]
     DifferentMilestone { task: String, parent: String },
+    #[error("{entity} `{id}` and related record `{related}` must belong to the same project")]
+    DifferentProject {
+        entity: String,
+        id: String,
+        related: String,
+    },
+    #[error("task `{task}` has contradictory `{relationship}` ancestry")]
+    ContradictoryAncestry { task: String, relationship: String },
     #[error("parenting task `{task}` to `{parent}` would create a cycle")]
     ParentCycle { task: String, parent: String },
     #[error("task `{task}` cannot depend on itself")]

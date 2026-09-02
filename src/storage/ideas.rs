@@ -109,9 +109,11 @@ fn decode_idea(
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::{DomainError, IdeaStatus};
-
     use super::super::Database;
+    use crate::{
+        domain::{DomainError, IdeaStatus},
+        storage::StorageError,
+    };
 
     #[test]
     fn idea_mutations_are_transactional_and_discard_is_idempotent() {
@@ -138,7 +140,7 @@ mod tests {
             .expect_err("discarded ideas cannot be updated");
         assert!(matches!(
             error,
-            super::super::StorageError::InvalidIdea(DomainError::InvalidTransition { .. })
+            StorageError::InvalidIdea(DomainError::InvalidTransition { .. })
         ));
         assert_eq!(
             database.idea(idea.id).expect("idea reads").expect("idea remains").title,
@@ -152,10 +154,7 @@ mod tests {
         let error = database
             .create_idea("  ".to_owned(), "description".to_owned())
             .expect_err("empty title is rejected");
-        assert!(matches!(
-            error,
-            super::super::StorageError::InvalidIdea(DomainError::EmptyTitle)
-        ));
+        assert!(matches!(error, StorageError::InvalidIdea(DomainError::EmptyTitle)));
         assert!(database.ideas().expect("ideas list").is_empty());
     }
 }

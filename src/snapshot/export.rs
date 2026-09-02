@@ -324,11 +324,11 @@ mod tests {
         assert!(
             files
                 .iter()
-                .any(|file| file.path == PathBuf::from(format!("ideas/{}.md", idea.id)))
+                .any(|file| file.path == Path::new(format!("ideas/{}.md", idea.id).as_str()))
         );
         let task_file = files
             .iter()
-            .find(|file| file.path == PathBuf::from(format!("tasks/{}.md", task.id)))
+            .find(|file| file.path == Path::new(format!("tasks/{}.md", task.id).as_str()))
             .expect("task file exists");
         let task_text = String::from_utf8(task_file.content.clone()).expect("task is UTF-8");
         assert!(task_text.contains(&format!("blocked-by = [\"{}\"]", blocker.id)));
