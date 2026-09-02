@@ -1,291 +1,430 @@
-# Arc Lightning v1 Implementation Tickets
+# Arc Lightning implementation tasks
 
-Source specification: [ROADMAP.md](ROADMAP.md)
+Source: [SPEC.md](SPEC.md)
 
-## Milestone 1: Local tracker
+Sequence: [ROADMAP.md](ROADMAP.md)
 
-Exit criterion: a developer can initialize Arc Lightning, capture ideas, organize
-spec-backed work through subtasks, manage lifecycle and dependencies, and query ready
-work without snapshots.
+Tasks are listed in dependency order. Completed v1 foundations are summarized
+in the roadmap and are not repeated here.
 
-### T01: Establish the synchronous Rust application foundation
+## T01: Support projects outside Git worktrees
 
-Prepare the crate for incremental feature work with the approved dependencies,
-module boundaries, error strategy, and a CLI-focused test harness.
+Allow Arc Lightning to initialize and discover a project in an ordinary
+directory while preserving optional Git-aware behavior.
 
-### T02: Initialize a Git-aware Arc Lightning project
+Blocked by: None - can start immediately
 
-Let a developer initialize and rediscover an Arc Lightning project from anywhere
-in a non-bare Git worktree.
+Acceptance criteria:
 
-### T03: Capture and manage ideas
+- [ ] `arcl init` succeeds in a non-Git directory and creates a local project
+- [ ] Commands discover the nearest Arc Lightning project from descendant
+      directories without relying on Git discovery
+- [ ] Git-backed projects still report repository state when repository-native
+      mode uses it
+- [ ] Core domain and storage operations do not require a Git repository
 
-Give developers a local inbox for creating, editing, listing, and discarding ideas
-with Markdown descriptions.
+Verification:
 
-### T04: Create releases and spec-backed epics
+- `cargo test --workspace --all-features project_discovery`
+- Complete init, idea, task, and ready operations in disposable Git and non-Git
+  directories
 
-Let developers group work into releases and register one epic for each existing Markdown spec.
+## T02: Add the connected planning records
 
-### T05: Organize milestones, tasks, and subtasks
+Add captures, owned specs, persistent plans, optional phases, flexible tasks,
+and notes to the existing application.
 
-Let developers decompose an epic into ordered milestones, tasks, and independently
-tracked subtasks.
+Blocked by: T01
 
-### T06: Enforce lifecycle and parking behavior
+Acceptance criteria:
 
-Lets developers start, park, unpark, complete, and cancel work while preserving the roadmap's lifecycle invariants.
+- [ ] Add typed records and forward-only migrations for each new entity and
+      relationship in `SPEC.md`
+- [ ] Store Markdown bodies for specs, plans, notes, and tasks in the operational
+      database
+- [ ] Allow a task under a project, spec, plan, phase, or parent task and reject
+      contradictory or cross-project ancestry
+- [ ] Add many-to-many release membership for specs, plans, tasks, and notes
+      without implicitly including descendants
+- [ ] Migrate current ideas, epics, milestones, tasks, and links as part of the
+      new schema migration
+- [ ] Preserve current identifiers when the entity type remains valid and store
+      explicit mappings where it changes
 
-### T07: Model blockers and compute ready work
+Verification:
 
-Lets developers express task dependencies and obtain deterministic recommendations for actionable leaf work.
+- `cargo test --workspace --all-features domain`
+- `cargo test --workspace --all-features migrations`
+- Create a current-format project, upgrade it, and confirm its records and
+  relationships remain available
 
-### T08: Inspect and validate the local work graph
+## T03: Implement capture promotion and owned planning content
 
-Gives humans and agents consistent read commands for records, filtered collections,
-hierarchy, progress, and integrity problems.
+Let users create and edit the new records and move a capture into a spec, task,
+or note without losing provenance.
 
-### T09: Promote ideas into linked epics
+Blocked by: T02
 
-Turns a captured idea into a spec-backed epic while retaining an explicit provenance link.
+Acceptance criteria:
 
-### T10: Preserve task handoffs and completion evidence
+- [ ] Create, show, update, list, and transition captures, specs, plans, phases,
+      and notes through application operations
+- [ ] Promote a capture transactionally to a spec, task, or note
+- [ ] Make repeated promotion to the same target idempotent and reject an
+      ambiguous second target
+- [ ] Check, diff, and apply structured plan input against a persistent plan
+      without duplicating tasks on repeated application
+- [ ] Return validation errors without partial writes
 
-**What to build:** Let an agent park active work with one current resume note and attach optional Markdown evidence when completing a task.
+Verification:
 
-**Blocked by:** T06, T08
-
-**Acceptance criteria:**
-
-- [x] Add non-null Markdown `handoff` and `evidence` fields to tasks with empty defaults.
-- [x] Implement `arcl task handoff <id> --note <markdown>|--note-file <path|->` for in-progress tasks.
-- [x] Store the handoff and park the task in one transaction; failures leave both unchanged.
-- [x] Retain the current handoff through unpark and start transitions until another handoff replaces it.
-- [x] Extend task completion with mutually exclusive `--evidence` and `--evidence-file <path|->` inputs.
-- [x] Store completion evidence in the same transaction as the terminal transition without treating it as proof or executing its contents.
-- [x] Include handoff and relevant blocker evidence in show, context, plain, and JSON output.
-
-**Verification:**
-
-- `cargo test --workspace --all-features handoff`
-- `cargo test --workspace --all-features evidence`
-- Verify transaction rollback for invalid states, unreadable files, malformed UTF-8, and guarded parent completion.
-- Park, resume, and complete a task through the binary and compare human and JSON context output.
-
-## Milestone 2: Version-controlled snapshots
-
-Exit criterion: a snapshot-enabled project can round-trip its complete graph through
-human-editable files, follow ordinary branch changes automatically, and stop safely
-when local and snapshot state diverge.
-
-### T11: Encode canonical TOML-front-matter snapshots
-
-**What to build:** Define a deterministic parser and renderer for every snapshot record
-and the versioned snapshot manifest.
-
-**Blocked by:** T07, T09, T10
-
-**Acceptance criteria:**
-
-- [x] Parse and render the exact `+++`-delimited TOML-front-matter and Markdown-body format from the roadmap.
-- [x] Support idea, release, epic, milestone, task, and subtask records with kebab-case fields.
-- [x] Preserve optional task handoff and evidence fields through canonical snapshot round trips.
-- [x] Use `<id>.md` filenames in the correct entity directory and keep subtasks in `tasks/`.
-- [x] Render optional fields by omission, sort ID arrays, use LF endings, and write one trailing newline.
-- [x] Reject malformed delimiters, invalid TOML, unknown v1 fields, invalid UTF-8,
-      mismatched directory/filename/ID type, and unsupported manifest versions.
-- [x] Preserve Markdown bodies exactly except for the documented final-newline normalization.
-- [x] Canonical rendering is deterministic and parse-render-parse stable.
-
-**Verification:**
-
-- `cargo test --workspace --all-features snapshot::codec`
-- Round-trip representative Unicode and multiline records for every entity type.
-- Run golden-file tests for canonical output and each malformed input class.
-
-### T12: Export database state as isolated snapshot records
-
-**What to build:** Let a snapshot-enabled project write its complete database projection
-into deterministic, independently mergeable record files.
-
-**Blocked by:** T11
-
-**Acceptance criteria:**
-
-- [x] `arcl init --snapshot` enables the default snapshot path and creates `manifest.toml` with format version 1.
-- [x] Add the `snapshot_files` migration and store the exact files from the last successful synchronization as the merge base.
-- [x] Implement `arcl snapshot export` for an initial export and later changed-record exports.
-- [x] Write through same-directory temporary files and atomic per-file renames;
-      update the base only after all required exports succeed.
-- [x] Verify each destination still matches the content observed at command start before replacing it.
-- [x] Exporting unchanged state produces no content changes.
-- [x] The exporter never writes the SQLite database or volatile generation metadata into the snapshot.
-
-**Verification:**
-
-- `cargo test --workspace --all-features snapshot::export`
-- Export a populated graph twice and verify the second run changes no bytes.
-- Simulate a concurrent file edit before replacement and verify a conflict rather than overwrite.
-
-### T13: Import and rebuild from a validated snapshot
-
-**What to build:** Let a developer edit snapshot files or clone a repository and reconstruct the complete SQLite work graph safely.
-
-**Blocked by:** T12
-
-**Acceptance criteria:**
-
-- [x] Parse every candidate record before opening a write transaction.
-- [x] Validate IDs, required fields, enums, spec paths, relationships, promotion symmetry,
-      parentage, cycles, lifecycle, and existing-record removal as one complete graph.
-- [x] Implement `arcl snapshot import` as an all-or-nothing database replacement or update followed by base-state refresh.
-- [x] Rebuild an absent or empty local database from a valid snapshot.
-- [x] Accept manually added records with valid prefixed ULIDs.
-- [x] Reject missing or renamed existing IDs because v1 has no hard deletion.
-- [x] Normalize harmless formatting only after a successful semantic import.
-- [x] Report the source file, field, and relationship path for validation failures.
-
-**Verification:**
-
-- `cargo test --workspace --all-features snapshot::import`
-- Rebuild a fresh database from an exported snapshot and compare every semantic record and relationship.
-- Corrupt each validation class and verify neither SQLite nor snapshot files change.
-
-### T14: Reconcile database and snapshot changes automatically
-
-**What to build:** Apply the roadmap's three-way synchronization state machine before
-ordinary commands and recover safe one-sided changes automatically.
-
-**Blocked by:** T13
-
-**Acceptance criteria:**
-
-- [ ] Compare the stored base, current database projection, and current snapshot projection semantically as specified.
-- [ ] Implement all five state-machine outcomes, including the equal-both-sides case.
-- [ ] Import snapshot-only changes before normal reads or writes.
-- [ ] Export database-only changes, including recovery after a database commit followed by an interrupted export.
-- [ ] Refuse automatic writes when database and snapshot both diverged differently from the base.
-- [ ] Bypass automatic reconciliation for explicit snapshot commands and make `arcl check`
-      report divergence without selecting a side.
-- [ ] Recheck observed snapshot content before post-mutation export so a concurrent editor cannot be overwritten.
-
-**Verification:**
-
-- `cargo test --workspace --all-features snapshot::sync`
-- Use failure injection to stop after the database commit, during file export, and before base update,
-  then verify the next command's behavior.
-- Cover every state-machine row with an end-to-end test.
-
-### T15: Diagnose and resolve snapshot and Git conflicts
-
-**What to build:** Give developers enough status and recovery tooling to understand branch-driven
-changes and explicitly resolve genuine divergence.
-
-**Blocked by:** T14
-
-**Acceptance criteria:**
-
-- [ ] Implement `arcl snapshot status` with record-level database, snapshot, and base differences.
-- [ ] Complete `arcl status` and `arcl check` with `gix` path states for configuration and snapshot files.
-- [ ] Detect unmerged snapshot paths and common conflict markers before TOML parsing.
-- [ ] Implement explicit export, import, and `snapshot reconcile --use database|snapshot` recovery paths.
-- [ ] Show a destructive-side summary and require confirmation in a TTY; require `--force` when non-interactive.
-- [ ] Forced recovery updates the chosen side and common base without invoking a Git mutation.
-- [ ] Branch checkout, detached HEAD, and unborn HEAD changes are handled without assuming a branch name exists.
-
-**Verification:**
-
-- `cargo test --workspace --all-features snapshot::reconcile`
-- `cargo test --workspace --all-features vcs`
-- Exercise external edits, a branch switch, an unresolved merge, and dual-side divergence in disposable repositories.
-- Verify refs, index, remotes, and Git configuration are unchanged after every recovery command.
-
-## Milestone 3: Repeatable planning
-
-Exit criterion: an external tool or coding agent can apply a complete TOML plan to an
-epic repeatedly without duplicating or deleting work.
-
-### T16: Check, diff, and apply additive plans transactionally
-
-**What to build:** Validate, preview, and apply a versioned TOML plan containing milestones, tasks, subtasks, and dependencies under an existing epic.
-
-**Blocked by:** T07
-
-**Acceptance criteria:**
-
-- [ ] Parse format-version-1 plans from a path or stdin with recursive subtasks and plan-local dependency references.
-- [ ] Enforce milestone plan-key uniqueness within an epic and task plan-key uniqueness within a milestone.
-- [ ] Resolve `<milestone>/<task>/...` references and full existing task IDs before writing.
-- [ ] Validate the complete resulting hierarchy and dependency graph transactionally.
-- [ ] Implement `arcl plan check` with complete validation and no writes.
-- [ ] Implement `arcl plan diff` with deterministic create and update output and no writes.
-- [ ] Create ULIDs for new plan keys and update matching records on repeated application.
-- [ ] Leave omitted records unchanged and never complete, cancel, move, or delete them implicitly.
-- [ ] Implement `arcl plan apply` as one transaction after the same validation used by check and diff.
-- [ ] Applying the same plan twice produces no duplicate records or second-run changes.
-
-**Verification:**
-
+- `cargo test --workspace --all-features capture`
 - `cargo test --workspace --all-features plan`
-- Check and diff the roadmap example from a file and stdin, apply it twice, and compare database state.
-- Verify invalid references, duplicate keys, cycles, and partial-update failures roll back fully.
+- Exercise create, edit, promotion, plan diff, and repeated plan apply through
+  the application API
 
-## Milestone 4: CLI and release hardening
+## T04: Adapt task execution to flexible ancestry
 
-Exit criterion: the complete v1 workflow satisfies the roadmap's CLI contract,
-passes all automated checks, and can be followed using terminal help and project documentation.
+Preserve lifecycle, dependencies, readiness, context, handoff, and evidence
+when phases and plans are optional.
 
-### T17: Make the CLI consistent for humans and automation
+Blocked by: T02, T03
 
-**What to build:** Apply the shared command, output, color, help, diagnostic, and exit-code
-contracts across every implemented workflow.
+Acceptance criteria:
 
-**Blocked by:** T08, T09, T10, T15, T16
+- [ ] Compute ready leaf tasks for every valid placement without assuming a
+      milestone exists
+- [ ] Reject dependency cycles, parent cycles, cross-project links, and invalid
+      container states before writing
+- [ ] Explain readiness and blocking in terms of the actual ancestry present
+- [ ] Include relevant spec, plan, phase, blocker, handoff, and evidence content
+      in task context without returning unrelated records
+- [ ] Preserve atomic handoff, parking, completion, and evidence behavior
 
-**Acceptance criteria:**
+Verification:
 
-- [ ] Audit the noun-and-verb command hierarchy, argument names, filter combinations,
-      description inputs, and help examples against the roadmap and <https://clig.dev/>.
-- [ ] Make human output concise and keep primary results on stdout and diagnostics on stderr.
-- [ ] Complete stable versioned JSON envelopes and one-record-per-line plain output for every read command.
-- [ ] Implement quiet mutation output and reject conflicting output modes.
-- [ ] Use `owo-colors` terminal-aware formatting and honor `NO_COLOR`, `FORCE_COLOR`,
-      and explicit `--color auto|always|never` precedence.
-- [ ] Ensure JSON, plain, quiet, piped, and ordinary non-TTY output contain no accidental ANSI escapes.
-- [ ] Map usage, validation, conflict, not-found, and unexpected failures to the specified exit codes and structured JSON errors.
-- [ ] Handle broken pipes quietly and never show a backtrace for an expected user error.
-- [ ] Top-level and subcommand help lead with useful examples and suggest unambiguous corrections.
+- `cargo test --workspace --all-features ready`
+- `cargo test --workspace --all-features context`
+- Cover project-, spec-, plan-, phase-, and parent-task placement in tests
 
-**Verification:**
+## T05: Move the CLI to the new vocabulary
+
+Expose the connected planning model through `arcl` and replace the old command
+nouns.
+
+Blocked by: T03, T04
+
+Acceptance criteria:
+
+- [ ] Add coherent `capture`, `spec`, `plan`, `task`, and `note` command groups
+- [ ] Support stable JSON for every new read operation and structured errors for
+      expected failures
+- [ ] Remove the `idea`, `epic`, and `milestone` command groups when their
+      replacements ship and do not add compatibility aliases
+- [ ] Update help examples so a user can complete capture -> spec -> plan ->
+      task and capture -> task workflows
+- [ ] Keep primary results on stdout and diagnostics on stderr without ANSI
+      escapes in machine output
+
+Verification:
 
 - `cargo test --workspace --all-features cli`
-- Run output-mode tests under TTY and non-TTY conditions with color environment variables.
-- Exercise every exit-code category and inspect stdout/stderr separation.
+- Run both primary workflows using human and JSON output
 
-### T18: Verify and document the complete v1 workflow
+## T06: Extract the shared Rust application
 
-**What to build:** Close the gaps found by a full-system review and leave a release-ready CLI with accurate user documentation.
+Move the working connected planning operations behind core, store, repository,
+and CLI crate boundaries without changing their behavior.
 
-**Blocked by:** T17
+Blocked by: T04, T05
 
-**Acceptance criteria:**
+Acceptance criteria:
 
-- [ ] Add an end-to-end test covering init, idea capture, promotion, plan application, ready work,
-      readiness explanation, context retrieval, handoff, completion evidence, lifecycle transitions,
-      snapshot export, manual snapshot edit, branch-driven import, and conflict recovery.
-- [ ] Add failure-injection coverage for every snapshot/database atomicity boundary identified in the roadmap.
-- [ ] Verify tests do not depend on global Git configuration, the developer's home directory, locale-specific output, or wall-clock sleeps.
-- [ ] Verify Arc Lightning never invokes the `git` executable and never changes Git refs, index, remotes, or configuration.
-- [ ] Update the README with installation, quick start, snapshot collaboration, recovery, JSON automation, and links to the roadmap.
-- [ ] Ensure terminal help is sufficient to complete the common workflow without reading source code.
-- [ ] Review implementation behavior against every roadmap success criterion and record any approved spec correction in `ROADMAP.md`.
-- [ ] All required formatting, check, lint, test, and documentation commands pass from a clean worktree.
+- [ ] Create workspace crates for domain and application operations, SQLite,
+      repository files, and the CLI
+- [ ] Keep domain and application crates independent of Clap, terminal output,
+      Tauri, and MCP transports
+- [ ] Preserve the binary name, commands, exit behavior, and database
+      compatibility
+- [ ] Move tests to the highest stable crate or CLI boundary without duplicating
+      coverage
 
-**Verification:**
+Verification:
+
+- `cargo check --workspace --all-targets --all-features`
+- `cargo test --workspace --all-features`
+- Run the capture, planning, ready-work, context, and handoff CLI workflows
+
+## T07: Remove the superseded internal model
+
+Remove old storage and internal type paths after production callers use the
+connected planning model.
+
+Blocked by: T05, T06
+
+Acceptance criteria:
+
+- [ ] Remove legacy tables or fields only through a forward migration with
+      upgrade coverage in this task
+- [ ] Remove duplicate domain paths after all production callers use the new
+      records
+- [ ] Confirm upgraded projects retain all supported Markdown, relationships,
+      handoffs, and evidence
+
+Verification:
+
+- `cargo test --workspace --all-features migrations`
+- `cargo test --workspace --all-features`
+
+## T08: Migrate repository-native files to the new model
+
+Adapt the existing codec, import, and export work to the versioned workspace
+layout in `SPEC.md`.
+
+Blocked by: T06, T07
+
+Acceptance criteria:
+
+- [ ] Define and document a new manifest version and record encoding for
+      captures, specs, plans, tasks, and notes
+- [ ] Import current snapshot records through an explicit migration path
+- [ ] Render one deterministic file per record and preserve Markdown bodies
+      through parse-render-parse round trips
+- [ ] Validate the complete candidate graph before mutating the database
+- [ ] Export changed records atomically and leave unchanged files byte-stable
+
+Verification:
+
+- `cargo test --workspace --all-features snapshot::codec`
+- `cargo test --workspace --all-features snapshot::import`
+- `cargo test --workspace --all-features snapshot::export`
+
+## T09: Finish automatic reconciliation and conflict recovery
+
+Synchronize one-sided database or workspace changes and provide explicit tools
+for true divergence.
+
+Blocked by: T08
+
+Acceptance criteria:
+
+- [ ] Implement every state in the base/database/workspace comparison from
+      `SPEC.md`
+- [ ] Reconcile before ordinary reads and writes, including recovery after an
+      interrupted post-commit export
+- [ ] Refuse automatic writes when the database and workspace changed
+      differently from their common base
+- [ ] Report record-level status, unmerged paths, conflict markers, and Git path
+      state where Git exists
+- [ ] Require an explicit side for destructive recovery and never mutate Git
+      refs, the index, remotes, or configuration
+
+Verification:
+
+- `cargo test --workspace --all-features snapshot::sync`
+- `cargo test --workspace --all-features snapshot::reconcile`
+- Exercise external edits, a branch switch, an unresolved merge, dual-side
+  divergence, and interrupted export in disposable projects
+
+## T10: Add the MCP server and Arc Lightning skill
+
+Expose agent operations through typed MCP tools and document the intended
+planning, context, handoff, and evidence workflow in a project skill.
+
+Blocked by: T06
+
+Acceptance criteria:
+
+- [ ] Add MCP tools for record reads and mutations, ready work, readiness
+      explanation, context, handoff, and completion
+- [ ] Reuse application operations and errors without invoking or scraping the
+      CLI
+- [ ] Publish versioned input and output schemas with bounded list pagination
+- [ ] Add an Arc Lightning skill that refers to product commands and MCP tools
+      without restating domain rules
+- [ ] Cover tool authorization boundaries and invalid-transition errors
+
+Verification:
+
+- `cargo test --workspace --all-features -p arcl-mcp`
+- Run one capture-to-completion workflow through MCP
+
+## T11: Create the pnpm workspace and shared UI package
+
+Build the reusable Svelte component and token package consumed by the desktop
+app and website.
+
+Blocked by: None - can start immediately
+
+Acceptance criteria:
+
+- [ ] Move the existing `website` directory to `apps/website` and update root
+      scripts, package references, and development commands without redesigning
+      the site in this task
+- [ ] Configure a pnpm workspace for `packages/ui`, `apps/desktop`, and
+      `apps/website` without duplicating frontend dependencies
+- [ ] Define semantic light and dark tokens using navy/sky blue with
+      gold/amber/yellow accents
+- [ ] Add accessible primitives for buttons, fields, menus, dialogs, tabs,
+      status, priority, feedback, and Markdown display
+- [ ] Add planning components needed by both consumers, with application data
+      supplied through props and events
+- [ ] Keep Tauri APIs, routing, persistence, and website content out of the
+      package
+- [ ] Provide a component review surface and tests for state, keyboard use,
+      focus, theme, and reduced motion
+- [ ] Configure Vitest unit and browser projects with
+      `@vitest/browser-playwright`, Chromium, and `vitest-browser-svelte`
+- [ ] Use `page` locators and accessible role, label, or text queries in browser
+      component tests
+- [ ] Add Playwright screenshot tests for stable shared component states in
+      light and dark themes
+- [ ] Pin viewport, color scheme, fonts, fixture data, and motion preferences for
+      screenshot runs
+
+Verification:
+
+- `pnpm --filter @arclightning/ui check`
+- `pnpm --filter @arclightning/ui test`
+- `pnpm --filter @arclightning/ui test:browser`
+- `pnpm --filter @arclightning/ui test:visual`
+- `pnpm --filter @arclightning/ui build`
+- Review light, dark, narrow, hover, focus, disabled, loading, empty, and error
+  states
+
+## T12: Build the desktop shell and project inbox
+
+Create the Tauri application, connect it to Rust application operations, and
+deliver project selection plus capture triage.
+
+Blocked by: T01, T03, T06, T11
+
+Acceptance criteria:
+
+- [ ] Open, create, remember, and switch between Arc Lightning projects
+- [ ] Use thin Tauri commands over the Rust application layer
+- [ ] List, create, edit, promote, and discard captures in the Inbox view
+- [ ] Show actionable validation and storage errors without exposing internal
+      traces
+- [ ] Match CLI results for the same project mutations
+- [ ] Provide a deterministic browser test adapter for desktop Playwright tests
+      without duplicating domain behavior
+- [ ] Cover the thin Tauri command boundary with Rust integration tests
+
+Verification:
+
+- `cargo test --workspace --all-features -p arcl-desktop`
+- `pnpm --filter @arclightning/desktop check`
+- `pnpm --filter @arclightning/desktop test`
+- `pnpm --filter @arclightning/desktop test:browser`
+- `pnpm --filter @arclightning/desktop test:e2e`
+- Complete capture -> task and capture -> spec flows through Playwright
+
+## T13: Add desktop work, planning, and task views
+
+Complete the graphical planning and execution workflow over the shared project
+model.
+
+Blocked by: T04, T12
+
+Acceptance criteria:
+
+- [ ] Show backlog, ready, in-progress, and parked work with readiness reasons
+- [ ] Navigate and edit specs, plans, optional phases, tasks, and notes in the
+      Planning view
+- [ ] Use CodeMirror 6 for Markdown editing with source-mode keyboard and
+      accessibility behavior covered by component tests
+- [ ] Show task ancestry, blockers, Markdown description, handoff, and evidence
+      on the Task view
+- [ ] Support start, park, handoff, unpark, complete, and cancel transitions with
+      the same validation as the CLI
+- [ ] Preserve selection and unsaved-edit safety during navigation and external
+      project changes
+- [ ] Support keyboard-only use, narrow windows, light and dark themes, and
+      reduced motion
+- [ ] Add Playwright screenshot coverage for Inbox, Work, Planning, and Task at
+      fixed desktop and narrow viewports in light and dark themes
+
+Verification:
+
+- `pnpm --filter @arclightning/desktop check`
+- `pnpm --filter @arclightning/desktop test`
+- `pnpm --filter @arclightning/desktop test:browser`
+- `pnpm --filter @arclightning/desktop test:e2e`
+- `pnpm --filter @arclightning/desktop test:visual`
+- Run Playwright flows for planning, blockers, handoff, and completion
+
+## T14: Rebuild the website and documentation shell
+
+Use the shared UI package for the product website and implement Arc Lightning's
+version of the Stormlight documentation house style.
+
+Blocked by: T11
+
+Acceptance criteria:
+
+- [ ] Replace the current Astro/Starlight presentation only after the new static
+      site builds and all retained content has a destination
+- [ ] Build the landing page with shared UI components and a concrete Arc
+      Lightning workflow example
+- [ ] Add the sticky header, grouped sidebar, breadcrumbs, article layout,
+      on-page table of contents, previous/next links, responsive menu, search,
+      and theme control used by the sibling documentation sites
+- [ ] Implement the documentation shell directly in `apps/website`, using the
+      shared UI package only for reusable primitives
+- [ ] Use IBM Plex Sans, Google Sans, and Google Sans Code with Arc Lightning's
+      navy/sky and gold/amber/yellow theme
+- [ ] Add copy-code, copy-Markdown, syntax highlighting, social metadata,
+      sitemap, `llms.txt`, and static output
+- [ ] Preserve useful documentation URLs or add redirects and update content for
+      the new product vocabulary
+- [ ] Pass keyboard, contrast, responsive, reduced-motion, and no-JavaScript
+      checks for core reading paths
+- [ ] Test interactive Svelte components through Vitest browser mode with the
+      Playwright provider and `vitest-browser-svelte`
+- [ ] Add Playwright screenshot coverage for the landing page and representative
+      documentation pages at fixed mobile and desktop viewports in both themes
+
+Verification:
+
+- `pnpm --filter @arclightning/website check`
+- `pnpm --filter @arclightning/website test`
+- `pnpm --filter @arclightning/website test:browser`
+- `pnpm --filter @arclightning/website test:e2e`
+- `pnpm --filter @arclightning/website test:visual`
+- `pnpm --filter @arclightning/website build`
+- Review Playwright screenshot diffs for mobile and desktop widths in both
+  themes
+
+## T15: Verify the integrated release
+
+Close gaps in the specified workflows and prepare one coherent release across
+the CLI, desktop app, MCP server, website, and repository-native mode.
+
+Blocked by: T07, T09, T10, T13, T14
+
+Acceptance criteria:
+
+- [ ] Run one project through capture, specification, planning, ready work,
+      execution, handoff, completion, repository synchronization, and conflict
+      recovery across the supported interfaces
+- [ ] Verify equivalent operations return the same semantic result through CLI,
+      desktop, and MCP adapters
+- [ ] Document installation, project migration, desktop use, CLI automation,
+      MCP, repository-native collaboration, and recovery
+- [ ] Map every success criterion in `SPEC.md` to automated evidence or a named
+      human review
+- [ ] Review and approve intentional Playwright screenshot changes before
+      updating baselines
+- [ ] Pass all formatting, lint, type, test, build, and documentation checks from
+      a clean checkout
+
+Verification:
 
 - `cargo fmt --all -- --check`
 - `cargo check --workspace --all-targets --all-features`
 - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
 - `cargo test --workspace --all-features`
-- `cargo doc --workspace --all-features --no-deps`
-- Run the roadmap's human review workflows in a disposable repository.
+- `pnpm -r check`
+- `pnpm -r test`
+- `pnpm -r build`
