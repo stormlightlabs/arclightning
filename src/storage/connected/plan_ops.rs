@@ -3,10 +3,7 @@ use std::collections::{HashMap, HashSet};
 use rusqlite::{Connection, params};
 use serde::Serialize;
 
-use super::{
-    Result, StorageError, ensure_project, ensure_spec, insert_phase, insert_task, phases, plan, planning_dependencies,
-    planning_task, planning_tasks, validate_task_ancestry,
-};
+use super::*;
 use crate::domain::{
     DomainError, Phase, PhaseId, Plan, PlanId, PlanningTask, ProjectId, SpecId, TaskDependency, TaskId,
 };
@@ -108,6 +105,7 @@ pub fn create_and_apply_plan(
     ensure_project(connection, project_id)?;
     let tx = connection.transaction()?;
     ensure_spec(&tx, project_id, spec_id)?;
+    super::require_open_container(&tx, "specs", &spec_id.to_string(), "spec", StorageError::InvalidPlan)?;
     let plan = Plan::new(project_id, spec_id, title, body).map_err(StorageError::InvalidPlan)?;
     tx.execute(
         "INSERT INTO plans (id, project_id, spec_id, title, body, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -154,45 +152,15 @@ fn apply_prepared_plan(connection: &Connection, prepared: &PreparedPlan) -> Resu
         }
     }
 
-    for task_entry in &prepared.entries.tasks {
-        let task_id = prepared.task_ids[&task_entry.path];
-        let phase_id = prepared.phase_ids[&task_entry.phase_key];
-        let parent_id = task_entry.parent_path.as_ref().map(|path| prepared.task_ids[path]);
-        let task = if let Some(current) = prepared.tasks_by_path.get(&task_entry.path) {
-            PlanningTask {
-                id: current.id,
-                project_id: current.project_id,
-                spec_id: Some(prepared.plan.spec_id),
-                plan_id: Some(prepared.plan.id),
-                phase_id: Some(phase_id),
-                parent_id,
-                plan_key: Some(task_entry.path.clone()),
-                title: task_entry.title.clone(),
-                body: current.body.clone(),
-                status: current.status,
-                priority: task_entry.priority,
-                position: i64::from(task_entry.position),
-                handoff: current.handoff.clone(),
-                evidence: current.evidence.clone(),
-            }
-        } else {
-            let mut task = PlanningTask::new(
-                prepared.project_id,
-                Some(prepared.plan.spec_id),
-                Some(prepared.plan.id),
-                Some(phase_id),
-                parent_id,
-                task_entry.title.clone(),
-                String::new(),
-                task_entry.priority,
-                i64::from(task_entry.position),
-            )
-            .map_err(StorageError::InvalidPlanningTask)?;
-            task.id = task_id;
-            task.plan_key = Some(task_entry.path.clone());
-            task
-        };
-        validate_task_ancestry(connection, &task)?;
+    let tasks = prepared
+        .entries
+        .tasks
+        .iter()
+        .map(|entry| prepared_task(prepared, entry))
+        .collect::<Result<Vec<_>>>()?;
+    super::validate_task_graph_candidates(connection, prepared.project_id, &tasks, true)?;
+
+    for (task_entry, task) in prepared.entries.tasks.iter().zip(tasks) {
         if prepared.tasks_by_path.contains_key(&task_entry.path) {
             connection.execute(
                 "UPDATE planning_tasks
@@ -225,6 +193,46 @@ fn apply_prepared_plan(connection: &Connection, prepared: &PreparedPlan) -> Resu
         existing_dependencies.insert((*task_id, *blocker_id));
     }
     Ok(())
+}
+
+fn prepared_task(prepared: &PreparedPlan, task_entry: &PlanTaskEntry) -> Result<PlanningTask> {
+    let task_id = prepared.task_ids[&task_entry.path];
+    let phase_id = prepared.phase_ids[&task_entry.phase_key];
+    let parent_id = task_entry.parent_path.as_ref().map(|path| prepared.task_ids[path]);
+    if let Some(current) = prepared.tasks_by_path.get(&task_entry.path) {
+        Ok(PlanningTask {
+            id: current.id,
+            project_id: current.project_id,
+            spec_id: Some(prepared.plan.spec_id),
+            plan_id: Some(prepared.plan.id),
+            phase_id: Some(phase_id),
+            parent_id,
+            plan_key: Some(task_entry.path.clone()),
+            title: task_entry.title.clone(),
+            body: current.body.clone(),
+            status: current.status,
+            priority: task_entry.priority,
+            position: i64::from(task_entry.position),
+            handoff: current.handoff.clone(),
+            evidence: current.evidence.clone(),
+        })
+    } else {
+        let mut task = PlanningTask::new(
+            prepared.project_id,
+            Some(prepared.plan.spec_id),
+            Some(prepared.plan.id),
+            Some(phase_id),
+            parent_id,
+            task_entry.title.clone(),
+            String::new(),
+            task_entry.priority,
+            i64::from(task_entry.position),
+        )
+        .map_err(StorageError::InvalidPlanningTask)?;
+        task.id = task_id;
+        task.plan_key = Some(task_entry.path.clone());
+        Ok(task)
+    }
 }
 
 fn finish_plan_apply(connection: &Connection, prepared: PreparedPlan) -> Result<PlanApplyResult> {

@@ -518,6 +518,49 @@ impl Database {
         connected::remove_planning_dependency(&mut self.connection, project.id, task_id, blocker_id)
     }
 
+    /// Read all actionable leaf tasks across the flexible connected hierarchy.
+    pub fn ready_planning_tasks(&self) -> Result<Vec<PlanningTask>> {
+        self.ready_planning_tasks_filtered(&PlanningReadyFilter::default())
+    }
+
+    /// Read actionable connected-model leaf tasks matching the supplied filters.
+    pub fn ready_planning_tasks_filtered(&self, filter: &PlanningReadyFilter) -> Result<Vec<PlanningTask>> {
+        let project = self.project()?;
+        connected::planning_ready_tasks(&self.connection, project.id, filter)
+    }
+
+    /// Build a connected-model task inspection view.
+    pub fn planning_task_view(&self, id: TaskId) -> Result<PlanningTaskView> {
+        connected::planning_task_view(&self.connection, id)
+    }
+
+    /// Build the focused context packet for a connected-model task.
+    pub fn planning_context(&self, id: TaskId) -> Result<PlanningContext> {
+        connected::context(&self.connection, id)
+    }
+
+    /// Apply one connected-model task lifecycle action atomically.
+    pub fn transition_planning_task(
+        &mut self, id: TaskId, action: TaskAction, allow_open_children: bool,
+    ) -> Result<PlanningTask> {
+        let project = self.project()?;
+        connected::transition_planning_task(&mut self.connection, project.id, id, action, allow_open_children)
+    }
+
+    /// Complete a connected-model task and optionally store Markdown evidence atomically.
+    pub fn complete_planning_task(
+        &mut self, id: TaskId, allow_open_children: bool, evidence: Option<String>,
+    ) -> Result<PlanningTask> {
+        let project = self.project()?;
+        connected::complete_planning_task(&mut self.connection, project.id, id, allow_open_children, evidence)
+    }
+
+    /// Store a handoff note and park an in-progress connected-model task atomically.
+    pub fn handoff_planning_task(&mut self, id: TaskId, note: String) -> Result<PlanningTask> {
+        let project = self.project()?;
+        connected::handoff_planning_task(&mut self.connection, project.id, id, note)
+    }
+
     /// Read all Markdown notes.
     pub fn notes(&self) -> Result<Vec<Note>> {
         let project = self.project()?;

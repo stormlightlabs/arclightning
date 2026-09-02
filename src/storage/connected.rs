@@ -1,17 +1,16 @@
-use std::{collections::HashSet, str::FromStr};
+use std::str::FromStr;
 
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::{Result, StorageError, releases};
 use crate::domain::*;
 
+mod execution;
 mod plan_ops;
 mod promotions;
 
-pub use plan_ops::{
-    PlanApplyResult, PlanChange, PlanDependencyDiff, PlanDiff, PlanDiffItem, apply_plan, check_plan,
-    create_and_apply_plan, diff_plan,
-};
+pub use execution::*;
+pub use plan_ops::*;
 pub use promotions::{CapturePromotionInput, CapturePromotionRecord, CapturePromotionResult, CaptureTaskPromotion};
 
 /// The stable project ID created for every operational database.
@@ -396,6 +395,7 @@ pub fn create_plan(
     ensure_project(connection, project_id)?;
     let tx = connection.transaction()?;
     ensure_spec(&tx, project_id, spec_id)?;
+    require_open_container(&tx, "specs", &spec_id.to_string(), "spec", StorageError::InvalidPlan)?;
     let plan = Plan::new(project_id, spec_id, title, body).map_err(StorageError::InvalidPlan)?;
     tx.execute(
         "INSERT INTO plans (id, project_id, spec_id, title, body, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -497,6 +497,13 @@ pub fn create_phase(
     let phase = Phase::new(project_id, plan_id, title, body, position).map_err(StorageError::InvalidPhase)?;
     let tx = connection.transaction()?;
     ensure_plan(&tx, project_id, plan_id)?;
+    require_open_container(&tx, "plans", &plan_id.to_string(), "plan", StorageError::InvalidPhase)?;
+    let spec_id: String = tx.query_row(
+        "SELECT spec_id FROM plans WHERE project_id = ?1 AND id = ?2",
+        params![project_id.to_string(), plan_id.to_string()],
+        |row| row.get(0),
+    )?;
+    require_open_container(&tx, "specs", &spec_id, "spec", StorageError::InvalidPhase)?;
     insert_phase(&tx, &phase)?;
     tx.commit()?;
     Ok(phase)
@@ -1181,6 +1188,23 @@ fn decode_note(raw: (String, String, String, String)) -> Result<Note> {
     Ok(value)
 }
 
+fn require_open_container(
+    connection: &Connection, table: &str, id: &str, entity: &'static str, error: fn(DomainError) -> StorageError,
+) -> Result<()> {
+    let status: String = connection.query_row(&format!("SELECT status FROM {table} WHERE id = ?1"), [id], |row| {
+        row.get(0)
+    })?;
+    let status = ContainerStatus::parse(entity, &status).map_err(error)?;
+    if status != ContainerStatus::Open {
+        return Err(error(DomainError::InvalidContainerState {
+            entity,
+            id: id.to_owned(),
+            status: status.as_str().to_owned(),
+        }));
+    }
+    Ok(())
+}
+
 fn ensure_project(connection: &Connection, id: ProjectId) -> Result<()> {
     let exists: bool = connection.query_row(
         "SELECT EXISTS (SELECT 1 FROM projects WHERE id = ?1)",
@@ -1269,73 +1293,15 @@ fn ensure_release(c: &Connection, p: ProjectId, id: ReleaseId) -> Result<()> {
 }
 
 fn validate_task_ancestry(c: &Connection, task: &PlanningTask) -> Result<()> {
-    ensure_project(c, task.project_id)?;
-    if let Some(id) = task.spec_id {
-        ensure_spec(c, task.project_id, id)?;
-    }
-    if let Some(id) = task.plan_id {
-        ensure_plan(c, task.project_id, id)?;
-        let spec: String = c.query_row(
-            "SELECT spec_id FROM plans WHERE project_id = ?1 AND id = ?2",
-            params![task.project_id.to_string(), id.to_string()],
-            |row| row.get(0),
-        )?;
-        if task.spec_id.is_some_and(|value| value.to_string() != spec) {
-            return Err(contradictory(task, "spec/plan"));
-        }
-    }
-    if let Some(id) = task.phase_id {
-        ensure_phase(c, task.project_id, id)?;
-        let plan: String = c.query_row(
-            "SELECT plan_id FROM phases WHERE project_id = ?1 AND id = ?2",
-            params![task.project_id.to_string(), id.to_string()],
-            |row| row.get(0),
-        )?;
-        let Some(task_plan) = task.plan_id else {
-            return Err(contradictory(task, "phase without plan"));
-        };
-        if task_plan.to_string() != plan {
-            return Err(contradictory(task, "plan/phase"));
-        }
-    }
-    if let Some(parent_id) = task.parent_id {
-        if parent_id == task.id {
-            return Err(StorageError::InvalidPlanningTask(DomainError::SelfParent {
-                task: task.id.to_string(),
-            }));
-        }
-        ensure_task(c, task.project_id, parent_id)?;
-        let parent = planning_task(c, parent_id)?
-            .ok_or_else(|| StorageError::PlanningTaskNotFound { id: parent_id.to_string() })?;
-        if task.spec_id.zip(parent.spec_id).is_some_and(|(a, b)| a != b) {
-            return Err(contradictory(task, "parent/spec"));
-        }
-        if task.plan_id.zip(parent.plan_id).is_some_and(|(a, b)| a != b) {
-            return Err(contradictory(task, "parent/plan"));
-        }
-        if task.phase_id.zip(parent.phase_id).is_some_and(|(a, b)| a != b) {
-            return Err(contradictory(task, "parent/phase"));
-        }
-        let mut seen = HashSet::new();
-        let mut current = Some(parent_id);
-        while let Some(id) = current {
-            if !seen.insert(id) || id == task.id {
-                return Err(StorageError::InvalidPlanningTask(DomainError::ParentCycle {
-                    task: task.id.to_string(),
-                    parent: parent_id.to_string(),
-                }));
-            }
-            current = planning_task(c, id)?.and_then(|value| value.parent_id);
-        }
-    }
-    Ok(())
+    execution::validate_task_graph(c, task.project_id, task, true)
 }
-fn contradictory(task: &PlanningTask, relationship: &str) -> StorageError {
-    StorageError::InvalidPlanningTask(DomainError::ContradictoryAncestry {
-        task: task.id.to_string(),
-        relationship: relationship.to_owned(),
-    })
+
+pub(super) fn validate_task_graph_candidates(
+    c: &Connection, project_id: ProjectId, candidates: &[PlanningTask], require_open_containers: bool,
+) -> Result<()> {
+    execution::validate_task_graph_candidates(c, project_id, candidates, require_open_containers)
 }
+
 fn insert_task(c: &Connection, task: &PlanningTask) -> Result<()> {
     c.execute("INSERT INTO planning_tasks (id, project_id, spec_id, plan_id, phase_id, parent_id, plan_key, title, body, status, priority, position, handoff, evidence) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)", params![task.id.to_string(), task.project_id.to_string(), task.spec_id.map(|x|x.to_string()), task.plan_id.map(|x|x.to_string()), task.phase_id.map(|x|x.to_string()), task.parent_id.map(|x|x.to_string()), task.plan_key, task.title, task.body, task.status.as_str(), task.priority.as_str(), task.position, task.handoff, task.evidence])?;
     Ok(())

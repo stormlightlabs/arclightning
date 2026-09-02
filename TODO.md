@@ -89,14 +89,14 @@ Blocked by: T02, T03
 
 Acceptance criteria:
 
-- [ ] Compute ready leaf tasks for every valid placement without assuming a
+- [x] Compute ready leaf tasks for every valid placement without assuming a
       milestone exists
-- [ ] Reject dependency cycles, parent cycles, cross-project links, and invalid
+- [x] Reject dependency cycles, parent cycles, cross-project links, and invalid
       container states before writing
-- [ ] Explain readiness and blocking in terms of the actual ancestry present
-- [ ] Include relevant spec, plan, phase, blocker, handoff, and evidence content
+- [x] Explain readiness and blocking in terms of the actual ancestry present
+- [x] Include relevant spec, plan, phase, blocker, handoff, and evidence content
       in task context without returning unrelated records
-- [ ] Preserve atomic handoff, parking, completion, and evidence behavior
+- [x] Preserve atomic handoff, parking, completion, and evidence behavior
 
 Verification:
 

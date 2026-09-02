@@ -31,6 +31,12 @@ pub enum DomainError {
     },
     #[error("task `{task}` has contradictory `{relationship}` ancestry")]
     ContradictoryAncestry { task: String, relationship: String },
+    #[error("{entity} `{id}` is `{status}`; it must be open for this operation")]
+    InvalidContainerState {
+        entity: &'static str,
+        id: String,
+        status: String,
+    },
     #[error("parenting task `{task}` to `{parent}` would create a cycle")]
     ParentCycle { task: String, parent: String },
     #[error("task `{task}` cannot depend on itself")]
