@@ -1,0 +1,56 @@
+@import "@fontsource-variable/ibm-plex-sans";
+@import "@fontsource-variable/google-sans";
+@import "@fontsource-variable/google-sans-code";
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--arcl-canvas);
+}
+
+body {
+  min-width: 20rem;
+  margin: 0;
+  color: var(--arcl-text);
+  background: var(--arcl-canvas);
+  font: 400 var(--arcl-type-base) / 1.55 var(--arcl-font-body);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+a,
+input,
+select,
+textarea,
+[tabindex] {
+  &:focus-visible {
+    outline: var(--arcl-focus-width) solid var(--arcl-focus);
+    outline-offset: 2px;
+  }
+}
+
+::selection {
+  color: var(--arcl-on-accent);
+  background: var(--arcl-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

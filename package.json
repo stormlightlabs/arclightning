@@ -1,0 +1,19 @@
+{
+  "name": "@arclightning/workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.21.0",
+  "scripts": {
+    "dev:desktop": "pnpm --filter @arclightning/desktop dev",
+    "dev:ui": "pnpm --filter @arclightning/ui dev",
+    "dev:website": "pnpm --filter @arclightning/website dev",
+    "check": "pnpm -r --if-present check",
+    "test": "pnpm -r --if-present test",
+    "build": "pnpm -r --if-present build"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=11.0.0"
+  }
+}

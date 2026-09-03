@@ -255,28 +255,28 @@ Blocked by: None - can start immediately
 
 Acceptance criteria:
 
-- [ ] Move the existing `website` directory to `apps/website` and update root
+- [x] Move the existing `website` directory to `apps/website` and update root
       scripts, package references, and development commands without redesigning
       the site in this task
-- [ ] Configure a pnpm workspace for `packages/ui`, `apps/desktop`, and
+- [x] Configure a pnpm workspace for `packages/ui`, `apps/desktop`, and
       `apps/website` without duplicating frontend dependencies
-- [ ] Define semantic light and dark tokens using navy/sky blue with
+- [x] Define semantic light and dark tokens using navy/sky blue with
       gold/amber/yellow accents
-- [ ] Add accessible primitives for buttons, fields, menus, dialogs, tabs,
+- [x] Add accessible primitives for buttons, fields, menus, dialogs, tabs,
       status, priority, feedback, and Markdown display
-- [ ] Add planning components needed by both consumers, with application data
+- [x] Add planning components needed by both consumers, with application data
       supplied through props and events
-- [ ] Keep Tauri APIs, routing, persistence, and website content out of the
+- [x] Keep Tauri APIs, routing, persistence, and website content out of the
       package
-- [ ] Provide a component review surface and tests for state, keyboard use,
+- [x] Provide a component review surface and tests for state, keyboard use,
       focus, theme, and reduced motion
-- [ ] Configure Vitest unit and browser projects with
+- [x] Configure Vitest unit and browser projects with
       `@vitest/browser-playwright`, Chromium, and `vitest-browser-svelte`
-- [ ] Use `page` locators and accessible role, label, or text queries in browser
+- [x] Use `page` locators and accessible role, label, or text queries in browser
       component tests
-- [ ] Add Playwright screenshot tests for stable shared component states in
+- [x] Add Playwright screenshot tests for stable shared component states in
       light and dark themes
-- [ ] Pin viewport, color scheme, fonts, fixture data, and motion preferences for
+- [x] Pin viewport, color scheme, fonts, fixture data, and motion preferences for
       screenshot runs
 
 Verification:
@@ -360,7 +360,7 @@ Blocked by: T11
 
 Acceptance criteria:
 
-- [ ] Replace the current Astro/Starlight presentation only after the new static
+- [ ] Replace the current documentation presentation only after the new static
       site builds and all retained content has a destination
 - [ ] Build the landing page with shared UI components and a concrete Arc
       Lightning workflow example

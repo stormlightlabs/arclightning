@@ -55,12 +55,12 @@ cargo build
 cargo test --workspace --all-features
 ```
 
-Run the documentation site locally with pnpm:
+Install the pnpm workspace and run the documentation site:
 
 ```sh
-pnpm --dir website install
-pnpm --dir website dev
+pnpm install
+pnpm dev:website
 ```
 
-Documentation content lives in `website/src/content/docs/`. The site build can
-be verified with `pnpm --dir website build`.
+Documentation content lives in `apps/website/src/content/docs/`. Verify the
+site with `pnpm --filter @arclightning/website build`.

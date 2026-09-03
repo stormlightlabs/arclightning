@@ -1,0 +1,22 @@
+# build output
+build/
+# generated types and search index
+.svelte-kit/
+static/pagefind/
+
+# dependencies
+node_modules/
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+
+# environment variables
+.env
+.env.production
+
+# macOS-specific files
+.DS_Store

@@ -1,0 +1,120 @@
+/* Arc Lightning's shared semantic design tokens. */
+:root,
+[data-arcl-theme="light"] {
+  color-scheme: light;
+
+  --arcl-canvas: #f5f8fc;
+  --arcl-surface: #ffffff;
+  --arcl-surface-subtle: #e8f0f8;
+  --arcl-surface-hover: #d9e8f5;
+  --arcl-text: #14253d;
+  --arcl-text-muted: #50647d;
+  --arcl-heading: #0b2342;
+  --arcl-border: #8ca2b9;
+  --arcl-border-strong: #385572;
+  --arcl-accent: #f4b41a;
+  --arcl-accent-hover: #d89a00;
+  --arcl-on-accent: #17263a;
+  --arcl-link: #075c9e;
+  --arcl-focus: #9a6200;
+  --arcl-info: #0b6cae;
+  --arcl-info-surface: #dceffc;
+  --arcl-success: #23744b;
+  --arcl-success-surface: #dff3e7;
+  --arcl-warning: #855000;
+  --arcl-warning-surface: #fff0bd;
+  --arcl-danger: #a42b35;
+  --arcl-danger-surface: #fde4e6;
+  --arcl-overlay: rgb(6 24 48 / 58%);
+  --arcl-shadow-color: #102842;
+
+  --arcl-font-body: "IBM Plex Sans Variable", "IBM Plex Sans", system-ui, sans-serif;
+  --arcl-font-ui: "Google Sans Variable", "Google Sans", var(--arcl-font-body);
+  --arcl-font-code: "Google Sans Code Variable", "Google Sans Code", ui-monospace, monospace;
+  --arcl-type-xs: 0.75rem;
+  --arcl-type-sm: 0.875rem;
+  --arcl-type-base: 1rem;
+  --arcl-type-lg: 1.2rem;
+  --arcl-type-xl: clamp(1.5rem, 1.25rem + 0.8vw, 2rem);
+
+  --arcl-space-1: 0.25rem;
+  --arcl-space-2: 0.5rem;
+  --arcl-space-3: 0.75rem;
+  --arcl-space-4: 1rem;
+  --arcl-space-5: 1.5rem;
+  --arcl-space-6: 2rem;
+  --arcl-space-8: 3rem;
+  --arcl-control-height: 2.75rem;
+  --arcl-radius-sm: 0.375rem;
+  --arcl-radius-md: 0.625rem;
+  --arcl-radius-lg: 0.875rem;
+  --arcl-border-width: 1px;
+  --arcl-focus-width: 3px;
+  --arcl-shadow-control: 0 1px 2px rgb(16 40 66 / 14%);
+  --arcl-shadow-overlay: 0 18px 48px rgb(16 40 66 / 24%);
+  --arcl-duration-fast: 120ms;
+  --arcl-duration-overlay: 200ms;
+  --arcl-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+[data-arcl-theme="dark"] {
+  color-scheme: dark;
+  --arcl-canvas: #081a30;
+  --arcl-surface: #102844;
+  --arcl-surface-subtle: #173653;
+  --arcl-surface-hover: #204563;
+  --arcl-text: #e7eff7;
+  --arcl-text-muted: #b8c8d8;
+  --arcl-heading: #f4f8fc;
+  --arcl-border: #6684a1;
+  --arcl-border-strong: #a9bfd2;
+  --arcl-accent: #f5bd32;
+  --arcl-accent-hover: #ffd66b;
+  --arcl-on-accent: #142033;
+  --arcl-link: #78c7ff;
+  --arcl-focus: #ffd45d;
+  --arcl-info: #8ad1ff;
+  --arcl-info-surface: #173d5a;
+  --arcl-success: #83d7aa;
+  --arcl-success-surface: #173f35;
+  --arcl-warning: #ffd36a;
+  --arcl-warning-surface: #4c3816;
+  --arcl-danger: #ff9aa1;
+  --arcl-danger-surface: #4c2930;
+  --arcl-overlay: rgb(1 8 18 / 74%);
+  --arcl-shadow-color: #020b15;
+  --arcl-shadow-control: 0 1px 2px rgb(0 0 0 / 28%);
+  --arcl-shadow-overlay: 0 20px 52px rgb(0 0 0 / 42%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-arcl-theme]) {
+    color-scheme: dark;
+    --arcl-canvas: #081a30;
+    --arcl-surface: #102844;
+    --arcl-surface-subtle: #173653;
+    --arcl-surface-hover: #204563;
+    --arcl-text: #e7eff7;
+    --arcl-text-muted: #b8c8d8;
+    --arcl-heading: #f4f8fc;
+    --arcl-border: #6684a1;
+    --arcl-border-strong: #a9bfd2;
+    --arcl-accent: #f5bd32;
+    --arcl-accent-hover: #ffd66b;
+    --arcl-on-accent: #142033;
+    --arcl-link: #78c7ff;
+    --arcl-focus: #ffd45d;
+    --arcl-info: #8ad1ff;
+    --arcl-info-surface: #173d5a;
+    --arcl-success: #83d7aa;
+    --arcl-success-surface: #173f35;
+    --arcl-warning: #ffd36a;
+    --arcl-warning-surface: #4c3816;
+    --arcl-danger: #ff9aa1;
+    --arcl-danger-surface: #4c2930;
+    --arcl-overlay: rgb(1 8 18 / 74%);
+    --arcl-shadow-color: #020b15;
+    --arcl-shadow-control: 0 1px 2px rgb(0 0 0 / 28%);
+    --arcl-shadow-overlay: 0 20px 52px rgb(0 0 0 / 42%);
+  }
+}

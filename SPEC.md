@@ -299,15 +299,14 @@ Required characteristics are:
 - Arc Lightning navy/sky surfaces and links with gold/amber/yellow accents for
   calls to action, current navigation, code emphasis, and selected states
 
-The current Astro/Starlight site can be replaced when the new shell is ready.
-Content migration must preserve useful URLs or add redirects.
+The SvelteKit and mdsvex site can adopt the complete documentation shell when
+it is ready. Content migration must preserve useful URLs or add redirects.
 
 ## Current state and migration constraints
 
-The current repository is a single Rust crate with a CLI, SQLite migrations,
-domain and storage modules, snapshot codecs, snapshot import/export, and CLI
-tests. The website uses Astro and Starlight at `website/`. The website work
-moves it to `apps/website` as part of the pnpm workspace transition.
+The Rust workspace contains the CLI, domain and storage crates, snapshot
+codecs, snapshot import/export, and CLI tests. The SvelteKit and mdsvex website
+lives at `apps/website` in the pnpm workspace.
 
 The implemented foundation includes ideas, releases, epics, milestones, tasks,
 dependencies, lifecycle rules, readiness, context, handoffs, evidence, and the

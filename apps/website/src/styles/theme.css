@@ -1,0 +1,50 @@
+@import "@arclightning/ui/styles.css";
+
+html { scroll-behavior: smooth; }
+body { min-height: 100vh; }
+a { color: var(--arcl-link); text-underline-offset: 0.16em; }
+a:hover { color: var(--arcl-warning); }
+h1, h2, h3 { color: var(--arcl-heading); font-family: var(--arcl-font-ui); text-wrap: balance; }
+
+.skip-link { position: fixed; z-index: 50; top: 0.75rem; left: 0.75rem; padding: 0.5rem 0.75rem; color: var(--arcl-on-accent); background: var(--arcl-accent); transform: translateY(-180%); }
+.skip-link:focus { transform: translateY(0); }
+.site-header { position: sticky; z-index: 10; top: 0; display: flex; min-height: 4rem; align-items: center; justify-content: space-between; gap: var(--arcl-space-4); padding-inline: max(var(--arcl-space-4), calc((100% - 76rem) / 2)); border-bottom: 1px solid var(--arcl-border); background: var(--arcl-surface); }
+.site-header__brand { color: var(--arcl-heading); font-family: var(--arcl-font-ui); font-weight: 700; text-decoration: none; }
+.site-header nav { display: flex; align-items: center; gap: var(--arcl-space-4); }
+.site-header nav a { min-height: 2.75rem; display: inline-flex; align-items: center; }
+
+.eyebrow { margin: 0; color: var(--arcl-warning); font: 650 var(--arcl-type-xs)/1 var(--arcl-font-code); letter-spacing: 0.08em; text-transform: uppercase; }
+.landing { width: min(68rem, calc(100% - 2rem)); margin-inline: auto; padding-block: clamp(4rem, 10vw, 8rem); }
+.landing > h1 { max-width: 13ch; margin: var(--arcl-space-3) 0; font-size: clamp(2.75rem, 8vw, 6rem); line-height: 0.98; letter-spacing: -0.045em; }
+.landing__intro { max-width: 58ch; color: var(--arcl-text-muted); font-size: var(--arcl-type-lg); }
+.landing__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--arcl-space-4); margin-block: var(--arcl-space-6) var(--arcl-space-8); }
+.button-link { display: inline-flex; min-height: 2.75rem; align-items: center; padding-inline: var(--arcl-space-4); border-radius: var(--arcl-radius-md); color: var(--arcl-on-accent); background: var(--arcl-accent); font-family: var(--arcl-font-ui); font-weight: 700; text-decoration: none; }
+.landing section { border-top: 1px solid var(--arcl-border); padding-top: var(--arcl-space-6); }
+.landing section ul { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: var(--arcl-space-4); padding: 0; }
+.landing section li { display: grid; gap: var(--arcl-space-1); padding: var(--arcl-space-4); border: 1px solid var(--arcl-border); border-radius: var(--arcl-radius-md); background: var(--arcl-surface); list-style: none; }
+.landing section li span { color: var(--arcl-text-muted); }
+
+.docs-layout { display: grid; grid-template-columns: minmax(13rem, 17rem) minmax(0, 1fr); width: min(76rem, 100%); margin-inline: auto; }
+.docs-layout aside { padding: var(--arcl-space-5); border-right: 1px solid var(--arcl-border); }
+.docs-layout aside ul { display: grid; gap: var(--arcl-space-1); margin: 0; padding: 0; }
+.docs-layout aside li { list-style: none; }
+.docs-layout aside a { display: block; padding: var(--arcl-space-2); border-radius: var(--arcl-radius-sm); color: var(--arcl-text-muted); text-decoration: none; }
+.docs-layout aside a:hover, .docs-layout aside a[aria-current="page"] { color: var(--arcl-heading); background: var(--arcl-surface-hover); }
+.article { min-width: 0; max-width: 52rem; padding: clamp(2rem, 5vw, 4rem); }
+.article > h1 { margin: var(--arcl-space-3) 0; font-size: clamp(2.25rem, 6vw, 4rem); line-height: 1; letter-spacing: -0.035em; }
+.article__lede { color: var(--arcl-text-muted); font-size: var(--arcl-type-lg); }
+.prose { margin-top: var(--arcl-space-8); line-height: 1.75; }
+.prose :where(p, li) { text-wrap: pretty; }
+.prose :where(pre) { overflow-x: auto; padding: var(--arcl-space-4); border: 1px solid var(--arcl-border); border-radius: var(--arcl-radius-md); background: var(--arcl-surface); }
+.prose :where(code) { color: var(--arcl-warning); font-family: var(--arcl-font-code); }
+.prose :where(table) { width: 100%; border-collapse: collapse; }
+.prose :where(th, td) { padding: var(--arcl-space-2); border-bottom: 1px solid var(--arcl-border); text-align: left; }
+
+@media (max-width: 46rem) {
+  .site-header nav a:not(:last-child) { display: none; }
+  .docs-layout { grid-template-columns: 1fr; }
+  .docs-layout aside { border-right: 0; border-bottom: 1px solid var(--arcl-border); }
+  .article { padding: var(--arcl-space-5) var(--arcl-space-4); }
+}
+
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
