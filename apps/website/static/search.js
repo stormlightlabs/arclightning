@@ -16,14 +16,12 @@ function isVisible(element) {
 
 function preferredSearch() {
 	pruneSearchStates();
-	const visible = searchStates.find((state) => isVisible(state.trigger)) ?? searchStates.find((state) => isVisible(state.box));
+	const visible =
+		searchStates.find((state) => isVisible(state.trigger)) ?? searchStates.find((state) => isVisible(state.box));
 	if (visible) return visible;
 
 	const mobile = window.matchMedia('(max-width: 900px)').matches;
-	return (
-		searchStates.find((state) => mobile === Boolean(state.box.closest('details'))) ??
-		searchStates[0]
-	);
+	return searchStates.find((state) => mobile === Boolean(state.box.closest('details'))) ?? searchStates[0];
 }
 
 function escapeHtml(value) {
@@ -101,7 +99,8 @@ async function search(state, query, version) {
 		const settledMatches = await Promise.allSettled(response.results.slice(0, 8).map((result) => result.data()));
 		const matches = settledMatches.flatMap((match) => (match.status === 'fulfilled' ? [match.value] : []));
 		if (version !== state.version) return;
-		if (response.results.length > 0 && matches.length === 0) throw new Error('Pagefind result fragments were unavailable');
+		if (response.results.length > 0 && matches.length === 0)
+			throw new Error('Pagefind result fragments were unavailable');
 
 		state.results.replaceChildren();
 		clearActiveResult(state);
@@ -199,9 +198,10 @@ function openSearch(state) {
 	state.openedDetails = details instanceof HTMLDetailsElement && !details.open;
 	if (state.openedDetails) details.open = true;
 
-	state.returnFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
-		? document.activeElement
-		: state.trigger;
+	state.returnFocus =
+		document.activeElement instanceof HTMLElement && document.activeElement !== document.body
+			? document.activeElement
+			: state.trigger;
 	resetSearch(state);
 	state.trigger.setAttribute('aria-expanded', 'true');
 	state.dialog.showModal();
