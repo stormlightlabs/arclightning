@@ -7,15 +7,19 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 mod codec;
+pub mod export;
+pub mod import;
+mod migration;
 
-pub use codec::{
-    EpicRecord, IdeaRecord, Manifest, MilestoneRecord, RecordKind, ReleaseRecord, SnapshotManifest, SnapshotRecord,
-    TaskRecord, decode_manifest, decode_record, encode_manifest, encode_record,
-};
+pub use codec::*;
+pub use export::{SnapshotExportError, SnapshotFile, export_graph, export_graph_with_base, project_graph};
+pub use import::{SnapshotImportError, import_graph, import_snapshot};
 
 pub const CONFIG_FORMAT_VERSION: u32 = 1;
 /// The version of the on-disk snapshot format implemented by this crate.
-pub const SNAPSHOT_FORMAT_VERSION: u32 = 1;
+pub const SNAPSHOT_FORMAT_VERSION: u32 = 2;
+/// The manifest version used by snapshots before the connected planning model.
+pub const LEGACY_SNAPSHOT_FORMAT_VERSION: u32 = 1;
 
 /// Snapshot and configuration validation failures.
 #[derive(Debug, Error)]
@@ -50,6 +54,10 @@ pub enum SnapshotError {
     EmptyRecordSpecPath,
     #[error("snapshot record position {position} is invalid; positions must be non-negative")]
     InvalidRecordPosition { position: i64 },
+    #[error("snapshot capture creation time cannot be empty")]
+    EmptyRecordCreatedAt,
+    #[error("snapshot record relationship is invalid: {0}")]
+    InvalidRecordRelationship(String),
 }
 
 type Result<T> = std::result::Result<T, SnapshotError>;

@@ -6,7 +6,7 @@ use anyhow::Context;
 use thiserror::Error;
 
 use arcl_core::domain::*;
-use arcl_repo::snapshot::{ProjectConfig, SnapshotError, SnapshotManifest, encode_manifest, resolve_snapshot_root};
+use arcl_repo::snapshot::*;
 use arcl_repo::vcs::{GixVcs, Vcs, VcsError};
 use arcl_store::{
     CaptureTaskPromotion, CaptureUpdate, ConnectedGraph, Database, NoteUpdate, PhaseUpdate, PlanUpdate,
@@ -20,7 +20,7 @@ const CONFIG_FILE: &str = "config.toml";
 const DATABASE_FILE: &str = "arcl.db";
 const GITIGNORE_FILE: &str = ".gitignore";
 const REQUIRED_GITIGNORE_ENTRIES: &[&str] = &["/arcl.db", "/arcl.db-*", "/*.tmp", "/conflicts/"];
-const SNAPSHOT_DIRECTORIES: &[&str] = &["ideas", "releases", "epics", "milestones", "tasks"];
+const SNAPSHOT_DIRECTORIES: &[&str] = &["captures", "releases", "specs", "plans", "phases", "tasks", "notes"];
 
 type CResult<T> = Result<T, CommandError>;
 type IResult<T> = Result<T, InitError>;
@@ -128,8 +128,12 @@ enum CommandError {
     InvalidConfig { path: PathBuf, source: SnapshotError },
     #[error("could not open Arc Lightning database `{path}`: {source}")]
     OpenDatabase { path: PathBuf, source: StorageError },
-    #[error("snapshot import and export require migration to the connected workspace format")]
-    SnapshotMigrationRequired,
+    #[error("snapshot support is disabled; run `arcl init --snapshot` first")]
+    SnapshotDisabled,
+    #[error(transparent)]
+    SnapshotExport(Box<SnapshotExportError>),
+    #[error(transparent)]
+    SnapshotImport(Box<SnapshotImportError>),
     #[error(transparent)]
     Domain(#[from] DomainError),
     #[error(transparent)]
@@ -150,6 +154,18 @@ enum CommandError {
     Integrity { message: String },
 }
 
+impl From<SnapshotExportError> for CommandError {
+    fn from(error: SnapshotExportError) -> Self {
+        Self::SnapshotExport(Box::new(error))
+    }
+}
+
+impl From<SnapshotImportError> for CommandError {
+    fn from(error: SnapshotImportError) -> Self {
+        Self::SnapshotImport(Box::new(error))
+    }
+}
+
 impl CommandError {
     fn exit_code(&self) -> u8 {
         match self {
@@ -157,10 +173,12 @@ impl CommandError {
                 VcsError::Discovery { .. } | VcsError::BareRepository { .. } | VcsError::MissingWorktree { .. } => 3,
                 VcsError::PathOutsideWorktree { .. } | VcsError::Operation { .. } => 1,
             },
-            Self::NotInitialized { .. }
-            | Self::InvalidConfig { .. }
-            | Self::SnapshotMigrationRequired
-            | Self::Domain(_) => 3,
+            Self::NotInitialized { .. } | Self::InvalidConfig { .. } | Self::SnapshotDisabled | Self::Domain(_) => 3,
+            Self::SnapshotExport(error) => match error.as_ref() {
+                SnapshotExportError::Conflict { .. } => 4,
+                _ => 1,
+            },
+            Self::SnapshotImport(error) => error.exit_code(),
             Self::ReadConfig { .. }
             | Self::ReadMarkdown { .. }
             | Self::ReadStdin { .. }
@@ -2008,20 +2026,35 @@ fn create_file(path: &Path, content: &[u8]) -> io::Result<()> {
 }
 
 fn open_database() -> CResult<Database> {
-    let start = std::env::current_dir().map_err(|source| CommandError::CurrentDirectory { source })?;
-    let Some(root) = nearest_project_root(&start) else {
-        return Err(CommandError::NotInitialized { root: start });
-    };
-    let arcl_directory = root.join(ARCL_DIRECTORY);
-    let config_path = arcl_directory.join(CONFIG_FILE);
-    let database_path = arcl_directory.join(DATABASE_FILE);
-    let input = fs::read_to_string(&config_path)
-        .map_err(|source| CommandError::ReadConfig { path: config_path.clone(), source })?;
-    ProjectConfig::parse(&input).map_err(|source| CommandError::InvalidConfig { path: config_path, source })?;
+    let (root, _) = project_root_config()?;
+    let database_path = root.join(ARCL_DIRECTORY).join(DATABASE_FILE);
     if !database_path.is_file() {
         return Err(CommandError::NotInitialized { root });
     }
     Database::open(&database_path).map_err(|source| CommandError::OpenDatabase { path: database_path, source })
+}
+
+fn project_root_config() -> CResult<(PathBuf, ProjectConfig)> {
+    let start = std::env::current_dir().map_err(|source| CommandError::CurrentDirectory { source })?;
+    let Some(root) = nearest_project_root(&start) else {
+        return Err(CommandError::NotInitialized { root: start });
+    };
+    let config_path = root.join(ARCL_DIRECTORY).join(CONFIG_FILE);
+    let input = fs::read_to_string(&config_path)
+        .map_err(|source| CommandError::ReadConfig { path: config_path.clone(), source })?;
+    let config =
+        ProjectConfig::parse(&input).map_err(|source| CommandError::InvalidConfig { path: config_path, source })?;
+    Ok((root, config))
+}
+
+fn snapshot_paths() -> CResult<(PathBuf, PathBuf)> {
+    let (root, config) = project_root_config()?;
+    if !config.snapshot.enabled {
+        return Err(CommandError::SnapshotDisabled);
+    }
+    let snapshot_root = resolve_snapshot_root(&root, &config.snapshot.path)
+        .map_err(|source| CommandError::InvalidConfig { path: root.join(ARCL_DIRECTORY).join(CONFIG_FILE), source })?;
+    Ok((root, snapshot_root))
 }
 
 fn nearest_project_root(start: &Path) -> Option<PathBuf> {
@@ -2031,6 +2064,25 @@ fn nearest_project_root(start: &Path) -> Option<PathBuf> {
         .map(Path::to_owned)
 }
 
-fn exec_snapshot(_command: SnapshotCommand) -> CResult<()> {
-    Err(CommandError::SnapshotMigrationRequired)
+fn exec_snapshot(command: SnapshotCommand) -> CResult<()> {
+    let (worktree_root, snapshot_root) = snapshot_paths()?;
+    let mut database = open_database()?;
+    match command {
+        SnapshotCommand::Export => {
+            let base = database.snapshot_base()?;
+            let files = export_graph_with_base(&snapshot_root, &database.connected_graph()?, &base)?;
+            let base = files
+                .iter()
+                .map(|file| arcl_store::SnapshotBaseFile {
+                    path: file.path.to_string_lossy().into_owned(),
+                    content: file.content.clone(),
+                })
+                .collect::<Vec<_>>();
+            database.replace_snapshot_base(&base)?;
+        }
+        SnapshotCommand::Import => {
+            import_graph(&snapshot_root, &worktree_root, &mut database)?;
+        }
+    }
+    Ok(())
 }

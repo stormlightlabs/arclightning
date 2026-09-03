@@ -135,6 +135,209 @@ impl Database {
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
+    /// Replace the connected graph and its snapshot base in one transaction.
+    ///
+    /// The repository adapter validates the candidate graph before calling this
+    /// method. Records are inserted in dependency order, and task parents are
+    /// attached only after every task exists so file order cannot affect import.
+    pub fn replace_graph_and_snapshot_base(
+        &mut self, graph: &ConnectedGraph, files: &[SnapshotBaseFile],
+    ) -> Result<()> {
+        let current_project = self.project()?;
+        if current_project.id != graph.project.id {
+            return Err(StorageError::InvalidProject(DomainError::DifferentProject {
+                entity: "snapshot".to_owned(),
+                id: graph.project.id.to_string(),
+                related: current_project.id.to_string(),
+            }));
+        }
+
+        let transaction = self.connection.transaction()?;
+        transaction.execute_batch(
+            "DELETE FROM record_links;
+             DELETE FROM release_memberships;
+             DELETE FROM capture_promotions;
+             DELETE FROM planning_task_dependencies;
+             UPDATE planning_tasks SET parent_id = NULL;
+             DELETE FROM planning_tasks;
+             DELETE FROM phases;
+             DELETE FROM plans;
+             DELETE FROM specs;
+             DELETE FROM notes;
+             DELETE FROM captures;
+             DELETE FROM releases;",
+        )?;
+
+        for release in &graph.releases {
+            transaction.execute(
+                "INSERT INTO releases (id, project_id, title, description, status)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![
+                    release.id.to_string(),
+                    graph.project.id.to_string(),
+                    release.title,
+                    release.description,
+                    release.status.as_str()
+                ],
+            )?;
+        }
+        for capture in &graph.captures {
+            transaction.execute(
+                "INSERT INTO captures (id, project_id, title, body, status, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![
+                    capture.id.to_string(),
+                    capture.project_id.to_string(),
+                    capture.title,
+                    capture.body,
+                    capture.status.as_str(),
+                    capture.created_at
+                ],
+            )?;
+        }
+        for spec in &graph.specs {
+            transaction.execute(
+                "INSERT INTO specs (id, project_id, title, body, acceptance_criteria, status, source_capture_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![
+                    spec.id.to_string(),
+                    spec.project_id.to_string(),
+                    spec.title,
+                    spec.body,
+                    spec.acceptance_criteria,
+                    spec.status.as_str(),
+                    spec.source_capture_id.map(|id| id.to_string())
+                ],
+            )?;
+        }
+        for plan in &graph.plans {
+            transaction.execute(
+                "INSERT INTO plans (id, project_id, spec_id, title, body, status)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![
+                    plan.id.to_string(),
+                    plan.project_id.to_string(),
+                    plan.spec_id.to_string(),
+                    plan.title,
+                    plan.body,
+                    plan.status.as_str()
+                ],
+            )?;
+        }
+        for phase in &graph.phases {
+            transaction.execute(
+                "INSERT INTO phases (id, project_id, plan_id, plan_key, title, body, status, position)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                rusqlite::params![
+                    phase.id.to_string(),
+                    phase.project_id.to_string(),
+                    phase.plan_id.to_string(),
+                    phase.plan_key,
+                    phase.title,
+                    phase.body,
+                    phase.status.as_str(),
+                    phase.position
+                ],
+            )?;
+        }
+        for task in &graph.tasks {
+            transaction.execute(
+                "INSERT INTO planning_tasks
+                 (id, project_id, spec_id, plan_id, phase_id, parent_id, plan_key, title, body,
+                  status, priority, position, handoff, evidence)
+                 VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                rusqlite::params![
+                    task.id.to_string(),
+                    task.project_id.to_string(),
+                    task.spec_id.map(|id| id.to_string()),
+                    task.plan_id.map(|id| id.to_string()),
+                    task.phase_id.map(|id| id.to_string()),
+                    task.plan_key,
+                    task.title,
+                    task.body,
+                    task.status.as_str(),
+                    task.priority.as_str(),
+                    task.position,
+                    task.handoff,
+                    task.evidence
+                ],
+            )?;
+        }
+        for task in &graph.tasks {
+            if let Some(parent_id) = task.parent_id {
+                transaction.execute(
+                    "UPDATE planning_tasks SET parent_id = ?1 WHERE id = ?2",
+                    rusqlite::params![parent_id.to_string(), task.id.to_string()],
+                )?;
+            }
+        }
+        for note in &graph.notes {
+            transaction.execute(
+                "INSERT INTO notes (id, project_id, title, body) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![note.id.to_string(), note.project_id.to_string(), note.title, note.body],
+            )?;
+        }
+        for promotion in &graph.capture_promotions {
+            transaction.execute(
+                "INSERT INTO capture_promotions (capture_id, project_id, target_kind, target_id)
+                 VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![
+                    promotion.capture_id.to_string(),
+                    promotion.project_id.to_string(),
+                    promotion.target.promotion_kind(),
+                    promotion.target.promotion_target_id()
+                ],
+            )?;
+        }
+        for dependency in &graph.dependencies {
+            transaction.execute(
+                "INSERT INTO planning_task_dependencies (project_id, task_id, blocker_id)
+                 VALUES (?1, ?2, ?3)",
+                rusqlite::params![
+                    graph.project.id.to_string(),
+                    dependency.task_id.to_string(),
+                    dependency.blocker_id.to_string()
+                ],
+            )?;
+        }
+        for membership in &graph.release_memberships {
+            transaction.execute(
+                "INSERT INTO release_memberships (project_id, release_id, record_kind, record_id)
+                 VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![
+                    membership.project_id.to_string(),
+                    membership.release_id.to_string(),
+                    membership.record_kind.as_str(),
+                    membership.record_id
+                ],
+            )?;
+        }
+        for link in &graph.links {
+            transaction.execute(
+                "INSERT INTO record_links
+                 (project_id, source_kind, source_id, target_kind, target_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![
+                    link.project_id.to_string(),
+                    link.source_kind.as_str(),
+                    link.source_id,
+                    link.target_kind.as_str(),
+                    link.target_id
+                ],
+            )?;
+        }
+
+        transaction.execute("DELETE FROM snapshot_files", [])?;
+        for file in files {
+            transaction.execute(
+                "INSERT INTO snapshot_files (path, content) VALUES (?1, ?2)",
+                rusqlite::params![&file.path, &file.content],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     /// Replace the stored snapshot base after filesystem export has completed.
     pub fn replace_snapshot_base(&mut self, files: &[SnapshotBaseFile]) -> Result<()> {
         let transaction = self.connection.transaction()?;

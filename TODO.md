@@ -182,19 +182,19 @@ Blocked by: T06, T07
 
 Acceptance criteria:
 
-- [ ] Define and document a new manifest version and record encoding for
+- [x] Define and document a new manifest version and record encoding for
       captures, specs, plans, tasks, and notes
-- [ ] Import current snapshot records through an explicit migration path
-- [ ] Render one deterministic file per record and preserve Markdown bodies
+- [x] Import current snapshot records through an explicit migration path
+- [x] Render one deterministic file per record and preserve Markdown bodies
       through parse-render-parse round trips
-- [ ] Validate the complete candidate graph before mutating the database
-- [ ] Export changed records atomically and leave unchanged files byte-stable
+- [x] Validate the complete candidate graph before mutating the database
+- [x] Export changed records atomically and leave unchanged files byte-stable
 
 Verification:
 
-- `cargo test --workspace --all-features snapshot::codec`
-- `cargo test --workspace --all-features snapshot::import`
-- `cargo test --workspace --all-features snapshot::export`
+- [x] `cargo test --workspace --all-features snapshot::codec`
+- [x] `cargo test --workspace --all-features snapshot::import`
+- [x] `cargo test --workspace --all-features snapshot::export`
 
 ## T09: Finish automatic reconciliation and conflict recovery
 

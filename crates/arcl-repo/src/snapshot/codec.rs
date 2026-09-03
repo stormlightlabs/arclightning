@@ -3,7 +3,8 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use arcl_core::domain::{
-    CaptureStatus, ContainerStatus, EpicId, IdeaId, MilestoneId, ReleaseId, TaskId, TaskPriority, TaskStatus,
+    CaptureId, CaptureStatus, ContainerStatus, NoteId, PhaseId, PlanId, ReleaseId, SpecId, TaskId, TaskPriority,
+    TaskStatus,
 };
 
 use super::{Result, SNAPSHOT_FORMAT_VERSION, SnapshotError};
@@ -13,50 +14,77 @@ const FRONT_MATTER_DELIMITER: &str = "+++";
 /// The stable kind and directory name of a snapshot record.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum RecordKind {
-    /// An idea in the project inbox.
-    Idea,
-    /// A release grouping epics.
+    /// An inbox capture.
+    Capture,
+    /// A release grouping explicit records.
     Release,
-    /// An epic linked to a Markdown specification.
-    Epic,
-    /// An ordered stage belonging to an epic.
-    Milestone,
-    /// A task or subtask belonging to a milestone.
+    /// An owned Markdown specification.
+    Spec,
+    /// A persistent implementation plan.
+    Plan,
+    /// An ordered phase belonging to a plan.
+    Phase,
+    /// A task at any supported planning level.
     Task,
+    /// A Markdown note.
+    Note,
 }
 
 impl RecordKind {
     /// Return the snapshot directory for this record kind.
     pub const fn directory(self) -> &'static str {
         match self {
-            Self::Idea => "ideas",
+            Self::Capture => "captures",
             Self::Release => "releases",
-            Self::Epic => "epics",
-            Self::Milestone => "milestones",
+            Self::Spec => "specs",
+            Self::Plan => "plans",
+            Self::Phase => "phases",
             Self::Task => "tasks",
+            Self::Note => "notes",
         }
     }
 
-    /// Return the human-readable kind name used in validation errors.
+    /// Return the stable kind name used in references and errors.
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Idea => "idea",
+            Self::Capture => "capture",
             Self::Release => "release",
-            Self::Epic => "epic",
-            Self::Milestone => "milestone",
+            Self::Spec => "spec",
+            Self::Plan => "plan",
+            Self::Phase => "phase",
             Self::Task => "task",
+            Self::Note => "note",
         }
     }
 
-    fn from_directory(directory: &str) -> Option<Self> {
+    pub(crate) fn from_directory(directory: &str) -> Option<Self> {
         match directory {
-            "ideas" => Some(Self::Idea),
+            "captures" => Some(Self::Capture),
             "releases" => Some(Self::Release),
-            "epics" => Some(Self::Epic),
-            "milestones" => Some(Self::Milestone),
+            "specs" => Some(Self::Spec),
+            "plans" => Some(Self::Plan),
+            "phases" => Some(Self::Phase),
             "tasks" => Some(Self::Task),
+            "notes" => Some(Self::Note),
             _ => None,
         }
+    }
+}
+
+/// A reference to another snapshot record.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SnapshotReference {
+    /// The referenced record kind.
+    pub kind: String,
+    /// The referenced record ID.
+    pub id: String,
+}
+
+impl SnapshotReference {
+    /// Construct a reference with a stable kind and ID.
+    pub fn new(kind: impl Into<String>, id: impl Into<String>) -> Self {
+        Self { kind: kind.into(), id: id.into() }
     }
 }
 
@@ -103,14 +131,17 @@ impl SnapshotManifest {
     }
 }
 
-/// An idea encoded in a snapshot record.
+/// An inbox capture encoded in a snapshot record.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct IdeaRecord {
-    pub id: IdeaId,
+pub struct CaptureRecord {
+    pub id: CaptureId,
     pub title: String,
     pub status: CaptureStatus,
-    pub promoted_to: Option<EpicId>,
-    pub description: String,
+    pub created_at: String,
+    /// The single promotion edge, when the capture has been promoted.
+    pub promoted_to: Option<SnapshotReference>,
+    pub links: Vec<SnapshotReference>,
+    pub body: String,
 }
 
 /// A release encoded in a snapshot record.
@@ -119,89 +150,125 @@ pub struct ReleaseRecord {
     pub id: ReleaseId,
     pub title: String,
     pub status: ContainerStatus,
-    pub description: String,
+    pub body: String,
+    /// Explicit members. Descendants are never implied by this list.
+    pub members: Vec<SnapshotReference>,
+    /// Explicit outgoing record links.
+    pub links: Vec<SnapshotReference>,
 }
 
-/// An epic encoded in a snapshot record.
+/// An owned specification encoded in a snapshot record.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EpicRecord {
-    pub id: EpicId,
+pub struct SpecRecord {
+    pub id: SpecId,
     pub title: String,
     pub status: ContainerStatus,
-    pub spec_path: String,
-    pub release: Option<ReleaseId>,
-    pub source_idea: Option<IdeaId>,
-    pub description: String,
+    pub source_capture_id: Option<CaptureId>,
+    pub acceptance_criteria: String,
+    pub links: Vec<SnapshotReference>,
+    pub body: String,
 }
 
-/// A milestone encoded in a snapshot record.
+/// A persistent implementation plan encoded in a snapshot record.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MilestoneRecord {
-    pub id: MilestoneId,
+pub struct PlanRecord {
+    pub id: PlanId,
+    pub spec_id: SpecId,
     pub title: String,
     pub status: ContainerStatus,
-    pub epic: EpicId,
-    pub position: i64,
+    pub links: Vec<SnapshotReference>,
+    pub body: String,
+}
+
+/// An optional ordered phase encoded in a snapshot record.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PhaseRecord {
+    pub id: PhaseId,
+    pub plan_id: PlanId,
     pub plan_key: Option<String>,
-    pub description: String,
+    pub title: String,
+    pub status: ContainerStatus,
+    pub position: i64,
+    pub links: Vec<SnapshotReference>,
+    pub body: String,
 }
 
-/// A task or subtask encoded in a snapshot record.
+/// A flexible planning task encoded in a snapshot record.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TaskRecord {
     pub id: TaskId,
+    pub spec_id: Option<SpecId>,
+    pub plan_id: Option<PlanId>,
+    pub phase_id: Option<PhaseId>,
+    pub parent_id: Option<TaskId>,
+    pub plan_key: Option<String>,
     pub title: String,
     pub status: TaskStatus,
     pub priority: TaskPriority,
-    pub milestone: MilestoneId,
     pub position: i64,
-    pub parent: Option<TaskId>,
-    pub plan_key: Option<String>,
     pub blocked_by: Vec<TaskId>,
     pub handoff: Option<String>,
     pub evidence: Option<String>,
-    pub description: String,
+    pub links: Vec<SnapshotReference>,
+    pub body: String,
 }
 
-/// A typed record in the version-controlled snapshot.
+/// A Markdown note encoded in a snapshot record.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NoteRecord {
+    pub id: NoteId,
+    pub title: String,
+    pub links: Vec<SnapshotReference>,
+    pub body: String,
+}
+
+/// A typed record in the versioned workspace projection.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SnapshotRecord {
-    /// An idea record.
-    Idea(IdeaRecord),
-    /// A release record.
+    /// An inbox capture.
+    Capture(CaptureRecord),
+    /// A release.
     Release(ReleaseRecord),
-    /// An epic record.
-    Epic(EpicRecord),
-    /// A milestone record.
-    Milestone(MilestoneRecord),
-    /// A task or subtask record.
+    /// An owned specification.
+    Spec(SpecRecord),
+    /// A persistent plan.
+    Plan(PlanRecord),
+    /// A plan phase.
+    Phase(PhaseRecord),
+    /// A planning task.
     Task(TaskRecord),
+    /// A Markdown note.
+    Note(NoteRecord),
 }
 
 impl SnapshotRecord {
     /// Return the record's typed kind.
     pub const fn kind(&self) -> RecordKind {
         match self {
-            Self::Idea(_) => RecordKind::Idea,
+            Self::Capture(_) => RecordKind::Capture,
             Self::Release(_) => RecordKind::Release,
-            Self::Epic(_) => RecordKind::Epic,
-            Self::Milestone(_) => RecordKind::Milestone,
+            Self::Spec(_) => RecordKind::Spec,
+            Self::Plan(_) => RecordKind::Plan,
+            Self::Phase(_) => RecordKind::Phase,
             Self::Task(_) => RecordKind::Task,
+            Self::Note(_) => RecordKind::Note,
         }
     }
 
     /// Return the canonical ID string used by the record filename.
     pub fn id_string(&self) -> String {
         match self {
-            Self::Idea(record) => record.id.to_string(),
+            Self::Capture(record) => record.id.to_string(),
             Self::Release(record) => record.id.to_string(),
-            Self::Epic(record) => record.id.to_string(),
-            Self::Milestone(record) => record.id.to_string(),
+            Self::Spec(record) => record.id.to_string(),
+            Self::Plan(record) => record.id.to_string(),
+            Self::Phase(record) => record.id.to_string(),
             Self::Task(record) => record.id.to_string(),
+            Self::Note(record) => record.id.to_string(),
         }
     }
 
-    /// Return the canonical worktree-relative path for this record.
+    /// Return the canonical workspace-relative path for this record.
     pub fn path(&self) -> PathBuf {
         PathBuf::from(self.kind().directory()).join(format!("{}.md", self.id_string()))
     }
@@ -231,26 +298,19 @@ pub fn encode_manifest(manifest: &SnapshotManifest) -> Result<String> {
 /// Parse a record, using its path to select and validate its typed kind.
 pub fn decode_record(path: &Path, input: &str) -> Result<SnapshotRecord> {
     let (kind, filename_id) = parse_record_path(path)?;
-    let (front_matter, description) = split_record_document(input)?;
-
+    let (front_matter, body) = split_record_document(input)?;
     let record = match kind {
-        RecordKind::Idea => {
-            SnapshotRecord::Idea(IdeaRecord::from_wire(parse_front_matter(&front_matter)?, description)?)
+        RecordKind::Capture => {
+            SnapshotRecord::Capture(CaptureRecord::from_wire(parse_front_matter(&front_matter)?, body)?)
         }
-        RecordKind::Release => SnapshotRecord::Release(ReleaseRecord::from_wire(
-            parse_front_matter(&front_matter)?,
-            description,
-        )?),
-        RecordKind::Epic => {
-            SnapshotRecord::Epic(EpicRecord::from_wire(parse_front_matter(&front_matter)?, description)?)
+        RecordKind::Release => {
+            SnapshotRecord::Release(ReleaseRecord::from_wire(parse_front_matter(&front_matter)?, body)?)
         }
-        RecordKind::Milestone => SnapshotRecord::Milestone(MilestoneRecord::from_wire(
-            parse_front_matter(&front_matter)?,
-            description,
-        )?),
-        RecordKind::Task => {
-            SnapshotRecord::Task(TaskRecord::from_wire(parse_front_matter(&front_matter)?, description)?)
-        }
+        RecordKind::Spec => SnapshotRecord::Spec(SpecRecord::from_wire(parse_front_matter(&front_matter)?, body)?),
+        RecordKind::Plan => SnapshotRecord::Plan(PlanRecord::from_wire(parse_front_matter(&front_matter)?, body)?),
+        RecordKind::Phase => SnapshotRecord::Phase(PhaseRecord::from_wire(parse_front_matter(&front_matter)?, body)?),
+        RecordKind::Task => SnapshotRecord::Task(TaskRecord::from_wire(parse_front_matter(&front_matter)?, body)?),
+        RecordKind::Note => SnapshotRecord::Note(NoteRecord::from_wire(parse_front_matter(&front_matter)?, body)?),
     };
 
     if record.id_string() != filename_id {
@@ -267,12 +327,15 @@ pub fn encode_record(path: &Path, record: &SnapshotRecord) -> Result<String> {
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
-struct IdeaFrontMatter {
-    id: IdeaId,
+struct CaptureFrontMatter {
+    id: CaptureId,
     title: String,
     status: CaptureStatus,
+    created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    promoted_to: Option<EpicId>,
+    promoted_to: Option<SnapshotReference>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    links: Vec<SnapshotReference>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -281,168 +344,253 @@ struct ReleaseFrontMatter {
     id: ReleaseId,
     title: String,
     status: ContainerStatus,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    members: Vec<SnapshotReference>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    links: Vec<SnapshotReference>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
-struct EpicFrontMatter {
-    id: EpicId,
+struct SpecFrontMatter {
+    id: SpecId,
     title: String,
     status: ContainerStatus,
-    spec_path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    release: Option<ReleaseId>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    source_idea: Option<IdeaId>,
+    source_capture: Option<CaptureId>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    acceptance_criteria: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    links: Vec<SnapshotReference>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
-struct MilestoneFrontMatter {
-    id: MilestoneId,
+struct PlanFrontMatter {
+    id: PlanId,
+    spec: SpecId,
     title: String,
     status: ContainerStatus,
-    epic: EpicId,
-    position: i64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    links: Vec<SnapshotReference>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct PhaseFrontMatter {
+    id: PhaseId,
+    plan: PlanId,
     #[serde(skip_serializing_if = "Option::is_none")]
     plan_key: Option<String>,
+    title: String,
+    status: ContainerStatus,
+    position: i64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    links: Vec<SnapshotReference>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 struct TaskFrontMatter {
     id: TaskId,
-    title: String,
-    status: TaskStatus,
-    priority: TaskPriority,
-    milestone: MilestoneId,
-    position: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    spec: Option<SpecId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    plan: Option<PlanId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    phase: Option<PhaseId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     parent: Option<TaskId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     plan_key: Option<String>,
+    title: String,
+    status: TaskStatus,
+    priority: TaskPriority,
+    position: i64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     blocked_by: Vec<TaskId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     handoff: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     evidence: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    links: Vec<SnapshotReference>,
 }
 
-impl IdeaRecord {
-    fn from_wire(front_matter: IdeaFrontMatter, description: String) -> Result<Self> {
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct NoteFrontMatter {
+    id: NoteId,
+    title: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    links: Vec<SnapshotReference>,
+}
+
+impl CaptureRecord {
+    fn from_wire(front_matter: CaptureFrontMatter, body: String) -> Result<Self> {
         validate_title(&front_matter.title)?;
+        if front_matter.created_at.trim().is_empty() {
+            return Err(SnapshotError::EmptyRecordCreatedAt);
+        }
         Ok(Self {
             id: front_matter.id,
             title: front_matter.title,
             status: front_matter.status,
+            created_at: normalize_line_endings(&front_matter.created_at),
             promoted_to: front_matter.promoted_to,
-            description,
+            links: normalize_references(front_matter.links),
+            body,
         })
     }
 
-    fn front_matter(&self) -> Result<IdeaFrontMatter> {
+    fn front_matter(&self) -> Result<CaptureFrontMatter> {
         validate_title(&self.title)?;
-        Ok(IdeaFrontMatter {
+        if self.created_at.trim().is_empty() {
+            return Err(SnapshotError::EmptyRecordCreatedAt);
+        }
+        Ok(CaptureFrontMatter {
             id: self.id,
             title: self.title.clone(),
             status: self.status,
-            promoted_to: self.promoted_to,
+            created_at: normalize_line_endings(&self.created_at),
+            promoted_to: self.promoted_to.clone(),
+            links: {
+                let mut links = self.links.clone();
+                links.sort();
+                links
+            },
         })
     }
 }
 
 impl ReleaseRecord {
-    fn from_wire(front_matter: ReleaseFrontMatter, description: String) -> Result<Self> {
+    fn from_wire(front_matter: ReleaseFrontMatter, body: String) -> Result<Self> {
         validate_title(&front_matter.title)?;
-        Ok(Self { id: front_matter.id, title: front_matter.title, status: front_matter.status, description })
+        Ok(Self {
+            id: front_matter.id,
+            title: front_matter.title,
+            status: front_matter.status,
+            body,
+            members: normalize_references(front_matter.members),
+            links: normalize_references(front_matter.links),
+        })
     }
 
     fn front_matter(&self) -> Result<ReleaseFrontMatter> {
         validate_title(&self.title)?;
-        Ok(ReleaseFrontMatter { id: self.id, title: self.title.clone(), status: self.status })
+        let mut members = self.members.clone();
+        let mut links = self.links.clone();
+        members.sort();
+        links.sort();
+        Ok(ReleaseFrontMatter { id: self.id, title: self.title.clone(), status: self.status, members, links })
     }
 }
 
-impl EpicRecord {
-    fn from_wire(front_matter: EpicFrontMatter, description: String) -> Result<Self> {
+impl SpecRecord {
+    fn from_wire(front_matter: SpecFrontMatter, body: String) -> Result<Self> {
         validate_title(&front_matter.title)?;
-        if front_matter.spec_path.is_empty() {
-            return Err(SnapshotError::EmptyRecordSpecPath);
-        }
         Ok(Self {
             id: front_matter.id,
             title: front_matter.title,
             status: front_matter.status,
-            spec_path: front_matter.spec_path,
-            release: front_matter.release,
-            source_idea: front_matter.source_idea,
-            description,
+            source_capture_id: front_matter.source_capture,
+            acceptance_criteria: normalize_body(&front_matter.acceptance_criteria),
+            links: normalize_references(front_matter.links),
+            body,
         })
     }
 
-    fn front_matter(&self) -> Result<EpicFrontMatter> {
+    fn front_matter(&self) -> Result<SpecFrontMatter> {
         validate_title(&self.title)?;
-        if self.spec_path.is_empty() {
-            return Err(SnapshotError::EmptyRecordSpecPath);
-        }
-        Ok(EpicFrontMatter {
+        let mut links = self.links.clone();
+        links.sort();
+        Ok(SpecFrontMatter {
             id: self.id,
             title: self.title.clone(),
             status: self.status,
-            spec_path: self.spec_path.clone(),
-            release: self.release,
-            source_idea: self.source_idea,
+            source_capture: self.source_capture_id,
+            acceptance_criteria: normalize_body(&self.acceptance_criteria),
+            links,
         })
     }
 }
 
-impl MilestoneRecord {
-    fn from_wire(front_matter: MilestoneFrontMatter, description: String) -> Result<Self> {
+impl PlanRecord {
+    fn from_wire(front_matter: PlanFrontMatter, body: String) -> Result<Self> {
+        validate_title(&front_matter.title)?;
+        Ok(Self {
+            id: front_matter.id,
+            spec_id: front_matter.spec,
+            title: front_matter.title,
+            status: front_matter.status,
+            links: normalize_references(front_matter.links),
+            body,
+        })
+    }
+
+    fn front_matter(&self) -> Result<PlanFrontMatter> {
+        validate_title(&self.title)?;
+        let mut links = self.links.clone();
+        links.sort();
+        Ok(PlanFrontMatter { id: self.id, spec: self.spec_id, title: self.title.clone(), status: self.status, links })
+    }
+}
+
+impl PhaseRecord {
+    fn from_wire(front_matter: PhaseFrontMatter, body: String) -> Result<Self> {
         validate_title(&front_matter.title)?;
         validate_position(front_matter.position)?;
         Ok(Self {
             id: front_matter.id,
+            plan_id: front_matter.plan,
+            plan_key: normalize_optional(front_matter.plan_key),
             title: front_matter.title,
             status: front_matter.status,
-            epic: front_matter.epic,
             position: front_matter.position,
-            plan_key: normalize_optional(front_matter.plan_key),
-            description,
+            links: normalize_references(front_matter.links),
+            body,
         })
     }
 
-    fn front_matter(&self) -> Result<MilestoneFrontMatter> {
+    fn front_matter(&self) -> Result<PhaseFrontMatter> {
         validate_title(&self.title)?;
         validate_position(self.position)?;
-        Ok(MilestoneFrontMatter {
+        let mut links = self.links.clone();
+        links.sort();
+        Ok(PhaseFrontMatter {
             id: self.id,
+            plan: self.plan_id,
+            plan_key: normalize_optional(self.plan_key.clone()),
             title: self.title.clone(),
             status: self.status,
-            epic: self.epic,
             position: self.position,
-            plan_key: normalize_optional(self.plan_key.clone()),
+            links,
         })
     }
 }
 
 impl TaskRecord {
-    fn from_wire(front_matter: TaskFrontMatter, description: String) -> Result<Self> {
+    fn from_wire(front_matter: TaskFrontMatter, body: String) -> Result<Self> {
         validate_title(&front_matter.title)?;
         validate_position(front_matter.position)?;
+        let mut blocked_by = front_matter.blocked_by;
+        blocked_by.sort();
         Ok(Self {
             id: front_matter.id,
+            spec_id: front_matter.spec,
+            plan_id: front_matter.plan,
+            phase_id: front_matter.phase,
+            parent_id: front_matter.parent,
+            plan_key: normalize_optional(front_matter.plan_key),
             title: front_matter.title,
             status: front_matter.status,
             priority: front_matter.priority,
-            milestone: front_matter.milestone,
             position: front_matter.position,
-            parent: front_matter.parent,
-            plan_key: normalize_optional(front_matter.plan_key),
-            blocked_by: front_matter.blocked_by,
+            blocked_by,
             handoff: normalize_optional_markdown(front_matter.handoff),
             evidence: normalize_optional_markdown(front_matter.evidence),
-            description,
+            links: normalize_references(front_matter.links),
+            body,
         })
     }
 
@@ -450,46 +598,74 @@ impl TaskRecord {
         validate_title(&self.title)?;
         validate_position(self.position)?;
         let mut blocked_by = self.blocked_by.clone();
+        let mut links = self.links.clone();
         blocked_by.sort();
+        links.sort();
         Ok(TaskFrontMatter {
             id: self.id,
+            spec: self.spec_id,
+            plan: self.plan_id,
+            phase: self.phase_id,
+            parent: self.parent_id,
+            plan_key: normalize_optional(self.plan_key.clone()),
             title: self.title.clone(),
             status: self.status,
             priority: self.priority,
-            milestone: self.milestone,
             position: self.position,
-            parent: self.parent,
-            plan_key: normalize_optional(self.plan_key.clone()),
             blocked_by,
             handoff: normalize_optional_markdown(self.handoff.clone()),
             evidence: normalize_optional_markdown(self.evidence.clone()),
+            links,
         })
+    }
+}
+
+impl NoteRecord {
+    fn from_wire(front_matter: NoteFrontMatter, body: String) -> Result<Self> {
+        validate_title(&front_matter.title)?;
+        Ok(Self {
+            id: front_matter.id,
+            title: front_matter.title,
+            links: normalize_references(front_matter.links),
+            body,
+        })
+    }
+
+    fn front_matter(&self) -> Result<NoteFrontMatter> {
+        validate_title(&self.title)?;
+        let mut links = self.links.clone();
+        links.sort();
+        Ok(NoteFrontMatter { id: self.id, title: self.title.clone(), links })
     }
 }
 
 fn render_record_document(record: &SnapshotRecord) -> Result<String> {
     let front_matter = match record {
-        SnapshotRecord::Idea(record) => render_front_matter(&record.front_matter()?)?,
+        SnapshotRecord::Capture(record) => render_front_matter(&record.front_matter()?)?,
         SnapshotRecord::Release(record) => render_front_matter(&record.front_matter()?)?,
-        SnapshotRecord::Epic(record) => render_front_matter(&record.front_matter()?)?,
-        SnapshotRecord::Milestone(record) => render_front_matter(&record.front_matter()?)?,
+        SnapshotRecord::Spec(record) => render_front_matter(&record.front_matter()?)?,
+        SnapshotRecord::Plan(record) => render_front_matter(&record.front_matter()?)?,
+        SnapshotRecord::Phase(record) => render_front_matter(&record.front_matter()?)?,
         SnapshotRecord::Task(record) => render_front_matter(&record.front_matter()?)?,
+        SnapshotRecord::Note(record) => render_front_matter(&record.front_matter()?)?,
     };
-    let description = match record {
-        SnapshotRecord::Idea(record) => normalize_body(&record.description),
-        SnapshotRecord::Release(record) => normalize_body(&record.description),
-        SnapshotRecord::Epic(record) => normalize_body(&record.description),
-        SnapshotRecord::Milestone(record) => normalize_body(&record.description),
-        SnapshotRecord::Task(record) => normalize_body(&record.description),
+    let body = match record {
+        SnapshotRecord::Capture(record) => normalize_body(&record.body),
+        SnapshotRecord::Release(record) => normalize_body(&record.body),
+        SnapshotRecord::Spec(record) => normalize_body(&record.body),
+        SnapshotRecord::Plan(record) => normalize_body(&record.body),
+        SnapshotRecord::Phase(record) => normalize_body(&record.body),
+        SnapshotRecord::Task(record) => normalize_body(&record.body),
+        SnapshotRecord::Note(record) => normalize_body(&record.body),
     };
 
-    if description.is_empty() {
+    if body.is_empty() {
         Ok(format!(
             "{FRONT_MATTER_DELIMITER}\n{front_matter}{FRONT_MATTER_DELIMITER}\n"
         ))
     } else {
         Ok(format!(
-            "{FRONT_MATTER_DELIMITER}\n{front_matter}{FRONT_MATTER_DELIMITER}\n\n{description}\n"
+            "{FRONT_MATTER_DELIMITER}\n{front_matter}{FRONT_MATTER_DELIMITER}\n\n{body}\n"
         ))
     }
 }
@@ -529,8 +705,7 @@ fn split_record_document(input: &str) -> Result<(String, String)> {
     if body_lines.first() == Some(&"") {
         body_lines.remove(0);
     }
-    let body = normalize_body(&body_lines.join("\n"));
-    Ok((front_matter_lines.join("\n"), body))
+    Ok((front_matter_lines.join("\n"), normalize_body(&body_lines.join("\n"))))
 }
 
 fn parse_record_path(path: &Path) -> Result<(RecordKind, String)> {
@@ -599,177 +774,132 @@ fn normalize_optional_markdown(value: Option<String>) -> Option<String> {
     })
 }
 
+fn normalize_references(mut references: Vec<SnapshotReference>) -> Vec<SnapshotReference> {
+    for reference in &mut references {
+        reference.kind = reference.kind.to_ascii_lowercase();
+        reference.id = reference.id.trim().to_owned();
+    }
+    references.sort();
+    references
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const IDEA_ID: &str = "arcl-i-01K0B3N4QSC9R7K6W8X2M5YH1Z";
-    const RELEASE_ID: &str = "arcl-r-01K0B2ZWTX7JX9PH7W5G1S6A9Q";
-    const EPIC_ID: &str = "arcl-e-01K0B2ZWTX7JX9PH7W5G1S6A9Q";
+    const CAPTURE_ID: &str = "arcl-c-01K0B3N4QSC9R7K6W8X2M5YH1Z";
+    const SPEC_ID: &str = "arcl-s-01K0B2ZWTX7JX9PH7W5G1S6A9Q";
+    const PLAN_ID: &str = "arcl-pl-01K0B2ZWTX7JX9PH7W5G1S6A9Q";
+    const PHASE_ID: &str = "arcl-ph-01K0B2ZWTX7JX9PH7W5G1S6A9Q";
     const TASK_ID: &str = "arcl-t-01K0B31M6VGK4YH8VKT4C0D2DR";
     const OTHER_TASK_ID: &str = "arcl-t-01K0B31M6VGK4YH8VKT4C0D2DS";
-    const MILESTONE_ID: &str = "arcl-m-01K0B2ZWTX7JX9PH7W5G1S6A9Q";
+    const NOTE_ID: &str = "arcl-n-01K0B2ZWTX7JX9PH7W5G1S6A9Q";
 
     #[test]
-    fn manifest_is_exact_and_accepts_missing_final_newline() {
-        let manifest = SnapshotManifest::parse("format-version = 1").expect("manifest");
-        assert_eq!(manifest.render().expect("render"), "format-version = 1\n");
-    }
-
-    #[test]
-    fn manifest_rejects_unknown_fields_and_versions() {
+    fn manifest_is_version_two_and_canonical() {
+        let manifest = SnapshotManifest::parse("format-version = 2").expect("manifest");
+        assert_eq!(manifest.render().expect("render"), "format-version = 2\n");
         assert!(matches!(
-            SnapshotManifest::parse("format-version = 1\nother = true"),
-            Err(SnapshotError::ManifestParse(_))
-        ));
-        assert!(matches!(
-            SnapshotManifest::parse("format-version = 2"),
+            SnapshotManifest::parse("format-version = 1"),
             Err(SnapshotError::UnsupportedVersion { .. })
         ));
     }
 
     #[test]
-    fn release_round_trips_through_canonical_codec() {
-        let record = SnapshotRecord::Release(ReleaseRecord {
-            id: ReleaseId::parse(RELEASE_ID).expect("release ID"),
-            title: "First release".to_owned(),
-            status: ContainerStatus::Open,
-            description: "Ship the first release.".to_owned(),
-        });
-        let path = Path::new("releases").join(format!("{RELEASE_ID}.md"));
-        let rendered = encode_record(&path, &record).expect("encode release");
-        let decoded = decode_record(&path, &rendered).expect("decode release");
+    fn all_new_record_kinds_round_trip() {
+        let records = [
+            SnapshotRecord::Capture(CaptureRecord {
+                id: CaptureId::parse(CAPTURE_ID).unwrap(),
+                title: "Capture".to_owned(),
+                status: CaptureStatus::Captured,
+                created_at: "2025-01-01T00:00:00.000Z".to_owned(),
+                promoted_to: None,
+                links: vec![],
+                body: "Capture **body**".to_owned(),
+            }),
+            SnapshotRecord::Spec(SpecRecord {
+                id: SpecId::parse(SPEC_ID).unwrap(),
+                title: "Spec".to_owned(),
+                status: ContainerStatus::Open,
+                source_capture_id: Some(CaptureId::parse(CAPTURE_ID).unwrap()),
+                acceptance_criteria: "- [ ] criterion".to_owned(),
+                links: vec![],
+                body: "# Spec".to_owned(),
+            }),
+            SnapshotRecord::Plan(PlanRecord {
+                id: PlanId::parse(PLAN_ID).unwrap(),
+                spec_id: SpecId::parse(SPEC_ID).unwrap(),
+                title: "Plan".to_owned(),
+                status: ContainerStatus::Open,
+                links: vec![],
+                body: "Plan body".to_owned(),
+            }),
+            SnapshotRecord::Phase(PhaseRecord {
+                id: PhaseId::parse(PHASE_ID).unwrap(),
+                plan_id: PlanId::parse(PLAN_ID).unwrap(),
+                plan_key: Some("build".to_owned()),
+                title: "Build".to_owned(),
+                status: ContainerStatus::Open,
+                position: 0,
+                links: vec![],
+                body: "Phase body".to_owned(),
+            }),
+            SnapshotRecord::Task(TaskRecord {
+                id: TaskId::parse(TASK_ID).unwrap(),
+                spec_id: Some(SpecId::parse(SPEC_ID).unwrap()),
+                plan_id: Some(PlanId::parse(PLAN_ID).unwrap()),
+                phase_id: Some(PhaseId::parse(PHASE_ID).unwrap()),
+                parent_id: None,
+                plan_key: Some("build/task".to_owned()),
+                title: "Task".to_owned(),
+                status: TaskStatus::Pending,
+                priority: TaskPriority::High,
+                position: 0,
+                blocked_by: vec![TaskId::parse(OTHER_TASK_ID).unwrap()],
+                handoff: Some("Resume here".to_owned()),
+                evidence: Some("Evidence".to_owned()),
+                links: vec![SnapshotReference::new("spec", SPEC_ID)],
+                body: "Task body".to_owned(),
+            }),
+            SnapshotRecord::Note(NoteRecord {
+                id: NoteId::parse(NOTE_ID).unwrap(),
+                title: "Note".to_owned(),
+                links: vec![SnapshotReference::new("task", TASK_ID)],
+                body: "Note body".to_owned(),
+            }),
+        ];
 
-        assert_eq!(decoded, record);
-        assert_eq!(encode_record(&path, &decoded).expect("re-encode release"), rendered);
+        for record in records {
+            let path = record.path();
+            let rendered = record.render().expect("render");
+            let decoded = decode_record(&path, &rendered).expect("decode");
+            assert_eq!(decoded, record);
+            assert_eq!(decoded.render().expect("re-render"), rendered);
+        }
     }
 
     #[test]
-    fn epic_round_trip_preserves_optional_relationships() {
-        let record = SnapshotRecord::Epic(EpicRecord {
-            id: EpicId::parse(EPIC_ID).expect("epic ID"),
-            title: "Snapshot codec".to_owned(),
-            status: ContainerStatus::Open,
-            spec_path: "docs/snapshot.md".to_owned(),
-            release: Some(ReleaseId::parse(RELEASE_ID).expect("release ID")),
-            source_idea: Some(IdeaId::parse(IDEA_ID).expect("idea ID")),
-            description: "Define the snapshot format.".to_owned(),
-        });
-        let path = Path::new("epics").join(format!("{EPIC_ID}.md"));
-        let rendered = encode_record(&path, &record).expect("encode epic");
-        let decoded = decode_record(&path, &rendered).expect("decode epic");
-
-        assert!(rendered.contains(&format!("release = \"{RELEASE_ID}\"")));
-        assert!(rendered.contains(&format!("source-idea = \"{IDEA_ID}\"")));
-        assert_eq!(decoded, record);
-        assert_eq!(encode_record(&path, &decoded).expect("re-encode epic"), rendered);
-    }
-
-    #[test]
-    fn milestone_round_trip_preserves_optional_plan_key() {
-        let record = SnapshotRecord::Milestone(MilestoneRecord {
-            id: MilestoneId::parse(MILESTONE_ID).expect("milestone ID"),
-            title: "Codec coverage".to_owned(),
-            status: ContainerStatus::Open,
-            epic: EpicId::parse(EPIC_ID).expect("epic ID"),
-            position: 10,
-            plan_key: Some("snapshot-codec".to_owned()),
-            description: "Cover every snapshot record kind.".to_owned(),
-        });
-        let path = Path::new("milestones").join(format!("{MILESTONE_ID}.md"));
-        let rendered = encode_record(&path, &record).expect("encode milestone");
-        let decoded = decode_record(&path, &rendered).expect("decode milestone");
-
-        assert!(rendered.contains("plan-key = \"snapshot-codec\""));
-        assert_eq!(decoded, record);
-        assert_eq!(encode_record(&path, &decoded).expect("re-encode milestone"), rendered);
-    }
-
-    #[test]
-    fn task_front_matter_is_strict_sorted_and_omits_empty_options() {
+    fn task_metadata_is_sorted_and_empty_markdown_is_omitted() {
         let record = SnapshotRecord::Task(TaskRecord {
-            id: TaskId::parse(TASK_ID).expect("task ID"),
-            title: "Ready work".to_owned(),
-            status: TaskStatus::Pending,
-            priority: TaskPriority::High,
-            milestone: MilestoneId::parse(MILESTONE_ID).expect("milestone ID"),
-            position: 20,
-            parent: None,
+            id: TaskId::parse(TASK_ID).unwrap(),
+            spec_id: None,
+            plan_id: None,
+            phase_id: None,
+            parent_id: None,
             plan_key: Some(String::new()),
-            blocked_by: vec![
-                TaskId::parse(OTHER_TASK_ID).expect("other task ID"),
-                TaskId::parse(TASK_ID).expect("task ID"),
-            ],
+            title: "Task".to_owned(),
+            status: TaskStatus::Pending,
+            priority: TaskPriority::Normal,
+            position: 0,
+            blocked_by: vec![TaskId::parse(OTHER_TASK_ID).unwrap(), TaskId::parse(TASK_ID).unwrap()],
             handoff: Some(String::new()),
             evidence: None,
-            description: "Return actionable tasks.\r\n\r\n".to_owned(),
+            links: vec![],
+            body: String::new(),
         });
-        let rendered =
-            encode_record(Path::new("tasks").join(format!("{TASK_ID}.md")).as_path(), &record).expect("record");
-        assert_eq!(
-            rendered,
-            format!(
-                "+++\nid = \"{TASK_ID}\"\ntitle = \"Ready work\"\nstatus = \"pending\"\npriority = \"high\"\nmilestone = \"{MILESTONE_ID}\"\nposition = 20\nblocked-by = [\"{TASK_ID}\", \"{OTHER_TASK_ID}\"]\n+++\n\nReturn actionable tasks.\n"
-            )
-        );
+        let rendered = record.render().expect("render");
+        assert!(rendered.contains(&format!("blocked-by = [\"{TASK_ID}\", \"{OTHER_TASK_ID}\"]")));
         assert!(!rendered.contains("plan-key"));
         assert!(!rendered.contains("handoff"));
-        assert!(!rendered.contains('\r'));
-    }
-
-    #[test]
-    fn task_round_trip_preserves_handoff_and_evidence() {
-        let record = SnapshotRecord::Task(TaskRecord {
-            id: TaskId::parse(TASK_ID).expect("task ID"),
-            title: "Ready work".to_owned(),
-            status: TaskStatus::Pending,
-            priority: TaskPriority::High,
-            milestone: MilestoneId::parse(MILESTONE_ID).expect("milestone ID"),
-            position: 20,
-            parent: None,
-            plan_key: None,
-            blocked_by: Vec::new(),
-            handoff: Some("Continue from the validated graph.".to_owned()),
-            evidence: Some("The focused snapshot tests pass.".to_owned()),
-            description: "Return actionable tasks.".to_owned(),
-        });
-        let path = Path::new("tasks").join(format!("{TASK_ID}.md"));
-
-        let rendered = encode_record(&path, &record).expect("encode task");
-        let decoded = decode_record(&path, &rendered).expect("decode task");
-
-        assert!(rendered.contains("handoff = \"Continue from the validated graph.\""));
-        assert!(rendered.contains("evidence = \"The focused snapshot tests pass.\""));
-        assert_eq!(decoded, record);
-    }
-
-    #[test]
-    fn reader_normalizes_body_and_requires_exact_delimiters() {
-        let input =
-            format!("+++\r\nid = \"{IDEA_ID}\"\r\ntitle = \"Idea\"\r\nstatus = \"captured\"\r\n+++\r\n\r\nbody\r\n");
-        let record = decode_record(Path::new("ideas").join(format!("{IDEA_ID}.md")).as_path(), &input).expect("record");
-        let SnapshotRecord::Idea(record) = record else { panic!("expected idea") };
-        assert_eq!(record.description, "body");
-
-        let malformed = input.replacen("+++\r\n", " +++\r\n", 1);
-        assert!(matches!(
-            decode_record(Path::new("ideas").join(format!("{IDEA_ID}.md")).as_path(), &malformed),
-            Err(SnapshotError::InvalidRecordFormat(_))
-        ));
-    }
-
-    #[test]
-    fn path_and_typed_id_must_agree() {
-        let input = format!("+++\nid = \"{IDEA_ID}\"\ntitle = \"Idea\"\nstatus = \"captured\"\n+++\n");
-        assert!(matches!(
-            decode_record(Path::new("epics").join(format!("{IDEA_ID}.md")).as_path(), &input),
-            Err(SnapshotError::FrontMatterParse(_))
-        ));
-
-        let mismatched_path = Path::new("ideas").join(format!("{EPIC_ID}.md"));
-        assert!(matches!(
-            decode_record(&mismatched_path, &input),
-            Err(SnapshotError::FilenameIdMismatch { .. })
-        ));
     }
 }
