@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { Icon } from '@arclightning/ui';
 	const year = new Date().getFullYear();
 </script>
 
@@ -7,7 +6,7 @@
 	<div class="site-footer__inner">
 		<div class="site-footer__intro">
 			<div class="site-footer__brand">
-				<span class="brand__mark" aria-hidden="true">ϟ</span><span>Arc Lightning</span>
+				<img class="brand__mark" src="/favicon.svg" alt="" /><span>Arc Lightning</span>
 			</div>
 			<p>Local-first project planning and execution for developers and software agents.</p>
 		</div>

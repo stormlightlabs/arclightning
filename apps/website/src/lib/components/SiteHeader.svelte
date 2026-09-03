@@ -17,7 +17,7 @@
 <header class="site-header" data-pagefind-ignore>
 	<div class="site-header__inner">
 		<a class="brand" href="/" aria-label="Arc Lightning home"
-			><span class="brand__mark" aria-hidden="true">ϟ</span><span>Arc Lightning</span></a>
+			><img class="brand__mark" src="/favicon.svg" alt="" /><span>Arc Lightning</span></a>
 		<nav class="primary-nav" aria-label="Primary navigation">
 			{#each links as link}<a class:active={isCurrent(link.slug)} href={link.href}>{link.label}</a>{/each}
 			<a class="github-link" href="https://github.com/stormlightlabs/arclightning"
