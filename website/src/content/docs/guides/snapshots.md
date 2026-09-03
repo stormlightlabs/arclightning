@@ -1,27 +1,67 @@
 ---
-title: Version-control project snapshots
-description: Export the connected planning model to Markdown and rebuild the local database from it.
+title: Share project snapshots
+description: Export planning records to Markdown, commit them with your project, and rebuild the local database after pulling changes.
 ---
 
-Snapshots keep a reviewable projection of Arc Lightning's planning records in a
-project workspace. SQLite remains the operational store. The workspace is
-optional and can be committed with the project.
+Snapshots let you review and share Arc Lightning records through version
+control. Arc Lightning continues to use SQLite while you work, then projects the
+connected planning model into a Markdown workspace when you export it.
 
 ## Enable snapshots
 
-Enable the workspace when initializing a project:
+Initialize the project with snapshot support:
 
 ```sh
 arcl init --snapshot
 ```
 
-The default workspace is `.arcl/snapshot/`. Keep `.arcl/arcl.db` local; the
-`.arcl/.gitignore` created by `arcl init` excludes it.
+Arc Lightning creates the snapshot workspace at `.arcl/snapshot/` by default.
+It also adds `.arcl/arcl.db` to `.arcl/.gitignore`, so the local database stays
+out of version control.
 
-## Workspace format
+Commit `.arcl/config.toml` and `.arcl/snapshot/` with the rest of the project.
 
-`manifest.toml` uses `format-version = 2`. Each record has TOML front matter
-between `+++` lines and a Markdown body after the closing delimiter:
+## Export your work
+
+After you change records through the CLI, export the database projection:
+
+```sh
+arcl snapshot export
+```
+
+Review the changes under `.arcl/snapshot/`, then commit them. Export writes the
+complete connected model, but leaves files unchanged when their bytes already
+match. It stops if a workspace file has changed since the last export instead
+of overwriting that file.
+
+Run another export before each commit that changes Arc Lightning records. This
+keeps the committed snapshot in step with your local database.
+
+## Import changes after a pull
+
+Import the snapshot before making new local changes:
+
+```sh
+arcl snapshot import
+```
+
+Import reads every record and validates IDs, references, task ancestry, parent
+cycles, dependency cycles, and the complete relationship graph. Arc Lightning
+replaces the database only after the whole workspace passes validation.
+
+For a fresh clone, initialize the local database first, then import the
+committed snapshot:
+
+```sh
+arcl init --snapshot
+arcl snapshot import
+```
+
+## Edit snapshot files
+
+You can edit a record in `.arcl/snapshot/` and import it back into SQLite. Keep
+the TOML front matter between the `+++` delimiters and write the record body as
+Markdown:
 
 ```text
 +++
@@ -31,10 +71,20 @@ status = "open"
 acceptance-criteria = "- [ ] Invalid records are rejected"
 +++
 
-The specification body is owned by Arc Lightning.
+The specification body goes here.
 ```
 
-The workspace stores one file per record:
+Do not rename or delete an existing record file. Snapshots do not support hard
+deletion. Use the record's status to complete, cancel, discard, or otherwise
+close it through the CLI.
+
+After a successful import, Arc Lightning rewrites the workspace in its
+canonical form. It sorts files by path and repeated references by kind and ID,
+uses LF line endings and one final newline, and omits empty optional metadata.
+
+## Understand the workspace
+
+The workspace contains `manifest.toml` and one Markdown file per record:
 
 - `captures/<capture-id>.md`
 - `specs/<spec-id>.md`
@@ -44,47 +94,13 @@ The workspace stores one file per record:
 - `notes/<note-id>.md`
 - `releases/<release-id>.md`
 
-Captures, specs, plans, tasks, and notes keep their Markdown bodies in the
-file. Task metadata includes status, priority, position, optional ancestry,
-blocking task IDs, handoff, and completion evidence. Plans and phases preserve
-their parent IDs and ordering. Release membership and record links are stored
-as explicit front matter references; descendants are not added implicitly.
+The manifest contains `format-version = 1`. Front matter stores record metadata
+and explicit relationships. Descendants are not added to releases or links
+implicitly.
 
-Arc Lightning sorts record files by path and sorts repeated references by kind
-and ID. It writes LF line endings, one final newline, and omits empty optional
-metadata. These rules make a parse-render-parse round trip deterministic while
-preserving Markdown content.
+## Avoid divergent changes
 
-## Export local changes
-
-After changing records, write the database projection to the workspace:
-
-```sh
-arcl snapshot export
-```
-
-Export stages the complete projection before replacing any destination files.
-It does not rewrite a file whose bytes already match the projection. If a
-working-tree file diverges from the last exported base, the command stops
-rather than replacing the newer bytes.
-
-## Import shared changes
-
-After cloning a project or receiving workspace changes, update the local
-SQLite database:
-
-```sh
-arcl snapshot import
-```
-
-Import reads every record, validates IDs, references, flexible task ancestry,
-parent cycles, dependency cycles, and the complete relationship graph before
-replacing database state. Invalid or incomplete workspaces are rejected without
-partial database writes. If both the database and workspace diverged from the
-last exported base, import reports a conflict instead of choosing a side.
-
-Arc Lightning accepts the previous `format-version = 1` workspace as an
-explicit migration input. The migration maps ideas to captures, epics to
-owned specs and plans, milestones to phases, and preserves task state,
-relationships, handoffs, evidence, and Markdown bodies. A successful import
-writes the version 2 layout and removes the migrated version 1 record files.
+Import after pulling snapshot changes and export before committing local
+database changes. If both the database and workspace changed from their last
+shared export, import reports a conflict instead of choosing one version. No
+partial database writes occur when an import fails.

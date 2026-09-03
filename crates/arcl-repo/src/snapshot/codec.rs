@@ -796,11 +796,11 @@ mod tests {
     const NOTE_ID: &str = "arcl-n-01K0B2ZWTX7JX9PH7W5G1S6A9Q";
 
     #[test]
-    fn manifest_is_version_two_and_canonical() {
-        let manifest = SnapshotManifest::parse("format-version = 2").expect("manifest");
-        assert_eq!(manifest.render().expect("render"), "format-version = 2\n");
+    fn manifest_is_version_one_and_canonical() {
+        let manifest = SnapshotManifest::parse("format-version = 1").expect("manifest");
+        assert_eq!(manifest.render().expect("render"), "format-version = 1\n");
         assert!(matches!(
-            SnapshotManifest::parse("format-version = 1"),
+            SnapshotManifest::parse("format-version = 2"),
             Err(SnapshotError::UnsupportedVersion { .. })
         ));
     }

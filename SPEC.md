@@ -321,8 +321,7 @@ The migration must:
 - use expand, migrate, and contract steps when old and new records must coexist
 - keep database migrations forward-only and test upgrades from representative
   databases
-- define a versioned migration for existing snapshot files before changing the
-  snapshot manifest
+- update the snapshot format in place until the first release
 - avoid completing obsolete synchronization work against the old hierarchy
   when the same work can be completed against the new model
 

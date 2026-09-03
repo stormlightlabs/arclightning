@@ -233,25 +233,6 @@ pub(crate) fn export_observed(
     Ok(())
 }
 
-pub(crate) fn remove_legacy_files(
-    root: &Path, observed: &[SnapshotFile], canonical: &[SnapshotFile],
-) -> Result<(), SnapshotExportError> {
-    let canonical_paths = canonical
-        .iter()
-        .map(|file| &file.path)
-        .collect::<std::collections::HashSet<_>>();
-    for file in observed {
-        if canonical_paths.contains(&file.path) {
-            continue;
-        }
-        let path = root.join(&file.path);
-        if path.exists() {
-            fs::remove_file(&path).map_err(|source| SnapshotExportError::Write { path, source })?;
-        }
-    }
-    Ok(())
-}
-
 fn push_record(files: &mut Vec<SnapshotFile>, record: SnapshotRecord) -> Result<(), SnapshotExportError> {
     let path = record.path();
     let content = encode_record(&path, &record)

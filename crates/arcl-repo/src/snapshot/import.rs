@@ -5,7 +5,6 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use serde::Deserialize;
 use thiserror::Error;
 
 use arcl_core::domain::*;
@@ -15,16 +14,10 @@ use super::{
     CaptureRecord, NoteRecord, PhaseRecord, PlanRecord, ReleaseRecord, SnapshotError, SnapshotFile, SnapshotRecord,
     SnapshotReference, SpecRecord, TaskRecord, decode_manifest, decode_record,
 };
-use super::{
-    export::export_observed,
-    export::project_graph,
-    migration::{LegacyRecord, decode_legacy_record, migrate_legacy_records},
-};
+use super::{export::export_observed, export::project_graph};
 
-const CURRENT_DIRECTORIES: &[&str] = &["captures", "releases", "specs", "plans", "phases", "tasks", "notes"];
-// FIXME: remove legacy
-const LEGACY_DIRECTORIES: &[&str] = &["ideas", "releases", "epics", "milestones", "tasks"];
 const DEFAULT_PROJECT_ID: &str = "arcl-pj-00000000000000000000000000";
+const RECORD_DIRECTORIES: &[&str] = &["captures", "releases", "specs", "plans", "phases", "tasks", "notes"];
 
 /// A validation or I/O failure raised while importing a complete snapshot.
 #[derive(Debug, Error)]
@@ -102,253 +95,22 @@ impl SnapshotImportError {
     }
 }
 
-type Result<T> = std::result::Result<T, SnapshotImportError>;
-
-#[derive(Debug, Deserialize)]
-struct ManifestVersion {
-    #[serde(rename = "format-version")]
-    format_version: u32,
-}
-
 struct CandidateSnapshot {
     records: BTreeMap<PathBuf, SnapshotRecord>,
     files: Vec<SnapshotFile>,
-    legacy: bool,
 }
 
 struct PreparedImport {
     graph: ConnectedGraph,
     files: Vec<SnapshotFile>,
     observed: Vec<SnapshotFile>,
-    legacy: bool,
 }
 
-/// Parse, validate, replace, and canonicalize a workspace using an open database.
-///
-/// Files are parsed and the complete candidate graph is validated before the
-/// database replacement transaction starts.
-pub fn import_graph(root: &Path, worktree_root: &Path, database: &mut Database) -> Result<Vec<SnapshotFile>> {
-    let project = database.project()?;
-    let prepared = prepare_import(root, worktree_root, project)?;
-    apply_prepared(root, prepared, database)
-}
-
-/// Import a workspace while opening the database only after validation.
-///
-/// This entry point supports cloning a project with no local SQLite file. The
-/// initial project ID is the same deterministic ID used by `arcl init`.
-pub fn import_snapshot(root: &Path, worktree_root: &Path, database_path: &Path) -> Result<Vec<SnapshotFile>> {
-    let project = Project::from_parts(
-        ProjectId::parse(DEFAULT_PROJECT_ID).expect("default project ID is canonical"),
-        "Project".to_owned(),
-    )
-    .map_err(|error| SnapshotImportError::Field {
-        path: PathBuf::from("manifest.toml"),
-        field: "project".to_owned(),
-        message: error.to_string(),
-    })?;
-    let prepared = prepare_import(root, worktree_root, project)?;
-    let mut database = Database::open(database_path)?;
-    apply_prepared(root, prepared, &mut database)
-}
-
-fn prepare_import(root: &Path, worktree_root: &Path, project: Project) -> Result<PreparedImport> {
-    let candidate = read_candidate(root, project.id)?;
-    let graph = validate_candidate(candidate.records, project, worktree_root)?;
-    let files = project_graph(&graph).map_err(|source| SnapshotImportError::Field {
-        path: PathBuf::from("manifest.toml"),
-        field: "canonical rendering".to_owned(),
-        message: source.to_string(),
-    })?;
-    Ok(PreparedImport { graph, files, observed: candidate.files, legacy: candidate.legacy })
-}
-
-fn apply_prepared(root: &Path, prepared: PreparedImport, database: &mut Database) -> Result<Vec<SnapshotFile>> {
-    if !prepared.legacy {
-        let base = database.snapshot_base()?;
-        reject_removed_base_records(&base, &prepared.files)?;
-        let current_files =
-            project_graph(&database.connected_graph()?).map_err(|source| SnapshotImportError::Field {
-                path: PathBuf::from("manifest.toml"),
-                field: "current database projection".to_owned(),
-                message: source.to_string(),
-            })?;
-        reject_removed_snapshot_records(&current_files, &prepared.files)?;
-        reject_divergent_changes(&base, &current_files, &prepared.files)?;
-    }
-
-    // Re-check exact bytes before filesystem canonicalization and before the
-    // SQLite replacement transaction starts.
-    export_observed(root, &prepared.files, &prepared.observed)?;
-    if prepared.legacy {
-        super::export::remove_legacy_files(root, &prepared.observed, &prepared.files)?;
-    }
-    let base = prepared
-        .files
-        .iter()
-        .map(|file| SnapshotBaseFile { path: file.path.to_string_lossy().into_owned(), content: file.content.clone() })
-        .collect::<Vec<_>>();
-    database.replace_graph_and_snapshot_base(&prepared.graph, &base)?;
-    Ok(prepared.files)
-}
-
-fn read_candidate(root: &Path, project_id: ProjectId) -> Result<CandidateSnapshot> {
-    let entries = read_entries(root)?;
-    let Some(manifest_entry) = entries
-        .iter()
-        .find(|entry| entry.file_name() == OsStr::new("manifest.toml"))
-    else {
-        return Err(SnapshotImportError::MissingManifest { path: root.join("manifest.toml") });
-    };
-    let manifest_path = root.join(manifest_entry.file_name());
-    let manifest_type = manifest_entry
-        .file_type()
-        .map_err(|source| SnapshotImportError::InspectEntry { path: manifest_path.clone(), source })?;
-    if !manifest_type.is_file() {
-        return Err(SnapshotImportError::WrongEntryType { path: PathBuf::from("manifest.toml") });
-    }
-    let manifest_input = read_utf8_file(&manifest_path, Path::new("manifest.toml"))?;
-    let version = toml::from_str::<ManifestVersion>(&manifest_input)
-        .map_err(|source| SnapshotImportError::Manifest {
-            path: PathBuf::from("manifest.toml"),
-            source: SnapshotError::ManifestParse(source),
-        })?
-        .format_version;
-    if version == super::LEGACY_SNAPSHOT_FORMAT_VERSION {
-        read_legacy_candidate(root, entries, manifest_input, project_id)
-    } else {
-        decode_manifest(&manifest_input)
-            .map_err(|source| SnapshotImportError::Manifest { path: PathBuf::from("manifest.toml"), source })?;
-        read_current_candidate(root, entries, manifest_input)
-    }
-}
-
-fn read_current_candidate(
-    root: &Path, entries: Vec<fs::DirEntry>, manifest_input: String,
-) -> Result<CandidateSnapshot> {
-    let mut records = BTreeMap::new();
-    let mut files = vec![SnapshotFile { path: PathBuf::from("manifest.toml"), content: manifest_input.into_bytes() }];
-    for entry in entries {
-        let name = entry.file_name();
-        if name == OsStr::new("manifest.toml") {
-            continue;
-        }
-        let relative = PathBuf::from(&name);
-        let path = root.join(&name);
-        let file_type = entry
-            .file_type()
-            .map_err(|source| SnapshotImportError::InspectEntry { path: path.clone(), source })?;
-        let Some(directory) = name.to_str() else {
-            return Err(SnapshotImportError::UnknownEntry { path: relative });
-        };
-        if !CURRENT_DIRECTORIES.contains(&directory) {
-            return Err(SnapshotImportError::UnknownEntry { path: relative });
-        }
-        if !file_type.is_dir() {
-            return Err(SnapshotImportError::WrongEntryType { path: relative });
-        }
-        read_current_record_directory(root, directory, &mut records, &mut files)?;
-    }
-    files.sort_by(|left, right| left.path.cmp(&right.path));
-    Ok(CandidateSnapshot { records, files, legacy: false })
-}
-
-fn read_legacy_candidate(
-    root: &Path, entries: Vec<fs::DirEntry>, manifest_input: String, project_id: ProjectId,
-) -> Result<CandidateSnapshot> {
-    let mut legacy_records = BTreeMap::<PathBuf, LegacyRecord>::new();
-    let mut files = vec![SnapshotFile { path: PathBuf::from("manifest.toml"), content: manifest_input.into_bytes() }];
-    for entry in entries {
-        let name = entry.file_name();
-        if name == OsStr::new("manifest.toml") {
-            continue;
-        }
-        let relative = PathBuf::from(&name);
-        let path = root.join(&name);
-        let file_type = entry
-            .file_type()
-            .map_err(|source| SnapshotImportError::InspectEntry { path: path.clone(), source })?;
-        let Some(directory) = name.to_str() else {
-            return Err(SnapshotImportError::UnknownEntry { path: relative });
-        };
-        if !file_type.is_dir() {
-            return Err(SnapshotImportError::WrongEntryType { path: relative });
-        }
-        if !LEGACY_DIRECTORIES.contains(&directory) {
-            // Initialization creates the new empty directories before an old
-            // workspace is imported. They are harmless until they contain files.
-            if CURRENT_DIRECTORIES.contains(&directory) && read_entries(&path)?.is_empty() {
-                continue;
-            }
-            return Err(SnapshotImportError::UnknownEntry { path: relative });
-        }
-        read_legacy_record_directory(root, directory, &mut legacy_records, &mut files)?;
-    }
-    let migrated = migrate_legacy_records(&legacy_records, project_id)
-        .map_err(|source| SnapshotImportError::Record { path: PathBuf::from("manifest.toml"), source })?;
-    let records = migrated.into_iter().map(|record| (record.path(), record)).collect();
-    files.sort_by(|left, right| left.path.cmp(&right.path));
-    Ok(CandidateSnapshot { records, files, legacy: true })
-}
-
-fn read_current_record_directory(
-    root: &Path, directory: &str, records: &mut BTreeMap<PathBuf, SnapshotRecord>, files: &mut Vec<SnapshotFile>,
-) -> Result<()> {
-    for entry in read_entries(&root.join(directory))? {
-        let name = entry.file_name();
-        let relative = Path::new(directory).join(&name);
-        let path = root.join(&relative);
-        let file_type = entry
-            .file_type()
-            .map_err(|source| SnapshotImportError::InspectEntry { path: path.clone(), source })?;
-        if !file_type.is_file() {
-            return Err(SnapshotImportError::UnknownEntry { path: relative });
-        }
-        let Some(filename) = name.to_str() else {
-            return Err(SnapshotImportError::UnknownEntry { path: relative });
-        };
-        if !filename.ends_with(".md") {
-            return Err(SnapshotImportError::UnknownEntry { path: relative });
-        }
-        let input = read_utf8_file(&path, &relative)?;
-        let record = decode_record(&relative, &input)
-            .map_err(|source| SnapshotImportError::Record { path: relative.clone(), source })?;
-        files.push(SnapshotFile { path: relative.clone(), content: input.into_bytes() });
-        if records.insert(relative.clone(), record).is_some() {
-            return Err(SnapshotImportError::UnknownEntry { path: relative });
-        }
-    }
-    Ok(())
-}
-
-fn read_legacy_record_directory(
-    root: &Path, directory: &str, records: &mut BTreeMap<PathBuf, LegacyRecord>, files: &mut Vec<SnapshotFile>,
-) -> Result<()> {
-    for entry in read_entries(&root.join(directory))? {
-        let name = entry.file_name();
-        let relative = Path::new(directory).join(&name);
-        let path = root.join(&relative);
-        let file_type = entry
-            .file_type()
-            .map_err(|source| SnapshotImportError::InspectEntry { path: path.clone(), source })?;
-        if !file_type.is_file() {
-            return Err(SnapshotImportError::UnknownEntry { path: relative });
-        }
-        let Some(filename) = name.to_str() else {
-            return Err(SnapshotImportError::UnknownEntry { path: relative });
-        };
-        if !filename.ends_with(".md") {
-            return Err(SnapshotImportError::UnknownEntry { path: relative });
-        }
-        let input = read_utf8_file(&path, &relative)?;
-        let record = decode_legacy_record(&relative, &input)
-            .map_err(|source| SnapshotImportError::Record { path: relative.clone(), source })?;
-        files.push(SnapshotFile { path: relative.clone(), content: input.into_bytes() });
-        if records.insert(relative.clone(), record).is_some() {
-            return Err(SnapshotImportError::UnknownEntry { path: relative });
-        }
-    }
-    Ok(())
+#[derive(Clone, Copy)]
+struct Ancestry {
+    spec: Option<SpecId>,
+    plan: Option<PlanId>,
+    phase: Option<PhaseId>,
 }
 
 struct RecordIndex {
@@ -524,11 +286,150 @@ impl RecordIndex {
     }
 }
 
-#[derive(Clone, Copy)]
-struct Ancestry {
-    spec: Option<SpecId>,
-    plan: Option<PlanId>,
-    phase: Option<PhaseId>,
+type Result<T> = std::result::Result<T, SnapshotImportError>;
+
+/// Parse, validate, replace, and canonicalize a workspace using an open database.
+///
+/// Files are parsed and the complete candidate graph is validated before the
+/// database replacement transaction starts.
+pub fn import_graph(root: &Path, worktree_root: &Path, database: &mut Database) -> Result<Vec<SnapshotFile>> {
+    let project = database.project()?;
+    let prepared = prepare_import(root, worktree_root, project)?;
+    apply_prepared(root, prepared, database)
+}
+
+/// Import a workspace while opening the database only after validation.
+///
+/// This entry point supports cloning a project with no local SQLite file. The
+/// initial project ID is the same deterministic ID used by `arcl init`.
+pub fn import_snapshot(root: &Path, worktree_root: &Path, database_path: &Path) -> Result<Vec<SnapshotFile>> {
+    let project = Project::from_parts(
+        ProjectId::parse(DEFAULT_PROJECT_ID).expect("default project ID is canonical"),
+        "Project".to_owned(),
+    )
+    .map_err(|error| SnapshotImportError::Field {
+        path: PathBuf::from("manifest.toml"),
+        field: "project".to_owned(),
+        message: error.to_string(),
+    })?;
+    let prepared = prepare_import(root, worktree_root, project)?;
+    let mut database = Database::open(database_path)?;
+    apply_prepared(root, prepared, &mut database)
+}
+
+fn prepare_import(root: &Path, worktree_root: &Path, project: Project) -> Result<PreparedImport> {
+    let candidate = read_candidate(root)?;
+    let graph = validate_candidate(candidate.records, project, worktree_root)?;
+    let files = project_graph(&graph).map_err(|source| SnapshotImportError::Field {
+        path: PathBuf::from("manifest.toml"),
+        field: "canonical rendering".to_owned(),
+        message: source.to_string(),
+    })?;
+    Ok(PreparedImport { graph, files, observed: candidate.files })
+}
+
+fn apply_prepared(root: &Path, prepared: PreparedImport, database: &mut Database) -> Result<Vec<SnapshotFile>> {
+    let base = database.snapshot_base()?;
+    reject_removed_base_records(&base, &prepared.files)?;
+    let current_files = project_graph(&database.connected_graph()?).map_err(|source| SnapshotImportError::Field {
+        path: PathBuf::from("manifest.toml"),
+        field: "current database projection".to_owned(),
+        message: source.to_string(),
+    })?;
+    reject_removed_snapshot_records(&current_files, &prepared.files)?;
+    reject_divergent_changes(&base, &current_files, &prepared.files)?;
+
+    // Re-check exact bytes before filesystem canonicalization and before the
+    // SQLite replacement transaction starts.
+    export_observed(root, &prepared.files, &prepared.observed)?;
+    let base = prepared
+        .files
+        .iter()
+        .map(|file| SnapshotBaseFile { path: file.path.to_string_lossy().into_owned(), content: file.content.clone() })
+        .collect::<Vec<_>>();
+    database.replace_graph_and_snapshot_base(&prepared.graph, &base)?;
+    Ok(prepared.files)
+}
+
+fn read_candidate(root: &Path) -> Result<CandidateSnapshot> {
+    let entries = read_entries(root)?;
+    let Some(manifest_entry) = entries
+        .iter()
+        .find(|entry| entry.file_name() == OsStr::new("manifest.toml"))
+    else {
+        return Err(SnapshotImportError::MissingManifest { path: root.join("manifest.toml") });
+    };
+    let manifest_path = root.join(manifest_entry.file_name());
+    let manifest_type = manifest_entry
+        .file_type()
+        .map_err(|source| SnapshotImportError::InspectEntry { path: manifest_path.clone(), source })?;
+    if !manifest_type.is_file() {
+        return Err(SnapshotImportError::WrongEntryType { path: PathBuf::from("manifest.toml") });
+    }
+    let manifest_input = read_utf8_file(&manifest_path, Path::new("manifest.toml"))?;
+    decode_manifest(&manifest_input)
+        .map_err(|source| SnapshotImportError::Manifest { path: PathBuf::from("manifest.toml"), source })?;
+    read_candidate_records(root, entries, manifest_input)
+}
+
+fn read_candidate_records(
+    root: &Path, entries: Vec<fs::DirEntry>, manifest_input: String,
+) -> Result<CandidateSnapshot> {
+    let mut records = BTreeMap::new();
+    let mut files = vec![SnapshotFile { path: PathBuf::from("manifest.toml"), content: manifest_input.into_bytes() }];
+    for entry in entries {
+        let name = entry.file_name();
+        if name == OsStr::new("manifest.toml") {
+            continue;
+        }
+        let relative = PathBuf::from(&name);
+        let path = root.join(&name);
+        let file_type = entry
+            .file_type()
+            .map_err(|source| SnapshotImportError::InspectEntry { path: path.clone(), source })?;
+        let Some(directory) = name.to_str() else {
+            return Err(SnapshotImportError::UnknownEntry { path: relative });
+        };
+        if !RECORD_DIRECTORIES.contains(&directory) {
+            return Err(SnapshotImportError::UnknownEntry { path: relative });
+        }
+        if !file_type.is_dir() {
+            return Err(SnapshotImportError::WrongEntryType { path: relative });
+        }
+        read_record_directory(root, directory, &mut records, &mut files)?;
+    }
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(CandidateSnapshot { records, files })
+}
+
+fn read_record_directory(
+    root: &Path, directory: &str, records: &mut BTreeMap<PathBuf, SnapshotRecord>, files: &mut Vec<SnapshotFile>,
+) -> Result<()> {
+    for entry in read_entries(&root.join(directory))? {
+        let name = entry.file_name();
+        let relative = Path::new(directory).join(&name);
+        let path = root.join(&relative);
+        let file_type = entry
+            .file_type()
+            .map_err(|source| SnapshotImportError::InspectEntry { path: path.clone(), source })?;
+        if !file_type.is_file() {
+            return Err(SnapshotImportError::UnknownEntry { path: relative });
+        }
+        let Some(filename) = name.to_str() else {
+            return Err(SnapshotImportError::UnknownEntry { path: relative });
+        };
+        if !filename.ends_with(".md") {
+            return Err(SnapshotImportError::UnknownEntry { path: relative });
+        }
+        let input = read_utf8_file(&path, &relative)?;
+        let record = decode_record(&relative, &input)
+            .map_err(|source| SnapshotImportError::Record { path: relative.clone(), source })?;
+        files.push(SnapshotFile { path: relative.clone(), content: input.into_bytes() });
+        if records.insert(relative.clone(), record).is_some() {
+            return Err(SnapshotImportError::UnknownEntry { path: relative });
+        }
+    }
+    Ok(())
 }
 
 fn validate_candidate(
@@ -1105,7 +1006,7 @@ fn record_id_from_path(path: &Path) -> Option<String> {
     let Component::Normal(directory) = components.next()? else { return None };
     let Component::Normal(filename) = components.next()? else { return None };
     if components.next().is_some()
-        || !CURRENT_DIRECTORIES
+        || !RECORD_DIRECTORIES
             .iter()
             .any(|candidate| directory == OsStr::new(candidate))
     {
@@ -1168,7 +1069,7 @@ mod tests {
             .create_spec("Existing".to_owned(), String::new(), String::new())
             .expect("spec creates");
         let root = tempfile::tempdir().expect("workspace creates");
-        fs::write(root.path().join("manifest.toml"), "format-version = 2\n").expect("manifest writes");
+        fs::write(root.path().join("manifest.toml"), "format-version = 1\n").expect("manifest writes");
         fs::create_dir(root.path().join("plans")).expect("plans directory creates");
         let plan_id = "arcl-pl-01K0B2ZWTX7JX9PH7W5G1S6A9Q";
         fs::write(root.path().join(format!("plans/{plan_id}.md")), format!(

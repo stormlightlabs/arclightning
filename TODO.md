@@ -184,7 +184,7 @@ Acceptance criteria:
 
 - [x] Define and document a new manifest version and record encoding for
       captures, specs, plans, tasks, and notes
-- [x] Import current snapshot records through an explicit migration path
+- [x] Use the connected planning model as snapshot format version 1
 - [x] Render one deterministic file per record and preserve Markdown bodies
       through parse-render-parse round trips
 - [x] Validate the complete candidate graph before mutating the database
