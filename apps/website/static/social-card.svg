@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Arc Lightning</title><desc id="desc">Connected planning for developers and software agents.</desc>
+  <rect width="1200" height="630" fill="#081a30"/>
+  <path d="M790 40 650 290h135L690 590l250-355H790L925 40Z" fill="#f5bd32" opacity=".12"/>
+  <circle cx="120" cy="110" r="42" fill="#f5bd32"/><path d="m128 71-31 49h22l-13 31 41-54h-23l18-26Z" fill="#142033"/>
+  <text x="92" y="265" fill="#78c7ff" font-family="sans-serif" font-size="26" font-weight="700" letter-spacing="3">LOCAL-FIRST PROJECT PLANNING</text>
+  <text x="92" y="365" fill="#f4f8fc" font-family="sans-serif" font-size="78" font-weight="700">Arc Lightning</text>
+  <text x="92" y="438" fill="#b8c8d8" font-family="sans-serif" font-size="34">Turn intent into ready work.</text>
+</svg>

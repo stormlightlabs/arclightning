@@ -7,7 +7,9 @@
     "dev": "vite dev",
     "build": "vite build && pagefind --site build --output-path static/pagefind --quiet && vite build",
     "preview": "vite preview",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "lint": "prettier --check .",
+    "format": "prettier --write ."
   },
   "dependencies": {
     "@arclightning/ui": "workspace:*"
@@ -18,6 +20,10 @@
     "@sveltejs/vite-plugin-svelte": "catalog:",
     "mdsvex": "^0.12.7",
     "pagefind": "^1.5.2",
+    "prettier": "catalog:",
+    "prettier-plugin-svelte": "catalog:",
+    "rehype-slug": "^6.0.0",
+    "shiki": "^3.23.0",
     "svelte": "catalog:",
     "svelte-check": "catalog:",
     "typescript": "catalog:",

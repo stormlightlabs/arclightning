@@ -3,7 +3,23 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#161821" />
+    <meta name="theme-color" content="#f5f8fc" />
+    <script>
+      (() => {
+        let stored = null;
+        try {
+          const value = localStorage.getItem("arcl-theme");
+          if (value === "light" || value === "dark") stored = value;
+        } catch {
+          // Storage can be unavailable in privacy-restricted browsers.
+        }
+        document.documentElement.classList.add("js");
+        if (stored) document.documentElement.dataset.arclTheme = stored;
+        const theme = stored ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+        document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#081a30" : "#f5f8fc");
+      })();
+    </script>
+    <script type="module" src="/search.js"></script>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover"><div style="display: contents">%sveltekit.body%</div></body>
