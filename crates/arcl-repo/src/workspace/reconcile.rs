@@ -31,9 +31,9 @@ pub enum Change {
 pub enum RecordState {
     /// The database and the workspace both match the base.
     Unchanged,
-    /// Only the database changed; exporting brings the workspace up to date.
+    /// The database differs from the base and the workspace matches it.
     DatabaseChanged(Change),
-    /// Only the workspace changed; importing brings the database up to date.
+    /// The workspace differs from the base and the database matches it.
     WorkspaceChanged(Change),
     /// Both sides made the same change; only the base is out of date.
     Converged(Change),
