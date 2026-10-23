@@ -377,18 +377,24 @@ pub(super) fn resolve_ready_filter(args: ReadyArgs) -> CResult<PlanningReadyFilt
     })
 }
 
+/// Builds a plan's subtree: phases in `position` order, then the plan's
+/// phaseless tasks. Tasks under a phase or a parent sort by `position`, then ID.
 fn plan_tree_node(graph: &ConnectedGraph, plan: &Plan) -> CResult<ConnectedTreeNode> {
-    let mut children = graph
+    let mut phases = graph
         .phases
         .iter()
         .filter(|phase| phase.plan_id == plan.id)
+        .collect::<Vec<_>>();
+    phases.sort_by(|left, right| left.position.cmp(&right.position).then_with(|| left.id.cmp(&right.id)));
+    let mut children = phases
+        .into_iter()
         .map(|phase| {
-            let tasks = graph
-                .tasks
-                .iter()
-                .filter(|task| task.phase_id == Some(phase.id) && task.parent_id.is_none())
-                .map(|task| task_tree_node(graph, task, &mut std::collections::HashSet::new()))
-                .collect::<CResult<Vec<_>>>()?;
+            let tasks = positioned_tasks(graph, |task| {
+                task.phase_id == Some(phase.id) && task.parent_id.is_none()
+            })
+            .into_iter()
+            .map(|task| task_tree_node(graph, task, &mut std::collections::HashSet::new()))
+            .collect::<CResult<Vec<_>>>()?;
             Ok(ConnectedTreeNode {
                 kind: "phase",
                 id: phase.id.to_string(),
@@ -399,14 +405,15 @@ fn plan_tree_node(graph: &ConnectedGraph, plan: &Plan) -> CResult<ConnectedTreeN
         })
         .collect::<CResult<Vec<_>>>()?;
     children.extend(
-        graph
-            .tasks
-            .iter()
-            .filter(|task| task.plan_id == Some(plan.id) && task.phase_id.is_none() && task.parent_id.is_none())
-            .map(|task| task_tree_node(graph, task, &mut std::collections::HashSet::new()))
-            .collect::<CResult<Vec<_>>>()?,
+        positioned_tasks(graph, |task| {
+            task.plan_id == Some(plan.id) && task.phase_id.is_none() && task.parent_id.is_none()
+        })
+        .into_iter()
+        .map(|task| task_tree_node(graph, task, &mut std::collections::HashSet::new()))
+        .collect::<CResult<Vec<_>>>()?,
     );
-    children.sort_by(|left, right| left.kind.cmp(right.kind).then_with(|| left.id.cmp(&right.id)));
+    // Stable: keeps the position order within each kind.
+    children.sort_by(|left, right| left.kind.cmp(right.kind));
     Ok(ConnectedTreeNode {
         kind: "plan",
         id: plan.id.to_string(),
@@ -424,14 +431,11 @@ fn task_tree_node(
             DomainError::ParentCycle { task: task.id.to_string(), parent: task.id.to_string() },
         )));
     }
-    let mut children = graph
-        .tasks
-        .iter()
-        .filter(|child| child.parent_id == Some(task.id))
+    let children = positioned_tasks(graph, |child| child.parent_id == Some(task.id))
+        .into_iter()
         .map(|child| task_tree_node(graph, child, path))
         .collect::<CResult<Vec<_>>>()?;
     path.remove(&task.id);
-    children.sort_by(|left, right| left.id.cmp(&right.id));
     Ok(ConnectedTreeNode {
         kind: "task",
         id: task.id.to_string(),
@@ -439,6 +443,16 @@ fn task_tree_node(
         status: task.status.as_str().to_owned(),
         children,
     })
+}
+
+/// Returns the tasks that match `keep`, sorted by `position`, then ID.
+///
+/// The store already loads tasks in that order; sorting here keeps the tree
+/// correct for any graph built another way.
+fn positioned_tasks(graph: &ConnectedGraph, keep: impl Fn(&PlanningTask) -> bool) -> Vec<&PlanningTask> {
+    let mut tasks = graph.tasks.iter().filter(|task| keep(task)).collect::<Vec<_>>();
+    tasks.sort_by(|left, right| left.position.cmp(&right.position).then_with(|| left.id.cmp(&right.id)));
+    tasks
 }
 
 fn find_tree_node<'a>(nodes: &'a [ConnectedTreeNode], id: &str) -> Option<&'a ConnectedTreeNode> {

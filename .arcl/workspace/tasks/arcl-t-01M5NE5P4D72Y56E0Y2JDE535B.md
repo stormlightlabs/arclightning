@@ -5,7 +5,7 @@ title = "T10: Add the MCP server and Arc Lightning skill"
 status = "pending"
 priority = "normal"
 position = 0
-blocked-by = ["arcl-t-01M5NE5P2N1AMT731RJBAZ66YT"]
+blocked-by = ["arcl-t-01M5NE5P2N1AMT731RJBAZ66YT", "arcl-t-01M5NH23GE6N1SXWVK9BHVGP5V"]
 +++
 
 Expose agent operations through typed MCP tools and document the intended

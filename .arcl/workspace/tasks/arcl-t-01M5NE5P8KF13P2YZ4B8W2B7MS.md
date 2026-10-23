@@ -5,7 +5,7 @@ title = "T14: Rebuild the website and documentation shell"
 status = "pending"
 priority = "normal"
 position = 0
-blocked-by = ["arcl-t-01M5NE5P6XHRR4Q84820YACQ07"]
+blocked-by = ["arcl-t-01M5NE5P6XHRR4Q84820YACQ07", "arcl-t-01M5NH1N3R9AX3XZH6XG9ZX1QE"]
 +++
 
 Use the shared UI package for the product website and implement Arc Lightning's

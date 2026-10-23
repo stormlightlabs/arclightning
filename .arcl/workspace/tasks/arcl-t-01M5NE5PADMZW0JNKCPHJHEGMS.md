@@ -5,7 +5,7 @@ title = "T15: Verify the integrated release"
 status = "pending"
 priority = "normal"
 position = 0
-blocked-by = ["arcl-t-01M5NE5P2N1AMT731RJBAZ66YT", "arcl-t-01M5NE5P4D72Y56E0Y2JDE535B", "arcl-t-01M5NE5P6XHRR4Q84820YACQ07", "arcl-t-01M5NE5P8KF13P2YZ4B8W2B7MS"]
+blocked-by = ["arcl-t-01M5NE5P2N1AMT731RJBAZ66YT", "arcl-t-01M5NE5P4D72Y56E0Y2JDE535B", "arcl-t-01M5NE5P6XHRR4Q84820YACQ07", "arcl-t-01M5NE5P8KF13P2YZ4B8W2B7MS", "arcl-t-01M5NH23PWTRC8KBW9CA93AGPK", "arcl-t-01M5NH242P4SSTMJT0T6R62Q21"]
 +++
 
 Close gaps in the specified workflows and prepare one coherent release across

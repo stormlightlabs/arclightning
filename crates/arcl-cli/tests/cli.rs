@@ -849,6 +849,67 @@ fn capture_can_promote_directly_to_a_task_and_invalid_json_writes_structured_std
 }
 
 #[test]
+fn tree_orders_plan_children_by_position_not_id() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let spec = run_json(dir, ["--json", "spec", "create", "Feature"].as_ref());
+    let spec_id = spec["data"]["spec"]["id"].as_str().expect("spec ID");
+    let plan = run_json(dir, ["--json", "plan", "create", "Build", "--spec", spec_id].as_ref());
+    let plan_id = plan["data"]["plan"]["id"].as_str().expect("plan ID").to_owned();
+
+    // Each record is created after the last, so IDs ascend while positions descend.
+    let create_phase = |title: &str, position: &str| {
+        let phase = run_json(
+            dir,
+            [
+                "--json",
+                "plan",
+                "phase",
+                "create",
+                title,
+                "--plan",
+                &plan_id,
+                "--position",
+                position,
+            ]
+            .as_ref(),
+        );
+        phase["data"]["phase"]["id"].as_str().expect("phase ID").to_owned()
+    };
+    let create_task = |title: &str, container: &str, id: &str, position: &str| {
+        let task = run_json(
+            dir,
+            ["--json", "task", "create", title, container, id, "--position", position].as_ref(),
+        );
+        task["data"]["task"]["id"].as_str().expect("task ID").to_owned()
+    };
+    create_task("Loose", "--plan", &plan_id, "0");
+    let third = create_phase("Third", "2");
+    let second = create_phase("Second", "1");
+    let first = create_phase("First", "0");
+    assert!(third < second && second < first, "phase IDs ascend in creation order");
+    create_task("Later", "--phase", &first, "1");
+    let earlier = create_task("Earlier", "--phase", &first, "0");
+    create_task("Sub later", "--parent", &earlier, "1");
+    create_task("Sub earlier", "--parent", &earlier, "0");
+
+    let tree = run_json(dir, ["--json", "tree", &plan_id].as_ref());
+    let titles = |node: &Value| -> Vec<String> {
+        node["children"]
+            .as_array()
+            .expect("children")
+            .iter()
+            .map(|child| child["title"].as_str().expect("title").to_owned())
+            .collect()
+    };
+    let plan_node = &tree["data"]["nodes"][0];
+    assert_eq!(titles(plan_node), ["First", "Second", "Third", "Loose"]);
+    let first_node = &plan_node["children"][0];
+    assert_eq!(titles(first_node), ["Earlier", "Later"]);
+    assert_eq!(titles(&first_node["children"][0]), ["Sub earlier", "Sub later"]);
+}
+
+#[test]
 fn structured_plan_check_diff_apply_and_repeat_are_deterministic() {
     let directory = initialized_directory();
     let spec = run_json(directory.path(), ["--json", "spec", "create", "Feature"].as_ref());
