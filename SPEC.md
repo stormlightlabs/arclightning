@@ -8,9 +8,9 @@ Arc Lightning is a local-first project planning and execution system for
 developers and software agents. It connects specifications, implementation
 plans, executable tasks, and working notes in one project model.
 
-People and agents use the same model through a desktop app, command-line
-interface (CLI), Model Context Protocol (MCP) server, and optional files stored
-with the project. The SQLite database is the operational store. Markdown is the readable form
+People and agents use the same model through a command-line interface (CLI), a
+local web app, a Model Context Protocol (MCP) server, a desktop app, and optional
+files stored with the project. The SQLite database is the operational store. Markdown is the readable form
 for long-form content.
 
 ## Product principles
@@ -18,8 +18,8 @@ for long-form content.
 - Local use works without an account, hosted service, or network connection
 - Git integration is optional. A project can use SQLite alone or keep a
   repository-native projection in sync with the database
-- The CLI, desktop app, and MCP server are peers over the same Rust application
-  operations
+- The CLI, local web app, MCP server, and desktop app are peers over the same
+  Rust application operations
 - Planning documents and execution state belong to one connected model
 - Markdown bodies are readable and editable outside Arc Lightning
 - Readiness, blockers, lifecycle transitions, handoffs, and completion evidence
@@ -40,7 +40,7 @@ A developer can:
 - create a task directly under a project or spec when a plan adds no value
 - model blockers and ask why work is ready or blocked
 - resume work from the latest handoff and inspect completion evidence
-- use the same project from the desktop app and CLI
+- use the same project from the browser, the desktop app, and the CLI
 - give an agent a focused context packet or use Arc Lightning through MCP
 - opt into reviewable project files that can be stored and merged with Git
 
@@ -58,20 +58,23 @@ The product direction is realized when:
 - specs and plans own their Markdown content instead of pointing at documents
   that Arc Lightning cannot edit
 - every supported operation uses the same Rust application layer from the CLI,
-  desktop adapter, and MCP adapter
+  web, desktop, and MCP adapters
 - flexible task placement preserves deterministic readiness and dependency
   rules
+- automations can read why work is blocked and what a completion unblocked as
+  typed data
 - repository-native mode round-trips the complete model and refuses to
   overwrite divergent database and file changes
-- the Tauri app provides inbox, work, planning, and task views
-- the Tauri app and website consume one shared UI package for design tokens and
+- the local web app and the Tauri app provide inbox, work, planning, and task
+  views
+- the web app, Tauri app, and website consume one shared UI package for design tokens and
   reusable Svelte components
 - the documentation follows the Stormlight house style described below
 - human output is concise and machine output is versioned and stable
 - focused tests cover domain rules, storage migrations, adapters, UI behavior,
   and repository synchronization
-- Playwright screenshot tests cover stable desktop, website, and shared UI
-  states in light and dark themes
+- Playwright screenshot tests cover stable web app, desktop, website, and
+  shared UI states in light and dark themes
 
 ## Domain model
 
@@ -142,8 +145,15 @@ Tasks retain:
 - Markdown completion evidence
 
 Readiness is calculated for actionable leaf tasks. A task is ready when it is
-pending, its applicable ancestors and containers permit work, and every direct
-blocker is complete. Notes never affect readiness.
+pending, its applicable ancestors and containers permit work, and every blocker
+on the task and on its ancestor tasks is complete. Notes never affect readiness.
+
+Blocking relationships connect two tasks in the same project and never form a
+cycle. Starting a task requires it to be ready unless a person forces it. A
+cancelled blocker does not complete the relationship; readiness reports it as
+a decision to remove or replace the dependency. Every readiness reason has a
+stable kind and record IDs in machine output, and completing a task reports
+the tasks it made ready.
 
 ### Note
 
@@ -171,11 +181,23 @@ The `arcl` CLI is a primary interface. Its vocabulary uses `capture`,
 `epic`, and `milestone` commands without compatibility aliases.
 
 Read commands support stable JSON. Mutations use the same validation and
-transactions as the desktop app and MCP server.
+transactions as the web app, desktop app, and MCP server.
+
+### Local web app
+
+`arcl serve` runs the planning and execution workflow in the browser. It binds
+to `127.0.0.1` on an ephemeral port by default, prints the URL, and accepts
+`--port` to pin one. Every request needs a per-run token and a matching `Host`
+header, so other local pages cannot drive it.
+
+The server is a thin HTTP adapter over the Rust application operations. The
+Svelte frontend lives in `apps/web`, uses the shared UI package, and provides
+the same four views as the desktop app.
 
 ### Desktop app
 
-The desktop app uses Tauri and a Svelte frontend. Tauri commands are thin
+The desktop app follows the first release. It uses Tauri and a Svelte
+frontend, reusing the web app's views where they apply. Tauri commands are thin
 adapters over Rust application operations and do not duplicate domain rules.
 
 The first complete desktop workflow has four views:
@@ -236,8 +258,10 @@ arclightning/
 |   |-- arcl-store/         # SQLite and migrations
 |   |-- arcl-repo/          # portable files and Git-aware reconciliation
 |   |-- arcl-cli/
-|   `-- arcl-mcp/
+|   |-- arcl-mcp/
+|   `-- arcl-server/        # loopback HTTP adapter for the web app
 |-- apps/
+|   |-- web/                # local web app served by `arcl serve`
 |   |-- desktop/            # Tauri application
 |   `-- website/            # product site and documentation
 |-- packages/
@@ -250,14 +274,14 @@ arclightning/
 This layout is a target, not a requirement to move every file at once. Each
 move must leave the affected interface buildable and tested.
 
-The Rust core must not depend on Tauri, terminal presentation, MCP transport,
-or frontend persistence. The shared UI package must not depend on Tauri APIs or
-website-only routing. Each application supplies those adapters at its
+The Rust core must not depend on Tauri, terminal presentation, MCP or HTTP
+transport, or frontend persistence. The shared UI package must not depend on
+Tauri APIs or website-only routing. Each application supplies those adapters at its
 composition root.
 
 ## Shared UI and visual direction
 
-The Tauri app and website use the shared UI package for:
+The web app, Tauri app, and website use the shared UI package for:
 
 - semantic color, type, spacing, border, shadow, motion, and focus tokens
 - buttons, icon buttons, fields, selectors, dialogs, sheets, menus, tabs,
@@ -330,7 +354,8 @@ The migration must:
 
 The stable behavior boundaries are the Rust application API for domain and
 storage behavior, adapter-level tests for CLI and MCP, component tests for the
-shared UI, and end-to-end tests for desktop and repository synchronization.
+shared UI, and end-to-end tests for the web app, desktop, and repository
+synchronization.
 
 The frontend test stack is:
 
@@ -347,7 +372,7 @@ Svelte implementation details. Server tests use real `Request` and `FormData`
 objects where those interfaces apply.
 
 Screenshot tests supplement behavioral assertions. They cover shared component
-states, the four desktop views, the website landing page, and representative
+states, the four web app and desktop views, the website landing page, and representative
 documentation pages. The screenshot environment pins Chromium, viewport,
 color scheme, fonts, fixture data, and motion preferences. Baseline changes
 require review and are updated only when the visual change is intentional.

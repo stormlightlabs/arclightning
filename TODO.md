@@ -215,6 +215,8 @@ Acceptance criteria:
       state where Git exists
 - [ ] Require an explicit side for destructive recovery and never mutate Git
       refs, the index, remotes, or configuration
+- [ ] Track this repository's own remaining roadmap and tasks in its committed
+      workspace
 
 Verification:
 
@@ -223,12 +225,55 @@ Verification:
 - Exercise external edits, a branch switch, an unresolved merge, dual-side
   divergence, and interrupted export in disposable projects
 
+## T16: Make blocking relationships strict
+
+Make blockers apply through the task hierarchy and to task transitions, so
+automations can trust readiness.
+
+Blocked by: T04
+
+Acceptance criteria:
+
+- [ ] Treat a task as blocked when it or any ancestor task has an unfinished
+      blocker, and name that ancestor in readiness explanations
+- [ ] Refuse `task start` for a task that is not ready, with an explicit force
+      option for people
+- [ ] Report a cancelled blocker as its own readiness reason that asks for the
+      dependency to be removed or replaced
+- [ ] Keep dependency validation the same across the CLI, plan application,
+      and workspace import
+
+Verification:
+
+- `cargo test --workspace --all-features ready`
+- `cargo test --workspace --all-features dependency`
+- Cover inherited blockers, forced and refused starts, and cancelled blockers
+  in tests
+
+## T17: Report readiness and unblocking as data
+
+Give automations typed readiness reasons and the tasks a completion unblocks.
+
+Blocked by: T16
+
+Acceptance criteria:
+
+- [ ] Add a stable `kind` and record IDs to every readiness reason in JSON,
+      alongside the existing human text
+- [ ] Return the tasks that became ready when a task completes
+- [ ] Version the JSON shapes and document them for the MCP server
+
+Verification:
+
+- `cargo test --workspace --all-features cli`
+- Chain completion to newly ready work using JSON output only
+
 ## T10: Add the MCP server and Arc Lightning skill
 
 Expose agent operations through typed MCP tools and document the intended
 planning, context, handoff, and evidence workflow in a project skill.
 
-Blocked by: T06
+Blocked by: T06, T17
 
 Acceptance criteria:
 
@@ -289,12 +334,119 @@ Verification:
 - Review light, dark, narrow, hover, focus, disabled, loading, empty, and error
   states
 
+## T18: Serve the local web app
+
+Serve the Inbox, Work, Planning, and Task workflow in the browser from the
+`arcl` binary.
+
+Blocked by: T11, T17
+
+Acceptance criteria:
+
+- [ ] Add `arcl serve`, bound to `127.0.0.1` on an ephemeral port by default,
+      with `--port` to pin one and the URL printed on start
+- [ ] Require a per-run token and check the `Host` header on every request
+- [ ] Add a thin HTTP adapter over the Rust application layer with the same
+      validation and errors as the CLI
+- [ ] Build Inbox, Work, Planning, and Task views in `apps/web` from the shared
+      UI package, with CodeMirror 6 for Markdown
+- [ ] Show readiness reasons, blockers, handoff, and evidence on the Task view
+- [ ] Support keyboard-only use, narrow windows, light and dark themes, and
+      reduced motion
+- [ ] Add Playwright workflow and screenshot coverage for the four views
+
+Verification:
+
+- `cargo test --workspace --all-features serve`
+- `pnpm --filter @arclightning/web check`
+- `pnpm --filter @arclightning/web test`
+- `pnpm --filter @arclightning/web test:e2e`
+- `pnpm --filter @arclightning/web test:visual`
+- Complete capture -> task and capture -> spec -> plan -> task in the browser
+  and confirm the results through the CLI
+
+## T14: Rebuild the website and documentation shell
+
+Use the shared UI package for the product website and implement Arc Lightning's
+version of the Stormlight documentation house style.
+
+Blocked by: T11, T18
+
+Acceptance criteria:
+
+- [ ] Replace the current documentation presentation only after the new static
+      site builds and all retained content has a destination
+- [ ] Build the landing page with shared UI components and a concrete Arc
+      Lightning workflow example
+- [ ] Add the sticky header, grouped sidebar, breadcrumbs, article layout,
+      on-page table of contents, previous/next links, responsive menu, search,
+      and theme control used by the sibling documentation sites
+- [ ] Implement the documentation shell directly in `apps/website`, using the
+      shared UI package only for reusable primitives
+- [ ] Use IBM Plex Sans, Google Sans, and Google Sans Code with Arc Lightning's
+      navy/sky and gold/amber/yellow theme
+- [ ] Add copy-code, copy-Markdown, syntax highlighting, social metadata,
+      sitemap, `llms.txt`, and static output
+- [ ] Preserve useful documentation URLs or add redirects and update content for
+      the new product vocabulary
+- [ ] Pass keyboard, contrast, responsive, reduced-motion, and no-JavaScript
+      checks for core reading paths
+- [ ] Test interactive Svelte components through Vitest browser mode with the
+      Playwright provider and `vitest-browser-svelte`
+- [ ] Add Playwright screenshot coverage for the landing page and representative
+      documentation pages at fixed mobile and desktop viewports in both themes
+
+Verification:
+
+- `pnpm --filter @arclightning/website check`
+- `pnpm --filter @arclightning/website test`
+- `pnpm --filter @arclightning/website test:browser`
+- `pnpm --filter @arclightning/website test:e2e`
+- `pnpm --filter @arclightning/website test:visual`
+- `pnpm --filter @arclightning/website build`
+- Review Playwright screenshot diffs for mobile and desktop widths in both
+  themes
+
+## T15: Verify the integrated release
+
+Close gaps in the specified workflows and prepare one coherent release across
+the CLI, local web app, MCP server, website, and repository-native mode.
+
+Blocked by: T07, T09, T10, T14, T17, T18
+
+Acceptance criteria:
+
+- [ ] Run one project through capture, specification, planning, ready work,
+      execution, handoff, completion, repository synchronization, and conflict
+      recovery across the supported interfaces
+- [ ] Verify equivalent operations return the same semantic result through CLI,
+      web app, and MCP adapters
+- [ ] Document installation, project migration, web app use, CLI automation,
+      MCP, repository-native collaboration, and recovery
+- [ ] Map every success criterion in `SPEC.md` to automated evidence or a named
+      human review
+- [ ] Review and approve intentional Playwright screenshot changes before
+      updating baselines
+- [ ] Pass all formatting, lint, type, test, build, and documentation checks from
+      a clean checkout
+
+Verification:
+
+- `cargo fmt --all -- --check`
+- `cargo check --workspace --all-targets --all-features`
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+- `cargo test --workspace --all-features`
+- `pnpm -r check`
+- `pnpm -r test`
+- `pnpm -r build`
+
 ## T12: Build the desktop shell and project inbox
 
-Create the Tauri application, connect it to Rust application operations, and
-deliver project selection plus capture triage.
+After the first release, create the Tauri application, connect it to Rust
+application operations, and deliver project selection plus capture triage. Reuse
+the web app's views where they apply.
 
-Blocked by: T01, T03, T06, T11
+Blocked by: T15, T18
 
 Acceptance criteria:
 
@@ -350,78 +502,3 @@ Verification:
 - `pnpm --filter @arclightning/desktop test:e2e`
 - `pnpm --filter @arclightning/desktop test:visual`
 - Run Playwright flows for planning, blockers, handoff, and completion
-
-## T14: Rebuild the website and documentation shell
-
-Use the shared UI package for the product website and implement Arc Lightning's
-version of the Stormlight documentation house style.
-
-Blocked by: T11
-
-Acceptance criteria:
-
-- [ ] Replace the current documentation presentation only after the new static
-      site builds and all retained content has a destination
-- [ ] Build the landing page with shared UI components and a concrete Arc
-      Lightning workflow example
-- [ ] Add the sticky header, grouped sidebar, breadcrumbs, article layout,
-      on-page table of contents, previous/next links, responsive menu, search,
-      and theme control used by the sibling documentation sites
-- [ ] Implement the documentation shell directly in `apps/website`, using the
-      shared UI package only for reusable primitives
-- [ ] Use IBM Plex Sans, Google Sans, and Google Sans Code with Arc Lightning's
-      navy/sky and gold/amber/yellow theme
-- [ ] Add copy-code, copy-Markdown, syntax highlighting, social metadata,
-      sitemap, `llms.txt`, and static output
-- [ ] Preserve useful documentation URLs or add redirects and update content for
-      the new product vocabulary
-- [ ] Pass keyboard, contrast, responsive, reduced-motion, and no-JavaScript
-      checks for core reading paths
-- [ ] Test interactive Svelte components through Vitest browser mode with the
-      Playwright provider and `vitest-browser-svelte`
-- [ ] Add Playwright screenshot coverage for the landing page and representative
-      documentation pages at fixed mobile and desktop viewports in both themes
-
-Verification:
-
-- `pnpm --filter @arclightning/website check`
-- `pnpm --filter @arclightning/website test`
-- `pnpm --filter @arclightning/website test:browser`
-- `pnpm --filter @arclightning/website test:e2e`
-- `pnpm --filter @arclightning/website test:visual`
-- `pnpm --filter @arclightning/website build`
-- Review Playwright screenshot diffs for mobile and desktop widths in both
-  themes
-
-## T15: Verify the integrated release
-
-Close gaps in the specified workflows and prepare one coherent release across
-the CLI, desktop app, MCP server, website, and repository-native mode.
-
-Blocked by: T07, T09, T10, T13, T14
-
-Acceptance criteria:
-
-- [ ] Run one project through capture, specification, planning, ready work,
-      execution, handoff, completion, repository synchronization, and conflict
-      recovery across the supported interfaces
-- [ ] Verify equivalent operations return the same semantic result through CLI,
-      desktop, and MCP adapters
-- [ ] Document installation, project migration, desktop use, CLI automation,
-      MCP, repository-native collaboration, and recovery
-- [ ] Map every success criterion in `SPEC.md` to automated evidence or a named
-      human review
-- [ ] Review and approve intentional Playwright screenshot changes before
-      updating baselines
-- [ ] Pass all formatting, lint, type, test, build, and documentation checks from
-      a clean checkout
-
-Verification:
-
-- `cargo fmt --all -- --check`
-- `cargo check --workspace --all-targets --all-features`
-- `cargo clippy --workspace --all-targets --all-features -- -D warnings`
-- `cargo test --workspace --all-features`
-- `pnpm -r check`
-- `pnpm -r test`
-- `pnpm -r build`
