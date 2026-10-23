@@ -148,3 +148,25 @@ Sync after pulling workspace changes and before committing local database
 changes. If the database and the workspace changed the same file differently
 since the last sync, sync and import report a conflict instead of choosing one
 version. No partial database writes occur when either fails.
+
+## Resolve divergent changes
+
+When sync stops on files both sides changed, run `arcl workspace status` to see
+them, decide which version to keep, and name the files:
+
+```sh
+arcl workspace resolve --keep workspace captures/arcl-c-01....md
+arcl workspace resolve --keep database captures/arcl-c-01....md
+```
+
+`--keep workspace` imports the file and replaces the database's version.
+`--keep database` writes the database's version over the file. Either way the
+other version is lost, so copy anything you still need first. Resolve then syncs
+every other change. It stops without writing if another file still diverges, if
+a named file has nothing to resolve, or if Git reports a workspace file as
+unmerged.
+
+A record file removed from the workspace can be resolved with
+`--keep database`, which writes it back. The workspace cannot win a removal,
+because records are never deleted; close a record through its status instead.
+Resolve never changes Git refs, the index, remotes or configuration.

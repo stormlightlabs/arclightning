@@ -337,6 +337,68 @@ fn workspace_status_reports_changes_head_and_unresolved_merges() {
 }
 
 #[test]
+fn workspace_resolve_keeps_the_chosen_side_of_a_divergent_file() {
+    let directory = tempdir().expect("temporary directory can be created");
+    run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
+    let capture = run_json(
+        directory.path(),
+        ["--json", "capture", "create", "Resolve idea", "--body", "First body"].as_ref(),
+    );
+    let capture_id = capture["data"]["capture"]["id"].as_str().expect("capture ID");
+    let workspace = |args: &[&str]| {
+        arcl_in(directory.path())
+            .arg("workspace")
+            .args(args)
+            .output()
+            .expect("workspace command runs")
+    };
+    assert!(workspace(&["sync"]).status.success());
+
+    let record = format!("captures/{capture_id}.md");
+    let record_path = directory.path().join(".arcl/workspace").join(&record);
+    let diverge = |file_body: &str, database_body: &str| {
+        let content = fs::read_to_string(&record_path).expect("record reads");
+        let current = run_json(directory.path(), ["--json", "capture", "show", capture_id].as_ref());
+        let body = current["data"]["capture"]["body"].as_str().expect("body").to_owned();
+        fs::write(&record_path, content.replace(&body, file_body)).expect("record writes");
+        run_json(
+            directory.path(),
+            ["--json", "capture", "update", capture_id, "--body", database_body].as_ref(),
+        );
+    };
+
+    diverge("File wins", "Database loses");
+    assert_eq!(workspace(&["sync"]).status.code(), Some(4));
+    let resolved = workspace(&["resolve", "--keep", "workspace", &record]);
+    assert!(
+        resolved.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&resolved.stderr)
+    );
+    let shown = run_json(directory.path(), ["--json", "capture", "show", capture_id].as_ref());
+    assert_eq!(shown["data"]["capture"]["body"], "File wins");
+
+    diverge("File loses", "Database wins");
+    let resolved = workspace(&["resolve", "--keep", "database", &record]);
+    assert!(
+        resolved.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&resolved.stderr)
+    );
+    assert!(
+        fs::read_to_string(&record_path)
+            .expect("record reads")
+            .contains("Database wins")
+    );
+    assert!(workspace(&["sync"]).status.success());
+
+    let nothing = workspace(&["resolve", "--keep", "database", &record]);
+    assert_eq!(nothing.status.code(), Some(3));
+    let missing_side = workspace(&["resolve", &record]);
+    assert_eq!(missing_side.status.code(), Some(2));
+}
+
+#[test]
 fn capture_spec_plan_task_workflow_round_trips_through_json() {
     let directory = initialized_directory();
     let capture = run_json(

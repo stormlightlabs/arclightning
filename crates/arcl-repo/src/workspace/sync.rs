@@ -67,6 +67,11 @@ pub enum WorkspaceSyncError {
         list_paths(paths)
     )]
     Divergent { paths: Vec<PathBuf> },
+    /// A path named for resolution has nothing to resolve.
+    #[error(
+        "workspace file `{path}` has nothing to resolve; resolve takes files the database and the workspace changed differently, or a record file removed from the workspace"
+    )]
+    NothingToResolve { path: PathBuf },
     /// One side removed a file the stored base holds.
     #[error(
         "workspace file `{path}` was removed from the {side}; the workspace does not support hard deletion{}",
@@ -101,7 +106,7 @@ impl WorkspaceSyncError {
             | Self::Divergent { .. }
             | Self::Export(WorkspaceExportError::Conflict { .. })
             | Self::Storage(StorageError::ChangedSinceRead) => 4,
-            Self::Removed { .. } => 3,
+            Self::Removed { .. } | Self::NothingToResolve { .. } => 3,
             Self::Import(error) => error.exit_code(),
             Self::Export(_) | Self::Storage(_) => 1,
         }
@@ -140,6 +145,27 @@ type Result<T> = std::result::Result<T, WorkspaceSyncError>;
 pub fn sync_workspace(
     root: &Path, worktree_root: &Path, database: &mut Database, vcs: Option<&dyn Vcs>,
 ) -> Result<SyncOutcome> {
+    run_sync(root, worktree_root, database, vcs, &BTreeMap::new())
+}
+
+/// Resolve `paths` by keeping one side's version, then sync everything else.
+///
+/// Each path must be one the database and the workspace changed differently,
+/// or a record file removed from the workspace. Keeping the database writes
+/// its version to the workspace; keeping the workspace imports the file. The
+/// workspace cannot win a removal, since records are never hard deleted.
+/// Other divergent paths still stop the sync, and nothing is written then.
+pub fn resolve_workspace(
+    root: &Path, worktree_root: &Path, database: &mut Database, vcs: Option<&dyn Vcs>, paths: &[PathBuf], keep: Side,
+) -> Result<SyncOutcome> {
+    let choices = paths.iter().map(|path| (path.clone(), keep)).collect();
+    run_sync(root, worktree_root, database, vcs, &choices)
+}
+
+fn run_sync(
+    root: &Path, worktree_root: &Path, database: &mut Database, vcs: Option<&dyn Vcs>,
+    choices: &BTreeMap<PathBuf, Side>,
+) -> Result<SyncOutcome> {
     reject_unmerged(root, vcs)?;
     let read = database.data_version()?;
     let base = database.workspace_base()?;
@@ -147,8 +173,21 @@ pub fn sync_workspace(
     let candidate = read_candidate(root)?;
     let comparison = compare(&base, &database_files, &candidate.files);
 
+    for path in choices.keys() {
+        let resolvable = comparison.records.iter().any(|record| {
+            &record.path == path
+                && matches!(
+                    record.state,
+                    RecordState::Divergent { .. } | RecordState::WorkspaceChanged(Change::Removed)
+                )
+        });
+        if !resolvable {
+            return Err(WorkspaceSyncError::NothingToResolve { path: path.clone() });
+        }
+    }
     let divergent = comparison
         .divergent()
+        .filter(|record| !choices.contains_key(&record.path))
         .map(|record| record.path.clone())
         .collect::<Vec<_>>();
     if !divergent.is_empty() {
@@ -166,6 +205,19 @@ pub fn sync_workspace(
         .collect::<BTreeMap<_, _>>();
     let mut outcome = SyncOutcome::default();
     for record in comparison.records {
+        if let Some(keep) = choices.get(&record.path) {
+            match (keep, workspace.get(&record.path)) {
+                (Side::Database, _) => outcome.exported.push(record.path),
+                (Side::Workspace, Some(content)) => {
+                    merged.insert(record.path.clone(), (*content).clone());
+                    outcome.imported.push(record.path);
+                }
+                (Side::Workspace, None) => {
+                    return Err(WorkspaceSyncError::Removed { path: record.path, side: Side::Workspace });
+                }
+            }
+            continue;
+        }
         match record.state {
             RecordState::Unchanged => {}
             RecordState::DatabaseChanged(Change::Removed) => {
@@ -283,6 +335,37 @@ mod tests {
         fn read(&self, relative: &Path) -> String {
             fs::read_to_string(self.root.path().join(relative)).expect("record reads")
         }
+
+        /// Edit the synced capture differently in the workspace and the database.
+        fn diverge_capture(&mut self) -> PathBuf {
+            let capture = self.path_of("captures");
+            self.edit(&capture, "Capture body", "Edited in the workspace");
+            let id = self.database.connected_graph().expect("graph loads").captures[0].id;
+            self.database
+                .update_capture(
+                    id,
+                    arcl_store::CaptureUpdate { title: None, body: Some("Edited in the database".to_owned()) },
+                )
+                .expect("capture updates");
+            capture
+        }
+
+        fn resolve(&mut self, paths: &[PathBuf], keep: Side) -> Result<SyncOutcome> {
+            resolve_workspace(
+                self.root.path(),
+                self.root.path(),
+                &mut self.database,
+                None,
+                paths,
+                keep,
+            )
+        }
+
+        fn capture_body(&self) -> String {
+            self.database.connected_graph().expect("graph loads").captures[0]
+                .body
+                .clone()
+        }
     }
 
     #[test]
@@ -340,6 +423,96 @@ mod tests {
         assert_eq!(graph.specs[0].body, "Edited in the workspace");
         assert_eq!(graph.notes[0].id, note.id);
         assert!(project.read(&note_path).contains("Written in the database"));
+    }
+
+    #[test]
+    fn resolving_with_the_database_writes_its_version_to_the_workspace() {
+        let mut project = Project::synced();
+        let capture = project.diverge_capture();
+
+        let outcome = project
+            .resolve(std::slice::from_ref(&capture), Side::Database)
+            .expect("resolve succeeds");
+        assert_eq!(outcome.exported, std::slice::from_ref(&capture));
+        assert!(project.read(&capture).contains("Edited in the database"));
+        assert_eq!(project.capture_body(), "Edited in the database");
+        assert!(project.sync().expect("next sync succeeds").is_empty());
+    }
+
+    #[test]
+    fn resolving_with_the_workspace_imports_its_version() {
+        let mut project = Project::synced();
+        let capture = project.diverge_capture();
+
+        let outcome = project
+            .resolve(std::slice::from_ref(&capture), Side::Workspace)
+            .expect("resolve succeeds");
+        assert_eq!(outcome.imported, std::slice::from_ref(&capture));
+        assert_eq!(project.capture_body(), "Edited in the workspace");
+        assert!(project.read(&capture).contains("Edited in the workspace"));
+        assert!(project.sync().expect("next sync succeeds").is_empty());
+    }
+
+    #[test]
+    fn resolving_a_removed_file_with_the_database_writes_it_back() {
+        let mut project = Project::synced();
+        let capture = project.path_of("captures");
+        fs::remove_file(project.root.path().join(&capture)).expect("record removes");
+
+        let error = project
+            .resolve(std::slice::from_ref(&capture), Side::Workspace)
+            .expect_err("the workspace cannot win a removal");
+        assert!(matches!(
+            error,
+            WorkspaceSyncError::Removed { side: Side::Workspace, .. }
+        ));
+        assert!(!project.root.path().join(&capture).exists());
+
+        project
+            .resolve(std::slice::from_ref(&capture), Side::Database)
+            .expect("resolve succeeds");
+        assert!(project.read(&capture).contains("Capture body"));
+        assert!(project.sync().expect("next sync succeeds").is_empty());
+    }
+
+    #[test]
+    fn resolve_refuses_a_path_with_nothing_to_resolve() {
+        let mut project = Project::synced();
+        let spec = project.path_of("specs");
+        project.edit(&spec, "Spec body", "Edited in the workspace");
+        let base = project.database.workspace_base().expect("base loads");
+
+        let error = project
+            .resolve(std::slice::from_ref(&spec), Side::Database)
+            .expect_err("a one-sided change has nothing to resolve");
+        assert!(matches!(&error, WorkspaceSyncError::NothingToResolve { path } if path == &spec));
+        assert_eq!(error.exit_code(), 3);
+        assert!(project.read(&spec).contains("Edited in the workspace"));
+        assert_eq!(project.database.workspace_base().expect("base loads"), base);
+    }
+
+    #[test]
+    fn other_divergent_paths_still_stop_a_resolve() {
+        let mut project = Project::synced();
+        let capture = project.diverge_capture();
+        let spec = project.path_of("specs");
+        project.edit(&spec, "Spec body", "Spec in the workspace");
+        let id = project.database.connected_graph().expect("graph loads").specs[0].id;
+        project
+            .database
+            .update_spec(
+                id,
+                arcl_store::SpecUpdate { body: Some("Spec in the database".to_owned()), ..Default::default() },
+            )
+            .expect("spec updates");
+
+        let error = project
+            .resolve(std::slice::from_ref(&capture), Side::Database)
+            .expect_err("the spec is still divergent");
+        assert!(
+            matches!(&error, WorkspaceSyncError::Divergent { paths } if paths.as_slice() == std::slice::from_ref(&spec))
+        );
+        assert!(project.read(&capture).contains("Edited in the workspace"));
     }
 
     #[test]
