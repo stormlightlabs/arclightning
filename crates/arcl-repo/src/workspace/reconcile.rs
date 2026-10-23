@@ -12,11 +12,13 @@ use std::{
 };
 
 use arcl_store::WorkspaceBaseFile;
+use serde::Serialize;
 
 use super::WorkspaceFile;
 
 /// How one side's copy of a path differs from the stored base.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Change {
     /// The path is absent from the base and present on this side.
     Added,

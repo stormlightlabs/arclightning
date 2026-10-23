@@ -41,6 +41,7 @@ repositories. Re-running initialization preserves existing project state.
 | `arcl workspace export` | Write the local database state to the configured workspace. |
 | `arcl workspace import` | Validate the workspace and rebuild the local database.      |
 | `arcl workspace sync`   | Carry changes made on one side to the other.                |
+| `arcl workspace status` | Show what changed since the last sync, without writing.     |
 
 Workspace commands require the workspace to be enabled with
 `arcl init --workspace`. A concurrent file change, or a file the database and

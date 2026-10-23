@@ -214,6 +214,128 @@ fn workspace_sync_carries_one_sided_changes_and_refuses_divergence() {
     );
 }
 
+fn git(directory: &Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "init.defaultBranch=main",
+        ])
+        .args(args)
+        .current_dir(directory)
+        .output()
+        .expect("git runs");
+    assert!(
+        output.status.success(),
+        "git {}: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn workspace_status_reports_changes_head_and_unresolved_merges() {
+    let directory = tempdir().expect("temporary directory can be created");
+    git(directory.path(), &["init", "-q"]);
+    run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
+    let unborn = run_json(directory.path(), ["--json", "workspace", "status"].as_ref());
+    assert_eq!(unborn["data"]["head"]["kind"], "unborn");
+    assert_eq!(unborn["data"]["head"]["branch"], "main");
+
+    let capture = run_json(
+        directory.path(),
+        ["--json", "capture", "create", "Status idea", "--body", "First body"].as_ref(),
+    );
+    let capture_id = capture["data"]["capture"]["id"].as_str().expect("capture ID");
+    let record = format!("captures/{capture_id}.md");
+    let pending = run_json(directory.path(), ["--json", "workspace", "status"].as_ref());
+    assert_eq!(pending["data"]["records"][0]["path"], record);
+    assert_eq!(pending["data"]["records"][0]["state"], "database-changed");
+    assert_eq!(pending["data"]["records"][0]["database"], "added");
+
+    let synced = arcl_in(directory.path())
+        .args(["workspace", "sync"])
+        .output()
+        .expect("sync runs");
+    assert!(
+        synced.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&synced.stderr)
+    );
+    let uncommitted = run_json(directory.path(), ["--json", "workspace", "status"].as_ref());
+    assert_eq!(uncommitted["data"]["records"], Value::Array(Vec::new()));
+    let git_changes = uncommitted["data"]["git_changes"].as_array().expect("git changes");
+    assert!(
+        git_changes
+            .iter()
+            .any(|change| change["path"] == record.as_str() && change["git"] == "untracked"),
+        "git changes: {git_changes:?}"
+    );
+    git(directory.path(), &["add", "."]);
+    git(directory.path(), &["commit", "-q", "-m", "base"]);
+    let clean = run_json(directory.path(), ["--json", "workspace", "status"].as_ref());
+    assert_eq!(clean["data"]["head"]["kind"], "branch");
+    assert_eq!(clean["data"]["records"], Value::Array(Vec::new()));
+    assert_eq!(clean["data"]["git_changes"], Value::Array(Vec::new()));
+
+    git(directory.path(), &["checkout", "-q", "--detach"]);
+    let detached = run_json(directory.path(), ["--json", "workspace", "status"].as_ref());
+    assert_eq!(detached["data"]["head"]["kind"], "detached");
+    git(directory.path(), &["checkout", "-q", "main"]);
+
+    let record_path = directory.path().join(".arcl/workspace").join(&record);
+    let base = fs::read_to_string(&record_path).expect("record reads");
+    git(directory.path(), &["checkout", "-q", "-b", "other"]);
+    fs::write(&record_path, base.replace("First body", "Other body")).expect("record writes");
+    git(directory.path(), &["commit", "-q", "-am", "other"]);
+    git(directory.path(), &["checkout", "-q", "main"]);
+    fs::write(&record_path, base.replace("First body", "Main body")).expect("record writes");
+    git(directory.path(), &["commit", "-q", "-am", "main"]);
+    let merge = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "merge",
+            "-q",
+            "other",
+        ])
+        .current_dir(directory.path())
+        .output()
+        .expect("git merge runs");
+    assert!(!merge.status.success(), "the merge should conflict");
+
+    let conflicted = run_json(directory.path(), ["--json", "workspace", "status"].as_ref());
+    assert_eq!(conflicted["data"]["unmerged"][0], record);
+    assert_eq!(conflicted["data"]["conflict_markers"][0], record);
+    assert_eq!(conflicted["data"]["records"][0]["git"], "conflicted");
+
+    let human = arcl_in(directory.path())
+        .args(["--color", "never", "workspace", "status"])
+        .output()
+        .expect("status runs");
+    let text = String::from_utf8_lossy(&human.stdout);
+    assert!(text.contains("Unmerged in Git:"), "status: {text}");
+    assert!(text.contains("Sync will stop"), "status: {text}");
+
+    let refused = arcl_in(directory.path())
+        .args(["workspace", "sync"])
+        .output()
+        .expect("sync runs");
+    assert_eq!(refused.status.code(), Some(4));
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(
+        stderr.contains("unmerged in Git") && stderr.contains(&record),
+        "stderr: {stderr}"
+    );
+    let after = run_json(directory.path(), ["--json", "capture", "show", capture_id].as_ref());
+    assert_eq!(after["data"]["capture"]["body"], "First body");
+}
+
 #[test]
 fn capture_spec_plan_task_workflow_round_trips_through_json() {
     let directory = initialized_directory();

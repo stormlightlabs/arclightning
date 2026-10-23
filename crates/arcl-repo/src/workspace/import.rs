@@ -12,12 +12,13 @@ use arcl_store::{ConnectedGraph, Database, StorageError, WorkspaceBaseFile};
 
 use super::{
     CaptureRecord, NoteRecord, PhaseRecord, PlanRecord, ReleaseRecord, SpecRecord, TaskRecord, WorkspaceError,
-    WorkspaceFile, WorkspaceRecord, WorkspaceReference, decode_manifest, decode_record,
+    WorkspaceFile, WorkspaceRecord, WorkspaceReference, decode_manifest, decode_record, list_paths,
 };
 use super::{export::export_observed, export::project_graph};
+use crate::vcs::{PathState, Vcs, VcsError};
 
 const DEFAULT_PROJECT_ID: &str = "arcl-pj-00000000000000000000000000";
-const RECORD_DIRECTORIES: &[&str] = &["captures", "releases", "specs", "plans", "phases", "tasks", "notes"];
+pub(super) const RECORD_DIRECTORIES: &[&str] = &["captures", "releases", "specs", "plans", "phases", "tasks", "notes"];
 
 /// A validation or I/O failure raised while importing a complete workspace.
 #[derive(Debug, Error)]
@@ -28,6 +29,15 @@ pub enum WorkspaceImportError {
     /// A directory entry could not be inspected.
     #[error("could not inspect workspace entry `{path}`: {source}")]
     InspectEntry { path: PathBuf, source: io::Error },
+    /// Git reports these workspace files as unmerged.
+    #[error(
+        "workspace files are unmerged in Git: {}; finish the merge, then run the command again",
+        list_paths(paths)
+    )]
+    Unmerged { paths: Vec<PathBuf> },
+    /// Git state could not be read.
+    #[error(transparent)]
+    Vcs(#[from] VcsError),
     /// The required manifest was not present.
     #[error("workspace manifest `{path}` is missing")]
     MissingManifest { path: PathBuf },
@@ -81,7 +91,7 @@ impl WorkspaceImportError {
     pub const fn exit_code(&self) -> u8 {
         match self {
             Self::Storage(StorageError::ChangedSinceRead) => 4,
-            Self::Storage(_) | Self::ReadDirectory { .. } | Self::InspectEntry { .. } => 1,
+            Self::Storage(_) | Self::Vcs(_) | Self::ReadDirectory { .. } | Self::InspectEntry { .. } => 1,
             Self::Export(super::WorkspaceExportError::Conflict { .. }) => 4,
             Self::Export(_) => 1,
             Self::MissingManifest { .. }
@@ -93,7 +103,7 @@ impl WorkspaceImportError {
             | Self::Field { .. }
             | Self::Relationship { .. }
             | Self::ExistingRecordRemoved { .. } => 3,
-            Self::Conflict { .. } => 4,
+            Self::Conflict { .. } | Self::Unmerged { .. } => 4,
         }
     }
 }
@@ -295,18 +305,24 @@ type Result<T> = std::result::Result<T, WorkspaceImportError>;
 /// Parse, validate, replace, and canonicalize a workspace using an open database.
 ///
 /// Files are parsed and the complete candidate graph is validated before the
-/// database replacement transaction starts.
-pub fn import_graph(root: &Path, worktree_root: &Path, database: &mut Database) -> Result<Vec<WorkspaceFile>> {
+/// database replacement transaction starts. Pass `vcs` when the project has a
+/// Git worktree; the import refuses files Git reports as unmerged.
+pub fn import_graph(
+    root: &Path, worktree_root: &Path, database: &mut Database, vcs: Option<&dyn Vcs>,
+) -> Result<Vec<WorkspaceFile>> {
     let project = database.project()?;
-    let prepared = prepare_import(root, worktree_root, project)?;
+    let prepared = prepare_import(root, worktree_root, project, vcs)?;
     apply_prepared(root, prepared, database)
 }
 
 /// Import a workspace while opening the database only after validation.
 ///
 /// This entry point supports cloning a project with no local SQLite file. The
-/// initial project ID is the same deterministic ID used by `arcl init`.
-pub fn import_workspace(root: &Path, worktree_root: &Path, database_path: &Path) -> Result<Vec<WorkspaceFile>> {
+/// initial project ID is the same deterministic ID used by `arcl init`. Pass
+/// `vcs` as for [`import_graph`].
+pub fn import_workspace(
+    root: &Path, worktree_root: &Path, database_path: &Path, vcs: Option<&dyn Vcs>,
+) -> Result<Vec<WorkspaceFile>> {
     let project = Project::from_parts(
         ProjectId::parse(DEFAULT_PROJECT_ID).expect("default project ID is canonical"),
         "Project".to_owned(),
@@ -316,12 +332,15 @@ pub fn import_workspace(root: &Path, worktree_root: &Path, database_path: &Path)
         field: "project".to_owned(),
         message: error.to_string(),
     })?;
-    let prepared = prepare_import(root, worktree_root, project)?;
+    let prepared = prepare_import(root, worktree_root, project, vcs)?;
     let mut database = Database::open(database_path)?;
     apply_prepared(root, prepared, &mut database)
 }
 
-fn prepare_import(root: &Path, worktree_root: &Path, project: Project) -> Result<PreparedImport> {
+fn prepare_import(
+    root: &Path, worktree_root: &Path, project: Project, vcs: Option<&dyn Vcs>,
+) -> Result<PreparedImport> {
+    reject_unmerged(root, vcs)?;
     let candidate = read_candidate(root)?;
     let graph = validate_candidate(candidate.records, project, worktree_root)?;
     let files = project_graph(&graph).map_err(|source| WorkspaceImportError::Field {
@@ -356,6 +375,19 @@ fn apply_prepared(root: &Path, prepared: PreparedImport, database: &mut Database
         .collect::<Vec<_>>();
     database.replace_graph_and_workspace_base(&prepared.graph, &base, read)?;
     Ok(prepared.files)
+}
+
+/// Refuse the workspace at `root` when Git reports any of its paths as
+/// unmerged. Without `vcs` there is no Git state to check.
+pub(super) fn reject_unmerged(root: &Path, vcs: Option<&dyn Vcs>) -> Result<()> {
+    let Some(vcs) = vcs else { return Ok(()) };
+    let paths = vcs
+        .changed_paths(root)?
+        .into_iter()
+        .filter(|(_, state)| *state == PathState::Conflicted)
+        .map(|(path, _)| path)
+        .collect::<Vec<_>>();
+    if paths.is_empty() { Ok(()) } else { Err(WorkspaceImportError::Unmerged { paths }) }
 }
 
 pub(super) fn read_candidate(root: &Path) -> Result<CandidateWorkspace> {
@@ -1029,6 +1061,7 @@ fn record_id_from_path(path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vcs::FakeVcs;
     use crate::workspace::export::export_graph;
     use arcl_core::domain::TaskPriority;
     use arcl_store::PlanningTaskCreate;
@@ -1060,7 +1093,7 @@ mod tests {
         export_graph(root.path(), &source.connected_graph().expect("graph loads")).expect("export succeeds");
 
         let mut destination = Database::open_in_memory().expect("database opens");
-        import_graph(root.path(), root.path(), &mut destination).expect("import succeeds");
+        import_graph(root.path(), root.path(), &mut destination, None).expect("import succeeds");
         let graph = destination.connected_graph().expect("graph loads");
         assert_eq!(graph.specs[0].body, "Spec body");
         assert_eq!(graph.plans[0].body, "Plan body");
@@ -1082,8 +1115,57 @@ mod tests {
         fs::write(root.path().join(format!("plans/{plan_id}.md")), format!(
             "+++\nid = \"{plan_id}\"\nspec = \"arcl-s-01K0B2ZWTX7JX9PH7W5G1S6AR\"\ntitle = \"Plan\"\nstatus = \"open\"\n+++\n"
         )).expect("plan writes");
-        let error = import_graph(root.path(), root.path(), &mut database).expect_err("missing spec rejects");
+        let error = import_graph(root.path(), root.path(), &mut database, None).expect_err("missing spec rejects");
         assert!(error.to_string().contains("spec"));
         assert!(database.spec(existing.id).expect("spec reads").is_some());
+    }
+
+    /// Export one capture whose body is `body`, and return the workspace
+    /// and the capture's path.
+    fn exported_capture(body: &str) -> (tempfile::TempDir, PathBuf) {
+        let mut source = Database::open_in_memory().expect("database opens");
+        source
+            .create_capture("Capture".to_owned(), body.to_owned())
+            .expect("capture creates");
+        let root = tempfile::tempdir().expect("workspace creates");
+        let files =
+            export_graph(root.path(), &source.connected_graph().expect("graph loads")).expect("export succeeds");
+        let capture = files
+            .iter()
+            .map(|file| file.path.clone())
+            .find(|path| path.starts_with("captures"))
+            .expect("capture exported");
+        (root, capture)
+    }
+
+    #[test]
+    fn unmerged_files_refuse_the_import() {
+        let (root, capture) = exported_capture("Capture body");
+        let vcs = FakeVcs::unmerged(&[&capture]);
+
+        let mut destination = Database::open_in_memory().expect("database opens");
+        let error =
+            import_graph(root.path(), root.path(), &mut destination, Some(&vcs)).expect_err("unmerged files refuse");
+        assert!(
+            matches!(&error, WorkspaceImportError::Unmerged { paths } if paths.as_slice() == std::slice::from_ref(&capture)),
+            "{error:?}"
+        );
+        assert_eq!(error.exit_code(), 4);
+        assert!(error.to_string().contains("unmerged in Git"));
+        assert!(destination.connected_graph().expect("graph loads").captures.is_empty());
+    }
+
+    #[test]
+    fn a_conflict_example_in_a_body_imports() {
+        let body = "```text\n<<<<<<< HEAD\nOurs\n=======\nTheirs\n>>>>>>> other\n```";
+        let (root, _) = exported_capture(body);
+        let vcs = FakeVcs { changed: Vec::new() };
+
+        let mut destination = Database::open_in_memory().expect("database opens");
+        import_graph(root.path(), root.path(), &mut destination, Some(&vcs)).expect("import succeeds");
+        assert_eq!(
+            destination.connected_graph().expect("graph loads").captures[0].body,
+            body
+        );
     }
 }

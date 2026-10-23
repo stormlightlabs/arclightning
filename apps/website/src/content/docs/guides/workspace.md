@@ -37,12 +37,33 @@ sides changed differently stops the sync with status code `4` and the paths
 involved, and nothing is written. A record written by another `arcl` command
 while sync runs also stops it with status code `4`; run sync again.
 
+In a Git worktree, a file Git reports as unmerged stops sync and import with
+status code `4` and the paths involved, and nothing is written. Finish the
+merge, then run the command again. Sync and import read Git's state, not the
+file text, so a record body can show a sample conflict.
+
 Switching to a branch that lacks records synced elsewhere stops sync with status
 code `3`, since sync does not delete records. Run `arcl workspace export` to
 write those records back, then run sync again.
 
 Sync writes workspace files before it updates the database. If a sync or an
 export stops partway, the next sync finishes the work.
+
+## Check before you sync
+
+Status shows what a sync would do without writing anything:
+
+```sh
+arcl workspace status
+```
+
+It lists each file that changed since the last sync and which side changed it,
+files both sides changed differently, files Git reports as unmerged, and
+entries outside the workspace layout. It warns about files with lines that look
+like conflict markers; sync accepts those lines as content. In a Git worktree it
+also shows the branch, a detached HEAD, or a branch with no commits yet, and
+files Git reports as changed that match the last sync, such as files sync wrote
+that you have not staged. Use `--json` or `--plain` for scripts.
 
 ## Export your work
 

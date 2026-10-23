@@ -24,9 +24,10 @@ use arcl_store::{Database, StorageError, WorkspaceBaseFile};
 use super::{
     Change, RecordState, WorkspaceExportError, WorkspaceImportError, compare, decode_record,
     export::export_observed,
-    import::{read_candidate, validate_candidate},
-    project_graph,
+    import::{read_candidate, reject_unmerged, validate_candidate},
+    list_paths, project_graph,
 };
+use crate::vcs::Vcs;
 
 /// The side of a sync that made a change.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -48,11 +49,17 @@ impl fmt::Display for Side {
 
 /// A sync that could not be applied.
 ///
-/// `Divergent`, `Removed` and `Import` write nothing. `Export` and `Storage`
+/// `Unmerged`, `Divergent`, `Removed` and `Import` write nothing. `Export` and `Storage`
 /// may leave workspace files written without the database commit; the next
 /// sync reconciles them.
 #[derive(Debug, Error)]
 pub enum WorkspaceSyncError {
+    /// Git reports these workspace files as unmerged.
+    #[error(
+        "workspace files are unmerged in Git: {}; finish the merge, then sync again",
+        list_paths(paths)
+    )]
+    Unmerged { paths: Vec<PathBuf> },
     /// The database and the workspace changed these paths differently since
     /// the last sync.
     #[error(
@@ -79,7 +86,10 @@ pub enum WorkspaceSyncError {
 
 impl From<WorkspaceImportError> for WorkspaceSyncError {
     fn from(error: WorkspaceImportError) -> Self {
-        Self::Import(Box::new(error))
+        match error {
+            WorkspaceImportError::Unmerged { paths } => Self::Unmerged { paths },
+            error => Self::Import(Box::new(error)),
+        }
     }
 }
 
@@ -87,7 +97,8 @@ impl WorkspaceSyncError {
     /// Return the CLI exit category for this sync failure.
     pub fn exit_code(&self) -> u8 {
         match self {
-            Self::Divergent { .. }
+            Self::Unmerged { .. }
+            | Self::Divergent { .. }
             | Self::Export(WorkspaceExportError::Conflict { .. })
             | Self::Storage(StorageError::ChangedSinceRead) => 4,
             Self::Removed { .. } => 3,
@@ -120,11 +131,16 @@ type Result<T> = std::result::Result<T, WorkspaceSyncError>;
 /// Synchronize the database and the workspace at `root`.
 ///
 /// Changes made on one side since the last sync are carried to the other.
-/// The sync refuses when a path diverged or a record file was removed, and
-/// validates the complete merged graph before writing anything. A commit from
+/// The sync refuses when Git reports a workspace file as unmerged, a path
+/// diverged or a record file was removed, and validates the complete merged graph before writing anything. A commit from
 /// another connection after the sync reads the database refuses the import
-/// with [`StorageError::ChangedSinceRead`] instead of overwriting it.
-pub fn sync_workspace(root: &Path, worktree_root: &Path, database: &mut Database) -> Result<SyncOutcome> {
+/// with [`StorageError::ChangedSinceRead`] instead of overwriting it. Pass
+/// `vcs` when the project has a Git worktree; without it there is no Git
+/// state to check.
+pub fn sync_workspace(
+    root: &Path, worktree_root: &Path, database: &mut Database, vcs: Option<&dyn Vcs>,
+) -> Result<SyncOutcome> {
+    reject_unmerged(root, vcs)?;
     let read = database.data_version()?;
     let base = database.workspace_base()?;
     let database_files = project_graph(&database.connected_graph()?)?;
@@ -209,19 +225,12 @@ fn removal_hint(side: Side) -> &'static str {
     }
 }
 
-fn list_paths(paths: &[PathBuf]) -> String {
-    paths
-        .iter()
-        .map(|path| format!("`{}`", path.display()))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
 
     use super::*;
+    use crate::vcs::{FakeVcs, PathState};
     use crate::workspace::{WorkspaceFile, export::export_graph_with_base};
 
     struct Project {
@@ -248,7 +257,11 @@ mod tests {
         }
 
         fn sync(&mut self) -> Result<SyncOutcome> {
-            sync_workspace(self.root.path(), self.root.path(), &mut self.database)
+            self.sync_with(None)
+        }
+
+        fn sync_with(&mut self, vcs: Option<&dyn Vcs>) -> Result<SyncOutcome> {
+            sync_workspace(self.root.path(), self.root.path(), &mut self.database, vcs)
         }
 
         fn path_of(&self, directory: &str) -> PathBuf {
@@ -355,6 +368,54 @@ mod tests {
             "Edited in the database"
         );
         assert_eq!(project.database.workspace_base().expect("base loads"), base);
+    }
+
+    #[test]
+    fn unmerged_files_stop_before_anything_is_written() {
+        let mut project = Project::synced();
+        let capture = project.path_of("captures");
+        project.edit(&capture, "Capture body", "Edited during a merge");
+        let edited = project.read(&capture);
+        let note = project
+            .database
+            .create_note("Note".to_owned(), "Not exported yet".to_owned())
+            .expect("note creates");
+        let base = project.database.workspace_base().expect("base loads");
+        let vcs = FakeVcs::unmerged(&[&capture]);
+
+        let error = project.sync_with(Some(&vcs)).expect_err("unmerged files refuse");
+        assert!(
+            matches!(&error, WorkspaceSyncError::Unmerged { paths } if paths.as_slice() == std::slice::from_ref(&capture)),
+            "{error:?}"
+        );
+        assert_eq!(error.exit_code(), 4);
+        assert!(error.to_string().contains("unmerged in Git"));
+        assert_eq!(project.read(&capture), edited);
+        assert!(!project.root.path().join(format!("notes/{}.md", note.id)).exists());
+        assert_eq!(
+            project.database.connected_graph().expect("graph loads").captures[0].body,
+            "Capture body"
+        );
+        assert_eq!(project.database.workspace_base().expect("base loads"), base);
+    }
+
+    #[test]
+    fn a_conflict_example_in_a_body_syncs_repeatedly() {
+        let mut project = Project::synced();
+        let capture = project.path_of("captures");
+        let example = "```text\n<<<<<<< HEAD\nOurs\n=======\nTheirs\n>>>>>>> other\n```";
+        project.edit(&capture, "Capture body", example);
+        let vcs = FakeVcs { changed: vec![(capture.clone(), PathState::Modified)] };
+
+        let outcome = project.sync_with(Some(&vcs)).expect("first sync succeeds");
+        assert_eq!(outcome.imported, std::slice::from_ref(&capture));
+        assert_eq!(
+            project.database.connected_graph().expect("graph loads").captures[0].body,
+            example
+        );
+        for _ in 0..2 {
+            assert!(project.sync_with(Some(&vcs)).expect("later sync succeeds").is_empty());
+        }
     }
 
     #[test]

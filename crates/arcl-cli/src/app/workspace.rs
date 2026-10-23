@@ -1,7 +1,8 @@
 use super::support::*;
 use super::*;
 
-pub(super) fn exec_workspace(command: WorkspaceCommand) -> CResult<()> {
+/// Run one workspace command. Only `status` returns a report to render.
+pub(super) fn exec_workspace(command: WorkspaceCommand) -> CResult<Option<WorkspaceStatus>> {
     let (worktree_root, workspace_root) = workspace_paths()?;
     let mut database = open_database()?;
     match command {
@@ -18,11 +19,32 @@ pub(super) fn exec_workspace(command: WorkspaceCommand) -> CResult<()> {
             database.replace_workspace_base(&base)?;
         }
         WorkspaceCommand::Import => {
-            import_graph(&workspace_root, &worktree_root, &mut database)?;
+            let vcs = discover_vcs(&worktree_root)?;
+            import_graph(&workspace_root, &worktree_root, &mut database, as_dyn(&vcs))?;
         }
         WorkspaceCommand::Sync => {
-            sync_workspace(&workspace_root, &worktree_root, &mut database)?;
+            let vcs = discover_vcs(&worktree_root)?;
+            sync_workspace(&workspace_root, &worktree_root, &mut database, as_dyn(&vcs))?;
+        }
+        WorkspaceCommand::Status => {
+            let vcs = discover_vcs(&worktree_root)?;
+            let status = workspace_status(&workspace_root, &database, as_dyn(&vcs))?;
+            return Ok(Some(status));
         }
     }
-    Ok(())
+    Ok(None)
+}
+
+/// Open the Git worktree at `worktree_root`, or return `None` when the
+/// project is not in one.
+fn discover_vcs(worktree_root: &Path) -> CResult<Option<GixVcs>> {
+    match GixVcs::discover(worktree_root) {
+        Ok(vcs) => Ok(Some(vcs)),
+        Err(VcsError::Discovery { .. }) => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn as_dyn(vcs: &Option<GixVcs>) -> Option<&dyn Vcs> {
+    vcs.as_ref().map(|vcs| vcs as &dyn Vcs)
 }

@@ -115,6 +115,8 @@ pub(super) enum CommandError {
     #[error(transparent)]
     WorkspaceSync(Box<WorkspaceSyncError>),
     #[error(transparent)]
+    WorkspaceStatus(Box<WorkspaceStatusError>),
+    #[error(transparent)]
     Domain(#[from] DomainError),
     #[error(transparent)]
     Storage(#[from] StorageError),
@@ -146,6 +148,12 @@ impl From<WorkspaceImportError> for CommandError {
     }
 }
 
+impl From<WorkspaceStatusError> for CommandError {
+    fn from(error: WorkspaceStatusError) -> Self {
+        Self::WorkspaceStatus(Box::new(error))
+    }
+}
+
 impl From<WorkspaceSyncError> for CommandError {
     fn from(error: WorkspaceSyncError) -> Self {
         Self::WorkspaceSync(Box::new(error))
@@ -166,6 +174,7 @@ impl CommandError {
             },
             Self::WorkspaceImport(error) => error.exit_code(),
             Self::WorkspaceSync(error) => error.exit_code(),
+            Self::WorkspaceStatus(_) => 1,
             Self::ReadConfig { .. }
             | Self::ReadMarkdown { .. }
             | Self::ReadStdin { .. }

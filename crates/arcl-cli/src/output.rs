@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use owo_colors::{OwoColorize, Stream};
 use serde::Serialize;
@@ -6,7 +6,14 @@ use thiserror::Error;
 
 use crate::cli::ColorChoice;
 use arcl_core::domain::{Capture, Note, Phase, Plan, PlanningTask, Release, Spec, TaskDependency};
+use arcl_repo::{
+    vcs::{HeadState, PathState},
+    workspace::{Change, RecordStatusKind, WorkspaceStatus},
+};
 use arcl_store::{CheckReport, PlanApplyResult, PlanDiff, PlanningContext, PlanningTaskView};
+
+/// The heading for files with lines that look like conflict markers.
+const MARKER_LABEL: &str = "Lines that look like conflict markers (sync accepts them as content):";
 
 /// The output format for a command result.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -619,6 +626,17 @@ impl Renderer {
         Ok(Some(self.style(message)))
     }
 
+    /// Render a workspace status report.
+    pub fn render_workspace_status(&self, status: &WorkspaceStatus) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human => human_workspace_status(status),
+            OutputMode::Plain => plain_workspace_status(status),
+            OutputMode::Json => serde_json::to_string(&Envelope { format_version: 1, data: status })?,
+            OutputMode::Quiet => return Ok(None),
+        };
+        Ok(Some(self.style(message)))
+    }
+
     fn style(&self, message: String) -> String {
         match (self.mode, self.color) {
             (OutputMode::Human, ColorChoice::Always) => message.bright_blue().to_string(),
@@ -1037,6 +1055,160 @@ fn format_change(change: arcl_store::PlanChange) -> &'static str {
 
 fn plain_escape(value: &str) -> String {
     value.replace('\\', "\\\\").replace('\t', "\\t").replace('\n', "\\n")
+}
+
+fn human_workspace_status(status: &WorkspaceStatus) -> String {
+    let mut lines = Vec::new();
+    if let Some(head) = &status.head {
+        lines.push(format!("Git: {}", head_text(head)));
+    }
+    if status.is_clean() {
+        lines.push("The database and the workspace match the last sync.".to_owned());
+        push_paths(&mut lines, MARKER_LABEL, &status.conflict_markers);
+        return lines.join("\n");
+    }
+    if !status.records.is_empty() {
+        lines.push("Changed since the last sync:".to_owned());
+        for record in &status.records {
+            let git = record
+                .git
+                .map(|state| format!(" (Git: {})", path_state_slug(state)))
+                .unwrap_or_default();
+            lines.push(format!(
+                "  {:<34} {}{git}",
+                record_text(record.state, record.database, record.workspace),
+                record.path.display()
+            ));
+        }
+    }
+    if !status.git_changes.is_empty() {
+        lines.push("Changed in Git, matching the last sync:".to_owned());
+        lines.extend(
+            status
+                .git_changes
+                .iter()
+                .map(|change| format!("  {:<34} {}", path_state_slug(change.git), change.path.display())),
+        );
+    }
+    push_paths(&mut lines, "Unmerged in Git:", &status.unmerged);
+    push_paths(&mut lines, MARKER_LABEL, &status.conflict_markers);
+    push_paths(&mut lines, "Outside the workspace layout:", &status.unexpected);
+    lines.push(
+        if status.sync_refuses() {
+            "Sync will stop until these are resolved."
+        } else if !status.records.is_empty() {
+            "Run `arcl workspace sync` to carry these changes."
+        } else {
+            "Sync has nothing to carry; commit these files in Git."
+        }
+        .to_owned(),
+    );
+    lines.join("\n")
+}
+
+fn push_paths(lines: &mut Vec<String>, label: &str, paths: &[PathBuf]) {
+    if !paths.is_empty() {
+        lines.push(label.to_owned());
+        lines.extend(paths.iter().map(|path| format!("  {}", path.display())));
+    }
+}
+
+fn plain_workspace_status(status: &WorkspaceStatus) -> String {
+    let mut lines = Vec::new();
+    if let Some(head) = &status.head {
+        lines.push(match head {
+            HeadState::Branch { branch, commit } => format!("head\tbranch\t{}\t{commit}", plain_escape(branch)),
+            HeadState::Detached { commit } => format!("head\tdetached\t-\t{commit}"),
+            HeadState::Unborn { branch } => format!("head\tunborn\t{}\t-", plain_escape(branch)),
+            HeadState::Unknown => "head\tunknown\t-\t-".to_owned(),
+        });
+    }
+    for record in &status.records {
+        lines.push(format!(
+            "record\t{}\t{}\t{}\t{}\t{}",
+            kind_slug(record.state),
+            record.database.map_or("-", change_slug),
+            record.workspace.map_or("-", change_slug),
+            record.git.map_or("-", path_state_slug),
+            plain_escape(&record.path.to_string_lossy()),
+        ));
+    }
+    lines.extend(status.git_changes.iter().map(|change| {
+        format!(
+            "git\t{}\t{}",
+            path_state_slug(change.git),
+            plain_escape(&change.path.to_string_lossy())
+        )
+    }));
+    for (label, paths) in [
+        ("unmerged", &status.unmerged),
+        ("conflict-markers", &status.conflict_markers),
+        ("unexpected", &status.unexpected),
+    ] {
+        lines.extend(
+            paths
+                .iter()
+                .map(|path| format!("{label}\t{}", plain_escape(&path.to_string_lossy()))),
+        );
+    }
+    lines.join("\n")
+}
+
+fn head_text(head: &HeadState) -> String {
+    match head {
+        HeadState::Branch { branch, commit } => format!("on branch {branch} at {}", short(commit)),
+        HeadState::Detached { commit } => format!("detached HEAD at {}", short(commit)),
+        HeadState::Unborn { branch } => format!("on branch {branch} with no commits yet"),
+        HeadState::Unknown => "HEAD names no branch or commit".to_owned(),
+    }
+}
+
+fn short(commit: &str) -> &str {
+    commit.get(..7).unwrap_or(commit)
+}
+
+fn record_text(kind: RecordStatusKind, database: Option<Change>, workspace: Option<Change>) -> String {
+    match (kind, database, workspace) {
+        (RecordStatusKind::DatabaseChanged, Some(change), _) => format!("database {}", change_slug(change)),
+        (RecordStatusKind::WorkspaceChanged, _, Some(change)) => format!("workspace {}", change_slug(change)),
+        (RecordStatusKind::Converged, Some(change), _) => format!("both {}", change_slug(change)),
+        (RecordStatusKind::Divergent, Some(database), Some(workspace)) => {
+            format!(
+                "divergent: database {}, workspace {}",
+                change_slug(database),
+                change_slug(workspace)
+            )
+        }
+        (kind, _, _) => kind_slug(kind).to_owned(),
+    }
+}
+
+const fn kind_slug(kind: RecordStatusKind) -> &'static str {
+    match kind {
+        RecordStatusKind::DatabaseChanged => "database-changed",
+        RecordStatusKind::WorkspaceChanged => "workspace-changed",
+        RecordStatusKind::Converged => "converged",
+        RecordStatusKind::Divergent => "divergent",
+    }
+}
+
+const fn change_slug(change: Change) -> &'static str {
+    match change {
+        Change::Added => "added",
+        Change::Modified => "modified",
+        Change::Removed => "removed",
+    }
+}
+
+const fn path_state_slug(state: PathState) -> &'static str {
+    match state {
+        PathState::Tracked => "tracked",
+        PathState::Untracked => "untracked",
+        PathState::Modified => "modified",
+        PathState::Deleted => "deleted",
+        PathState::Conflicted => "conflicted",
+        PathState::Absent => "absent",
+    }
 }
 
 #[cfg(test)]

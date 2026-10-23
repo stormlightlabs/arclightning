@@ -10,12 +10,14 @@ mod codec;
 pub mod export;
 pub mod import;
 pub mod reconcile;
+pub mod status;
 pub mod sync;
 
 pub use codec::*;
 pub use export::{WorkspaceExportError, WorkspaceFile, export_graph, export_graph_with_base, project_graph};
 pub use import::{WorkspaceImportError, import_graph, import_workspace};
 pub use reconcile::{Change, Comparison, RecordComparison, RecordState, compare};
+pub use status::{GitChange, RecordStatus, RecordStatusKind, WorkspaceStatus, WorkspaceStatusError, workspace_status};
 pub use sync::{Side, SyncOutcome, WorkspaceSyncError, sync_workspace};
 
 pub const CONFIG_FORMAT_VERSION: u32 = 1;
@@ -156,6 +158,31 @@ pub fn resolve_workspace_root(worktree_root: &Path, relative: &Path) -> Result<P
     Ok(resolved)
 }
 
+/// Return whether `content` holds a line that looks like a Git merge conflict
+/// marker: seven or more `<` or `>` followed by a space or the end of the line.
+///
+/// Status reports such files as a warning only. A record body can show a
+/// conflict as an example, so sync and import read Git's unmerged state
+/// instead of matching text.
+pub(crate) fn has_conflict_markers(content: &[u8]) -> bool {
+    String::from_utf8_lossy(content).lines().any(|line| {
+        let Some(marker) = line.chars().next().filter(|first| matches!(first, '<' | '>')) else {
+            return false;
+        };
+        let rest = line.trim_start_matches(marker);
+        line.len() - rest.len() >= 7 && (rest.is_empty() || rest.starts_with(' '))
+    })
+}
+
+/// Render paths as a comma-separated list of backquoted names for messages.
+pub(crate) fn list_paths(paths: &[PathBuf]) -> String {
+    paths
+        .iter()
+        .map(|path| format!("`{}`", path.display()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,5 +222,16 @@ mod tests {
             resolve_workspace_root(worktree.path(), Path::new("linked/workspace")),
             Err(WorkspaceError::SymlinkPath { .. })
         ));
+    }
+
+    #[test]
+    fn conflict_marker_lines_need_seven_or_more_and_a_space_or_line_end() {
+        assert!(has_conflict_markers(b"<<<<<<< HEAD\n"));
+        assert!(has_conflict_markers(b"body\n>>>>>>>\n"));
+        assert!(has_conflict_markers(b"<<<<<<<<<< ours\n"));
+        assert!(has_conflict_markers(b">>>>>>>>>>\n"));
+        assert!(!has_conflict_markers(b"<<<<<< six\n"));
+        assert!(!has_conflict_markers(b"<<<<<<<<x\n"));
+        assert!(!has_conflict_markers(b"text <<<<<<< inline\n"));
     }
 }
