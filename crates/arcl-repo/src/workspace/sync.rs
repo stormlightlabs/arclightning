@@ -46,7 +46,11 @@ impl fmt::Display for Side {
     }
 }
 
-/// A sync that could not be applied. Nothing is written when one is returned.
+/// A sync that could not be applied.
+///
+/// `Divergent`, `Removed` and `Import` write nothing. `Export` and `Storage`
+/// may leave workspace files written without the database commit; the next
+/// sync reconciles them.
 #[derive(Debug, Error)]
 pub enum WorkspaceSyncError {
     /// The database and the workspace changed these paths differently since
@@ -57,7 +61,10 @@ pub enum WorkspaceSyncError {
     )]
     Divergent { paths: Vec<PathBuf> },
     /// One side removed a file the stored base holds.
-    #[error("workspace file `{path}` was removed from the {side}; the workspace does not support hard deletion")]
+    #[error(
+        "workspace file `{path}` was removed from the {side}; the workspace does not support hard deletion{}",
+        removal_hint(*side)
+    )]
     Removed { path: PathBuf, side: Side },
     /// The workspace could not be read, or the merged graph is invalid.
     #[error(transparent)]
@@ -80,7 +87,9 @@ impl WorkspaceSyncError {
     /// Return the CLI exit category for this sync failure.
     pub fn exit_code(&self) -> u8 {
         match self {
-            Self::Divergent { .. } | Self::Export(WorkspaceExportError::Conflict { .. }) => 4,
+            Self::Divergent { .. }
+            | Self::Export(WorkspaceExportError::Conflict { .. })
+            | Self::Storage(StorageError::ChangedSinceRead) => 4,
             Self::Removed { .. } => 3,
             Self::Import(error) => error.exit_code(),
             Self::Export(_) | Self::Storage(_) => 1,
@@ -112,8 +121,11 @@ type Result<T> = std::result::Result<T, WorkspaceSyncError>;
 ///
 /// Changes made on one side since the last sync are carried to the other.
 /// The sync refuses when a path diverged or a record file was removed, and
-/// validates the complete merged graph before writing anything.
+/// validates the complete merged graph before writing anything. A commit from
+/// another connection after the sync reads the database refuses the import
+/// with [`StorageError::ChangedSinceRead`] instead of overwriting it.
 pub fn sync_workspace(root: &Path, worktree_root: &Path, database: &mut Database) -> Result<SyncOutcome> {
+    let read = database.data_version()?;
     let base = database.workspace_base()?;
     let database_files = project_graph(&database.connected_graph()?)?;
     let candidate = read_candidate(root)?;
@@ -184,10 +196,17 @@ pub fn sync_workspace(root: &Path, worktree_root: &Path, database: &mut Database
         .map(|file| WorkspaceBaseFile { path: file.path.to_string_lossy().into_owned(), content: file.content.clone() })
         .collect::<Vec<_>>();
     match &graph {
-        Some(graph) => database.replace_graph_and_workspace_base(graph, &base)?,
+        Some(graph) => database.replace_graph_and_workspace_base(graph, &base, read)?,
         None => database.replace_workspace_base(&base)?,
     }
     Ok(outcome)
+}
+
+fn removal_hint(side: Side) -> &'static str {
+    match side {
+        Side::Workspace => "; if a branch switch removed it, `arcl workspace export` writes it back",
+        Side::Database => "",
+    }
 }
 
 fn list_paths(paths: &[PathBuf]) -> String {
@@ -356,14 +375,25 @@ mod tests {
     fn an_invalid_merged_graph_writes_nothing() {
         let mut project = Project::synced();
         let spec = project.path_of("specs");
-        project.edit(&spec, "status = \"open\"", "status = \"unknown\"");
+        // Decodes, but links to a note that does not exist.
+        let missing = arcl_core::domain::NoteId::new();
+        project.edit(
+            &spec,
+            "status = \"open\"",
+            &format!("status = \"open\"\nlinks = [{{ kind = \"note\", id = \"{missing}\" }}]"),
+        );
         let note = project
             .database
             .create_note("Note".to_owned(), "Not exported yet".to_owned())
             .expect("note creates");
         let base = project.database.workspace_base().expect("base loads");
 
-        project.sync().expect_err("invalid record refuses");
+        let error = project.sync().expect_err("invalid graph refuses");
+        assert!(
+            matches!(&error, WorkspaceSyncError::Import(import) if matches!(**import, WorkspaceImportError::Relationship { .. })),
+            "{error:?}"
+        );
+        assert_eq!(error.exit_code(), 3);
         assert!(!project.root.path().join(format!("notes/{}.md", note.id)).exists());
         assert_eq!(project.database.workspace_base().expect("base loads"), base);
     }

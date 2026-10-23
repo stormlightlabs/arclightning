@@ -6,7 +6,7 @@ pub use connected::*;
 
 use std::{path::Path, time::Duration};
 
-use rusqlite::Connection;
+use rusqlite::{Connection, TransactionBehavior};
 use thiserror::Error;
 
 use arcl_core::domain::*;
@@ -94,7 +94,19 @@ pub enum StorageError {
     NewerDatabase { found: i32, latest: i32 },
     #[error("migration sequence is missing version {expected} before version {found}")]
     MigrationGap { expected: i32, found: i32 },
+    /// Another connection committed after this command read the database, so
+    /// replacing the graph would discard that write.
+    #[error("the database changed after this command read it; run the command again")]
+    ChangedSinceRead,
 }
+
+/// The database's data version as one connection observed it.
+///
+/// Read it with [`Database::data_version`] before reading the state a later
+/// replacement is built from. The value changes when another connection
+/// commits; commits on the same connection leave it unchanged.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DataVersion(i64);
 
 /// The single SQLite connection owner for one application command.
 #[derive(Debug)]
@@ -124,6 +136,15 @@ impl Database {
             .pragma_query_value(None, "user_version", |row| row.get(0))?)
     }
 
+    /// Read the data version that guards a later graph replacement.
+    pub fn data_version(&self) -> Result<DataVersion> {
+        Ok(DataVersion(self.connection.pragma_query_value(
+            None,
+            "data_version",
+            |row| row.get(0),
+        )?))
+    }
+
     /// Read the exact files recorded by the last successful workspace export.
     pub fn workspace_base(&self) -> Result<Vec<WorkspaceBaseFile>> {
         let mut statement = self
@@ -140,8 +161,13 @@ impl Database {
     /// The repository adapter validates the candidate graph before calling this
     /// method. Records are inserted in dependency order, and task parents are
     /// attached only after every task exists so file order cannot affect import.
+    ///
+    /// `read` is the [`DataVersion`] taken before the caller read the state the
+    /// graph was built from. The transaction takes the write lock first and
+    /// returns [`StorageError::ChangedSinceRead`] without writing if another
+    /// connection committed since then.
     pub fn replace_graph_and_workspace_base(
-        &mut self, graph: &ConnectedGraph, files: &[WorkspaceBaseFile],
+        &mut self, graph: &ConnectedGraph, files: &[WorkspaceBaseFile], read: DataVersion,
     ) -> Result<()> {
         let current_project = self.project()?;
         if current_project.id != graph.project.id {
@@ -152,7 +178,13 @@ impl Database {
             }));
         }
 
-        let transaction = self.connection.transaction()?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current: i64 = transaction.pragma_query_value(None, "data_version", |row| row.get(0))?;
+        if DataVersion(current) != read {
+            return Err(StorageError::ChangedSinceRead);
+        }
         transaction.execute_batch(
             "DELETE FROM record_links;
              DELETE FROM release_memberships;
@@ -773,7 +805,7 @@ fn configure(connection: &mut Connection) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CURRENT_VERSION, Database};
+    use super::{CURRENT_VERSION, Database, StorageError};
 
     #[test]
     fn opening_a_database_applies_embedded_migrations() {
@@ -795,5 +827,37 @@ mod tests {
             )
             .expect("format marker exists");
         assert_eq!(format_version, CURRENT_VERSION.to_string());
+    }
+
+    #[test]
+    fn a_graph_replacement_refuses_a_commit_made_after_the_read() {
+        let directory = tempfile::tempdir().expect("directory creates");
+        let path = directory.path().join("arcl.db");
+        let mut reader = Database::open(&path).expect("reader opens");
+        let mut writer = Database::open(&path).expect("writer opens");
+        reader
+            .create_capture("Before".to_owned(), "Read by the replacement".to_owned())
+            .expect("capture creates");
+
+        let read = reader.data_version().expect("version reads");
+        let graph = reader.connected_graph().expect("graph loads");
+        let written = writer
+            .create_capture("After".to_owned(), "Committed by another connection".to_owned())
+            .expect("capture creates");
+
+        let error = reader
+            .replace_graph_and_workspace_base(&graph, &[], read)
+            .expect_err("stale replacement refuses");
+        assert!(matches!(error, StorageError::ChangedSinceRead), "{error:?}");
+        let captures = reader.captures().expect("captures load");
+        assert_eq!(captures.len(), 2);
+        assert!(captures.iter().any(|capture| capture.id == written.id));
+
+        let read = reader.data_version().expect("version reads");
+        let graph = reader.connected_graph().expect("graph loads");
+        reader
+            .replace_graph_and_workspace_base(&graph, &[], read)
+            .expect("current replacement succeeds");
+        assert_eq!(reader.captures().expect("captures load").len(), 2);
     }
 }

@@ -34,7 +34,12 @@ Sync compares each file with the version stored at the last sync. A change made
 only in the database is written to the workspace. A change made only in the
 workspace is validated with the complete graph and imported. A file that both
 sides changed differently stops the sync with status code `4` and the paths
-involved, and nothing is written.
+involved, and nothing is written. A record written by another `arcl` command
+while sync runs also stops it with status code `4`; run sync again.
+
+Switching to a branch that lacks records synced elsewhere stops sync with status
+code `3`, since sync does not delete records. Run `arcl workspace export` to
+write those records back, then run sync again.
 
 Sync writes workspace files before it updates the database. If a sync or an
 export stops partway, the next sync finishes the work.

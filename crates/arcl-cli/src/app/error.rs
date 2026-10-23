@@ -218,6 +218,7 @@ impl StorageErrorExitCode for StorageError {
             | StorageError::InvalidPlanInput(_)
             | StorageError::NewerDatabase { .. }
             | StorageError::MigrationGap { .. } => 3,
+            StorageError::ChangedSinceRead => 4,
             StorageError::Sqlite(_) => 1,
         }
     }

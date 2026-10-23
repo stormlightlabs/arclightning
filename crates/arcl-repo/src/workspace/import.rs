@@ -80,6 +80,7 @@ impl WorkspaceImportError {
     /// Return the CLI exit category for this import failure.
     pub const fn exit_code(&self) -> u8 {
         match self {
+            Self::Storage(StorageError::ChangedSinceRead) => 4,
             Self::Storage(_) | Self::ReadDirectory { .. } | Self::InspectEntry { .. } => 1,
             Self::Export(super::WorkspaceExportError::Conflict { .. }) => 4,
             Self::Export(_) => 1,
@@ -332,6 +333,9 @@ fn prepare_import(root: &Path, worktree_root: &Path, project: Project) -> Result
 }
 
 fn apply_prepared(root: &Path, prepared: PreparedImport, database: &mut Database) -> Result<Vec<WorkspaceFile>> {
+    // Taken before any read, so a commit from another connection after this
+    // point refuses the replacement instead of being overwritten.
+    let read = database.data_version()?;
     let base = database.workspace_base()?;
     reject_removed_base_records(&base, &prepared.files)?;
     let current_files = project_graph(&database.connected_graph()?).map_err(|source| WorkspaceImportError::Field {
@@ -350,7 +354,7 @@ fn apply_prepared(root: &Path, prepared: PreparedImport, database: &mut Database
         .iter()
         .map(|file| WorkspaceBaseFile { path: file.path.to_string_lossy().into_owned(), content: file.content.clone() })
         .collect::<Vec<_>>();
-    database.replace_graph_and_workspace_base(&prepared.graph, &base)?;
+    database.replace_graph_and_workspace_base(&prepared.graph, &base, read)?;
     Ok(prepared.files)
 }
 
