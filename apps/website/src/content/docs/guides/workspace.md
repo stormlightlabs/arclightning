@@ -37,10 +37,10 @@ sides changed differently stops the sync with status code `4` and the paths
 involved, and nothing is written. A record written by another `arcl` command
 while sync runs also stops it with status code `4`; run sync again.
 
-A file that still holds Git conflict markers (`<<<<<<<` or `>>>>>>>` lines)
-stops sync and import with status code `4` and the paths involved, and nothing
-is written. Resolve the merge, then run the command again. Sync does not read
-Git, so finish the merge before syncing even where a file has no markers left.
+In a Git worktree, a file Git reports as unmerged stops sync and import with
+status code `4` and the paths involved, and nothing is written. Finish the
+merge, then run the command again. Sync and import read Git's state, not the
+file text, so a record body can show a sample conflict.
 
 Switching to a branch that lacks records synced elsewhere stops sync with status
 code `3`, since sync does not delete records. Run `arcl workspace export` to
@@ -58,12 +58,12 @@ arcl workspace status
 ```
 
 It lists each file that changed since the last sync and which side changed it,
-files both sides changed differently, files Git reports as unmerged, files with
-conflict markers, and entries outside the workspace layout. In a Git worktree
-it also shows the branch, a detached HEAD, or a branch with no commits yet, and
+files both sides changed differently, files Git reports as unmerged, and
+entries outside the workspace layout. It warns about files with lines that look
+like conflict markers; sync accepts those lines as content. In a Git worktree it
+also shows the branch, a detached HEAD, or a branch with no commits yet, and
 files Git reports as changed that match the last sync, such as files sync wrote
-that you have not staged. Use
-`--json` or `--plain` for scripts.
+that you have not staged. Use `--json` or `--plain` for scripts.
 
 ## Export your work
 

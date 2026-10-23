@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use owo_colors::{OwoColorize, Stream};
 use serde::Serialize;
@@ -11,6 +11,9 @@ use arcl_repo::{
     workspace::{Change, RecordStatusKind, WorkspaceStatus},
 };
 use arcl_store::{CheckReport, PlanApplyResult, PlanDiff, PlanningContext, PlanningTaskView};
+
+/// The heading for files with lines that look like conflict markers.
+const MARKER_LABEL: &str = "Lines that look like conflict markers (sync accepts them as content):";
 
 /// The output format for a command result.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1061,6 +1064,7 @@ fn human_workspace_status(status: &WorkspaceStatus) -> String {
     }
     if status.is_clean() {
         lines.push("The database and the workspace match the last sync.".to_owned());
+        push_paths(&mut lines, MARKER_LABEL, &status.conflict_markers);
         return lines.join("\n");
     }
     if !status.records.is_empty() {
@@ -1086,21 +1090,12 @@ fn human_workspace_status(status: &WorkspaceStatus) -> String {
                 .map(|change| format!("  {:<34} {}", path_state_slug(change.git), change.path.display())),
         );
     }
-    for (label, paths) in [
-        ("Unmerged in Git:", &status.unmerged),
-        ("Conflict markers:", &status.conflict_markers),
-        ("Outside the workspace layout:", &status.unexpected),
-    ] {
-        if !paths.is_empty() {
-            lines.push(label.to_owned());
-            lines.extend(paths.iter().map(|path| format!("  {}", path.display())));
-        }
-    }
+    push_paths(&mut lines, "Unmerged in Git:", &status.unmerged);
+    push_paths(&mut lines, MARKER_LABEL, &status.conflict_markers);
+    push_paths(&mut lines, "Outside the workspace layout:", &status.unexpected);
     lines.push(
         if status.sync_refuses() {
             "Sync will stop until these are resolved."
-        } else if !status.unmerged.is_empty() {
-            "Finish the Git merge before syncing; sync does not check Git state."
         } else if !status.records.is_empty() {
             "Run `arcl workspace sync` to carry these changes."
         } else {
@@ -1109,6 +1104,13 @@ fn human_workspace_status(status: &WorkspaceStatus) -> String {
         .to_owned(),
     );
     lines.join("\n")
+}
+
+fn push_paths(lines: &mut Vec<String>, label: &str, paths: &[PathBuf]) {
+    if !paths.is_empty() {
+        lines.push(label.to_owned());
+        lines.extend(paths.iter().map(|path| format!("  {}", path.display())));
+    }
 }
 
 fn plain_workspace_status(status: &WorkspaceStatus) -> String {

@@ -329,7 +329,7 @@ fn workspace_status_reports_changes_head_and_unresolved_merges() {
     assert_eq!(refused.status.code(), Some(4));
     let stderr = String::from_utf8_lossy(&refused.stderr);
     assert!(
-        stderr.contains("conflict markers") && stderr.contains(&record),
+        stderr.contains("unmerged in Git") && stderr.contains(&record),
         "stderr: {stderr}"
     );
     let after = run_json(directory.path(), ["--json", "capture", "show", capture_id].as_ref());

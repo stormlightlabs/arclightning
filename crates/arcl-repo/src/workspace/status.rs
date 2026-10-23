@@ -87,9 +87,11 @@ pub struct WorkspaceStatus {
     /// Paths that match the last sync but differ from the Git index, sorted
     /// by path. Unmerged paths are listed under `unmerged` instead.
     pub git_changes: Vec<GitChange>,
-    /// Workspace paths Git reports as unmerged.
+    /// Workspace paths Git reports as unmerged, which sync and import refuse.
     pub unmerged: Vec<PathBuf>,
-    /// Workspace files that contain merge conflict markers.
+    /// Workspace files with lines that look like merge conflict markers.
+    /// This is a warning: sync accepts them as content, since a record body
+    /// can show a conflict as an example.
     pub conflict_markers: Vec<PathBuf>,
     /// Entries outside the workspace layout, which sync and import refuse.
     pub unexpected: Vec<PathBuf>,
@@ -98,26 +100,15 @@ pub struct WorkspaceStatus {
 impl WorkspaceStatus {
     /// Return whether the database and the workspace match the last sync and
     /// Git: sync has nothing to do, nothing blocks it and Git reports no
-    /// workspace changes.
+    /// workspace changes. The `conflict_markers` warning does not count.
     pub fn is_clean(&self) -> bool {
-        self.records.is_empty()
-            && self.git_changes.is_empty()
-            && self.unmerged.is_empty()
-            && self.conflict_markers.is_empty()
-            && self.unexpected.is_empty()
-    }
-
-    /// Return whether the workspace is not ready to sync: either sync would
-    /// refuse it, or Git reports an unfinished merge. Sync does not read Git,
-    /// so an unmerged path without conflict markers blocks here but not in
-    /// sync itself; see [`Self::sync_refuses`].
-    pub fn blocks_sync(&self) -> bool {
-        !self.unmerged.is_empty() || self.sync_refuses()
+        self.records.is_empty() && self.git_changes.is_empty() && self.unmerged.is_empty() && self.unexpected.is_empty()
     }
 
     /// Return whether `arcl workspace sync` would stop without writing.
+    /// Conflict marker lines do not count; only Git's unmerged state does.
     pub fn sync_refuses(&self) -> bool {
-        !self.conflict_markers.is_empty()
+        !self.unmerged.is_empty()
             || !self.unexpected.is_empty()
             || self.records.iter().any(|record| {
                 record.state == RecordStatusKind::Divergent
@@ -243,6 +234,7 @@ fn is_symlink(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vcs::FakeVcs;
     use crate::workspace::sync_workspace;
 
     fn synced() -> (tempfile::TempDir, Database) {
@@ -252,7 +244,7 @@ mod tests {
             .expect("capture creates");
         let root = tempfile::tempdir().expect("workspace creates");
         fs::write(root.path().join("manifest.toml"), "format-version = 1\n").expect("manifest writes");
-        sync_workspace(root.path(), root.path(), &mut database).expect("sync succeeds");
+        sync_workspace(root.path(), root.path(), &mut database, None).expect("sync succeeds");
         (root, database)
     }
 
@@ -270,7 +262,7 @@ mod tests {
         let (root, database) = synced();
         let status = workspace_status(root.path(), &database, None).expect("status reads");
         assert!(status.is_clean());
-        assert!(!status.blocks_sync());
+        assert!(!status.sync_refuses());
         assert_eq!(status.head, None);
     }
 
@@ -292,11 +284,11 @@ mod tests {
         assert_eq!(status.records[1].path, PathBuf::from(format!("notes/{}.md", note.id)));
         assert_eq!(status.records[1].state, RecordStatusKind::DatabaseChanged);
         assert_eq!(status.records[1].database, Some(Change::Added));
-        assert!(!status.blocks_sync());
+        assert!(!status.sync_refuses());
     }
 
     #[test]
-    fn conflict_markers_and_unexpected_entries_are_reported_not_fatal() {
+    fn conflict_markers_warn_and_unexpected_entries_refuse() {
         let (root, database) = synced();
         let capture = capture_path(root.path());
         fs::write(
@@ -310,7 +302,27 @@ mod tests {
         assert_eq!(status.conflict_markers, std::slice::from_ref(&capture));
         assert_eq!(status.unexpected, [PathBuf::from("notes.txt")]);
         assert_eq!(status.records[0].path, capture);
-        assert!(status.blocks_sync());
+        assert!(status.sync_refuses());
+
+        fs::remove_file(root.path().join("notes.txt")).expect("stray file removes");
+        let status = workspace_status(root.path(), &database, None).expect("status reads");
+        assert_eq!(status.conflict_markers, std::slice::from_ref(&capture));
+        assert!(!status.sync_refuses());
+    }
+
+    #[test]
+    fn a_synced_conflict_example_is_clean_with_a_warning() {
+        let (root, mut database) = synced();
+        let capture = capture_path(root.path());
+        let content = fs::read_to_string(root.path().join(&capture)).expect("capture reads");
+        let example = "```text\n<<<<<<< HEAD\nOurs\n=======\nTheirs\n>>>>>>> other\n```";
+        fs::write(root.path().join(&capture), content.replace("Capture body", example)).expect("capture writes");
+        sync_workspace(root.path(), root.path(), &mut database, None).expect("sync succeeds");
+
+        let status = workspace_status(root.path(), &database, None).expect("status reads");
+        assert_eq!(status.conflict_markers, std::slice::from_ref(&capture));
+        assert!(status.is_clean());
+        assert!(!status.sync_refuses());
     }
 
     #[test]
@@ -321,36 +333,20 @@ mod tests {
 
         let status = workspace_status(root.path(), &database, None).expect("status reads");
         assert_eq!(status.records[0].workspace, Some(Change::Removed));
-        assert!(status.blocks_sync());
         assert!(status.sync_refuses());
     }
 
     #[test]
     fn git_state_head_and_unmerged_paths_come_from_vcs() {
-        struct FakeVcs;
-        impl Vcs for FakeVcs {
-            fn worktree_root(&self) -> Result<&Path, VcsError> {
-                Ok(Path::new("/"))
-            }
-            fn head_id(&self) -> Result<Option<String>, VcsError> {
-                Ok(None)
-            }
-            fn branch_name(&self) -> Result<Option<String>, VcsError> {
-                Ok(Some("main".to_owned()))
-            }
-            fn path_state(&self, _: &Path) -> Result<PathState, VcsError> {
-                Ok(PathState::Tracked)
-            }
-            fn changed_paths(&self, _: &Path) -> Result<Vec<(PathBuf, PathState)>, VcsError> {
-                Ok(vec![
-                    (PathBuf::from("notes/a.md"), PathState::Conflicted),
-                    (PathBuf::from("manifest.toml"), PathState::Untracked),
-                ])
-            }
-        }
+        let vcs = FakeVcs {
+            changed: vec![
+                (PathBuf::from("notes/a.md"), PathState::Conflicted),
+                (PathBuf::from("manifest.toml"), PathState::Untracked),
+            ],
+        };
 
         let (root, database) = synced();
-        let status = workspace_status(root.path(), &database, Some(&FakeVcs)).expect("status reads");
+        let status = workspace_status(root.path(), &database, Some(&vcs)).expect("status reads");
         assert_eq!(status.head, Some(HeadState::Unborn { branch: "main".to_owned() }));
         assert_eq!(status.unmerged, [PathBuf::from("notes/a.md")]);
         assert_eq!(
@@ -358,9 +354,6 @@ mod tests {
             [GitChange { path: PathBuf::from("manifest.toml"), git: PathState::Untracked }]
         );
         assert!(!status.is_clean());
-        // Sync does not read Git, so an unmerged path without markers blocks
-        // the report but not sync itself.
-        assert!(status.blocks_sync());
-        assert!(!status.sync_refuses());
+        assert!(status.sync_refuses());
     }
 }
