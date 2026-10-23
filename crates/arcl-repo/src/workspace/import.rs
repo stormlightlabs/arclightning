@@ -12,7 +12,8 @@ use arcl_store::{ConnectedGraph, Database, StorageError, WorkspaceBaseFile};
 
 use super::{
     CaptureRecord, NoteRecord, PhaseRecord, PlanRecord, ReleaseRecord, SpecRecord, TaskRecord, WorkspaceError,
-    WorkspaceFile, WorkspaceRecord, WorkspaceReference, decode_manifest, decode_record,
+    WorkspaceFile, WorkspaceRecord, WorkspaceReference, decode_manifest, decode_record, has_conflict_markers,
+    list_paths,
 };
 use super::{export::export_observed, export::project_graph};
 
@@ -28,6 +29,12 @@ pub enum WorkspaceImportError {
     /// A directory entry could not be inspected.
     #[error("could not inspect workspace entry `{path}`: {source}")]
     InspectEntry { path: PathBuf, source: io::Error },
+    /// Workspace files still hold merge conflict markers.
+    #[error(
+        "workspace files contain merge conflict markers: {}; resolve the merge, then run the command again",
+        list_paths(paths)
+    )]
+    ConflictMarkers { paths: Vec<PathBuf> },
     /// The required manifest was not present.
     #[error("workspace manifest `{path}` is missing")]
     MissingManifest { path: PathBuf },
@@ -93,7 +100,7 @@ impl WorkspaceImportError {
             | Self::Field { .. }
             | Self::Relationship { .. }
             | Self::ExistingRecordRemoved { .. } => 3,
-            Self::Conflict { .. } => 4,
+            Self::Conflict { .. } | Self::ConflictMarkers { .. } => 4,
         }
     }
 }
@@ -374,13 +381,25 @@ pub(super) fn read_candidate(root: &Path) -> Result<CandidateWorkspace> {
         return Err(WorkspaceImportError::WrongEntryType { path: PathBuf::from("manifest.toml") });
     }
     let manifest_input = read_utf8_file(&manifest_path, Path::new("manifest.toml"))?;
-    decode_manifest(&manifest_input)
-        .map_err(|source| WorkspaceImportError::Manifest { path: PathBuf::from("manifest.toml"), source })?;
-    read_candidate_records(root, entries, manifest_input)
+    // Files with conflict markers are collected rather than decoded, so the
+    // error names every one of them instead of the first decode failure.
+    let mut conflicted = Vec::new();
+    if has_conflict_markers(manifest_input.as_bytes()) {
+        conflicted.push(PathBuf::from("manifest.toml"));
+    } else {
+        decode_manifest(&manifest_input)
+            .map_err(|source| WorkspaceImportError::Manifest { path: PathBuf::from("manifest.toml"), source })?;
+    }
+    let candidate = read_candidate_records(root, entries, manifest_input, &mut conflicted)?;
+    if !conflicted.is_empty() {
+        conflicted.sort();
+        return Err(WorkspaceImportError::ConflictMarkers { paths: conflicted });
+    }
+    Ok(candidate)
 }
 
 fn read_candidate_records(
-    root: &Path, entries: Vec<fs::DirEntry>, manifest_input: String,
+    root: &Path, entries: Vec<fs::DirEntry>, manifest_input: String, conflicted: &mut Vec<PathBuf>,
 ) -> Result<CandidateWorkspace> {
     let mut records = BTreeMap::new();
     let mut files = vec![WorkspaceFile { path: PathBuf::from("manifest.toml"), content: manifest_input.into_bytes() }];
@@ -403,7 +422,7 @@ fn read_candidate_records(
         if !file_type.is_dir() {
             return Err(WorkspaceImportError::WrongEntryType { path: relative });
         }
-        read_record_directory(root, directory, &mut records, &mut files)?;
+        read_record_directory(root, directory, &mut records, &mut files, conflicted)?;
     }
     files.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(CandidateWorkspace { records, files })
@@ -411,6 +430,7 @@ fn read_candidate_records(
 
 fn read_record_directory(
     root: &Path, directory: &str, records: &mut BTreeMap<PathBuf, WorkspaceRecord>, files: &mut Vec<WorkspaceFile>,
+    conflicted: &mut Vec<PathBuf>,
 ) -> Result<()> {
     for entry in read_entries(&root.join(directory))? {
         let name = entry.file_name();
@@ -429,6 +449,10 @@ fn read_record_directory(
             return Err(WorkspaceImportError::UnknownEntry { path: relative });
         }
         let input = read_utf8_file(&path, &relative)?;
+        if has_conflict_markers(input.as_bytes()) {
+            conflicted.push(relative);
+            continue;
+        }
         let record = decode_record(&relative, &input)
             .map_err(|source| WorkspaceImportError::Record { path: relative.clone(), source })?;
         files.push(WorkspaceFile { path: relative.clone(), content: input.into_bytes() });
@@ -1085,5 +1109,37 @@ mod tests {
         let error = import_graph(root.path(), root.path(), &mut database).expect_err("missing spec rejects");
         assert!(error.to_string().contains("spec"));
         assert!(database.spec(existing.id).expect("spec reads").is_some());
+    }
+
+    #[test]
+    fn conflict_markers_refuse_the_import() {
+        let mut source = Database::open_in_memory().expect("database opens");
+        source
+            .create_capture("Capture".to_owned(), "Capture body".to_owned())
+            .expect("capture creates");
+        let root = tempfile::tempdir().expect("workspace creates");
+        let files =
+            export_graph(root.path(), &source.connected_graph().expect("graph loads")).expect("export succeeds");
+        let capture = files
+            .iter()
+            .map(|file| file.path.clone())
+            .find(|path| path.starts_with("captures"))
+            .expect("capture exported");
+        let path = root.path().join(&capture);
+        let content = fs::read_to_string(&path).expect("capture reads");
+        fs::write(
+            &path,
+            content.replace("Capture body", "<<<<<<< HEAD\nOurs\n=======\nTheirs\n>>>>>>> other"),
+        )
+        .expect("capture writes");
+
+        let mut destination = Database::open_in_memory().expect("database opens");
+        let error = import_graph(root.path(), root.path(), &mut destination).expect_err("conflict markers refuse");
+        assert!(
+            matches!(&error, WorkspaceImportError::ConflictMarkers { paths } if paths.as_slice() == std::slice::from_ref(&capture)),
+            "{error:?}"
+        );
+        assert_eq!(error.exit_code(), 4);
+        assert!(destination.connected_graph().expect("graph loads").captures.is_empty());
     }
 }

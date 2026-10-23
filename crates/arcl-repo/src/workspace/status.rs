@@ -15,7 +15,8 @@ use thiserror::Error;
 use arcl_store::{Database, StorageError};
 
 use super::{
-    Change, RecordState, WorkspaceExportError, WorkspaceFile, compare, import::RECORD_DIRECTORIES, project_graph,
+    Change, RecordState, WorkspaceExportError, WorkspaceFile, compare, has_conflict_markers,
+    import::RECORD_DIRECTORIES, project_graph,
 };
 use crate::vcs::{HeadState, PathState, Vcs, VcsError};
 
@@ -66,6 +67,16 @@ pub struct RecordStatus {
     pub git: Option<PathState>,
 }
 
+/// A workspace path Git reports as changed although it matches the last sync,
+/// such as a file sync wrote that is not yet staged.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct GitChange {
+    /// The path relative to the workspace root.
+    pub path: PathBuf,
+    /// The path's Git state.
+    pub git: PathState,
+}
+
 /// Everything status reports about one workspace.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct WorkspaceStatus {
@@ -73,6 +84,9 @@ pub struct WorkspaceStatus {
     pub head: Option<HeadState>,
     /// Paths that differ from the last sync, sorted by path.
     pub records: Vec<RecordStatus>,
+    /// Paths that match the last sync but differ from the Git index, sorted
+    /// by path. Unmerged paths are listed under `unmerged` instead.
+    pub git_changes: Vec<GitChange>,
     /// Workspace paths Git reports as unmerged.
     pub unmerged: Vec<PathBuf>,
     /// Workspace files that contain merge conflict markers.
@@ -82,18 +96,28 @@ pub struct WorkspaceStatus {
 }
 
 impl WorkspaceStatus {
-    /// Return whether sync has nothing to do and nothing blocks it.
+    /// Return whether the database and the workspace match the last sync and
+    /// Git: sync has nothing to do, nothing blocks it and Git reports no
+    /// workspace changes.
     pub fn is_clean(&self) -> bool {
         self.records.is_empty()
+            && self.git_changes.is_empty()
             && self.unmerged.is_empty()
             && self.conflict_markers.is_empty()
             && self.unexpected.is_empty()
     }
 
-    /// Return whether a sync would stop without writing.
+    /// Return whether the workspace is not ready to sync: either sync would
+    /// refuse it, or Git reports an unfinished merge. Sync does not read Git,
+    /// so an unmerged path without conflict markers blocks here but not in
+    /// sync itself; see [`Self::sync_refuses`].
     pub fn blocks_sync(&self) -> bool {
-        !self.unmerged.is_empty()
-            || !self.conflict_markers.is_empty()
+        !self.unmerged.is_empty() || self.sync_refuses()
+    }
+
+    /// Return whether `arcl workspace sync` would stop without writing.
+    pub fn sync_refuses(&self) -> bool {
+        !self.conflict_markers.is_empty()
             || !self.unexpected.is_empty()
             || self.records.iter().any(|record| {
                 record.state == RecordStatusKind::Divergent
@@ -123,7 +147,7 @@ pub fn workspace_status(
             .map(|(_, state)| *state)
     };
 
-    let records = compare(&base, &database_files, &workspace_files)
+    let records: Vec<RecordStatus> = compare(&base, &database_files, &workspace_files)
         .records
         .into_iter()
         .filter_map(|record| {
@@ -141,6 +165,12 @@ pub fn workspace_status(
         })
         .collect();
 
+    let mut git_changes: Vec<GitChange> = git_paths
+        .iter()
+        .filter(|(path, state)| *state != PathState::Conflicted && !records.iter().any(|record| &record.path == path))
+        .map(|(path, state)| GitChange { path: path.clone(), git: *state })
+        .collect();
+    git_changes.sort_by(|left, right| left.path.cmp(&right.path));
     let unmerged = git_paths
         .iter()
         .filter(|(_, state)| *state == PathState::Conflicted)
@@ -152,7 +182,7 @@ pub fn workspace_status(
         .map(|file| file.path.clone())
         .collect();
 
-    Ok(WorkspaceStatus { head, records, unmerged, conflict_markers, unexpected })
+    Ok(WorkspaceStatus { head, records, git_changes, unmerged, conflict_markers, unexpected })
 }
 
 /// Read the manifest and every record file under `root` as raw bytes, and
@@ -208,12 +238,6 @@ fn read(path: &Path) -> Result<Vec<u8>, WorkspaceStatusError> {
 
 fn is_symlink(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink())
-}
-
-fn has_conflict_markers(content: &[u8]) -> bool {
-    String::from_utf8_lossy(content).lines().any(|line| {
-        line.starts_with("<<<<<<< ") || line.starts_with(">>>>>>> ") || line == "<<<<<<<" || line == ">>>>>>>"
-    })
 }
 
 #[cfg(test)]
@@ -298,6 +322,7 @@ mod tests {
         let status = workspace_status(root.path(), &database, None).expect("status reads");
         assert_eq!(status.records[0].workspace, Some(Change::Removed));
         assert!(status.blocks_sync());
+        assert!(status.sync_refuses());
     }
 
     #[test]
@@ -317,7 +342,10 @@ mod tests {
                 Ok(PathState::Tracked)
             }
             fn changed_paths(&self, _: &Path) -> Result<Vec<(PathBuf, PathState)>, VcsError> {
-                Ok(vec![(PathBuf::from("notes/a.md"), PathState::Conflicted)])
+                Ok(vec![
+                    (PathBuf::from("notes/a.md"), PathState::Conflicted),
+                    (PathBuf::from("manifest.toml"), PathState::Untracked),
+                ])
             }
         }
 
@@ -325,6 +353,14 @@ mod tests {
         let status = workspace_status(root.path(), &database, Some(&FakeVcs)).expect("status reads");
         assert_eq!(status.head, Some(HeadState::Unborn { branch: "main".to_owned() }));
         assert_eq!(status.unmerged, [PathBuf::from("notes/a.md")]);
+        assert_eq!(
+            status.git_changes,
+            [GitChange { path: PathBuf::from("manifest.toml"), git: PathState::Untracked }]
+        );
+        assert!(!status.is_clean());
+        // Sync does not read Git, so an unmerged path without markers blocks
+        // the report but not sync itself.
         assert!(status.blocks_sync());
+        assert!(!status.sync_refuses());
     }
 }

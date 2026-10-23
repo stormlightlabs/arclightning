@@ -17,7 +17,7 @@ pub use codec::*;
 pub use export::{WorkspaceExportError, WorkspaceFile, export_graph, export_graph_with_base, project_graph};
 pub use import::{WorkspaceImportError, import_graph, import_workspace};
 pub use reconcile::{Change, Comparison, RecordComparison, RecordState, compare};
-pub use status::{RecordStatus, RecordStatusKind, WorkspaceStatus, WorkspaceStatusError, workspace_status};
+pub use status::{GitChange, RecordStatus, RecordStatusKind, WorkspaceStatus, WorkspaceStatusError, workspace_status};
 pub use sync::{Side, SyncOutcome, WorkspaceSyncError, sync_workspace};
 
 pub const CONFIG_FORMAT_VERSION: u32 = 1;
@@ -156,6 +156,24 @@ pub fn resolve_workspace_root(worktree_root: &Path, relative: &Path) -> Result<P
         }
     }
     Ok(resolved)
+}
+
+/// Return whether `content` holds a Git merge conflict marker line
+/// (`<<<<<<<` or `>>>>>>>`). Status reports such files, and sync and import
+/// refuse them.
+pub(crate) fn has_conflict_markers(content: &[u8]) -> bool {
+    String::from_utf8_lossy(content).lines().any(|line| {
+        line.starts_with("<<<<<<< ") || line.starts_with(">>>>>>> ") || line == "<<<<<<<" || line == ">>>>>>>"
+    })
+}
+
+/// Render paths as a comma-separated list of backquoted names for messages.
+pub(crate) fn list_paths(paths: &[PathBuf]) -> String {
+    paths
+        .iter()
+        .map(|path| format!("`{}`", path.display()))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[cfg(test)]

@@ -25,7 +25,7 @@ use super::{
     Change, RecordState, WorkspaceExportError, WorkspaceImportError, compare, decode_record,
     export::export_observed,
     import::{read_candidate, validate_candidate},
-    project_graph,
+    list_paths, project_graph,
 };
 
 /// The side of a sync that made a change.
@@ -48,11 +48,17 @@ impl fmt::Display for Side {
 
 /// A sync that could not be applied.
 ///
-/// `Divergent`, `Removed` and `Import` write nothing. `Export` and `Storage`
+/// `ConflictMarkers`, `Divergent`, `Removed` and `Import` write nothing. `Export` and `Storage`
 /// may leave workspace files written without the database commit; the next
 /// sync reconciles them.
 #[derive(Debug, Error)]
 pub enum WorkspaceSyncError {
+    /// Workspace files still hold merge conflict markers.
+    #[error(
+        "workspace files contain merge conflict markers: {}; resolve the merge, then sync again",
+        list_paths(paths)
+    )]
+    ConflictMarkers { paths: Vec<PathBuf> },
     /// The database and the workspace changed these paths differently since
     /// the last sync.
     #[error(
@@ -79,7 +85,10 @@ pub enum WorkspaceSyncError {
 
 impl From<WorkspaceImportError> for WorkspaceSyncError {
     fn from(error: WorkspaceImportError) -> Self {
-        Self::Import(Box::new(error))
+        match error {
+            WorkspaceImportError::ConflictMarkers { paths } => Self::ConflictMarkers { paths },
+            error => Self::Import(Box::new(error)),
+        }
     }
 }
 
@@ -87,7 +96,8 @@ impl WorkspaceSyncError {
     /// Return the CLI exit category for this sync failure.
     pub fn exit_code(&self) -> u8 {
         match self {
-            Self::Divergent { .. }
+            Self::ConflictMarkers { .. }
+            | Self::Divergent { .. }
             | Self::Export(WorkspaceExportError::Conflict { .. })
             | Self::Storage(StorageError::ChangedSinceRead) => 4,
             Self::Removed { .. } => 3,
@@ -120,7 +130,8 @@ type Result<T> = std::result::Result<T, WorkspaceSyncError>;
 /// Synchronize the database and the workspace at `root`.
 ///
 /// Changes made on one side since the last sync are carried to the other.
-/// The sync refuses when a path diverged or a record file was removed, and
+/// The sync refuses when a workspace file holds merge conflict markers, a
+/// path diverged or a record file was removed, and
 /// validates the complete merged graph before writing anything. A commit from
 /// another connection after the sync reads the database refuses the import
 /// with [`StorageError::ChangedSinceRead`] instead of overwriting it.
@@ -207,14 +218,6 @@ fn removal_hint(side: Side) -> &'static str {
         Side::Workspace => "; if a branch switch removed it, `arcl workspace export` writes it back",
         Side::Database => "",
     }
-}
-
-fn list_paths(paths: &[PathBuf]) -> String {
-    paths
-        .iter()
-        .map(|path| format!("`{}`", path.display()))
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 #[cfg(test)]
@@ -353,6 +356,39 @@ mod tests {
         assert_eq!(
             project.database.connected_graph().expect("graph loads").captures[0].body,
             "Edited in the database"
+        );
+        assert_eq!(project.database.workspace_base().expect("base loads"), base);
+    }
+
+    #[test]
+    fn conflict_markers_stop_before_anything_is_written() {
+        let mut project = Project::synced();
+        let capture = project.path_of("captures");
+        // The front matter still decodes; only the body holds the markers.
+        project.edit(
+            &capture,
+            "Capture body",
+            "<<<<<<< HEAD\nMain body\n=======\nOther body\n>>>>>>> other",
+        );
+        let conflicted = project.read(&capture);
+        let note = project
+            .database
+            .create_note("Note".to_owned(), "Not exported yet".to_owned())
+            .expect("note creates");
+        let base = project.database.workspace_base().expect("base loads");
+
+        let error = project.sync().expect_err("conflict markers refuse");
+        assert!(
+            matches!(&error, WorkspaceSyncError::ConflictMarkers { paths } if paths.as_slice() == std::slice::from_ref(&capture)),
+            "{error:?}"
+        );
+        assert_eq!(error.exit_code(), 4);
+        assert!(error.to_string().contains("resolve the merge"));
+        assert_eq!(project.read(&capture), conflicted);
+        assert!(!project.root.path().join(format!("notes/{}.md", note.id)).exists());
+        assert_eq!(
+            project.database.connected_graph().expect("graph loads").captures[0].body,
+            "Capture body"
         );
         assert_eq!(project.database.workspace_base().expect("base loads"), base);
     }

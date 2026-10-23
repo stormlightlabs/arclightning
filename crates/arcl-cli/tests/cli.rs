@@ -265,11 +265,26 @@ fn workspace_status_reports_changes_head_and_unresolved_merges() {
         "stderr: {}",
         String::from_utf8_lossy(&synced.stderr)
     );
+    let uncommitted = run_json(directory.path(), ["--json", "workspace", "status"].as_ref());
+    assert_eq!(uncommitted["data"]["records"], Value::Array(Vec::new()));
+    let git_changes = uncommitted["data"]["git_changes"].as_array().expect("git changes");
+    assert!(
+        git_changes
+            .iter()
+            .any(|change| change["path"] == record.as_str() && change["git"] == "untracked"),
+        "git changes: {git_changes:?}"
+    );
     git(directory.path(), &["add", "."]);
     git(directory.path(), &["commit", "-q", "-m", "base"]);
     let clean = run_json(directory.path(), ["--json", "workspace", "status"].as_ref());
     assert_eq!(clean["data"]["head"]["kind"], "branch");
     assert_eq!(clean["data"]["records"], Value::Array(Vec::new()));
+    assert_eq!(clean["data"]["git_changes"], Value::Array(Vec::new()));
+
+    git(directory.path(), &["checkout", "-q", "--detach"]);
+    let detached = run_json(directory.path(), ["--json", "workspace", "status"].as_ref());
+    assert_eq!(detached["data"]["head"]["kind"], "detached");
+    git(directory.path(), &["checkout", "-q", "main"]);
 
     let record_path = directory.path().join(".arcl/workspace").join(&record);
     let base = fs::read_to_string(&record_path).expect("record reads");
@@ -306,6 +321,19 @@ fn workspace_status_reports_changes_head_and_unresolved_merges() {
     let text = String::from_utf8_lossy(&human.stdout);
     assert!(text.contains("Unmerged in Git:"), "status: {text}");
     assert!(text.contains("Sync will stop"), "status: {text}");
+
+    let refused = arcl_in(directory.path())
+        .args(["workspace", "sync"])
+        .output()
+        .expect("sync runs");
+    assert_eq!(refused.status.code(), Some(4));
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(
+        stderr.contains("conflict markers") && stderr.contains(&record),
+        "stderr: {stderr}"
+    );
+    let after = run_json(directory.path(), ["--json", "capture", "show", capture_id].as_ref());
+    assert_eq!(after["data"]["capture"]["body"], "First body");
 }
 
 #[test]

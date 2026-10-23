@@ -1077,6 +1077,15 @@ fn human_workspace_status(status: &WorkspaceStatus) -> String {
             ));
         }
     }
+    if !status.git_changes.is_empty() {
+        lines.push("Changed in Git, matching the last sync:".to_owned());
+        lines.extend(
+            status
+                .git_changes
+                .iter()
+                .map(|change| format!("  {:<34} {}", path_state_slug(change.git), change.path.display())),
+        );
+    }
     for (label, paths) in [
         ("Unmerged in Git:", &status.unmerged),
         ("Conflict markers:", &status.conflict_markers),
@@ -1087,11 +1096,18 @@ fn human_workspace_status(status: &WorkspaceStatus) -> String {
             lines.extend(paths.iter().map(|path| format!("  {}", path.display())));
         }
     }
-    lines.push(if status.blocks_sync() {
-        "Sync will stop until these are resolved.".to_owned()
-    } else {
-        "Run `arcl workspace sync` to carry these changes.".to_owned()
-    });
+    lines.push(
+        if status.sync_refuses() {
+            "Sync will stop until these are resolved."
+        } else if !status.unmerged.is_empty() {
+            "Finish the Git merge before syncing; sync does not check Git state."
+        } else if !status.records.is_empty() {
+            "Run `arcl workspace sync` to carry these changes."
+        } else {
+            "Sync has nothing to carry; commit these files in Git."
+        }
+        .to_owned(),
+    );
     lines.join("\n")
 }
 
@@ -1115,6 +1131,13 @@ fn plain_workspace_status(status: &WorkspaceStatus) -> String {
             plain_escape(&record.path.to_string_lossy()),
         ));
     }
+    lines.extend(status.git_changes.iter().map(|change| {
+        format!(
+            "git\t{}\t{}",
+            path_state_slug(change.git),
+            plain_escape(&change.path.to_string_lossy())
+        )
+    }));
     for (label, paths) in [
         ("unmerged", &status.unmerged),
         ("conflict-markers", &status.conflict_markers),
