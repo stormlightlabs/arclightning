@@ -1,6 +1,6 @@
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
-use std::{fs, fs::OpenOptions};
 
 use anyhow::Context;
 use thiserror::Error;
@@ -56,17 +56,22 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
     let renderer = Renderer::new(mode, cli.color);
 
     let access = command_access(cli.command.as_ref());
-    let (roots, synced) = match access {
-        Access::Untracked => (None, Ok(())),
+    // The lock is held from the first sync until `run` returns.
+    let (roots, synced, _lock) = match access {
+        Access::Untracked => (None, Ok(()), None),
         _ => match workspace_roots() {
-            Ok(Some(roots)) => {
-                let synced = auto_sync(&roots);
-                (Some(roots), synced)
-            }
-            Ok(None) => (None, Ok(())),
-            Err(error) => (None, Err(error)),
+            Ok(Some(roots)) => match roots.lock() {
+                Ok(lock) => {
+                    let synced = auto_sync(&roots);
+                    (Some(roots), synced, Some(lock))
+                }
+                Err(error) => (None, Err(error), None),
+            },
+            Ok(None) => (None, Ok(()), None),
+            Err(error) => (None, Err(error), None),
         },
     };
+    let mut warning = None;
     match synced {
         // A missing database is the command's own error to report, once.
         Ok(()) | Err(CommandError::NotInitialized { .. }) => {}
@@ -82,21 +87,49 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
             return Err(ApplicationError::from_command(error).into());
         }
         Err(error) => {
-            eprintln!("warning: the workspace did not sync, so this shows the database as it is: {error}");
+            warning = Some(format!(
+                "the workspace did not sync, so this shows the database as it is: {error}"
+            ));
+            // Under `--json` the warning waits for the command to succeed, so
+            // stderr holds at most one JSON value.
+            if mode != OutputMode::Json {
+                write_warning(mode, warning.take());
+            }
         }
     }
 
     dispatch(cli.command, &renderer)?;
+    write_warning(mode, warning);
 
     if access == Access::Write
         && let Some(roots) = &roots
         && let Err(error) = auto_sync(roots)
     {
-        eprintln!(
-            "warning: the change is saved, but the workspace was not updated: {error}; the next command updates it"
+        write_warning(
+            mode,
+            Some(format!(
+                "the change is saved, but the workspace was not updated: {error}; the next command updates it"
+            )),
         );
     }
     Ok(())
+}
+
+/// Write a warning to stderr: plain text, a one-line JSON envelope under
+/// `--json`, or nothing under `--quiet`.
+fn write_warning(mode: OutputMode, warning: Option<String>) {
+    let Some(message) = warning else { return };
+    match mode {
+        OutputMode::Quiet => {}
+        OutputMode::Json => eprintln!(
+            "{}",
+            serde_json::json!({
+                "format_version": 1,
+                "warning": { "code": "workspace_sync", "message": message },
+            })
+        ),
+        OutputMode::Human | OutputMode::Plain => eprintln!("warning: {message}"),
+    }
 }
 
 /// Run one command with no workspace sync around it.

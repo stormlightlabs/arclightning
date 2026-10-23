@@ -30,8 +30,13 @@ record file, pull, or switch branches, and the next `arcl` command picks it up.
 If that first sync stops, a command that changes records refuses with the
 sync's status code and names the files, before it changes anything. A command
 that only reads records still runs, shows the database as it is, and prints a
-warning. If the export after a change fails, the change is saved and the next
-command writes it to the workspace.
+warning: one line of JSON on stderr under `--json`, and none under `--quiet`. If
+the export after a change fails, the change is saved and the next command writes
+it to the workspace.
+
+While the workspace is on, `arcl` commands in one project run one at a time. A
+command waits on the lock file `.arcl/arcl.db-sync.lock` until the one before it
+finishes its syncs.
 
 To sync without running another command:
 

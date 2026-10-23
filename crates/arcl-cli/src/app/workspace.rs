@@ -1,9 +1,12 @@
+use super::auto_sync::lock_project;
 use super::support::*;
 use super::*;
 
-/// Run one workspace command. Only `status` returns a report to render.
+/// Run one workspace command under the project's sync lock. Only `status`
+/// returns a report to render.
 pub(super) fn exec_workspace(command: WorkspaceCommand) -> CResult<Option<WorkspaceStatus>> {
     let (worktree_root, workspace_root) = workspace_paths()?;
+    let _lock = lock_project(&worktree_root)?;
     let mut database = open_database()?;
     match command {
         WorkspaceCommand::Export => {

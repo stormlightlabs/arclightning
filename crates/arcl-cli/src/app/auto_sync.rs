@@ -5,10 +5,17 @@
 //! changes anything; a read warns and shows the database as it is. After a
 //! write commits, a second sync exports it. If that export fails, the change
 //! is already saved and the next command finishes the export.
+//!
+//! Every sync runs under the project's sync lock, so arcl commands in one
+//! project with the workspace on run one at a time.
 
 use super::support::*;
 use super::workspace::{as_dyn, discover_vcs};
 use super::*;
+
+/// The lock file, under `.arcl/`, that serializes syncs in one project. The
+/// `/arcl.db-*` entry in `.arcl/.gitignore` keeps it out of Git.
+const SYNC_LOCK_FILE: &str = "arcl.db-sync.lock";
 
 /// How a command touches project records.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -26,6 +33,13 @@ pub(super) enum Access {
 pub(super) struct WorkspaceRoots {
     worktree_root: PathBuf,
     workspace_root: PathBuf,
+}
+
+impl WorkspaceRoots {
+    /// Take the project's sync lock. See [`lock_project`].
+    pub(super) fn lock(&self) -> CResult<File> {
+        lock_project(&self.worktree_root)
+    }
 }
 
 /// Classify a parsed command by how it touches records.
@@ -87,4 +101,20 @@ pub(super) fn auto_sync(roots: &WorkspaceRoots) -> CResult<()> {
     let vcs = discover_vcs(&roots.worktree_root)?;
     sync_workspace(&roots.workspace_root, &roots.worktree_root, &mut database, as_dyn(&vcs))?;
     Ok(())
+}
+
+/// Take an exclusive lock on `.arcl/arcl.db-sync.lock` under `project_root`,
+/// creating the file if it is missing. Blocks until no other arcl process
+/// holds it. The lock is held until the returned file drops, so a caller
+/// keeps it across a sync, the command and the sync after it.
+pub(super) fn lock_project(project_root: &Path) -> CResult<File> {
+    let path = project_root.join(ARCL_DIRECTORY).join(SYNC_LOCK_FILE);
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .map_err(|source| CommandError::SyncLock { path: path.clone(), source })?;
+    file.lock().map_err(|source| CommandError::SyncLock { path, source })?;
+    Ok(file)
 }

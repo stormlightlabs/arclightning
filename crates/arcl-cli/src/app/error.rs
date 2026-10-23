@@ -117,9 +117,12 @@ pub(super) enum CommandError {
     #[error(transparent)]
     WorkspaceStatus(Box<WorkspaceStatusError>),
     #[error(
-        "the workspace must sync before this change, and the sync stopped: {0}\nRun `arcl workspace status` to see why; `arcl workspace resolve` settles files both sides changed"
+        "the workspace must sync before this change, and the sync stopped: {0}\nRun `arcl workspace status` to see why{hint}",
+        hint = resolve_hint(.0)
     )]
     AutoSync(Box<WorkspaceSyncError>),
+    #[error("could not lock `{path}`: {source}")]
+    SyncLock { path: PathBuf, source: io::Error },
     #[error(transparent)]
     Domain(#[from] DomainError),
     #[error(transparent)]
@@ -184,7 +187,8 @@ impl CommandError {
             | Self::ReadMarkdown { .. }
             | Self::ReadStdin { .. }
             | Self::OpenDatabase { source: StorageError::Sqlite(_), .. }
-            | Self::CurrentDirectory { .. } => 1,
+            | Self::CurrentDirectory { .. }
+            | Self::SyncLock { .. } => 1,
             Self::OpenDatabase { source, .. } => source.storage_exit_code(),
             Self::Storage(error) => error.storage_exit_code(),
             Self::InvalidMarkdown { .. }
@@ -235,5 +239,15 @@ impl StorageErrorExitCode for StorageError {
             StorageError::ChangedSinceRead => 4,
             StorageError::Sqlite(_) => 1,
         }
+    }
+}
+
+/// Name `arcl workspace resolve` only for a sync failure it settles: files the
+/// database and the workspace changed differently. A file removed from the
+/// workspace carries its own `resolve --keep database` hint.
+fn resolve_hint(error: &WorkspaceSyncError) -> &'static str {
+    match error {
+        WorkspaceSyncError::Divergent { .. } => "; `arcl workspace resolve` settles files both sides changed",
+        _ => "",
     }
 }

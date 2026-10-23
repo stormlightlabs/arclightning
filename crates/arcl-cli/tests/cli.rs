@@ -493,6 +493,7 @@ fn commands_sync_the_workspace_around_reads_and_writes() {
     assert_eq!(refused.status.code(), Some(4));
     let stderr = String::from_utf8_lossy(&refused.stderr);
     assert!(stderr.contains("arcl workspace status"), "stderr: {stderr}");
+    assert!(stderr.contains("arcl workspace resolve"), "stderr: {stderr}");
     let read = arcl_in(directory.path())
         .args(["--json", "capture", "show", capture_id])
         .output()
@@ -525,6 +526,10 @@ fn commands_treat_a_symlinked_workspace_as_a_failed_sync() {
     assert_eq!(refused.status.code(), Some(3));
     let stderr = String::from_utf8_lossy(&refused.stderr);
     assert!(stderr.contains("symbolic link"), "stderr: {stderr}");
+    assert!(
+        !stderr.contains("workspace resolve"),
+        "resolve cannot fix a symlinked workspace: {stderr}"
+    );
 
     let read = arcl_in(directory.path())
         .args(["--json", "capture", "list"])
@@ -537,6 +542,86 @@ fn commands_treat_a_symlinked_workspace_as_a_failed_sync() {
         "stderr: {stderr}"
     );
     assert_eq!(json(&read.stdout)["data"]["captures"], Value::Array(Vec::new()));
+    let warning: Value = serde_json::from_slice(&read.stderr).expect("stderr is one JSON value");
+    assert_eq!(warning["format_version"], 1);
+    assert_eq!(warning["warning"]["code"], "workspace_sync");
+
+    let quiet = arcl_in(directory.path())
+        .args(["--quiet", "capture", "list"])
+        .output()
+        .expect("list runs");
+    assert!(quiet.status.success());
+    assert!(
+        quiet.stderr.is_empty(),
+        "stderr: {}",
+        String::from_utf8_lossy(&quiet.stderr)
+    );
+
+    let failed = arcl_in(directory.path())
+        .args(["--json", "capture", "show", "not-an-id"])
+        .output()
+        .expect("show runs");
+    assert_eq!(failed.status.code(), Some(3));
+    let error: Value = serde_json::from_slice(&failed.stderr).expect("stderr is one JSON value");
+    assert_eq!(error["error"]["code"], "invalid_request");
+}
+
+#[test]
+fn parallel_writes_with_the_workspace_on_all_succeed() {
+    let directory = tempdir().expect("temporary directory can be created");
+    run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
+    let children = (0..16)
+        .map(|index| {
+            std::process::Command::new(assert_cmd::cargo::cargo_bin("arcl"))
+                .args(["--json", "note", "create", &format!("Parallel {index}")])
+                .current_dir(directory.path())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .expect("arcl spawns")
+        })
+        .collect::<Vec<_>>();
+    for child in children {
+        let output = child.wait_with_output().expect("arcl finishes");
+        assert!(
+            output.status.success(),
+            "stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            output.stderr.is_empty(),
+            "stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let note_id = id(&output.stdout, "note");
+        assert!(
+            directory
+                .path()
+                .join(format!(".arcl/workspace/notes/{note_id}.md"))
+                .is_file(),
+            "note {note_id} was not exported"
+        );
+    }
+    let status = run_json(directory.path(), ["--json", "workspace", "status"].as_ref());
+    assert_eq!(status["data"]["records"], Value::Array(Vec::new()));
+}
+
+#[test]
+fn workspace_status_reports_a_record_only_the_database_has() {
+    let directory = tempdir().expect("temporary directory can be created");
+    run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
+    let capture = with_workspace_off(directory.path(), || {
+        run_json(
+            directory.path(),
+            ["--json", "capture", "create", "Database only"].as_ref(),
+        )
+    });
+    let capture_id = capture["data"]["capture"]["id"].as_str().expect("capture ID");
+    let status = run_json(directory.path(), ["--json", "workspace", "status"].as_ref());
+    let record = &status["data"]["records"][0];
+    assert_eq!(record["path"], format!("captures/{capture_id}.md"));
+    assert_eq!(record["state"], "database-changed");
+    assert_eq!(record["database"], "added");
 }
 
 #[test]
