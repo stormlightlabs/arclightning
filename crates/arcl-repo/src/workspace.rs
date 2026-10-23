@@ -18,7 +18,7 @@ pub use export::{WorkspaceExportError, WorkspaceFile, export_graph, export_graph
 pub use import::{WorkspaceImportError, import_graph, import_workspace};
 pub use reconcile::{Change, Comparison, RecordComparison, RecordState, compare};
 pub use status::{GitChange, RecordStatus, RecordStatusKind, WorkspaceStatus, WorkspaceStatusError, workspace_status};
-pub use sync::{Side, SyncOutcome, WorkspaceSyncError, sync_workspace};
+pub use sync::{Side, SyncOutcome, WorkspaceSyncError, resolve_workspace, sync_workspace, workspace_relative};
 
 pub const CONFIG_FORMAT_VERSION: u32 = 1;
 /// The version of the on-disk workspace format implemented by this crate.

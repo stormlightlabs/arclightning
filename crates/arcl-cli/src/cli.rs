@@ -22,6 +22,15 @@ impl fmt::Display for ColorChoice {
     }
 }
 
+/// The side whose version `workspace resolve` keeps.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum KeepSide {
+    /// Keep the database's version and write it to the workspace.
+    Database,
+    /// Keep the workspace file and import it into the database.
+    Workspace,
+}
+
 /// Arc Lightning commands.
 #[derive(Clone, Debug, Subcommand)]
 pub enum Command {
@@ -695,6 +704,15 @@ pub enum WorkspaceCommand {
     Sync,
     /// Report what differs from the last sync, conflicts, and Git state, without writing.
     Status,
+    /// Keep one side's version of files both sides changed, then sync the rest.
+    Resolve {
+        /// The side whose version to keep.
+        #[arg(long, value_enum)]
+        keep: KeepSide,
+        /// Workspace-relative paths, as `arcl workspace status` prints them.
+        #[arg(required = true, value_name = "PATH")]
+        paths: Vec<PathBuf>,
+    },
 }
 
 /// Filters accepted by broad connected-record queries.

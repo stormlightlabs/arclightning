@@ -26,6 +26,23 @@ pub(super) fn exec_workspace(command: WorkspaceCommand) -> CResult<Option<Worksp
             let vcs = discover_vcs(&worktree_root)?;
             sync_workspace(&workspace_root, &worktree_root, &mut database, as_dyn(&vcs))?;
         }
+        WorkspaceCommand::Resolve { keep, paths } => {
+            let vcs = discover_vcs(&worktree_root)?;
+            let keep = match keep {
+                KeepSide::Database => Side::Database,
+                KeepSide::Workspace => Side::Workspace,
+            };
+            let current_dir = std::env::current_dir().map_err(|source| CommandError::CurrentDirectory { source })?;
+            resolve_workspace(
+                &workspace_root,
+                &worktree_root,
+                &current_dir,
+                &mut database,
+                as_dyn(&vcs),
+                &paths,
+                keep,
+            )?;
+        }
         WorkspaceCommand::Status => {
             let vcs = discover_vcs(&worktree_root)?;
             let status = workspace_status(&workspace_root, &database, as_dyn(&vcs))?;
