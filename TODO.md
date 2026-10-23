@@ -205,17 +205,17 @@ Blocked by: T08
 
 Acceptance criteria:
 
-- [ ] Implement every state in the base/database/workspace comparison from
+- [x] Implement every state in the base/database/workspace comparison from
       `SPEC.md`
-- [ ] Reconcile before ordinary reads and writes, including recovery after an
+- [x] Reconcile before ordinary reads and writes, including recovery after an
       interrupted post-commit export
-- [ ] Refuse automatic writes when the database and workspace changed
+- [x] Refuse automatic writes when the database and workspace changed
       differently from their common base
-- [ ] Report record-level status, unmerged paths, conflict markers, and Git path
+- [x] Report record-level status, unmerged paths, conflict markers, and Git path
       state where Git exists
-- [ ] Require an explicit side for destructive recovery and never mutate Git
+- [x] Require an explicit side for destructive recovery and never mutate Git
       refs, the index, remotes, or configuration
-- [ ] Track this repository's own remaining roadmap and tasks in its committed
+- [x] Track this repository's own remaining roadmap and tasks in its committed
       workspace
 
 Verification:

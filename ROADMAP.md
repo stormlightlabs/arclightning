@@ -10,11 +10,12 @@ Arc Lightning has a working Rust CLI over a shared application layer and
 SQLite. It covers projects with or without Git, captures, specs, plans, optional
 phases, flexible tasks, notes, releases, dependencies, lifecycle state,
 ready-work queries, task context, handoffs, and evidence. The shared Svelte UI
-package exists. Workspace encoding, export, import, and the three-way
-comparison are implemented.
+package exists. The repository-native workspace syncs around every command,
+reports status, and stops for explicit recovery on divergence or unmerged Git
+files. This repository tracks its remaining roadmap in `.arcl/workspace`.
 
-Workspace sync and recovery, strict blocking, MCP, the local web app, the new
-website, and the desktop app are unfinished.
+Strict blocking, MCP, the local web app, the new website, and the desktop app
+are unfinished.
 
 ## Milestone 1: Connected planning model
 
