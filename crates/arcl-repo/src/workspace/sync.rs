@@ -14,7 +14,7 @@
 use std::{
     collections::BTreeMap,
     fmt,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 use thiserror::Error;
@@ -49,7 +49,8 @@ impl fmt::Display for Side {
 
 /// A sync that could not be applied.
 ///
-/// `Unmerged`, `Divergent`, `Removed` and `Import` write nothing. `Export` and `Storage`
+/// `Unmerged`, `Divergent`, `NothingToResolve`, `Removed` and `Import` write
+/// nothing. `Export` and `Storage`
 /// may leave workspace files written without the database commit; the next
 /// sync reconciles them.
 #[derive(Debug, Error)]
@@ -69,13 +70,13 @@ pub enum WorkspaceSyncError {
     Divergent { paths: Vec<PathBuf> },
     /// A path named for resolution has nothing to resolve.
     #[error(
-        "workspace file `{path}` has nothing to resolve; resolve takes files the database and the workspace changed differently, or a record file removed from the workspace"
+        "workspace file `{path}` has nothing to resolve; resolve takes files the database and the workspace changed differently, or a record file removed from the workspace; paths are workspace-relative, as `arcl workspace status` prints them"
     )]
     NothingToResolve { path: PathBuf },
     /// One side removed a file the stored base holds.
     #[error(
         "workspace file `{path}` was removed from the {side}; the workspace does not support hard deletion{}",
-        removal_hint(*side)
+        removal_hint(path, *side)
     )]
     Removed { path: PathBuf, side: Side },
     /// The workspace could not be read, or the merged graph is invalid.
@@ -116,9 +117,11 @@ impl WorkspaceSyncError {
 /// The paths a sync carried from one side to the other.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SyncOutcome {
-    /// Paths changed only in the workspace and imported into the database.
+    /// Paths changed only in the workspace, or resolved in its favour, and
+    /// imported into the database.
     pub imported: Vec<PathBuf>,
-    /// Paths changed only in the database and exported to the workspace.
+    /// Paths changed only in the database, or resolved in its favour, and
+    /// exported to the workspace.
     pub exported: Vec<PathBuf>,
     /// Paths both sides changed the same way; only the base moved.
     pub converged: Vec<PathBuf>,
@@ -155,11 +158,38 @@ pub fn sync_workspace(
 /// its version to the workspace; keeping the workspace imports the file. The
 /// workspace cannot win a removal, since records are never hard deleted.
 /// Other divergent paths still stop the sync, and nothing is written then.
+///
+/// Paths are workspace-relative, as `arcl workspace status` prints them. A
+/// leading `./`, the workspace path relative to `worktree_root`, or an
+/// absolute path under `root` is accepted too; see [`workspace_relative`].
 pub fn resolve_workspace(
     root: &Path, worktree_root: &Path, database: &mut Database, vcs: Option<&dyn Vcs>, paths: &[PathBuf], keep: Side,
 ) -> Result<SyncOutcome> {
-    let choices = paths.iter().map(|path| (path.clone(), keep)).collect();
+    let choices = paths
+        .iter()
+        .map(|path| (workspace_relative(path, root, worktree_root), keep))
+        .collect();
     run_sync(root, worktree_root, database, vcs, &choices)
+}
+
+/// Return `path` relative to the workspace at `root`.
+///
+/// Leading `./` components are dropped. An absolute path under `root` loses
+/// that prefix, and a relative path that starts with the workspace's path
+/// relative to `worktree_root` (such as `.arcl/workspace/captures/x.md`) loses
+/// that prefix. Any other path is returned without its leading `./`.
+pub fn workspace_relative(path: &Path, root: &Path, worktree_root: &Path) -> PathBuf {
+    if path.is_absolute() {
+        return path.strip_prefix(root).unwrap_or(path).to_owned();
+    }
+    let path = path
+        .components()
+        .skip_while(|component| matches!(component, Component::CurDir))
+        .collect::<PathBuf>();
+    match root.strip_prefix(worktree_root) {
+        Ok(prefix) if !prefix.as_os_str().is_empty() => path.strip_prefix(prefix).map(Path::to_owned).unwrap_or(path),
+        _ => path,
+    }
 }
 
 fn run_sync(
@@ -270,10 +300,15 @@ fn run_sync(
     Ok(outcome)
 }
 
-fn removal_hint(side: Side) -> &'static str {
+fn removal_hint(path: &Path, side: Side) -> String {
     match side {
-        Side::Workspace => "; if a branch switch removed it, `arcl workspace export` writes it back",
-        Side::Database => "",
+        Side::Workspace => {
+            format!(
+                "; `arcl workspace resolve --keep database {}` writes it back",
+                path.display()
+            )
+        }
+        Side::Database => String::new(),
     }
 }
 
@@ -489,6 +524,56 @@ mod tests {
         assert_eq!(error.exit_code(), 3);
         assert!(project.read(&spec).contains("Edited in the workspace"));
         assert_eq!(project.database.workspace_base().expect("base loads"), base);
+    }
+
+    #[test]
+    fn resolve_accepts_a_path_with_a_leading_dot() {
+        let mut project = Project::synced();
+        let capture = project.diverge_capture();
+
+        let outcome = project
+            .resolve(&[Path::new(".").join(&capture)], Side::Database)
+            .expect("resolve succeeds");
+        assert_eq!(outcome.exported, std::slice::from_ref(&capture));
+        assert!(project.read(&capture).contains("Edited in the database"));
+    }
+
+    #[test]
+    fn named_paths_become_workspace_relative() {
+        let worktree = Path::new("/project");
+        let root = Path::new("/project/.arcl/workspace");
+        let expected = Path::new("captures/x.md");
+        for named in [
+            "captures/x.md",
+            "./captures/x.md",
+            ".arcl/workspace/captures/x.md",
+            "./.arcl/workspace/captures/x.md",
+            "/project/.arcl/workspace/captures/x.md",
+        ] {
+            assert_eq!(
+                workspace_relative(Path::new(named), root, worktree),
+                expected,
+                "{named}"
+            );
+        }
+        assert_eq!(
+            workspace_relative(Path::new("/elsewhere/captures/x.md"), root, worktree),
+            Path::new("/elsewhere/captures/x.md")
+        );
+        assert_eq!(
+            workspace_relative(Path::new("./captures/x.md"), worktree, worktree),
+            expected
+        );
+    }
+
+    #[test]
+    fn a_removed_file_names_resolve_as_the_fix() {
+        let error = WorkspaceSyncError::Removed { path: PathBuf::from("captures/x.md"), side: Side::Workspace };
+        assert!(
+            error
+                .to_string()
+                .ends_with("; `arcl workspace resolve --keep database captures/x.md` writes it back")
+        );
     }
 
     #[test]

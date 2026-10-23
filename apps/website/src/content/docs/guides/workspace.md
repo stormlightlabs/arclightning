@@ -155,8 +155,8 @@ When sync stops on files both sides changed, run `arcl workspace status` to see
 them, decide which version to keep, and name the files:
 
 ```sh
-arcl workspace resolve --keep workspace captures/arcl-c-01....md
-arcl workspace resolve --keep database captures/arcl-c-01....md
+arcl workspace resolve --keep workspace captures/<capture-id>.md
+arcl workspace resolve --keep database captures/<capture-id>.md
 ```
 
 `--keep workspace` imports the file and replaces the database's version.
