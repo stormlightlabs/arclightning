@@ -134,14 +134,14 @@ pub(super) fn project_root_config() -> CResult<(PathBuf, ProjectConfig)> {
     Ok((root, config))
 }
 
-pub(super) fn snapshot_paths() -> CResult<(PathBuf, PathBuf)> {
+pub(super) fn workspace_paths() -> CResult<(PathBuf, PathBuf)> {
     let (root, config) = project_root_config()?;
-    if !config.snapshot.enabled {
-        return Err(CommandError::SnapshotDisabled);
+    if !config.workspace.enabled {
+        return Err(CommandError::WorkspaceDisabled);
     }
-    let snapshot_root = resolve_snapshot_root(&root, &config.snapshot.path)
+    let workspace_root = resolve_workspace_root(&root, &config.workspace.path)
         .map_err(|source| CommandError::InvalidConfig { path: root.join(ARCL_DIRECTORY).join(CONFIG_FILE), source })?;
-    Ok((root, snapshot_root))
+    Ok((root, workspace_root))
 }
 
 pub(super) fn nearest_project_root(start: &Path) -> Option<PathBuf> {

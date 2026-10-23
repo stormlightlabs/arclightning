@@ -1,48 +1,48 @@
 ---
-title: Share project snapshots
+title: Share the project workspace
 description: Export planning records to Markdown, commit them with your project, and rebuild the local database after pulling changes.
 ---
 
-Snapshots let you review and share Arc Lightning records through version
-control. Arc Lightning continues to use SQLite while you work, then projects the
-connected planning model into a Markdown workspace when you export it.
+The workspace lets you review and share Arc Lightning records through version
+control. Arc Lightning uses SQLite while you work, then projects the connected
+planning model into Markdown files when you export it.
 
-## Enable snapshots
+## Enable the workspace
 
-Initialize the project with snapshot support:
+Initialize the project with the workspace enabled:
 
 ```sh
-arcl init --snapshot
+arcl init --workspace
 ```
 
-Arc Lightning creates the snapshot workspace at `.arcl/snapshot/` by default.
-It also adds `.arcl/arcl.db` to `.arcl/.gitignore`, so the local database stays
-out of version control.
+Arc Lightning creates the workspace at `.arcl/workspace/` by default. It also
+adds `.arcl/arcl.db` to `.arcl/.gitignore`, so the local database stays out of
+version control.
 
-Commit `.arcl/config.toml` and `.arcl/snapshot/` with the rest of the project.
+Commit `.arcl/config.toml` and `.arcl/workspace/` with the rest of the project.
 
 ## Export your work
 
 After you change records through the CLI, export the database projection:
 
 ```sh
-arcl snapshot export
+arcl workspace export
 ```
 
-Review the changes under `.arcl/snapshot/`, then commit them. Export writes the
+Review the changes under `.arcl/workspace/`, then commit them. Export writes the
 complete connected model, but leaves files unchanged when their bytes already
 match. It stops if a workspace file has changed since the last export instead
 of overwriting that file.
 
 Run another export before each commit that changes Arc Lightning records. This
-keeps the committed snapshot in step with your local database.
+keeps the committed workspace in step with your local database.
 
 ## Import changes after a pull
 
-Import the snapshot before making new local changes:
+Import the workspace before making new local changes:
 
 ```sh
-arcl snapshot import
+arcl workspace import
 ```
 
 Import reads every record and validates IDs, references, task ancestry, parent
@@ -50,16 +50,16 @@ cycles, dependency cycles, and the complete relationship graph. Arc Lightning
 replaces the database only after the whole workspace passes validation.
 
 For a fresh clone, initialize the local database first, then import the
-committed snapshot:
+committed workspace:
 
 ```sh
-arcl init --snapshot
-arcl snapshot import
+arcl init --workspace
+arcl workspace import
 ```
 
-## Edit snapshot files
+## Edit workspace files
 
-You can edit a record in `.arcl/snapshot/` and import it back into SQLite. Keep
+You can edit a record in `.arcl/workspace/` and import it back into SQLite. Keep
 the TOML front matter between the `+++` delimiters and write the record body as
 Markdown:
 
@@ -74,8 +74,8 @@ acceptance-criteria = "- [ ] Invalid records are rejected"
 The specification body goes here.
 ```
 
-Do not rename or delete an existing record file. Snapshots do not support hard
-deletion. Use the record's status to complete, cancel, discard, or otherwise
+Do not rename or delete an existing record file. The workspace does not support
+hard deletion. Use the record's status to complete, cancel, discard, or otherwise
 close it through the CLI.
 
 After a successful import, Arc Lightning rewrites the workspace in its
@@ -100,7 +100,7 @@ implicitly.
 
 ## Avoid divergent changes
 
-Import after pulling snapshot changes and export before committing local
+Import after pulling workspace changes and export before committing local
 database changes. If both the database and workspace changed from their last
 shared export, import reports a conflict instead of choosing one version. No
 partial database writes occur when an import fails.

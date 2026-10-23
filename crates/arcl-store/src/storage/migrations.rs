@@ -11,6 +11,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration { version: 1, sql: include_str!("migrations/001_schema.sql") },
     Migration { version: 2, sql: include_str!("migrations/002_plan_keys.sql") },
     Migration { version: 3, sql: include_str!("migrations/003_remove_legacy_model.sql") },
+    Migration { version: 4, sql: include_str!("migrations/004_workspace_files.sql") },
 ];
 
 pub fn apply(connection: &mut Connection) -> Result<(), StorageError> {
@@ -158,6 +159,43 @@ mod tests {
         assert_eq!(graph.notes[0].body, "# Existing note body");
         assert_eq!(graph.release_memberships.len(), 2);
         assert_eq!(graph.links.len(), 1);
+    }
+
+    #[test]
+    fn workspace_migration_keeps_the_stored_base() {
+        let mut connection = rusqlite::Connection::open_in_memory().expect("in-memory SQLite opens");
+        for sql in [
+            include_str!("migrations/001_schema.sql"),
+            include_str!("migrations/002_plan_keys.sql"),
+            include_str!("migrations/003_remove_legacy_model.sql"),
+        ] {
+            connection.execute_batch(sql).expect("earlier schema creates");
+        }
+        connection
+            .pragma_update(None, "user_version", 3)
+            .expect("version marker writes");
+        connection
+            .execute(
+                "INSERT INTO snapshot_files (path, content) VALUES ('notes/a.md', x'2b2b2b')",
+                [],
+            )
+            .expect("base file inserts");
+
+        super::apply(&mut connection).expect("workspace migration applies");
+        let content: Vec<u8> = connection
+            .query_row(
+                "SELECT content FROM workspace_files WHERE path = 'notes/a.md'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("base file moves");
+        let state: String = connection
+            .query_row("SELECT value FROM meta WHERE key = 'workspace-sync-state'", [], |row| {
+                row.get(0)
+            })
+            .expect("sync state key moves");
+        assert_eq!(content, b"+++");
+        assert_eq!(state, "clean");
     }
 
     #[test]

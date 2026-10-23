@@ -8,52 +8,52 @@ use std::{
 use thiserror::Error;
 
 use arcl_core::domain::{CapturePromotionTarget, LinkedRecordKind};
-use arcl_store::{ConnectedGraph, SnapshotBaseFile};
+use arcl_store::{ConnectedGraph, WorkspaceBaseFile};
 
 use super::{
-    CaptureRecord, NoteRecord, PhaseRecord, PlanRecord, ReleaseRecord, SnapshotManifest, SnapshotRecord,
-    SnapshotReference, SpecRecord, TaskRecord, encode_manifest, encode_record,
+    CaptureRecord, NoteRecord, PhaseRecord, PlanRecord, ReleaseRecord, SpecRecord, TaskRecord, WorkspaceManifest,
+    WorkspaceRecord, WorkspaceReference, encode_manifest, encode_record,
 };
 
-/// A filesystem failure or edit conflict raised while exporting a snapshot.
+/// A filesystem failure or edit conflict raised while exporting a workspace.
 #[derive(Debug, Error)]
-pub enum SnapshotExportError {
-    /// A snapshot path could not be created or inspected.
-    #[error("could not inspect snapshot path `{path}`: {source}")]
+pub enum WorkspaceExportError {
+    /// A workspace path could not be created or inspected.
+    #[error("could not inspect workspace path `{path}`: {source}")]
     Inspect { path: PathBuf, source: io::Error },
-    /// A snapshot file could not be read.
-    #[error("could not read snapshot file `{path}`: {source}")]
+    /// A workspace file could not be read.
+    #[error("could not read workspace file `{path}`: {source}")]
     Read { path: PathBuf, source: io::Error },
-    /// A snapshot file could not be written.
-    #[error("could not write snapshot file `{path}`: {source}")]
+    /// A workspace file could not be written.
+    #[error("could not write workspace file `{path}`: {source}")]
     Write { path: PathBuf, source: io::Error },
     /// A filesystem edit would overwrite bytes changed since the last base.
-    #[error("snapshot file `{path}` was changed outside arcl; refusing to overwrite it")]
+    #[error("workspace file `{path}` was changed outside arcl; refusing to overwrite it")]
     Conflict { path: PathBuf },
     /// A generated record could not be encoded.
-    #[error("could not encode snapshot file `{path}`: {source}")]
+    #[error("could not encode workspace file `{path}`: {source}")]
     Encode {
         path: PathBuf,
-        source: super::SnapshotError,
+        source: super::WorkspaceError,
     },
 }
 
-/// A single canonical file produced by a snapshot projection.
+/// A single canonical file produced by a workspace projection.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SnapshotFile {
-    /// The path relative to the snapshot root.
+pub struct WorkspaceFile {
+    /// The path relative to the workspace root.
     pub path: PathBuf,
     /// The canonical UTF-8 file contents.
     pub content: Vec<u8>,
 }
 
 /// Render every connected record and explicit relationship in canonical order.
-pub fn project_graph(graph: &ConnectedGraph) -> Result<Vec<SnapshotFile>, SnapshotExportError> {
+pub fn project_graph(graph: &ConnectedGraph) -> Result<Vec<WorkspaceFile>, WorkspaceExportError> {
     let mut files = Vec::new();
-    files.push(SnapshotFile {
+    files.push(WorkspaceFile {
         path: PathBuf::from("manifest.toml"),
-        content: encode_manifest(&SnapshotManifest::default())
-            .map_err(|source| SnapshotExportError::Encode { path: PathBuf::from("manifest.toml"), source })?
+        content: encode_manifest(&WorkspaceManifest::default())
+            .map_err(|source| WorkspaceExportError::Encode { path: PathBuf::from("manifest.toml"), source })?
             .into_bytes(),
     });
 
@@ -69,7 +69,7 @@ pub fn project_graph(graph: &ConnectedGraph) -> Result<Vec<SnapshotFile>, Snapsh
         let promoted_to = promotions.get(&capture.id).copied().map(promotion_reference);
         push_record(
             &mut files,
-            SnapshotRecord::Capture(CaptureRecord {
+            WorkspaceRecord::Capture(CaptureRecord {
                 id: capture.id,
                 title: capture.title.clone(),
                 status: capture.status,
@@ -83,7 +83,7 @@ pub fn project_graph(graph: &ConnectedGraph) -> Result<Vec<SnapshotFile>, Snapsh
     for release in &graph.releases {
         push_record(
             &mut files,
-            SnapshotRecord::Release(ReleaseRecord {
+            WorkspaceRecord::Release(ReleaseRecord {
                 id: release.id,
                 title: release.title.clone(),
                 status: release.status,
@@ -96,7 +96,7 @@ pub fn project_graph(graph: &ConnectedGraph) -> Result<Vec<SnapshotFile>, Snapsh
     for spec in &graph.specs {
         push_record(
             &mut files,
-            SnapshotRecord::Spec(SpecRecord {
+            WorkspaceRecord::Spec(SpecRecord {
                 id: spec.id,
                 title: spec.title.clone(),
                 status: spec.status,
@@ -110,7 +110,7 @@ pub fn project_graph(graph: &ConnectedGraph) -> Result<Vec<SnapshotFile>, Snapsh
     for plan in &graph.plans {
         push_record(
             &mut files,
-            SnapshotRecord::Plan(PlanRecord {
+            WorkspaceRecord::Plan(PlanRecord {
                 id: plan.id,
                 spec_id: plan.spec_id,
                 title: plan.title.clone(),
@@ -123,7 +123,7 @@ pub fn project_graph(graph: &ConnectedGraph) -> Result<Vec<SnapshotFile>, Snapsh
     for phase in &graph.phases {
         push_record(
             &mut files,
-            SnapshotRecord::Phase(PhaseRecord {
+            WorkspaceRecord::Phase(PhaseRecord {
                 id: phase.id,
                 plan_id: phase.plan_id,
                 plan_key: phase.plan_key.clone(),
@@ -138,7 +138,7 @@ pub fn project_graph(graph: &ConnectedGraph) -> Result<Vec<SnapshotFile>, Snapsh
     for task in &graph.tasks {
         push_record(
             &mut files,
-            SnapshotRecord::Task(TaskRecord {
+            WorkspaceRecord::Task(TaskRecord {
                 id: task.id,
                 spec_id: task.spec_id,
                 plan_id: task.plan_id,
@@ -165,7 +165,7 @@ pub fn project_graph(graph: &ConnectedGraph) -> Result<Vec<SnapshotFile>, Snapsh
     for note in &graph.notes {
         push_record(
             &mut files,
-            SnapshotRecord::Note(NoteRecord {
+            WorkspaceRecord::Note(NoteRecord {
                 id: note.id,
                 title: note.title.clone(),
                 links: links_for(&links, LinkedRecordKind::Note, note.id.to_string()),
@@ -177,14 +177,14 @@ pub fn project_graph(graph: &ConnectedGraph) -> Result<Vec<SnapshotFile>, Snapsh
     Ok(files)
 }
 
-/// Render and atomically preflight an export against the last stored snapshot base.
+/// Render and atomically preflight an export against the last stored workspace base.
 ///
 /// A changed working-tree file is overwritten only when it is unchanged from the
 /// stored base (or already contains the canonical bytes). All conflicts are
 /// found before any generated file is replaced.
 pub fn export_graph_with_base(
-    root: &Path, graph: &ConnectedGraph, base: &[SnapshotBaseFile],
-) -> Result<Vec<SnapshotFile>, SnapshotExportError> {
+    root: &Path, graph: &ConnectedGraph, base: &[WorkspaceBaseFile],
+) -> Result<Vec<WorkspaceFile>, WorkspaceExportError> {
     let files = project_graph(graph)?;
     let base = base
         .iter()
@@ -203,29 +203,29 @@ pub fn export_graph_with_base(
             continue;
         }
         if base.contains_key(&file.path) || !current.is_empty() {
-            return Err(SnapshotExportError::Conflict { path: file.path.clone() });
+            return Err(WorkspaceExportError::Conflict { path: file.path.clone() });
         }
     }
     write_files(root, &files, &existing)
 }
 
 /// Render and export without a stored base. Existing differing files are conflicts.
-pub fn export_graph(root: &Path, graph: &ConnectedGraph) -> Result<Vec<SnapshotFile>, SnapshotExportError> {
+pub fn export_graph(root: &Path, graph: &ConnectedGraph) -> Result<Vec<WorkspaceFile>, WorkspaceExportError> {
     export_graph_with_base(root, graph, &[])
 }
 
 pub(crate) fn export_observed(
-    root: &Path, files: &[SnapshotFile], observed: &[SnapshotFile],
-) -> Result<(), SnapshotExportError> {
+    root: &Path, files: &[WorkspaceFile], observed: &[WorkspaceFile],
+) -> Result<(), WorkspaceExportError> {
     let observed = observed
         .iter()
         .map(|file| (&file.path, &file.content))
         .collect::<HashMap<_, _>>();
     for file in observed.keys() {
         let path = root.join(file);
-        let current = fs::read(&path).map_err(|source| SnapshotExportError::Read { path: path.clone(), source })?;
+        let current = fs::read(&path).map_err(|source| WorkspaceExportError::Read { path: path.clone(), source })?;
         if observed[file].as_slice() != current.as_slice() {
-            return Err(SnapshotExportError::Conflict { path: (*file).clone() });
+            return Err(WorkspaceExportError::Conflict { path: (*file).clone() });
         }
     }
     let existing = existing_files(root, files)?;
@@ -233,21 +233,21 @@ pub(crate) fn export_observed(
     Ok(())
 }
 
-fn push_record(files: &mut Vec<SnapshotFile>, record: SnapshotRecord) -> Result<(), SnapshotExportError> {
+fn push_record(files: &mut Vec<WorkspaceFile>, record: WorkspaceRecord) -> Result<(), WorkspaceExportError> {
     let path = record.path();
     let content = encode_record(&path, &record)
-        .map_err(|source| SnapshotExportError::Encode { path: path.clone(), source })?
+        .map_err(|source| WorkspaceExportError::Encode { path: path.clone(), source })?
         .into_bytes();
-    files.push(SnapshotFile { path, content });
+    files.push(WorkspaceFile { path, content });
     Ok(())
 }
 
-fn link_map(graph: &ConnectedGraph) -> HashMap<(LinkedRecordKind, String), Vec<SnapshotReference>> {
+fn link_map(graph: &ConnectedGraph) -> HashMap<(LinkedRecordKind, String), Vec<WorkspaceReference>> {
     let mut map = HashMap::new();
     for link in &graph.links {
         map.entry((link.source_kind, link.source_id.clone()))
             .or_insert_with(Vec::new)
-            .push(SnapshotReference::new(
+            .push(WorkspaceReference::new(
                 link.target_kind.as_str(),
                 link.target_id.clone(),
             ));
@@ -259,17 +259,17 @@ fn link_map(graph: &ConnectedGraph) -> HashMap<(LinkedRecordKind, String), Vec<S
 }
 
 fn links_for(
-    links: &HashMap<(LinkedRecordKind, String), Vec<SnapshotReference>>, kind: LinkedRecordKind, id: String,
-) -> Vec<SnapshotReference> {
+    links: &HashMap<(LinkedRecordKind, String), Vec<WorkspaceReference>>, kind: LinkedRecordKind, id: String,
+) -> Vec<WorkspaceReference> {
     links.get(&(kind, id)).cloned().unwrap_or_default()
 }
 
-fn membership_map(graph: &ConnectedGraph) -> HashMap<arcl_core::domain::ReleaseId, Vec<SnapshotReference>> {
+fn membership_map(graph: &ConnectedGraph) -> HashMap<arcl_core::domain::ReleaseId, Vec<WorkspaceReference>> {
     let mut map = HashMap::new();
     for membership in &graph.release_memberships {
         map.entry(membership.release_id)
             .or_insert_with(Vec::new)
-            .push(SnapshotReference::new(
+            .push(WorkspaceReference::new(
                 membership.record_kind.as_str(),
                 membership.record_id.clone(),
             ));
@@ -280,20 +280,20 @@ fn membership_map(graph: &ConnectedGraph) -> HashMap<arcl_core::domain::ReleaseI
     map
 }
 
-fn promotion_reference(target: CapturePromotionTarget) -> SnapshotReference {
-    SnapshotReference::new(target.promotion_kind(), target.promotion_target_id())
+fn promotion_reference(target: CapturePromotionTarget) -> WorkspaceReference {
+    WorkspaceReference::new(target.promotion_kind(), target.promotion_target_id())
 }
 
 fn nonempty(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_owned())
 }
 
-fn existing_files(root: &Path, files: &[SnapshotFile]) -> Result<HashMap<PathBuf, Vec<u8>>, SnapshotExportError> {
+fn existing_files(root: &Path, files: &[WorkspaceFile]) -> Result<HashMap<PathBuf, Vec<u8>>, WorkspaceExportError> {
     if root.exists() {
         let metadata = fs::symlink_metadata(root)
-            .map_err(|source| SnapshotExportError::Inspect { path: root.to_owned(), source })?;
+            .map_err(|source| WorkspaceExportError::Inspect { path: root.to_owned(), source })?;
         if !metadata.is_dir() {
-            return Err(SnapshotExportError::Inspect {
+            return Err(WorkspaceExportError::Inspect {
                 path: root.to_owned(),
                 source: io::Error::from(io::ErrorKind::AlreadyExists),
             });
@@ -305,24 +305,24 @@ fn existing_files(root: &Path, files: &[SnapshotFile]) -> Result<HashMap<PathBuf
         let path = root.join(&file.path);
         match fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
-                return Err(SnapshotExportError::Inspect {
+                return Err(WorkspaceExportError::Inspect {
                     path,
                     source: io::Error::from(io::ErrorKind::InvalidInput),
                 });
             }
             Ok(_) => {
                 let content =
-                    fs::read(&path).map_err(|source| SnapshotExportError::Read { path: path.clone(), source })?;
+                    fs::read(&path).map_err(|source| WorkspaceExportError::Read { path: path.clone(), source })?;
                 existing.insert(file.path.clone(), content);
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(source) => return Err(SnapshotExportError::Inspect { path, source }),
+            Err(source) => return Err(WorkspaceExportError::Inspect { path, source }),
         }
     }
     Ok(existing)
 }
 
-fn validate_path_components(root: &Path, relative: &Path) -> Result<(), SnapshotExportError> {
+fn validate_path_components(root: &Path, relative: &Path) -> Result<(), WorkspaceExportError> {
     let mut path = root.to_owned();
     for component in relative.components() {
         if let std::path::Component::Normal(component) = component {
@@ -331,7 +331,7 @@ fn validate_path_components(root: &Path, relative: &Path) -> Result<(), Snapshot
                 .map(|metadata| metadata.file_type().is_symlink())
                 .unwrap_or(false)
             {
-                return Err(SnapshotExportError::Inspect {
+                return Err(WorkspaceExportError::Inspect {
                     path,
                     source: io::Error::from(io::ErrorKind::InvalidInput),
                 });
@@ -342,35 +342,35 @@ fn validate_path_components(root: &Path, relative: &Path) -> Result<(), Snapshot
 }
 
 fn write_files(
-    root: &Path, files: &[SnapshotFile], existing: &HashMap<PathBuf, Vec<u8>>,
-) -> Result<Vec<SnapshotFile>, SnapshotExportError> {
+    root: &Path, files: &[WorkspaceFile], existing: &HashMap<PathBuf, Vec<u8>>,
+) -> Result<Vec<WorkspaceFile>, WorkspaceExportError> {
     for file in files {
         validate_path_components(root, &file.path)?;
         let path = root.join(&file.path);
         let current = match fs::read(&path) {
             Ok(content) => Some(content),
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-            Err(source) => return Err(SnapshotExportError::Read { path, source }),
+            Err(source) => return Err(WorkspaceExportError::Read { path, source }),
         };
         if current.as_ref() != existing.get(&file.path) {
-            return Err(SnapshotExportError::Conflict { path: file.path.clone() });
+            return Err(WorkspaceExportError::Conflict { path: file.path.clone() });
         }
     }
-    fs::create_dir_all(root).map_err(|source| SnapshotExportError::Inspect { path: root.to_owned(), source })?;
+    fs::create_dir_all(root).map_err(|source| WorkspaceExportError::Inspect { path: root.to_owned(), source })?;
     for directory in ["captures", "releases", "specs", "plans", "phases", "tasks", "notes"] {
         let path = root.join(directory);
         match fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
             Ok(_) => {
-                return Err(SnapshotExportError::Inspect {
+                return Err(WorkspaceExportError::Inspect {
                     path,
                     source: io::Error::from(io::ErrorKind::InvalidInput),
                 });
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                fs::create_dir(&path).map_err(|source| SnapshotExportError::Write { path: path.clone(), source })?;
+                fs::create_dir(&path).map_err(|source| WorkspaceExportError::Write { path: path.clone(), source })?;
             }
-            Err(source) => return Err(SnapshotExportError::Inspect { path, source }),
+            Err(source) => return Err(WorkspaceExportError::Inspect { path, source }),
         }
     }
     let nonce = SystemTime::now()
@@ -379,9 +379,9 @@ fn write_files(
         .as_nanos();
     let staging = root.with_extension(format!("export-{nonce}"));
     if staging.exists() {
-        fs::remove_dir_all(&staging).map_err(|source| SnapshotExportError::Write { path: staging.clone(), source })?;
+        fs::remove_dir_all(&staging).map_err(|source| WorkspaceExportError::Write { path: staging.clone(), source })?;
     }
-    fs::create_dir_all(&staging).map_err(|source| SnapshotExportError::Write { path: staging.clone(), source })?;
+    fs::create_dir_all(&staging).map_err(|source| WorkspaceExportError::Write { path: staging.clone(), source })?;
     let result = (|| {
         for file in files {
             if existing.get(&file.path) == Some(&file.content) {
@@ -390,9 +390,9 @@ fn write_files(
             let path = staging.join(&file.path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
-                    .map_err(|source| SnapshotExportError::Write { path: parent.to_owned(), source })?;
+                    .map_err(|source| WorkspaceExportError::Write { path: parent.to_owned(), source })?;
             }
-            fs::write(&path, &file.content).map_err(|source| SnapshotExportError::Write { path, source })?;
+            fs::write(&path, &file.content).map_err(|source| WorkspaceExportError::Write { path, source })?;
         }
         for file in files {
             if existing.get(&file.path) == Some(&file.content) {
@@ -402,15 +402,15 @@ fn write_files(
             let destination = root.join(&file.path);
             if let Some(parent) = destination.parent() {
                 fs::create_dir_all(parent)
-                    .map_err(|source| SnapshotExportError::Write { path: parent.to_owned(), source })?;
+                    .map_err(|source| WorkspaceExportError::Write { path: parent.to_owned(), source })?;
             }
             fs::rename(&staged, &destination)
-                .map_err(|source| SnapshotExportError::Write { path: destination, source })?;
+                .map_err(|source| WorkspaceExportError::Write { path: destination, source })?;
         }
         Ok(())
     })();
     let cleanup = fs::remove_dir_all(&staging);
-    result.and(cleanup.map_err(|source| SnapshotExportError::Write { path: staging, source }))?;
+    result.and(cleanup.map_err(|source| WorkspaceExportError::Write { path: staging, source }))?;
     Ok(files.to_vec())
 }
 

@@ -7,11 +7,11 @@ use arcl_core::domain::{
     TaskStatus,
 };
 
-use super::{Result, SNAPSHOT_FORMAT_VERSION, SnapshotError};
+use super::{Result, WORKSPACE_FORMAT_VERSION, WorkspaceError};
 
 const FRONT_MATTER_DELIMITER: &str = "+++";
 
-/// The stable kind and directory name of a snapshot record.
+/// The stable kind and directory name of a workspace record.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum RecordKind {
     /// An inbox capture.
@@ -31,7 +31,7 @@ pub enum RecordKind {
 }
 
 impl RecordKind {
-    /// Return the snapshot directory for this record kind.
+    /// Return the workspace directory for this record kind.
     pub const fn directory(self) -> &'static str {
         match self {
             Self::Capture => "captures",
@@ -71,54 +71,54 @@ impl RecordKind {
     }
 }
 
-/// A reference to another snapshot record.
+/// A reference to another workspace record.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SnapshotReference {
+pub struct WorkspaceReference {
     /// The referenced record kind.
     pub kind: String,
     /// The referenced record ID.
     pub id: String,
 }
 
-impl SnapshotReference {
+impl WorkspaceReference {
     /// Construct a reference with a stable kind and ID.
     pub fn new(kind: impl Into<String>, id: impl Into<String>) -> Self {
         Self { kind: kind.into(), id: id.into() }
     }
 }
 
-/// The snapshot manifest's stable format metadata.
+/// The workspace manifest's stable format metadata.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct SnapshotManifest {
+pub struct WorkspaceManifest {
     #[serde(rename = "format-version")]
     pub format_version: u32,
 }
 
-/// Backwards-friendly short name for the snapshot manifest.
-pub type Manifest = SnapshotManifest;
+/// Backwards-friendly short name for the workspace manifest.
+pub type Manifest = WorkspaceManifest;
 
-impl Default for SnapshotManifest {
+impl Default for WorkspaceManifest {
     fn default() -> Self {
-        Self { format_version: SNAPSHOT_FORMAT_VERSION }
+        Self { format_version: WORKSPACE_FORMAT_VERSION }
     }
 }
 
-impl SnapshotManifest {
-    /// Parse and validate a snapshot manifest.
+impl WorkspaceManifest {
+    /// Parse and validate a workspace manifest.
     pub fn parse(input: &str) -> Result<Self> {
-        let manifest = toml::from_str::<Self>(input).map_err(SnapshotError::ManifestParse)?;
+        let manifest = toml::from_str::<Self>(input).map_err(WorkspaceError::ManifestParse)?;
         manifest.validate()?;
         Ok(manifest)
     }
 
-    /// Validate that this manifest uses the supported snapshot format.
+    /// Validate that this manifest uses the supported workspace format.
     pub fn validate(&self) -> Result<()> {
-        if self.format_version != SNAPSHOT_FORMAT_VERSION {
-            return Err(SnapshotError::UnsupportedVersion {
+        if self.format_version != WORKSPACE_FORMAT_VERSION {
+            return Err(WorkspaceError::UnsupportedVersion {
                 found: self.format_version,
-                expected: SNAPSHOT_FORMAT_VERSION,
+                expected: WORKSPACE_FORMAT_VERSION,
             });
         }
         Ok(())
@@ -131,7 +131,7 @@ impl SnapshotManifest {
     }
 }
 
-/// An inbox capture encoded in a snapshot record.
+/// An inbox capture encoded in a workspace record.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CaptureRecord {
     pub id: CaptureId,
@@ -139,12 +139,12 @@ pub struct CaptureRecord {
     pub status: CaptureStatus,
     pub created_at: String,
     /// The single promotion edge, when the capture has been promoted.
-    pub promoted_to: Option<SnapshotReference>,
-    pub links: Vec<SnapshotReference>,
+    pub promoted_to: Option<WorkspaceReference>,
+    pub links: Vec<WorkspaceReference>,
     pub body: String,
 }
 
-/// A release encoded in a snapshot record.
+/// A release encoded in a workspace record.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReleaseRecord {
     pub id: ReleaseId,
@@ -152,12 +152,12 @@ pub struct ReleaseRecord {
     pub status: ContainerStatus,
     pub body: String,
     /// Explicit members. Descendants are never implied by this list.
-    pub members: Vec<SnapshotReference>,
+    pub members: Vec<WorkspaceReference>,
     /// Explicit outgoing record links.
-    pub links: Vec<SnapshotReference>,
+    pub links: Vec<WorkspaceReference>,
 }
 
-/// An owned specification encoded in a snapshot record.
+/// An owned specification encoded in a workspace record.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SpecRecord {
     pub id: SpecId,
@@ -165,22 +165,22 @@ pub struct SpecRecord {
     pub status: ContainerStatus,
     pub source_capture_id: Option<CaptureId>,
     pub acceptance_criteria: String,
-    pub links: Vec<SnapshotReference>,
+    pub links: Vec<WorkspaceReference>,
     pub body: String,
 }
 
-/// A persistent implementation plan encoded in a snapshot record.
+/// A persistent implementation plan encoded in a workspace record.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlanRecord {
     pub id: PlanId,
     pub spec_id: SpecId,
     pub title: String,
     pub status: ContainerStatus,
-    pub links: Vec<SnapshotReference>,
+    pub links: Vec<WorkspaceReference>,
     pub body: String,
 }
 
-/// An optional ordered phase encoded in a snapshot record.
+/// An optional ordered phase encoded in a workspace record.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PhaseRecord {
     pub id: PhaseId,
@@ -189,11 +189,11 @@ pub struct PhaseRecord {
     pub title: String,
     pub status: ContainerStatus,
     pub position: i64,
-    pub links: Vec<SnapshotReference>,
+    pub links: Vec<WorkspaceReference>,
     pub body: String,
 }
 
-/// A flexible planning task encoded in a snapshot record.
+/// A flexible planning task encoded in a workspace record.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TaskRecord {
     pub id: TaskId,
@@ -209,22 +209,22 @@ pub struct TaskRecord {
     pub blocked_by: Vec<TaskId>,
     pub handoff: Option<String>,
     pub evidence: Option<String>,
-    pub links: Vec<SnapshotReference>,
+    pub links: Vec<WorkspaceReference>,
     pub body: String,
 }
 
-/// A Markdown note encoded in a snapshot record.
+/// A Markdown note encoded in a workspace record.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NoteRecord {
     pub id: NoteId,
     pub title: String,
-    pub links: Vec<SnapshotReference>,
+    pub links: Vec<WorkspaceReference>,
     pub body: String,
 }
 
 /// A typed record in the versioned workspace projection.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SnapshotRecord {
+pub enum WorkspaceRecord {
     /// An inbox capture.
     Capture(CaptureRecord),
     /// A release.
@@ -241,7 +241,7 @@ pub enum SnapshotRecord {
     Note(NoteRecord),
 }
 
-impl SnapshotRecord {
+impl WorkspaceRecord {
     /// Return the record's typed kind.
     pub const fn kind(&self) -> RecordKind {
         match self {
@@ -285,42 +285,42 @@ impl SnapshotRecord {
     }
 }
 
-/// Parse the canonical manifest from a snapshot manifest file.
-pub fn decode_manifest(input: &str) -> Result<SnapshotManifest> {
-    SnapshotManifest::parse(input)
+/// Parse the canonical manifest from a workspace manifest file.
+pub fn decode_manifest(input: &str) -> Result<WorkspaceManifest> {
+    WorkspaceManifest::parse(input)
 }
 
 /// Encode a validated manifest in canonical TOML form.
-pub fn encode_manifest(manifest: &SnapshotManifest) -> Result<String> {
+pub fn encode_manifest(manifest: &WorkspaceManifest) -> Result<String> {
     manifest.render()
 }
 
 /// Parse a record, using its path to select and validate its typed kind.
-pub fn decode_record(path: &Path, input: &str) -> Result<SnapshotRecord> {
+pub fn decode_record(path: &Path, input: &str) -> Result<WorkspaceRecord> {
     let (kind, filename_id) = parse_record_path(path)?;
     let (front_matter, body) = split_record_document(input)?;
     let record = match kind {
         RecordKind::Capture => {
-            SnapshotRecord::Capture(CaptureRecord::from_wire(parse_front_matter(&front_matter)?, body)?)
+            WorkspaceRecord::Capture(CaptureRecord::from_wire(parse_front_matter(&front_matter)?, body)?)
         }
         RecordKind::Release => {
-            SnapshotRecord::Release(ReleaseRecord::from_wire(parse_front_matter(&front_matter)?, body)?)
+            WorkspaceRecord::Release(ReleaseRecord::from_wire(parse_front_matter(&front_matter)?, body)?)
         }
-        RecordKind::Spec => SnapshotRecord::Spec(SpecRecord::from_wire(parse_front_matter(&front_matter)?, body)?),
-        RecordKind::Plan => SnapshotRecord::Plan(PlanRecord::from_wire(parse_front_matter(&front_matter)?, body)?),
-        RecordKind::Phase => SnapshotRecord::Phase(PhaseRecord::from_wire(parse_front_matter(&front_matter)?, body)?),
-        RecordKind::Task => SnapshotRecord::Task(TaskRecord::from_wire(parse_front_matter(&front_matter)?, body)?),
-        RecordKind::Note => SnapshotRecord::Note(NoteRecord::from_wire(parse_front_matter(&front_matter)?, body)?),
+        RecordKind::Spec => WorkspaceRecord::Spec(SpecRecord::from_wire(parse_front_matter(&front_matter)?, body)?),
+        RecordKind::Plan => WorkspaceRecord::Plan(PlanRecord::from_wire(parse_front_matter(&front_matter)?, body)?),
+        RecordKind::Phase => WorkspaceRecord::Phase(PhaseRecord::from_wire(parse_front_matter(&front_matter)?, body)?),
+        RecordKind::Task => WorkspaceRecord::Task(TaskRecord::from_wire(parse_front_matter(&front_matter)?, body)?),
+        RecordKind::Note => WorkspaceRecord::Note(NoteRecord::from_wire(parse_front_matter(&front_matter)?, body)?),
     };
 
     if record.id_string() != filename_id {
-        return Err(SnapshotError::FilenameIdMismatch { id: record.id_string(), filename: filename_id });
+        return Err(WorkspaceError::FilenameIdMismatch { id: record.id_string(), filename: filename_id });
     }
     Ok(record)
 }
 
 /// Encode a record after checking its kind and ID against `path`.
-pub fn encode_record(path: &Path, record: &SnapshotRecord) -> Result<String> {
+pub fn encode_record(path: &Path, record: &WorkspaceRecord) -> Result<String> {
     validate_record_path(path, record.kind(), &record.id_string())?;
     record.render()
 }
@@ -333,9 +333,9 @@ struct CaptureFrontMatter {
     status: CaptureStatus,
     created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    promoted_to: Option<SnapshotReference>,
+    promoted_to: Option<WorkspaceReference>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    links: Vec<SnapshotReference>,
+    links: Vec<WorkspaceReference>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -345,9 +345,9 @@ struct ReleaseFrontMatter {
     title: String,
     status: ContainerStatus,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    members: Vec<SnapshotReference>,
+    members: Vec<WorkspaceReference>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    links: Vec<SnapshotReference>,
+    links: Vec<WorkspaceReference>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -361,7 +361,7 @@ struct SpecFrontMatter {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     acceptance_criteria: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    links: Vec<SnapshotReference>,
+    links: Vec<WorkspaceReference>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -372,7 +372,7 @@ struct PlanFrontMatter {
     title: String,
     status: ContainerStatus,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    links: Vec<SnapshotReference>,
+    links: Vec<WorkspaceReference>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -386,7 +386,7 @@ struct PhaseFrontMatter {
     status: ContainerStatus,
     position: i64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    links: Vec<SnapshotReference>,
+    links: Vec<WorkspaceReference>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -414,7 +414,7 @@ struct TaskFrontMatter {
     #[serde(skip_serializing_if = "Option::is_none")]
     evidence: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    links: Vec<SnapshotReference>,
+    links: Vec<WorkspaceReference>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -423,14 +423,14 @@ struct NoteFrontMatter {
     id: NoteId,
     title: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    links: Vec<SnapshotReference>,
+    links: Vec<WorkspaceReference>,
 }
 
 impl CaptureRecord {
     fn from_wire(front_matter: CaptureFrontMatter, body: String) -> Result<Self> {
         validate_title(&front_matter.title)?;
         if front_matter.created_at.trim().is_empty() {
-            return Err(SnapshotError::EmptyRecordCreatedAt);
+            return Err(WorkspaceError::EmptyRecordCreatedAt);
         }
         Ok(Self {
             id: front_matter.id,
@@ -446,7 +446,7 @@ impl CaptureRecord {
     fn front_matter(&self) -> Result<CaptureFrontMatter> {
         validate_title(&self.title)?;
         if self.created_at.trim().is_empty() {
-            return Err(SnapshotError::EmptyRecordCreatedAt);
+            return Err(WorkspaceError::EmptyRecordCreatedAt);
         }
         Ok(CaptureFrontMatter {
             id: self.id,
@@ -639,24 +639,24 @@ impl NoteRecord {
     }
 }
 
-fn render_record_document(record: &SnapshotRecord) -> Result<String> {
+fn render_record_document(record: &WorkspaceRecord) -> Result<String> {
     let front_matter = match record {
-        SnapshotRecord::Capture(record) => render_front_matter(&record.front_matter()?)?,
-        SnapshotRecord::Release(record) => render_front_matter(&record.front_matter()?)?,
-        SnapshotRecord::Spec(record) => render_front_matter(&record.front_matter()?)?,
-        SnapshotRecord::Plan(record) => render_front_matter(&record.front_matter()?)?,
-        SnapshotRecord::Phase(record) => render_front_matter(&record.front_matter()?)?,
-        SnapshotRecord::Task(record) => render_front_matter(&record.front_matter()?)?,
-        SnapshotRecord::Note(record) => render_front_matter(&record.front_matter()?)?,
+        WorkspaceRecord::Capture(record) => render_front_matter(&record.front_matter()?)?,
+        WorkspaceRecord::Release(record) => render_front_matter(&record.front_matter()?)?,
+        WorkspaceRecord::Spec(record) => render_front_matter(&record.front_matter()?)?,
+        WorkspaceRecord::Plan(record) => render_front_matter(&record.front_matter()?)?,
+        WorkspaceRecord::Phase(record) => render_front_matter(&record.front_matter()?)?,
+        WorkspaceRecord::Task(record) => render_front_matter(&record.front_matter()?)?,
+        WorkspaceRecord::Note(record) => render_front_matter(&record.front_matter()?)?,
     };
     let body = match record {
-        SnapshotRecord::Capture(record) => normalize_body(&record.body),
-        SnapshotRecord::Release(record) => normalize_body(&record.body),
-        SnapshotRecord::Spec(record) => normalize_body(&record.body),
-        SnapshotRecord::Plan(record) => normalize_body(&record.body),
-        SnapshotRecord::Phase(record) => normalize_body(&record.body),
-        SnapshotRecord::Task(record) => normalize_body(&record.body),
-        SnapshotRecord::Note(record) => normalize_body(&record.body),
+        WorkspaceRecord::Capture(record) => normalize_body(&record.body),
+        WorkspaceRecord::Release(record) => normalize_body(&record.body),
+        WorkspaceRecord::Spec(record) => normalize_body(&record.body),
+        WorkspaceRecord::Plan(record) => normalize_body(&record.body),
+        WorkspaceRecord::Phase(record) => normalize_body(&record.body),
+        WorkspaceRecord::Task(record) => normalize_body(&record.body),
+        WorkspaceRecord::Note(record) => normalize_body(&record.body),
     };
 
     if body.is_empty() {
@@ -676,14 +676,14 @@ fn render_front_matter<T: Serialize>(front_matter: &T) -> Result<String> {
 }
 
 fn parse_front_matter<T: for<'de> Deserialize<'de>>(input: &str) -> Result<T> {
-    toml::from_str(input).map_err(SnapshotError::FrontMatterParse)
+    toml::from_str(input).map_err(WorkspaceError::FrontMatterParse)
 }
 
 fn split_record_document(input: &str) -> Result<(String, String)> {
     let normalized = normalize_line_endings(input);
     let mut lines = normalized.split('\n');
     if lines.next() != Some(FRONT_MATTER_DELIMITER) {
-        return Err(SnapshotError::InvalidRecordFormat(
+        return Err(WorkspaceError::InvalidRecordFormat(
             "the document must begin with an exact `+++` delimiter line".to_owned(),
         ));
     }
@@ -698,7 +698,7 @@ fn split_record_document(input: &str) -> Result<(String, String)> {
         front_matter_lines.push(line);
     }
     let closing_index = closing_index.ok_or_else(|| {
-        SnapshotError::InvalidRecordFormat("front matter has no exact closing `+++` delimiter line".to_owned())
+        WorkspaceError::InvalidRecordFormat("front matter has no exact closing `+++` delimiter line".to_owned())
     })?;
 
     let mut body_lines: Vec<&str> = normalized.split('\n').skip(closing_index + 1).collect();
@@ -719,16 +719,16 @@ fn parse_record_path(path: &Path) -> Result<(RecordKind, String)> {
         _ => None,
     };
     let (Some(directory), Some(filename)) = (directory, filename) else {
-        return Err(SnapshotError::InvalidRecordPath { path: path.to_owned() });
+        return Err(WorkspaceError::InvalidRecordPath { path: path.to_owned() });
     };
     let Some(kind) = RecordKind::from_directory(directory) else {
-        return Err(SnapshotError::KindPathMismatch { kind: directory.to_owned(), path: path.to_owned() });
+        return Err(WorkspaceError::KindPathMismatch { kind: directory.to_owned(), path: path.to_owned() });
     };
     let Some(filename_id) = filename.strip_suffix(".md") else {
-        return Err(SnapshotError::InvalidRecordPath { path: path.to_owned() });
+        return Err(WorkspaceError::InvalidRecordPath { path: path.to_owned() });
     };
     if filename_id.is_empty() {
-        return Err(SnapshotError::InvalidRecordPath { path: path.to_owned() });
+        return Err(WorkspaceError::InvalidRecordPath { path: path.to_owned() });
     }
     Ok((kind, filename_id.to_owned()))
 }
@@ -736,20 +736,20 @@ fn parse_record_path(path: &Path) -> Result<(RecordKind, String)> {
 fn validate_record_path(path: &Path, kind: RecordKind, id: &str) -> Result<()> {
     let (path_kind, filename_id) = parse_record_path(path)?;
     if path_kind != kind {
-        return Err(SnapshotError::KindPathMismatch { kind: kind.as_str().to_owned(), path: path.to_owned() });
+        return Err(WorkspaceError::KindPathMismatch { kind: kind.as_str().to_owned(), path: path.to_owned() });
     }
     if filename_id != id {
-        return Err(SnapshotError::FilenameIdMismatch { id: id.to_owned(), filename: filename_id });
+        return Err(WorkspaceError::FilenameIdMismatch { id: id.to_owned(), filename: filename_id });
     }
     Ok(())
 }
 
 fn validate_title(title: &str) -> Result<()> {
-    if title.trim().is_empty() { Err(SnapshotError::EmptyRecordTitle) } else { Ok(()) }
+    if title.trim().is_empty() { Err(WorkspaceError::EmptyRecordTitle) } else { Ok(()) }
 }
 
 fn validate_position(position: i64) -> Result<()> {
-    if position < 0 { Err(SnapshotError::InvalidRecordPosition { position }) } else { Ok(()) }
+    if position < 0 { Err(WorkspaceError::InvalidRecordPosition { position }) } else { Ok(()) }
 }
 
 fn normalize_line_endings(value: &str) -> String {
@@ -774,7 +774,7 @@ fn normalize_optional_markdown(value: Option<String>) -> Option<String> {
     })
 }
 
-fn normalize_references(mut references: Vec<SnapshotReference>) -> Vec<SnapshotReference> {
+fn normalize_references(mut references: Vec<WorkspaceReference>) -> Vec<WorkspaceReference> {
     for reference in &mut references {
         reference.kind = reference.kind.to_ascii_lowercase();
         reference.id = reference.id.trim().to_owned();
@@ -797,18 +797,18 @@ mod tests {
 
     #[test]
     fn manifest_is_version_one_and_canonical() {
-        let manifest = SnapshotManifest::parse("format-version = 1").expect("manifest");
+        let manifest = WorkspaceManifest::parse("format-version = 1").expect("manifest");
         assert_eq!(manifest.render().expect("render"), "format-version = 1\n");
         assert!(matches!(
-            SnapshotManifest::parse("format-version = 2"),
-            Err(SnapshotError::UnsupportedVersion { .. })
+            WorkspaceManifest::parse("format-version = 2"),
+            Err(WorkspaceError::UnsupportedVersion { .. })
         ));
     }
 
     #[test]
     fn all_new_record_kinds_round_trip() {
         let records = [
-            SnapshotRecord::Capture(CaptureRecord {
+            WorkspaceRecord::Capture(CaptureRecord {
                 id: CaptureId::parse(CAPTURE_ID).unwrap(),
                 title: "Capture".to_owned(),
                 status: CaptureStatus::Captured,
@@ -817,7 +817,7 @@ mod tests {
                 links: vec![],
                 body: "Capture **body**".to_owned(),
             }),
-            SnapshotRecord::Spec(SpecRecord {
+            WorkspaceRecord::Spec(SpecRecord {
                 id: SpecId::parse(SPEC_ID).unwrap(),
                 title: "Spec".to_owned(),
                 status: ContainerStatus::Open,
@@ -826,7 +826,7 @@ mod tests {
                 links: vec![],
                 body: "# Spec".to_owned(),
             }),
-            SnapshotRecord::Plan(PlanRecord {
+            WorkspaceRecord::Plan(PlanRecord {
                 id: PlanId::parse(PLAN_ID).unwrap(),
                 spec_id: SpecId::parse(SPEC_ID).unwrap(),
                 title: "Plan".to_owned(),
@@ -834,7 +834,7 @@ mod tests {
                 links: vec![],
                 body: "Plan body".to_owned(),
             }),
-            SnapshotRecord::Phase(PhaseRecord {
+            WorkspaceRecord::Phase(PhaseRecord {
                 id: PhaseId::parse(PHASE_ID).unwrap(),
                 plan_id: PlanId::parse(PLAN_ID).unwrap(),
                 plan_key: Some("build".to_owned()),
@@ -844,7 +844,7 @@ mod tests {
                 links: vec![],
                 body: "Phase body".to_owned(),
             }),
-            SnapshotRecord::Task(TaskRecord {
+            WorkspaceRecord::Task(TaskRecord {
                 id: TaskId::parse(TASK_ID).unwrap(),
                 spec_id: Some(SpecId::parse(SPEC_ID).unwrap()),
                 plan_id: Some(PlanId::parse(PLAN_ID).unwrap()),
@@ -858,13 +858,13 @@ mod tests {
                 blocked_by: vec![TaskId::parse(OTHER_TASK_ID).unwrap()],
                 handoff: Some("Resume here".to_owned()),
                 evidence: Some("Evidence".to_owned()),
-                links: vec![SnapshotReference::new("spec", SPEC_ID)],
+                links: vec![WorkspaceReference::new("spec", SPEC_ID)],
                 body: "Task body".to_owned(),
             }),
-            SnapshotRecord::Note(NoteRecord {
+            WorkspaceRecord::Note(NoteRecord {
                 id: NoteId::parse(NOTE_ID).unwrap(),
                 title: "Note".to_owned(),
-                links: vec![SnapshotReference::new("task", TASK_ID)],
+                links: vec![WorkspaceReference::new("task", TASK_ID)],
                 body: "Note body".to_owned(),
             }),
         ];
@@ -880,7 +880,7 @@ mod tests {
 
     #[test]
     fn task_metadata_is_sorted_and_empty_markdown_is_omitted() {
-        let record = SnapshotRecord::Task(TaskRecord {
+        let record = WorkspaceRecord::Task(TaskRecord {
             id: TaskId::parse(TASK_ID).unwrap(),
             spec_id: None,
             plan_id: None,

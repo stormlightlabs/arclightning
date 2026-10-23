@@ -37,8 +37,8 @@ Initialization creates `.arcl/` in the worktree root:
 ```
 
 The database is operational state and is ignored by the scoped `.gitignore`.
-Use `arcl init --snapshot` when you want to enable the optional snapshot setting
-in `config.toml`.
+Use `arcl init --workspace` when you want to enable the optional workspace
+setting in `config.toml`.
 
 ## When to use it
 

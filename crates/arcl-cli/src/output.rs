@@ -104,17 +104,17 @@ impl Renderer {
     }
 
     /// Render the result of project initialization.
-    pub fn render_init(&self, root: &Path, snapshot_enabled: bool) -> Result<Option<String>, OutputError> {
+    pub fn render_init(&self, root: &Path, workspace_enabled: bool) -> Result<Option<String>, OutputError> {
         let root = root.to_string_lossy();
         let message = match self.mode {
             OutputMode::Human => {
-                let snapshot = if snapshot_enabled { " with snapshots enabled" } else { "" };
-                format!("Initialized Arc Lightning in `{root}`{snapshot}")
+                let workspace = if workspace_enabled { " with the workspace enabled" } else { "" };
+                format!("Initialized Arc Lightning in `{root}`{workspace}")
             }
             OutputMode::Plain => format!("initialized\t{root}"),
             OutputMode::Json => serde_json::to_string(&Envelope {
                 format_version: 1,
-                data: InitData { status: "initialized", root: root.as_ref(), snapshot_enabled },
+                data: InitData { status: "initialized", root: root.as_ref(), workspace_enabled },
             })?,
             OutputMode::Quiet => return Ok(None),
         };
@@ -657,7 +657,7 @@ struct StartupData {
 struct InitData<'a> {
     status: &'static str,
     root: &'a str,
-    snapshot_enabled: bool,
+    workspace_enabled: bool,
 }
 
 #[derive(Debug, Serialize)]

@@ -213,8 +213,10 @@ file under a configurable workspace directory. The target layout is:
     |-- captures/
     |-- specs/
     |-- plans/
+    |-- phases/
     |-- tasks/
-    `-- notes/
+    |-- notes/
+    `-- releases/
 ```
 
 Synchronization uses a three-state comparison: compare
@@ -304,15 +306,15 @@ it is ready. Content migration must preserve useful URLs or add redirects.
 
 ## Current state and migration constraints
 
-The Rust workspace contains the CLI, domain and storage crates, snapshot
-codecs, snapshot import/export, and CLI tests. The SvelteKit and mdsvex website
-lives at `apps/website` in the pnpm workspace.
+The Rust workspace contains the CLI, domain and storage crates, the
+repository-native workspace codec, workspace import and export, and CLI tests.
+The SvelteKit and mdsvex website lives at `apps/website` in the pnpm workspace.
 
 The implemented foundation includes ideas, releases, epics, milestones, tasks,
 dependencies, lifecycle rules, readiness, context, handoffs, evidence, and the
-first snapshot codec/import/export path. Automatic snapshot reconciliation,
-conflict tooling, complete plan application, and release hardening are not
-finished.
+first workspace codec, import, and export path. Automatic workspace
+reconciliation, conflict tooling, complete plan application, and release
+hardening are not finished.
 
 The migration must:
 
@@ -320,7 +322,7 @@ The migration must:
 - use expand, migrate, and contract steps when old and new records must coexist
 - keep database migrations forward-only and test upgrades from representative
   databases
-- update the snapshot format in place until the first release
+- update the workspace format in place until the first release
 - avoid completing obsolete synchronization work against the old hierarchy
   when the same work can be completed against the new model
 

@@ -12,16 +12,16 @@ use thiserror::Error;
 use arcl_core::domain::*;
 
 /// The newest SQLite schema version understood by the application.
-pub const CURRENT_VERSION: i32 = 3;
+pub const CURRENT_VERSION: i32 = 4;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub type Result<T> = std::result::Result<T, StorageError>;
 
-/// One exact file stored as the last successful snapshot base.
+/// One exact file stored as the last successful workspace base.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SnapshotBaseFile {
-    /// The path relative to the snapshot root.
+pub struct WorkspaceBaseFile {
+    /// The path relative to the workspace root.
     pub path: String,
     /// The exact bytes observed after the successful export.
     pub content: Vec<u8>,
@@ -124,29 +124,29 @@ impl Database {
             .pragma_query_value(None, "user_version", |row| row.get(0))?)
     }
 
-    /// Read the exact files recorded by the last successful snapshot export.
-    pub fn snapshot_base(&self) -> Result<Vec<SnapshotBaseFile>> {
+    /// Read the exact files recorded by the last successful workspace export.
+    pub fn workspace_base(&self) -> Result<Vec<WorkspaceBaseFile>> {
         let mut statement = self
             .connection
-            .prepare("SELECT path, content FROM snapshot_files ORDER BY path")?;
+            .prepare("SELECT path, content FROM workspace_files ORDER BY path")?;
         let rows = statement.query_map([], |row| {
-            Ok(SnapshotBaseFile { path: row.get(0)?, content: row.get(1)? })
+            Ok(WorkspaceBaseFile { path: row.get(0)?, content: row.get(1)? })
         })?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
-    /// Replace the connected graph and its snapshot base in one transaction.
+    /// Replace the connected graph and its workspace base in one transaction.
     ///
     /// The repository adapter validates the candidate graph before calling this
     /// method. Records are inserted in dependency order, and task parents are
     /// attached only after every task exists so file order cannot affect import.
-    pub fn replace_graph_and_snapshot_base(
-        &mut self, graph: &ConnectedGraph, files: &[SnapshotBaseFile],
+    pub fn replace_graph_and_workspace_base(
+        &mut self, graph: &ConnectedGraph, files: &[WorkspaceBaseFile],
     ) -> Result<()> {
         let current_project = self.project()?;
         if current_project.id != graph.project.id {
             return Err(StorageError::InvalidProject(DomainError::DifferentProject {
-                entity: "snapshot".to_owned(),
+                entity: "workspace".to_owned(),
                 id: graph.project.id.to_string(),
                 related: current_project.id.to_string(),
             }));
@@ -327,10 +327,10 @@ impl Database {
             )?;
         }
 
-        transaction.execute("DELETE FROM snapshot_files", [])?;
+        transaction.execute("DELETE FROM workspace_files", [])?;
         for file in files {
             transaction.execute(
-                "INSERT INTO snapshot_files (path, content) VALUES (?1, ?2)",
+                "INSERT INTO workspace_files (path, content) VALUES (?1, ?2)",
                 rusqlite::params![&file.path, &file.content],
             )?;
         }
@@ -338,13 +338,13 @@ impl Database {
         Ok(())
     }
 
-    /// Replace the stored snapshot base after filesystem export has completed.
-    pub fn replace_snapshot_base(&mut self, files: &[SnapshotBaseFile]) -> Result<()> {
+    /// Replace the stored workspace base after filesystem export has completed.
+    pub fn replace_workspace_base(&mut self, files: &[WorkspaceBaseFile]) -> Result<()> {
         let transaction = self.connection.transaction()?;
-        transaction.execute("DELETE FROM snapshot_files", [])?;
+        transaction.execute("DELETE FROM workspace_files", [])?;
         for file in files {
             transaction.execute(
-                "INSERT INTO snapshot_files (path, content) VALUES (?1, ?2)",
+                "INSERT INTO workspace_files (path, content) VALUES (?1, ?2)",
                 rusqlite::params![&file.path, &file.content],
             )?;
         }
