@@ -20,6 +20,9 @@ pub(super) fn exec_workspace(command: WorkspaceCommand) -> CResult<()> {
         WorkspaceCommand::Import => {
             import_graph(&workspace_root, &worktree_root, &mut database)?;
         }
+        WorkspaceCommand::Sync => {
+            sync_workspace(&workspace_root, &worktree_root, &mut database)?;
+        }
     }
     Ok(())
 }

@@ -80,6 +80,7 @@ impl WorkspaceImportError {
     /// Return the CLI exit category for this import failure.
     pub const fn exit_code(&self) -> u8 {
         match self {
+            Self::Storage(StorageError::ChangedSinceRead) => 4,
             Self::Storage(_) | Self::ReadDirectory { .. } | Self::InspectEntry { .. } => 1,
             Self::Export(super::WorkspaceExportError::Conflict { .. }) => 4,
             Self::Export(_) => 1,
@@ -97,9 +98,10 @@ impl WorkspaceImportError {
     }
 }
 
-struct CandidateWorkspace {
-    records: BTreeMap<PathBuf, WorkspaceRecord>,
-    files: Vec<WorkspaceFile>,
+/// A workspace read from disk: every decoded record and the exact bytes of every file.
+pub(super) struct CandidateWorkspace {
+    pub(super) records: BTreeMap<PathBuf, WorkspaceRecord>,
+    pub(super) files: Vec<WorkspaceFile>,
 }
 
 struct PreparedImport {
@@ -331,6 +333,9 @@ fn prepare_import(root: &Path, worktree_root: &Path, project: Project) -> Result
 }
 
 fn apply_prepared(root: &Path, prepared: PreparedImport, database: &mut Database) -> Result<Vec<WorkspaceFile>> {
+    // Taken before any read, so a commit from another connection after this
+    // point refuses the replacement instead of being overwritten.
+    let read = database.data_version()?;
     let base = database.workspace_base()?;
     reject_removed_base_records(&base, &prepared.files)?;
     let current_files = project_graph(&database.connected_graph()?).map_err(|source| WorkspaceImportError::Field {
@@ -349,11 +354,11 @@ fn apply_prepared(root: &Path, prepared: PreparedImport, database: &mut Database
         .iter()
         .map(|file| WorkspaceBaseFile { path: file.path.to_string_lossy().into_owned(), content: file.content.clone() })
         .collect::<Vec<_>>();
-    database.replace_graph_and_workspace_base(&prepared.graph, &base)?;
+    database.replace_graph_and_workspace_base(&prepared.graph, &base, read)?;
     Ok(prepared.files)
 }
 
-fn read_candidate(root: &Path) -> Result<CandidateWorkspace> {
+pub(super) fn read_candidate(root: &Path) -> Result<CandidateWorkspace> {
     let entries = read_entries(root)?;
     let Some(manifest_entry) = entries
         .iter()
@@ -434,7 +439,7 @@ fn read_record_directory(
     Ok(())
 }
 
-fn validate_candidate(
+pub(super) fn validate_candidate(
     records: BTreeMap<PathBuf, WorkspaceRecord>, project: Project, _worktree_root: &Path,
 ) -> Result<ConnectedGraph> {
     let mut ids = HashMap::<String, PathBuf>::new();

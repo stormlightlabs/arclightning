@@ -113,6 +113,8 @@ pub(super) enum CommandError {
     #[error(transparent)]
     WorkspaceImport(Box<WorkspaceImportError>),
     #[error(transparent)]
+    WorkspaceSync(Box<WorkspaceSyncError>),
+    #[error(transparent)]
     Domain(#[from] DomainError),
     #[error(transparent)]
     Storage(#[from] StorageError),
@@ -144,6 +146,12 @@ impl From<WorkspaceImportError> for CommandError {
     }
 }
 
+impl From<WorkspaceSyncError> for CommandError {
+    fn from(error: WorkspaceSyncError) -> Self {
+        Self::WorkspaceSync(Box::new(error))
+    }
+}
+
 impl CommandError {
     fn exit_code(&self) -> u8 {
         match self {
@@ -157,6 +165,7 @@ impl CommandError {
                 _ => 1,
             },
             Self::WorkspaceImport(error) => error.exit_code(),
+            Self::WorkspaceSync(error) => error.exit_code(),
             Self::ReadConfig { .. }
             | Self::ReadMarkdown { .. }
             | Self::ReadStdin { .. }
@@ -209,6 +218,7 @@ impl StorageErrorExitCode for StorageError {
             | StorageError::InvalidPlanInput(_)
             | StorageError::NewerDatabase { .. }
             | StorageError::MigrationGap { .. } => 3,
+            StorageError::ChangedSinceRead => 4,
             StorageError::Sqlite(_) => 1,
         }
     }

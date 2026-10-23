@@ -214,6 +214,11 @@ pub fn export_graph(root: &Path, graph: &ConnectedGraph) -> Result<Vec<Workspace
     export_graph_with_base(root, graph, &[])
 }
 
+/// Write `files` only if the workspace still matches what a sync observed.
+///
+/// Every observed path must still hold its observed bytes, and every other
+/// path in `files` must still be absent. A file edited or created since the
+/// workspace was read is a [`WorkspaceExportError::Conflict`].
 pub(crate) fn export_observed(
     root: &Path, files: &[WorkspaceFile], observed: &[WorkspaceFile],
 ) -> Result<(), WorkspaceExportError> {
@@ -229,6 +234,12 @@ pub(crate) fn export_observed(
         }
     }
     let existing = existing_files(root, files)?;
+    if let Some(created) = files
+        .iter()
+        .find(|file| !observed.contains_key(&file.path) && existing.contains_key(&file.path))
+    {
+        return Err(WorkspaceExportError::Conflict { path: created.path.clone() });
+    }
     write_files(root, files, &existing)?;
     Ok(())
 }
@@ -503,5 +514,24 @@ mod tests {
         let before = fs::read(&task_path).expect("task file reads");
         export_graph(root.path(), &graph).expect("repeat export succeeds");
         assert_eq!(fs::read(task_path).expect("task file reads"), before);
+    }
+
+    #[test]
+    fn an_observed_export_refuses_a_file_created_after_the_workspace_was_read() {
+        let root = tempfile::tempdir().expect("workspace creates");
+        let manifest =
+            WorkspaceFile { path: PathBuf::from("manifest.toml"), content: b"format-version = 1\n".to_vec() };
+        fs::write(root.path().join(&manifest.path), &manifest.content).expect("manifest writes");
+        let note = WorkspaceFile { path: PathBuf::from("notes/new.md"), content: b"from the database\n".to_vec() };
+        fs::create_dir(root.path().join("notes")).expect("notes directory creates");
+        fs::write(root.path().join(&note.path), "created by hand\n").expect("note writes");
+
+        let error = export_observed(root.path(), &[manifest.clone(), note.clone()], &[manifest])
+            .expect_err("a created file refuses");
+        assert!(matches!(&error, WorkspaceExportError::Conflict { path } if path == &note.path));
+        assert_eq!(
+            fs::read_to_string(root.path().join(&note.path)).expect("note reads"),
+            "created by hand\n"
+        );
     }
 }

@@ -21,6 +21,29 @@ version control.
 
 Commit `.arcl/config.toml` and `.arcl/workspace/` with the rest of the project.
 
+## Sync both ways
+
+Run sync after you change records, after you edit workspace files, and after a
+pull or a branch switch:
+
+```sh
+arcl workspace sync
+```
+
+Sync compares each file with the version stored at the last sync. A change made
+only in the database is written to the workspace. A change made only in the
+workspace is validated with the complete graph and imported. A file that both
+sides changed differently stops the sync with status code `4` and the paths
+involved, and nothing is written. A record written by another `arcl` command
+while sync runs also stops it with status code `4`; run sync again.
+
+Switching to a branch that lacks records synced elsewhere stops sync with status
+code `3`, since sync does not delete records. Run `arcl workspace export` to
+write those records back, then run sync again.
+
+Sync writes workspace files before it updates the database. If a sync or an
+export stops partway, the next sync finishes the work.
+
 ## Export your work
 
 After you change records through the CLI, export the database projection:
@@ -100,7 +123,7 @@ implicitly.
 
 ## Avoid divergent changes
 
-Import after pulling workspace changes and export before committing local
-database changes. If both the database and workspace changed from their last
-shared export, import reports a conflict instead of choosing one version. No
-partial database writes occur when an import fails.
+Sync after pulling workspace changes and before committing local database
+changes. If the database and the workspace changed the same file differently
+since the last sync, sync and import report a conflict instead of choosing one
+version. No partial database writes occur when either fails.
