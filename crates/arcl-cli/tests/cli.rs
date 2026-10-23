@@ -1,8 +1,28 @@
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::OnceLock,
+};
 
 use assert_cmd::Command;
 use serde_json::Value;
 use tempfile::{TempDir, tempdir};
+
+/// Git variables that point a command at another repository, index or object
+/// store. A Git hook in a linked worktree exports an absolute `GIT_DIR` and
+/// `GIT_INDEX_FILE`, so a test run from that hook would otherwise commit into
+/// the developer's repository.
+const GIT_LOCATION_VARIABLES: [&str; 9] = [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_NAMESPACE",
+    "GIT_CEILING_DIRECTORIES",
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+];
 
 /// The Git state arcl must leave alone: HEAD, refs, an unfinished merge, the
 /// index, local configuration and changes outside the workspace.
@@ -35,10 +55,41 @@ impl GitState {
     }
 }
 
-fn arcl_in(directory: &Path) -> Command {
-    let mut command = Command::cargo_bin("arcl").expect("Cargo exposes the arcl binary");
-    command.current_dir(directory);
+/// Build a command for `program` in `directory` that sees no Git state from the
+/// host. It drops [`GIT_LOCATION_VARIABLES`], ignores global and system config,
+/// and points `HOME` and `XDG_CONFIG_HOME` at an empty directory, since Git and
+/// gix read `$XDG_CONFIG_HOME/git/ignore` even with global config off. A host
+/// excludes file that ignores `.arcl/` or `*.md` would otherwise hide records
+/// from both the test's `git` and arcl.
+fn isolated_command(program: impl AsRef<std::ffi::OsStr>, directory: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new(program);
+    for variable in GIT_LOCATION_VARIABLES {
+        command.env_remove(variable);
+    }
+    let home = empty_home();
     command
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .current_dir(directory);
+    command
+}
+
+/// An empty directory under Cargo's test temp directory, created once and
+/// shared by every command as `HOME`.
+fn empty_home() -> &'static Path {
+    static HOME: OnceLock<PathBuf> = OnceLock::new();
+    HOME.get_or_init(|| {
+        let home = Path::new(env!("CARGO_TARGET_TMPDIR")).join("cli-empty-home");
+        fs::create_dir_all(&home).expect("empty home creates");
+        home
+    })
+}
+
+/// Build an `arcl` command in `directory`, isolated from host Git state.
+fn arcl_in(directory: &Path) -> Command {
+    Command::from_std(isolated_command(assert_cmd::cargo::cargo_bin("arcl"), directory))
 }
 
 fn initialized_directory() -> TempDir {
@@ -260,13 +311,11 @@ fn with_workspace_off<T>(directory: &Path, action: impl FnOnce() -> T) -> T {
 }
 
 /// Run `git` in `directory` with a fixed identity and default branch, and
-/// return its output whether or not it succeeded. Global and system config are
-/// ignored, so settings such as `merge.ff = only` or a hooks path on the host
-/// cannot change what the scenarios do.
+/// return its output whether or not it succeeded. The command is built by
+/// [`isolated_command`], so settings such as `merge.ff = only`, a hooks path or
+/// a `GIT_DIR` on the host cannot change what the scenarios do.
 fn git_output(directory: &Path, args: &[&str]) -> std::process::Output {
-    std::process::Command::new("git")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
+    isolated_command("git", directory)
         .args([
             "-c",
             "user.name=Test",
@@ -278,7 +327,6 @@ fn git_output(directory: &Path, args: &[&str]) -> std::process::Output {
             "commit.gpgsign=false",
         ])
         .args(args)
-        .current_dir(directory)
         .output()
         .expect("git runs")
 }
@@ -605,9 +653,8 @@ fn parallel_writes_with_the_workspace_on_all_succeed() {
     run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
     let children = (0..16)
         .map(|index| {
-            std::process::Command::new(assert_cmd::cargo::cargo_bin("arcl"))
+            isolated_command(assert_cmd::cargo::cargo_bin("arcl"), directory.path())
                 .args(["--json", "note", "create", &format!("Parallel {index}")])
-                .current_dir(directory.path())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .spawn()

@@ -245,21 +245,52 @@ impl Vcs for FakeVcs {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, process::Command};
+    use std::{ffi::OsStr, fs, process::Command};
 
     use super::*;
+
+    /// Run `git` in `directory` with no Git state from the host: no location
+    /// variables, which a hook in a linked worktree exports and which would
+    /// point `git` at the developer's repository, and no global, system or
+    /// `$XDG_CONFIG_HOME/git` config, since `home` stands in for both.
+    fn isolated_git(directory: &Path, home: &Path, args: &[&OsStr]) {
+        let mut command = Command::new("git");
+        for variable in [
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_COMMON_DIR",
+        ] {
+            command.env_remove(variable);
+        }
+        let status = command
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("HOME", home)
+            .env("XDG_CONFIG_HOME", home)
+            .args(args)
+            .current_dir(directory)
+            .status()
+            .expect("git runs");
+        assert!(status.success(), "git {args:?} failed");
+    }
 
     #[test]
     fn changed_paths_lists_only_paths_under_the_prefix() {
         let root = tempfile::tempdir().expect("worktree creates");
-        let status = Command::new("git")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .args(["init", "-q"])
-            .current_dir(root.path())
-            .status()
-            .expect("git runs");
-        assert!(status.success());
+        let home = tempfile::tempdir().expect("home creates");
+        let excludes = home.path().join("excludes");
+        fs::write(&excludes, "").expect("excludes writes");
+        isolated_git(root.path(), home.path(), &["init".as_ref(), "-q".as_ref()]);
+        // gix runs in this process and reads the host's excludes file, so the
+        // repository's own config names an empty one, which takes precedence.
+        isolated_git(
+            root.path(),
+            home.path(),
+            &["config".as_ref(), "core.excludesFile".as_ref(), excludes.as_os_str()],
+        );
         fs::create_dir_all(root.path().join("ws/notes")).expect("workspace creates");
         fs::write(root.path().join("ws/notes/a.md"), "a").expect("note writes");
         fs::write(root.path().join("wsx.md"), "x").expect("sibling writes");
