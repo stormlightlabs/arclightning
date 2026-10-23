@@ -1,9 +1,12 @@
+use super::auto_sync::lock_project;
 use super::support::*;
 use super::*;
 
-/// Run one workspace command. Only `status` returns a report to render.
+/// Run one workspace command under the project's sync lock. Only `status`
+/// returns a report to render.
 pub(super) fn exec_workspace(command: WorkspaceCommand) -> CResult<Option<WorkspaceStatus>> {
     let (worktree_root, workspace_root) = workspace_paths()?;
+    let _lock = lock_project(&worktree_root)?;
     let mut database = open_database()?;
     match command {
         WorkspaceCommand::Export => {
@@ -54,7 +57,7 @@ pub(super) fn exec_workspace(command: WorkspaceCommand) -> CResult<Option<Worksp
 
 /// Open the Git worktree at `worktree_root`, or return `None` when the
 /// project is not in one.
-fn discover_vcs(worktree_root: &Path) -> CResult<Option<GixVcs>> {
+pub(super) fn discover_vcs(worktree_root: &Path) -> CResult<Option<GixVcs>> {
     match GixVcs::discover(worktree_root) {
         Ok(vcs) => Ok(Some(vcs)),
         Err(VcsError::Discovery { .. }) => Ok(None),
@@ -62,6 +65,8 @@ fn discover_vcs(worktree_root: &Path) -> CResult<Option<GixVcs>> {
     }
 }
 
-fn as_dyn(vcs: &Option<GixVcs>) -> Option<&dyn Vcs> {
+/// Borrow a discovered worktree as the `Vcs` trait object the workspace
+/// functions take.
+pub(super) fn as_dyn(vcs: &Option<GixVcs>) -> Option<&dyn Vcs> {
     vcs.as_ref().map(|vcs| vcs as &dyn Vcs)
 }
