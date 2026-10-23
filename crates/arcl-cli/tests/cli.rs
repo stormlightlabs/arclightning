@@ -56,7 +56,7 @@ fn help_uses_the_connected_vocabulary_without_compatibility_commands() {
     for command in ["capture", "spec", "plan", "task", "note"] {
         assert!(help.contains(command), "help does not mention {command}");
     }
-    for command in ["idea", "epic", "milestone"] {
+    for command in ["idea", "epic", "milestone", "snapshot"] {
         assert!(!help.contains(command), "help still mentions removed command {command}");
     }
     assert!(help.contains("capture promote arcl-c-… spec"));
@@ -67,6 +67,85 @@ fn help_uses_the_connected_vocabulary_without_compatibility_commands() {
         .output()
         .expect("removed command is rejected");
     assert_eq!(old.status.code(), Some(2));
+
+    let snapshot = arcl_in(directory.path())
+        .args(["snapshot", "export"])
+        .output()
+        .expect("removed snapshot noun is rejected");
+    assert_eq!(snapshot.status.code(), Some(2));
+}
+
+#[test]
+fn init_with_workspace_creates_the_layout_under_arcl_workspace() {
+    let directory = tempdir().expect("temporary directory can be created");
+    let init = run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
+    assert_eq!(init["data"]["workspace_enabled"], true);
+
+    let config = fs::read_to_string(directory.path().join(".arcl/config.toml")).expect("config is written");
+    assert!(config.contains("enabled = true"), "config: {config}");
+    assert!(config.contains("path = \".arcl/workspace\""), "config: {config}");
+
+    let workspace = directory.path().join(".arcl/workspace");
+    assert!(workspace.join("manifest.toml").is_file());
+    for kind in ["captures", "releases", "specs", "plans", "phases", "tasks", "notes"] {
+        assert!(workspace.join(kind).is_dir(), "missing workspace directory {kind}");
+    }
+}
+
+#[test]
+fn workspace_export_and_import_round_trip_under_arcl_workspace() {
+    let disabled = initialized_directory();
+    let refused = arcl_in(disabled.path())
+        .args(["--json", "workspace", "export"])
+        .output()
+        .expect("export runs");
+    assert_eq!(refused.status.code(), Some(3));
+
+    let source = tempdir().expect("temporary directory can be created");
+    run_json(source.path(), ["--json", "init", "--workspace"].as_ref());
+    let capture = run_json(
+        source.path(),
+        [
+            "--json",
+            "capture",
+            "create",
+            "Exported idea",
+            "--body",
+            "Workspace body",
+        ]
+        .as_ref(),
+    );
+    let capture_id = capture["data"]["capture"]["id"].as_str().expect("capture ID");
+    let exported = arcl_in(source.path())
+        .args(["workspace", "export"])
+        .output()
+        .expect("export runs");
+    assert!(
+        exported.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&exported.stderr)
+    );
+    let record_path = format!(".arcl/workspace/captures/{capture_id}.md");
+    let record = fs::read_to_string(source.path().join(&record_path)).expect("capture record is exported");
+    assert!(record.contains("Exported idea"), "record: {record}");
+
+    let target = tempdir().expect("temporary directory can be created");
+    run_json(target.path(), ["--json", "init", "--workspace"].as_ref());
+    for file in [".arcl/workspace/manifest.toml", record_path.as_str()] {
+        fs::copy(source.path().join(file), target.path().join(file)).expect("workspace file copies");
+    }
+    let imported = arcl_in(target.path())
+        .args(["workspace", "import"])
+        .output()
+        .expect("import runs");
+    assert!(
+        imported.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    let shown = run_json(target.path(), ["--json", "capture", "show", capture_id].as_ref());
+    assert_eq!(shown["data"]["capture"]["title"], "Exported idea");
+    assert_eq!(shown["data"]["capture"]["body"], "Workspace body");
 }
 
 #[test]
