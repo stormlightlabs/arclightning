@@ -173,11 +173,12 @@ Deliverables:
   website states
 - consistent errors and output across adapters
 - packaging and installation documentation
-- a release checklist tied to the success criteria in [SPEC.md](SPEC.md)
+- a release checklist tied to the first-release success criteria in
+  [SPEC.md](SPEC.md)
 
-Exit criterion: every success criterion has automated evidence or a recorded
-human review, and a new user can install Arc Lightning and complete the primary
-workflow from the documentation
+Exit criterion: every first-release success criterion has automated evidence
+or a recorded human review, and a new user can install Arc Lightning and
+complete the primary workflow from the documentation
 
 ## Milestone 10: Desktop planning and execution
 

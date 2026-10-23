@@ -9,9 +9,9 @@ developers and software agents. It connects specifications, implementation
 plans, executable tasks, and working notes in one project model.
 
 People and agents use the same model through a command-line interface (CLI), a
-local web app, a Model Context Protocol (MCP) server, a desktop app, and optional
-files stored with the project. The SQLite database is the operational store. Markdown is the readable form
-for long-form content.
+local web app, a Model Context Protocol (MCP) server, a desktop app, and
+optional files stored with the project. The SQLite database is the operational
+store. Markdown is the readable form for long-form content.
 
 ## Product principles
 
@@ -46,7 +46,7 @@ A developer can:
 
 ## Success criteria
 
-The product direction is realized when:
+The first release is complete when:
 
 - a non-Git directory can host a complete Arc Lightning project
 - schema changes preserve descriptions, relationships, lifecycle state,
@@ -58,23 +58,29 @@ The product direction is realized when:
 - specs and plans own their Markdown content instead of pointing at documents
   that Arc Lightning cannot edit
 - every supported operation uses the same Rust application layer from the CLI,
-  web, desktop, and MCP adapters
+  web, and MCP adapters
 - flexible task placement preserves deterministic readiness and dependency
   rules
 - automations can read why work is blocked and what a completion unblocked as
   typed data
 - repository-native mode round-trips the complete model and refuses to
   overwrite divergent database and file changes
-- the local web app and the Tauri app provide inbox, work, planning, and task
-  views
-- the web app, Tauri app, and website consume one shared UI package for design tokens and
+- the local web app provides Inbox, Work, Planning, and Task views
+- the web app and website consume one shared UI package for design tokens and
   reusable Svelte components
 - the documentation follows the Stormlight house style described below
 - human output is concise and machine output is versioned and stable
 - focused tests cover domain rules, storage migrations, adapters, UI behavior,
   and repository synchronization
-- Playwright screenshot tests cover stable web app, desktop, website, and
-  shared UI states in light and dark themes
+- Playwright screenshot tests cover stable web app, website, and shared UI
+  states in light and dark themes
+
+The desktop app follows the first release. It is complete when:
+
+- the Tauri app provides the same four views through the same Rust application
+  layer
+- the Tauri app consumes the shared UI package
+- Playwright screenshot tests cover the desktop views in light and dark themes
 
 ## Domain model
 
@@ -192,7 +198,7 @@ header, so other local pages cannot drive it.
 
 The server is a thin HTTP adapter over the Rust application operations. The
 Svelte frontend lives in `apps/web`, uses the shared UI package, and provides
-the same four views as the desktop app.
+four views: Inbox, Work, Planning, and Task.
 
 ### Desktop app
 
@@ -276,8 +282,8 @@ move must leave the affected interface buildable and tested.
 
 The Rust core must not depend on Tauri, terminal presentation, MCP or HTTP
 transport, or frontend persistence. The shared UI package must not depend on
-Tauri APIs or website-only routing. Each application supplies those adapters at its
-composition root.
+Tauri APIs or website-only routing. Each application supplies those adapters at
+its composition root.
 
 ## Shared UI and visual direction
 
@@ -372,10 +378,11 @@ Svelte implementation details. Server tests use real `Request` and `FormData`
 objects where those interfaces apply.
 
 Screenshot tests supplement behavioral assertions. They cover shared component
-states, the four web app and desktop views, the website landing page, and representative
-documentation pages. The screenshot environment pins Chromium, viewport,
-color scheme, fonts, fixture data, and motion preferences. Baseline changes
-require review and are updated only when the visual change is intentional.
+states, the four web app and desktop views, the website landing page, and
+representative documentation pages. The screenshot environment pins Chromium,
+viewport, color scheme, fonts, fixture data, and motion preferences. Baseline
+changes require review and are updated only when the visual change is
+intentional.
 
 Desktop Playwright tests run the Svelte interface through a deterministic
 browser harness backed by a test application adapter. Rust integration tests

@@ -423,8 +423,8 @@ Acceptance criteria:
       web app, and MCP adapters
 - [ ] Document installation, project migration, web app use, CLI automation,
       MCP, repository-native collaboration, and recovery
-- [ ] Map every success criterion in `SPEC.md` to automated evidence or a named
-      human review
+- [ ] Map every first-release success criterion in `SPEC.md` to automated
+      evidence or a named human review
 - [ ] Review and approve intentional Playwright screenshot changes before
       updating baselines
 - [ ] Pass all formatting, lint, type, test, build, and documentation checks from
