@@ -253,6 +253,8 @@ mod tests {
     fn changed_paths_lists_only_paths_under_the_prefix() {
         let root = tempfile::tempdir().expect("worktree creates");
         let status = Command::new("git")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
             .args(["init", "-q"])
             .current_dir(root.path())
             .status()

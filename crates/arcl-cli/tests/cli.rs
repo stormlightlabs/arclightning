@@ -260,9 +260,13 @@ fn with_workspace_off<T>(directory: &Path, action: impl FnOnce() -> T) -> T {
 }
 
 /// Run `git` in `directory` with a fixed identity and default branch, and
-/// return its output whether or not it succeeded.
+/// return its output whether or not it succeeded. Global and system config are
+/// ignored, so settings such as `merge.ff = only` or a hooks path on the host
+/// cannot change what the scenarios do.
 fn git_output(directory: &Path, args: &[&str]) -> std::process::Output {
     std::process::Command::new("git")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
         .args([
             "-c",
             "user.name=Test",

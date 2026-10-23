@@ -16,8 +16,7 @@ Deliverables:
   website states
 - consistent errors and output across adapters
 - packaging and installation documentation
-- a release checklist tied to the first-release success criteria in
-  [SPEC.md](SPEC.md)
+- a release checklist tied to the first-release success criteria in `SPEC.md`
 
 Exit criterion: every first-release success criterion has automated evidence
 or a recorded human review, and a new user can install Arc Lightning and
