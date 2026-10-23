@@ -236,8 +236,12 @@ Acceptance criteria:
 
 - [ ] Treat a task as blocked when it or any ancestor task has an unfinished
       blocker, and name that ancestor in readiness explanations
-- [ ] Refuse `task start` for a task that is not ready, with an explicit force
-      option for people
+- [ ] Refuse `task start` from pending for a task that is not ready unless
+      the caller passes `--force`; starting an in-progress task stays a no-op,
+      and the MCP start tool does not expose force
+- [ ] Refuse blocker edges that form a cycle or join a task to its own
+      ancestor or descendant; report existing ones through readiness,
+      `arcl check`, and import with the path that forms them
 - [ ] Report a cancelled blocker as its own readiness reason that asks for the
       dependency to be removed or replaced
 - [ ] Keep dependency validation the same across the CLI, plan application,
@@ -247,8 +251,11 @@ Verification:
 
 - `cargo test --workspace --all-features ready`
 - `cargo test --workspace --all-features dependency`
-- Cover inherited blockers, forced and refused starts, and cancelled blockers
-  in tests
+- Cover inherited blockers, forced and refused starts, repeat starts,
+  ancestor and descendant edges, and cancelled blockers in tests
+- Update `connected_execution_keeps_invalid_writes_atomic` in
+  `crates/arcl-store/src/storage/connected/execution.rs` on purpose: its start
+  after a forced container close needs `--force` once readiness applies
 
 ## T17: Report readiness and unblocking as data
 
@@ -345,7 +352,11 @@ Acceptance criteria:
 
 - [ ] Add `arcl serve`, bound to `127.0.0.1` on an ephemeral port by default,
       with `--port` to pin one and the URL printed on start
-- [ ] Require a per-run token and check the `Host` header on every request
+- [ ] Check the `Host` header and require the per-run token in a request
+      header on every request, never in a cookie or in a query string after
+      the first page load
+- [ ] Require a matching `Origin` on mutations, send no CORS headers, and
+      never change state on GET
 - [ ] Add a thin HTTP adapter over the Rust application layer with the same
       validation and errors as the CLI
 - [ ] Build Inbox, Work, Planning, and Task views in `apps/web` from the shared

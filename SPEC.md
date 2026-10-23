@@ -155,7 +155,13 @@ pending, its applicable ancestors and containers permit work, and every blocker
 on the task and on its ancestor tasks is complete. Notes never affect readiness.
 
 Blocking relationships connect two tasks in the same project and never form a
-cycle. Starting a task requires it to be ready unless a person forces it. A
+cycle. A task cannot block, or be blocked by, its own ancestor or descendant.
+New edges that break either rule are refused. Existing ones are reported by
+readiness and `arcl check`, and by import with the path that forms them.
+
+Moving a pending task to in progress requires it to be ready unless the caller
+passes `--force`. Starting a task that is already in progress stays a no-op.
+The MCP start tool does not expose force; an agent asks a person instead. A
 cancelled blocker does not complete the relationship; readiness reports it as
 a decision to remove or replace the dependency. Every readiness reason has a
 stable kind and record IDs in machine output, and completing a task reports
@@ -193,8 +199,12 @@ transactions as the web app, desktop app, and MCP server.
 
 `arcl serve` runs the planning and execution workflow in the browser. It binds
 to `127.0.0.1` on an ephemeral port by default, prints the URL, and accepts
-`--port` to pin one. Every request needs a per-run token and a matching `Host`
-header, so other local pages cannot drive it.
+`--port` to pin one. Every request needs a matching `Host` header, which
+stops DNS rebinding. Every request also needs the per-run token in a request
+header, never a cookie, and in no query string after the first page load.
+Mutations need a matching `Origin`. The server sends no CORS headers and never
+changes state on GET. The header token and the `Origin` check stop other local
+pages, including those on other `127.0.0.1` ports, from driving it.
 
 The server is a thin HTTP adapter over the Rust application operations. The
 Svelte frontend lives in `apps/web`, uses the shared UI package, and provides

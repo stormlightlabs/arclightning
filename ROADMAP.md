@@ -79,7 +79,10 @@ automations can rely on them.
 Deliverables:
 
 - blockers on a parent task also block its descendants
-- `task start` refuses work that is not ready unless forced
+- `task start` from pending refuses work that is not ready unless the caller
+  passes `--force`; a repeat start stays a no-op
+- blocker edges cannot form a cycle or join a task to its own ancestor or
+  descendant
 - a cancelled blocker is reported as a decision to make, not a silent wait
 - typed readiness reasons in JSON alongside the human text
 - task completion reports the tasks it made ready
@@ -133,7 +136,9 @@ Deliverables:
 
 - `arcl serve`, bound to `127.0.0.1` on an ephemeral port by default, with
   `--port` to pin one
-- a per-run token and `Host` header check on every request
+- a `Host` header check and a per-run token in a request header on every
+  request, an `Origin` check on mutations, no CORS headers, and no state
+  changes on GET
 - Inbox, Work, Planning, and Task views built from the shared UI package
 - an HTTP adapter over the Rust application layer with the same validation and
   errors as the CLI
