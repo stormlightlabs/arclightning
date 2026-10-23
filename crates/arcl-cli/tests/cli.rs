@@ -508,6 +508,51 @@ fn commands_sync_the_workspace_around_reads_and_writes() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn commands_treat_a_symlinked_workspace_as_a_failed_sync() {
+    let directory = tempdir().expect("temporary directory can be created");
+    run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
+    let workspace = directory.path().join(".arcl/workspace");
+    let moved = directory.path().join("moved-workspace");
+    fs::rename(&workspace, &moved).expect("workspace moves");
+    std::os::unix::fs::symlink(&moved, &workspace).expect("symlink is created");
+
+    let refused = arcl_in(directory.path())
+        .args(["capture", "create", "Blocked"])
+        .output()
+        .expect("create runs");
+    assert_eq!(refused.status.code(), Some(3));
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(stderr.contains("symbolic link"), "stderr: {stderr}");
+
+    let read = arcl_in(directory.path())
+        .args(["--json", "capture", "list"])
+        .output()
+        .expect("list runs");
+    assert!(read.status.success());
+    let stderr = String::from_utf8_lossy(&read.stderr);
+    assert!(
+        stderr.contains("warning") && stderr.contains("symbolic link"),
+        "stderr: {stderr}"
+    );
+    assert_eq!(json(&read.stdout)["data"]["captures"], Value::Array(Vec::new()));
+}
+
+#[test]
+fn a_missing_database_reports_not_initialized_once() {
+    let directory = tempdir().expect("temporary directory can be created");
+    run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
+    fs::remove_file(directory.path().join(".arcl/arcl.db")).expect("database is removed");
+
+    for args in [["--json", "list"].as_ref(), ["--json", "note", "create", "x"].as_ref()] {
+        let output = arcl_in(directory.path()).args(args).output().expect("command runs");
+        assert_eq!(output.status.code(), Some(3));
+        let stderr: Value = serde_json::from_slice(&output.stderr).expect("stderr is one JSON value");
+        assert!(stderr.to_string().contains("not initialized"), "stderr: {stderr}");
+    }
+}
+
 #[test]
 fn capture_spec_plan_task_workflow_round_trips_through_json() {
     let directory = initialized_directory();

@@ -71,11 +71,14 @@ pub(super) fn command_access(command: Option<&Command>) -> Access {
 }
 
 /// Return the roots to sync, or `None` when there is no project or its
-/// workspace is off. Configuration errors are left for the command to report.
-pub(super) fn workspace_roots() -> Option<WorkspaceRoots> {
-    workspace_paths()
-        .ok()
-        .map(|(worktree_root, workspace_root)| WorkspaceRoots { worktree_root, workspace_root })
+/// workspace is off. Any other configuration error, such as a symlinked
+/// workspace, is returned so the caller treats it as a failed sync.
+pub(super) fn workspace_roots() -> CResult<Option<WorkspaceRoots>> {
+    match workspace_paths() {
+        Ok((worktree_root, workspace_root)) => Ok(Some(WorkspaceRoots { worktree_root, workspace_root })),
+        Err(CommandError::WorkspaceDisabled | CommandError::NotInitialized { .. }) => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 /// Sync the database and the workspace once.

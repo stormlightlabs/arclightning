@@ -56,18 +56,34 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
     let renderer = Renderer::new(mode, cli.color);
 
     let access = command_access(cli.command.as_ref());
-    let roots = if access == Access::Untracked { None } else { workspace_roots() };
-    if let Some(roots) = &roots
-        && let Err(error) = auto_sync(roots)
-    {
-        if access == Access::Write {
+    let (roots, synced) = match access {
+        Access::Untracked => (None, Ok(())),
+        _ => match workspace_roots() {
+            Ok(Some(roots)) => {
+                let synced = auto_sync(&roots);
+                (Some(roots), synced)
+            }
+            Ok(None) => (None, Ok(())),
+            Err(error) => (None, Err(error)),
+        },
+    };
+    match synced {
+        // A missing database is the command's own error to report, once.
+        Ok(()) | Err(CommandError::NotInitialized { .. }) => {}
+        Err(error) if access == Access::Write => {
             let error = match error {
-                CommandError::WorkspaceSync(error) => CommandError::AutoSync(error),
+                CommandError::WorkspaceSync(error)
+                    if !matches!(*error, WorkspaceSyncError::Storage(StorageError::ChangedSinceRead)) =>
+                {
+                    CommandError::AutoSync(error)
+                }
                 other => other,
             };
             return Err(ApplicationError::from_command(error).into());
         }
-        eprintln!("warning: the workspace did not sync, so this shows the database as it is: {error}");
+        Err(error) => {
+            eprintln!("warning: the workspace did not sync, so this shows the database as it is: {error}");
+        }
     }
 
     dispatch(cli.command, &renderer)?;
