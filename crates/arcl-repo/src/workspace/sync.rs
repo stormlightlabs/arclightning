@@ -369,17 +369,36 @@ mod tests {
     }
 
     #[test]
-    fn an_export_cut_off_after_the_database_commit_finishes_on_the_next_sync() {
+    fn an_import_cut_off_after_the_file_writes_imports_on_the_next_sync() {
         let mut project = Project::synced();
-        let note = project
-            .database
-            .create_note("Note".to_owned(), "Committed, never exported".to_owned())
-            .expect("note creates");
+        let spec = project.path_of("specs");
+        project.edit(&spec, "Spec body", "Written, never committed");
+        let base = project.database.workspace_base().expect("base loads");
+
+        // Run a sync's steps up to its file writes, then stop before the
+        // database commits the merged graph and the new base.
+        let candidate = read_candidate(project.root.path()).expect("workspace reads");
+        let graph = validate_candidate(
+            candidate.records,
+            project.database.project().expect("project loads"),
+            project.root.path(),
+        )
+        .expect("merged graph validates");
+        let files = project_graph(&graph).expect("projection succeeds");
+        export_observed(project.root.path(), &files, &candidate.files).expect("files write");
+        assert_eq!(
+            project.database.connected_graph().expect("graph loads").specs[0].body,
+            "Spec body"
+        );
+        assert_eq!(project.database.workspace_base().expect("base loads"), base);
 
         let outcome = project.sync().expect("sync succeeds");
-        let path = PathBuf::from(format!("notes/{}.md", note.id));
-        assert_eq!(outcome.exported, std::slice::from_ref(&path));
-        assert!(project.read(&path).contains("Committed, never exported"));
+        assert_eq!(outcome.imported, std::slice::from_ref(&spec));
+        assert_eq!(
+            project.database.connected_graph().expect("graph loads").specs[0].body,
+            "Written, never committed"
+        );
+        assert!(project.sync().expect("second sync succeeds").is_empty());
     }
 
     #[test]
