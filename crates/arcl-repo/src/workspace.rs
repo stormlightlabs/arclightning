@@ -10,12 +10,14 @@ mod codec;
 pub mod export;
 pub mod import;
 pub mod reconcile;
+pub mod status;
 pub mod sync;
 
 pub use codec::*;
 pub use export::{WorkspaceExportError, WorkspaceFile, export_graph, export_graph_with_base, project_graph};
 pub use import::{WorkspaceImportError, import_graph, import_workspace};
 pub use reconcile::{Change, Comparison, RecordComparison, RecordState, compare};
+pub use status::{RecordStatus, RecordStatusKind, WorkspaceStatus, WorkspaceStatusError, workspace_status};
 pub use sync::{Side, SyncOutcome, WorkspaceSyncError, sync_workspace};
 
 pub const CONFIG_FORMAT_VERSION: u32 = 1;

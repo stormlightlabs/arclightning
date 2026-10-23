@@ -693,6 +693,8 @@ pub enum WorkspaceCommand {
     Import,
     /// Carry one-sided changes between SQLite and the workspace; stop on divergence.
     Sync,
+    /// Report what differs from the last sync, conflicts, and Git state, without writing.
+    Status,
 }
 
 /// Filters accepted by broad connected-record queries.

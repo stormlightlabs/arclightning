@@ -44,6 +44,20 @@ write those records back, then run sync again.
 Sync writes workspace files before it updates the database. If a sync or an
 export stops partway, the next sync finishes the work.
 
+## Check before you sync
+
+Status shows what a sync would do without writing anything:
+
+```sh
+arcl workspace status
+```
+
+It lists each file that changed since the last sync and which side changed it,
+files both sides changed differently, files Git reports as unmerged, files with
+conflict markers, and entries outside the workspace layout. In a Git worktree
+it also shows the branch, a detached HEAD, or a branch with no commits yet. Use
+`--json` or `--plain` for scripts.
+
 ## Export your work
 
 After you change records through the CLI, export the database projection:

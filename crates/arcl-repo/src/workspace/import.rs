@@ -17,7 +17,7 @@ use super::{
 use super::{export::export_observed, export::project_graph};
 
 const DEFAULT_PROJECT_ID: &str = "arcl-pj-00000000000000000000000000";
-const RECORD_DIRECTORIES: &[&str] = &["captures", "releases", "specs", "plans", "phases", "tasks", "notes"];
+pub(super) const RECORD_DIRECTORIES: &[&str] = &["captures", "releases", "specs", "plans", "phases", "tasks", "notes"];
 
 /// A validation or I/O failure raised while importing a complete workspace.
 #[derive(Debug, Error)]

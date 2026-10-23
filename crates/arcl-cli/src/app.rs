@@ -116,8 +116,10 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
             }
         }
         Some(Command::Workspace { command }) => {
-            exec_workspace(command).map_err(ApplicationError::from_command)?;
-            write_output(None)
+            match exec_workspace(command).map_err(ApplicationError::from_command)? {
+                Some(status) => write_output(renderer.render_workspace_status(&status)?),
+                None => write_output(None),
+            }
         }
         Some(Command::Ready { filters }) => {
             let database = open_database().map_err(ApplicationError::from_command)?;

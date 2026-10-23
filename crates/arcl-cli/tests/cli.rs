@@ -214,6 +214,100 @@ fn workspace_sync_carries_one_sided_changes_and_refuses_divergence() {
     );
 }
 
+fn git(directory: &Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "init.defaultBranch=main",
+        ])
+        .args(args)
+        .current_dir(directory)
+        .output()
+        .expect("git runs");
+    assert!(
+        output.status.success(),
+        "git {}: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn workspace_status_reports_changes_head_and_unresolved_merges() {
+    let directory = tempdir().expect("temporary directory can be created");
+    git(directory.path(), &["init", "-q"]);
+    run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
+    let unborn = run_json(directory.path(), ["--json", "workspace", "status"].as_ref());
+    assert_eq!(unborn["data"]["head"]["kind"], "unborn");
+    assert_eq!(unborn["data"]["head"]["branch"], "main");
+
+    let capture = run_json(
+        directory.path(),
+        ["--json", "capture", "create", "Status idea", "--body", "First body"].as_ref(),
+    );
+    let capture_id = capture["data"]["capture"]["id"].as_str().expect("capture ID");
+    let record = format!("captures/{capture_id}.md");
+    let pending = run_json(directory.path(), ["--json", "workspace", "status"].as_ref());
+    assert_eq!(pending["data"]["records"][0]["path"], record);
+    assert_eq!(pending["data"]["records"][0]["state"], "database-changed");
+    assert_eq!(pending["data"]["records"][0]["database"], "added");
+
+    let synced = arcl_in(directory.path())
+        .args(["workspace", "sync"])
+        .output()
+        .expect("sync runs");
+    assert!(
+        synced.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&synced.stderr)
+    );
+    git(directory.path(), &["add", "."]);
+    git(directory.path(), &["commit", "-q", "-m", "base"]);
+    let clean = run_json(directory.path(), ["--json", "workspace", "status"].as_ref());
+    assert_eq!(clean["data"]["head"]["kind"], "branch");
+    assert_eq!(clean["data"]["records"], Value::Array(Vec::new()));
+
+    let record_path = directory.path().join(".arcl/workspace").join(&record);
+    let base = fs::read_to_string(&record_path).expect("record reads");
+    git(directory.path(), &["checkout", "-q", "-b", "other"]);
+    fs::write(&record_path, base.replace("First body", "Other body")).expect("record writes");
+    git(directory.path(), &["commit", "-q", "-am", "other"]);
+    git(directory.path(), &["checkout", "-q", "main"]);
+    fs::write(&record_path, base.replace("First body", "Main body")).expect("record writes");
+    git(directory.path(), &["commit", "-q", "-am", "main"]);
+    let merge = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "merge",
+            "-q",
+            "other",
+        ])
+        .current_dir(directory.path())
+        .output()
+        .expect("git merge runs");
+    assert!(!merge.status.success(), "the merge should conflict");
+
+    let conflicted = run_json(directory.path(), ["--json", "workspace", "status"].as_ref());
+    assert_eq!(conflicted["data"]["unmerged"][0], record);
+    assert_eq!(conflicted["data"]["conflict_markers"][0], record);
+    assert_eq!(conflicted["data"]["records"][0]["git"], "conflicted");
+
+    let human = arcl_in(directory.path())
+        .args(["--color", "never", "workspace", "status"])
+        .output()
+        .expect("status runs");
+    let text = String::from_utf8_lossy(&human.stdout);
+    assert!(text.contains("Unmerged in Git:"), "status: {text}");
+    assert!(text.contains("Sync will stop"), "status: {text}");
+}
+
 #[test]
 fn capture_spec_plan_task_workflow_round_trips_through_json() {
     let directory = initialized_directory();

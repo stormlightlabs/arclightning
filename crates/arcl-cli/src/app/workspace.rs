@@ -1,7 +1,8 @@
 use super::support::*;
 use super::*;
 
-pub(super) fn exec_workspace(command: WorkspaceCommand) -> CResult<()> {
+/// Run one workspace command. Only `status` returns a report to render.
+pub(super) fn exec_workspace(command: WorkspaceCommand) -> CResult<Option<WorkspaceStatus>> {
     let (worktree_root, workspace_root) = workspace_paths()?;
     let mut database = open_database()?;
     match command {
@@ -23,6 +24,15 @@ pub(super) fn exec_workspace(command: WorkspaceCommand) -> CResult<()> {
         WorkspaceCommand::Sync => {
             sync_workspace(&workspace_root, &worktree_root, &mut database)?;
         }
+        WorkspaceCommand::Status => {
+            let vcs = match GixVcs::discover(&worktree_root) {
+                Ok(vcs) => Some(vcs),
+                Err(VcsError::Discovery { .. }) => None,
+                Err(error) => return Err(error.into()),
+            };
+            let status = workspace_status(&workspace_root, &database, vcs.as_ref().map(|vcs| vcs as &dyn Vcs))?;
+            return Ok(Some(status));
+        }
     }
-    Ok(())
+    Ok(None)
 }

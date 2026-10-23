@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use gix::status::index_worktree::iter::Summary;
+use serde::Serialize;
 use thiserror::Error;
 
 /// Read-only VCS operations required by the application boundary.
@@ -9,10 +10,39 @@ pub trait Vcs {
     fn head_id(&self) -> Result<Option<String>, VcsError>;
     fn branch_name(&self) -> Result<Option<String>, VcsError>;
     fn path_state(&self, path: &Path) -> Result<PathState, VcsError>;
+    /// List every path under `prefix` whose worktree state differs from the
+    /// index, relative to `prefix`.
+    fn changed_paths(&self, prefix: &Path) -> Result<Vec<(PathBuf, PathState)>, VcsError>;
+
+    /// Describe where HEAD points: a branch, a detached commit, or a branch
+    /// with no commits yet.
+    fn head_state(&self) -> Result<HeadState, VcsError> {
+        Ok(match (self.branch_name()?, self.head_id()?) {
+            (Some(branch), Some(commit)) => HeadState::Branch { branch, commit },
+            (Some(branch), None) => HeadState::Unborn { branch },
+            (None, Some(commit)) => HeadState::Detached { commit },
+            (None, None) => HeadState::Unknown,
+        })
+    }
+}
+
+/// Where HEAD points in a Git worktree.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum HeadState {
+    /// HEAD names a branch that has at least one commit.
+    Branch { branch: String, commit: String },
+    /// HEAD points at a commit without naming a branch.
+    Detached { commit: String },
+    /// HEAD names a branch that has no commits yet.
+    Unborn { branch: String },
+    /// HEAD names neither a branch nor a commit.
+    Unknown,
 }
 
 /// The state of a worktree path relevant to workspace synchronization.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum PathState {
     Tracked,
     Untracked,
@@ -116,5 +146,48 @@ impl Vcs for GixVcs {
         }
 
         if candidate.exists() { Ok(PathState::Tracked) } else { Ok(PathState::Absent) }
+    }
+
+    fn changed_paths(&self, prefix: &Path) -> Result<Vec<(PathBuf, PathState)>, VcsError> {
+        let candidate = if prefix.is_absolute() { prefix.to_owned() } else { self.root.join(prefix) };
+        let relative = candidate
+            .strip_prefix(&self.root)
+            .map_err(|_| VcsError::PathOutsideWorktree { path: candidate.clone(), root: self.root.clone() })?;
+        let mut prefix = relative.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/");
+        if !prefix.is_empty() && !prefix.ends_with('/') {
+            prefix.push('/');
+        }
+
+        let statuses = self
+            .repository
+            .status(gix::progress::Discard)
+            .map_err(|error| VcsError::Operation { operation: "create status iterator", message: error.to_string() })?
+            .untracked_files(gix::status::UntrackedFiles::Files)
+            .into_index_worktree_iter(Vec::new())
+            .map_err(|error| VcsError::Operation {
+                operation: "inspect worktree status",
+                message: error.to_string(),
+            })?;
+
+        let mut changed = Vec::new();
+        for item in statuses {
+            let item = item.map_err(|error| VcsError::Operation {
+                operation: "read worktree status",
+                message: error.to_string(),
+            })?;
+            let path = String::from_utf8_lossy(item.rela_path().as_ref()).into_owned();
+            let Some(inside) = path.strip_prefix(&prefix) else { continue };
+            let state = match item.summary() {
+                Some(Summary::Added) => PathState::Untracked,
+                Some(Summary::Removed) => PathState::Deleted,
+                Some(Summary::Conflict) => PathState::Conflicted,
+                Some(_) => PathState::Modified,
+                None => continue,
+            };
+            changed.push((PathBuf::from(inside), state));
+        }
+        changed.sort_by(|left, right| left.0.cmp(&right.0));
+        changed.dedup_by(|left, right| left.0 == right.0);
+        Ok(changed)
     }
 }
