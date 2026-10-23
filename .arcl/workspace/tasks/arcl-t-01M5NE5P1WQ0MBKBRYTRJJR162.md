@@ -13,6 +13,8 @@ automations can trust readiness.
 
 Blocked by: T04
 
+Delivered by subtasks T16.1–T16.4.
+
 Acceptance criteria:
 
 - [ ] Treat a task as blocked when it or any ancestor task has an unfinished

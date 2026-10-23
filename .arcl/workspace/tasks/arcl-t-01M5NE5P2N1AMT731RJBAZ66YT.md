@@ -12,6 +12,8 @@ Give automations typed readiness reasons and the tasks a completion unblocks.
 
 Blocked by: T16
 
+Delivered by subtasks T17.1–T17.3.
+
 Acceptance criteria:
 
 - [ ] Add a stable `kind` and record IDs to every readiness reason in JSON,
