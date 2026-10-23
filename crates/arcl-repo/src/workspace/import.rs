@@ -97,9 +97,10 @@ impl WorkspaceImportError {
     }
 }
 
-struct CandidateWorkspace {
-    records: BTreeMap<PathBuf, WorkspaceRecord>,
-    files: Vec<WorkspaceFile>,
+/// A workspace read from disk: every decoded record and the exact bytes of every file.
+pub(super) struct CandidateWorkspace {
+    pub(super) records: BTreeMap<PathBuf, WorkspaceRecord>,
+    pub(super) files: Vec<WorkspaceFile>,
 }
 
 struct PreparedImport {
@@ -353,7 +354,7 @@ fn apply_prepared(root: &Path, prepared: PreparedImport, database: &mut Database
     Ok(prepared.files)
 }
 
-fn read_candidate(root: &Path) -> Result<CandidateWorkspace> {
+pub(super) fn read_candidate(root: &Path) -> Result<CandidateWorkspace> {
     let entries = read_entries(root)?;
     let Some(manifest_entry) = entries
         .iter()
@@ -434,7 +435,7 @@ fn read_record_directory(
     Ok(())
 }
 
-fn validate_candidate(
+pub(super) fn validate_candidate(
     records: BTreeMap<PathBuf, WorkspaceRecord>, project: Project, _worktree_root: &Path,
 ) -> Result<ConnectedGraph> {
     let mut ids = HashMap::<String, PathBuf>::new();

@@ -149,6 +149,72 @@ fn workspace_export_and_import_round_trip_under_arcl_workspace() {
 }
 
 #[test]
+fn workspace_sync_carries_one_sided_changes_and_refuses_divergence() {
+    let directory = tempdir().expect("temporary directory can be created");
+    run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
+    let capture = run_json(
+        directory.path(),
+        ["--json", "capture", "create", "Synced idea", "--body", "Database body"].as_ref(),
+    );
+    let capture_id = capture["data"]["capture"]["id"].as_str().expect("capture ID");
+    let sync = || {
+        arcl_in(directory.path())
+            .args(["workspace", "sync"])
+            .output()
+            .expect("sync runs")
+    };
+
+    let exported = sync();
+    assert!(
+        exported.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&exported.stderr)
+    );
+    let record_path = directory
+        .path()
+        .join(format!(".arcl/workspace/captures/{capture_id}.md"));
+    let record = fs::read_to_string(&record_path).expect("capture record is exported");
+    assert!(record.contains("Database body"), "record: {record}");
+
+    fs::write(&record_path, record.replace("Database body", "Workspace body")).expect("record edits");
+    let imported = sync();
+    assert!(
+        imported.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    let shown = run_json(directory.path(), ["--json", "capture", "show", capture_id].as_ref());
+    assert_eq!(shown["data"]["capture"]["body"], "Workspace body");
+
+    let record = fs::read_to_string(&record_path).expect("record reads");
+    fs::write(&record_path, record.replace("Workspace body", "Edited in the file")).expect("record edits");
+    run_json(
+        directory.path(),
+        [
+            "--json",
+            "capture",
+            "update",
+            capture_id,
+            "--body",
+            "Edited in the database",
+        ]
+        .as_ref(),
+    );
+    let refused = sync();
+    assert_eq!(refused.status.code(), Some(4));
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(
+        stderr.contains(&format!("captures/{capture_id}.md")),
+        "stderr: {stderr}"
+    );
+    assert!(
+        fs::read_to_string(&record_path)
+            .expect("record reads")
+            .contains("Edited in the file")
+    );
+}
+
+#[test]
 fn capture_spec_plan_task_workflow_round_trips_through_json() {
     let directory = initialized_directory();
     let capture = run_json(

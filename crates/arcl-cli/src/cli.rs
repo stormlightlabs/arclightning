@@ -691,6 +691,8 @@ pub enum WorkspaceCommand {
     Export,
     /// Validate and import the complete workspace graph into SQLite.
     Import,
+    /// Carry one-sided changes between SQLite and the workspace; stop on divergence.
+    Sync,
 }
 
 /// Filters accepted by broad connected-record queries.
