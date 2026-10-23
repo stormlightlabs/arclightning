@@ -23,8 +23,17 @@ Commit `.arcl/config.toml` and `.arcl/workspace/` with the rest of the project.
 
 ## Sync both ways
 
-Run sync after you change records, after you edit workspace files, and after a
-pull or a branch switch:
+With the workspace on, every command that reads or changes records syncs first,
+and every change is written to the workspace as soon as it is saved. Edit a
+record file, pull, or switch branches, and the next `arcl` command picks it up.
+
+If that first sync stops, a command that changes records refuses with the
+sync's status code and names the files, before it changes anything. A command
+that only reads records still runs, shows the database as it is, and prints a
+warning. If the export after a change fails, the change is saved and the next
+command writes it to the workspace.
+
+To sync without running another command:
 
 ```sh
 arcl workspace sync

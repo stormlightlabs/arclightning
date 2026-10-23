@@ -116,6 +116,10 @@ pub(super) enum CommandError {
     WorkspaceSync(Box<WorkspaceSyncError>),
     #[error(transparent)]
     WorkspaceStatus(Box<WorkspaceStatusError>),
+    #[error(
+        "the workspace must sync before this change, and the sync stopped: {0}\nRun `arcl workspace status` to see why; `arcl workspace resolve` settles files both sides changed"
+    )]
+    AutoSync(Box<WorkspaceSyncError>),
     #[error(transparent)]
     Domain(#[from] DomainError),
     #[error(transparent)]
@@ -175,6 +179,7 @@ impl CommandError {
             Self::WorkspaceImport(error) => error.exit_code(),
             Self::WorkspaceSync(error) => error.exit_code(),
             Self::WorkspaceStatus(_) => 1,
+            Self::AutoSync(error) => error.exit_code(),
             Self::ReadConfig { .. }
             | Self::ReadMarkdown { .. }
             | Self::ReadStdin { .. }

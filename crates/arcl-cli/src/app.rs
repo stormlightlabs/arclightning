@@ -22,6 +22,7 @@ const GITIGNORE_FILE: &str = ".gitignore";
 const REQUIRED_GITIGNORE_ENTRIES: &[&str] = &["/arcl.db", "/arcl.db-*", "/*.tmp", "/conflicts/"];
 const WORKSPACE_DIRECTORIES: &[&str] = &["captures", "releases", "specs", "plans", "phases", "tasks", "notes"];
 
+mod auto_sync;
 mod commands;
 mod error;
 mod init;
@@ -39,6 +40,8 @@ use query::{connected_tree, list_connected, resolve_ready_filter, show_record};
 use support::{open_database, parse_task_id, write_output};
 use workspace::exec_workspace;
 
+use auto_sync::{Access, auto_sync, command_access, workspace_roots};
+
 /// Run one parsed CLI invocation at the application boundary.
 pub fn run(cli: Cli) -> anyhow::Result<()> {
     let mode = if cli.json {
@@ -52,7 +55,37 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
     };
     let renderer = Renderer::new(mode, cli.color);
 
-    match cli.command {
+    let access = command_access(cli.command.as_ref());
+    let roots = if access == Access::Untracked { None } else { workspace_roots() };
+    if let Some(roots) = &roots
+        && let Err(error) = auto_sync(roots)
+    {
+        if access == Access::Write {
+            let error = match error {
+                CommandError::WorkspaceSync(error) => CommandError::AutoSync(error),
+                other => other,
+            };
+            return Err(ApplicationError::from_command(error).into());
+        }
+        eprintln!("warning: the workspace did not sync, so this shows the database as it is: {error}");
+    }
+
+    dispatch(cli.command, &renderer)?;
+
+    if access == Access::Write
+        && let Some(roots) = &roots
+        && let Err(error) = auto_sync(roots)
+    {
+        eprintln!(
+            "warning: the change is saved, but the workspace was not updated: {error}; the next command updates it"
+        );
+    }
+    Ok(())
+}
+
+/// Run one command with no workspace sync around it.
+fn dispatch(command: Option<Command>, renderer: &Renderer) -> anyhow::Result<()> {
+    match command {
         Some(Command::Init { workspace }) => {
             let start = std::env::current_dir().context("could not determine the current directory")?;
             let initialization = initialize(&start, workspace).map_err(ApplicationError::from_init)?;
@@ -67,15 +100,15 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
             }?;
             write_output(message)
         }
-        Some(Command::Release { command }) => exec_release(command, &renderer),
-        Some(Command::Spec { command }) => exec_spec(command, &renderer),
-        Some(Command::Plan { command }) => exec_plan(command, &renderer),
-        Some(Command::Task { command }) => exec_task(command, &renderer),
-        Some(Command::Dependency { command }) => exec_dependency(command, &renderer),
-        Some(Command::Note { command }) => exec_note(command, &renderer),
+        Some(Command::Release { command }) => exec_release(command, renderer),
+        Some(Command::Spec { command }) => exec_spec(command, renderer),
+        Some(Command::Plan { command }) => exec_plan(command, renderer),
+        Some(Command::Task { command }) => exec_task(command, renderer),
+        Some(Command::Dependency { command }) => exec_dependency(command, renderer),
+        Some(Command::Note { command }) => exec_note(command, renderer),
         Some(Command::Show { id }) => {
             let database = open_database().map_err(ApplicationError::from_command)?;
-            let message = show_record(&database, &id, &renderer).map_err(ApplicationError::from_command)?;
+            let message = show_record(&database, &id, renderer).map_err(ApplicationError::from_command)?;
             write_output(message)
         }
         Some(Command::List { filters }) => {
