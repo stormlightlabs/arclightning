@@ -27,26 +27,26 @@ Initialize or rediscover the project in the enclosing Git worktree.
 
 ```sh
 arcl init
-arcl init --snapshot
+arcl init --workspace
 ```
 
 The command creates `.arcl/config.toml`, `.arcl/arcl.db`, and a scoped
 `.arcl/.gitignore`. It rejects directories outside Git worktrees and bare
 repositories. Re-running initialization preserves existing project state.
 
-## Snapshots
+## Workspace
 
-| Command                | Purpose                                                    |
-| ---------------------- | ---------------------------------------------------------- |
-| `arcl snapshot export` | Write the local database state to the configured snapshot. |
-| `arcl snapshot import` | Validate the snapshot and rebuild the local database.      |
+| Command                 | Purpose                                                     |
+| ----------------------- | ----------------------------------------------------------- |
+| `arcl workspace export` | Write the local database state to the configured workspace. |
+| `arcl workspace import` | Validate the workspace and rebuild the local database.      |
 
-Snapshot commands require snapshot support to be enabled with
-`arcl init --snapshot`. A concurrent file change stops the command with status
+Workspace commands require the workspace to be enabled with
+`arcl init --workspace`. A concurrent file change stops the command with status
 code `4` instead of overwriting the newer content.
 
-See [Version-control project snapshots](/guides/snapshots/) for the Git workflow
-and snapshot layout.
+See [Share the project workspace](/guides/workspace/) for the Git workflow and
+workspace layout.
 
 ## Idea commands
 
@@ -182,11 +182,11 @@ for automation that needs stable field names rather than human prose.
 
 The CLI uses these status categories/codes:
 
-| Code | Meaning                                                     |
-| ---- | ----------------------------------------------------------- |
-| `0`  | Success.                                                    |
-| `1`  | Runtime, filesystem, Git operation, or SQLite failure.      |
-| `2`  | Command-line parsing failure reported by `clap`.            |
-| `3`  | Invalid project, record, input, or lifecycle transition.    |
-| `4`  | Reserved for snapshot or concurrent-modification conflicts. |
-| `5`  | Requested record was not found.                             |
+| Code | Meaning                                                      |
+| ---- | ------------------------------------------------------------ |
+| `0`  | Success.                                                     |
+| `1`  | Runtime, filesystem, Git operation, or SQLite failure.       |
+| `2`  | Command-line parsing failure reported by `clap`.             |
+| `3`  | Invalid project, record, input, or lifecycle transition.     |
+| `4`  | Reserved for workspace or concurrent-modification conflicts. |
+| `5`  | Requested record was not found.                              |

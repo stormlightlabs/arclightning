@@ -44,14 +44,14 @@ Initialization creates `.arcl/config.toml`, `.arcl/arcl.db`, and a scoped
 `.arcl/.gitignore`. Re-running `arcl init` preserves existing configuration,
 database content, and local ignore customizations.
 
-Use the optional snapshot flag when initializing a project that wants the
-snapshot setting enabled:
+Use the optional workspace flag when initializing a project that wants the
+workspace setting enabled:
 
 ```sh
-arcl init --snapshot
+arcl init --workspace
 ```
 
-See [Version-control project snapshots](/guides/snapshots/) for the export,
+See [Share the project workspace](/guides/workspace/) for the export,
 import, and Git workflow.
 
 ## Capture an idea

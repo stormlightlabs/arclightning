@@ -1,5 +1,5 @@
 format-version = 1
 
-[snapshot]
+[workspace]
 enabled = false
-path = ".arcl/snapshot"
+path = ".arcl/workspace"

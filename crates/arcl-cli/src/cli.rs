@@ -27,9 +27,9 @@ impl fmt::Display for ColorChoice {
 pub enum Command {
     /// Initialize or rediscover a project.
     Init {
-        /// Enable the optional version-controlled snapshot path when creating configuration.
+        /// Enable the optional version-controlled workspace path when creating configuration.
         #[arg(long)]
-        snapshot: bool,
+        workspace: bool,
     },
     /// Capture and manage unstructured inbox records.
     Capture {
@@ -93,10 +93,10 @@ pub enum Command {
     },
     /// Validate database and graph invariants.
     Check,
-    /// Inspect or synchronize the version-controlled snapshot.
-    Snapshot {
+    /// Inspect or synchronize the version-controlled workspace.
+    Workspace {
         #[command(subcommand)]
-        command: SnapshotCommand,
+        command: WorkspaceCommand,
     },
     /// List actionable leaf tasks in deterministic order.
     Ready {
@@ -684,12 +684,12 @@ pub enum NoteLinkCommand {
     },
 }
 
-/// Explicit snapshot commands.
+/// Explicit workspace commands.
 #[derive(Clone, Debug, Subcommand)]
-pub enum SnapshotCommand {
-    /// Export the complete database graph into snapshot records.
+pub enum WorkspaceCommand {
+    /// Export the complete database graph into workspace records.
     Export,
-    /// Validate and import the complete snapshot graph into SQLite.
+    /// Validate and import the complete workspace graph into SQLite.
     Import,
 }
 
@@ -784,7 +784,7 @@ pub struct AcceptanceArgs {
     after_help = r#"Examples:
 
     arcl init
-    arcl init --snapshot
+    arcl init --workspace
     arcl --help
     arcl --version
     arcl capture create "Improve import errors" --body "Make failures easier to fix."

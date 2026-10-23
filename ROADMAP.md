@@ -8,10 +8,10 @@ acceptance criteria.
 
 Arc Lightning already has a working Rust CLI and SQLite model for ideas,
 releases, spec-backed epics, milestones, tasks, dependencies, lifecycle state,
-ready-work queries, task context, handoffs, and evidence. Snapshot encoding,
+ready-work queries, task context, handoffs, and evidence. Workspace encoding,
 export, and import are also implemented.
 
-This foundation is retained. Automatic snapshot reconciliation, conflict
+This foundation is retained. Automatic workspace reconciliation, conflict
 recovery, full plan application, MCP, desktop, and the new product model are
 unfinished.
 
@@ -53,7 +53,7 @@ new adapters can use the same operations without invoking the CLI
 
 ## Milestone 3: Repository-native collaboration
 
-Adapt the existing snapshot work to the new record types and finish safe
+Adapt the existing workspace work to the new record types and finish safe
 bidirectional synchronization.
 
 Deliverables:

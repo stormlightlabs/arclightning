@@ -39,7 +39,7 @@ const navigationOrder = [
 	'guides/lifecycle',
 	'guides/inspect-work',
 	'guides/releases',
-	'guides/snapshots',
+	'guides/workspace',
 	'guides/automation',
 	'reference/manual',
 	'reference/deps'

@@ -61,17 +61,17 @@ pub(super) enum InitError {
     #[error("could not read project configuration `{path}`: {source}")]
     ReadConfig { path: PathBuf, source: io::Error },
     #[error("project configuration `{path}` is invalid: {source}")]
-    InvalidConfig { path: PathBuf, source: SnapshotError },
+    InvalidConfig { path: PathBuf, source: WorkspaceError },
     #[error("could not write project configuration `{path}`: {source}")]
     WriteConfig { path: PathBuf, source: io::Error },
     #[error("could not render project configuration `{path}`: {source}")]
-    RenderConfig { path: PathBuf, source: SnapshotError },
-    #[error("could not create snapshot directory `{path}`: {source}")]
-    CreateSnapshotDirectory { path: PathBuf, source: io::Error },
-    #[error("could not render snapshot manifest `{path}`: {source}")]
-    RenderSnapshotManifest { path: PathBuf, source: SnapshotError },
-    #[error("could not write snapshot manifest `{path}`: {source}")]
-    WriteSnapshotManifest { path: PathBuf, source: io::Error },
+    RenderConfig { path: PathBuf, source: WorkspaceError },
+    #[error("could not create workspace directory `{path}`: {source}")]
+    CreateWorkspaceDirectory { path: PathBuf, source: io::Error },
+    #[error("could not render workspace manifest `{path}`: {source}")]
+    RenderWorkspaceManifest { path: PathBuf, source: WorkspaceError },
+    #[error("could not write workspace manifest `{path}`: {source}")]
+    WriteWorkspaceManifest { path: PathBuf, source: io::Error },
     #[error("could not read scoped ignore file `{path}`: {source}")]
     ReadGitignore { path: PathBuf, source: io::Error },
     #[error("could not write scoped ignore file `{path}`: {source}")]
@@ -103,15 +103,15 @@ pub(super) enum CommandError {
     #[error("could not determine the current directory: {source}")]
     CurrentDirectory { source: io::Error },
     #[error("project configuration `{path}` is invalid: {source}")]
-    InvalidConfig { path: PathBuf, source: SnapshotError },
+    InvalidConfig { path: PathBuf, source: WorkspaceError },
     #[error("could not open Arc Lightning database `{path}`: {source}")]
     OpenDatabase { path: PathBuf, source: StorageError },
-    #[error("snapshot support is disabled; run `arcl init --snapshot` first")]
-    SnapshotDisabled,
+    #[error("workspace support is disabled; run `arcl init --workspace` first")]
+    WorkspaceDisabled,
     #[error(transparent)]
-    SnapshotExport(Box<SnapshotExportError>),
+    WorkspaceExport(Box<WorkspaceExportError>),
     #[error(transparent)]
-    SnapshotImport(Box<SnapshotImportError>),
+    WorkspaceImport(Box<WorkspaceImportError>),
     #[error(transparent)]
     Domain(#[from] DomainError),
     #[error(transparent)]
@@ -132,15 +132,15 @@ pub(super) enum CommandError {
     Integrity { message: String },
 }
 
-impl From<SnapshotExportError> for CommandError {
-    fn from(error: SnapshotExportError) -> Self {
-        Self::SnapshotExport(Box::new(error))
+impl From<WorkspaceExportError> for CommandError {
+    fn from(error: WorkspaceExportError) -> Self {
+        Self::WorkspaceExport(Box::new(error))
     }
 }
 
-impl From<SnapshotImportError> for CommandError {
-    fn from(error: SnapshotImportError) -> Self {
-        Self::SnapshotImport(Box::new(error))
+impl From<WorkspaceImportError> for CommandError {
+    fn from(error: WorkspaceImportError) -> Self {
+        Self::WorkspaceImport(Box::new(error))
     }
 }
 
@@ -151,12 +151,12 @@ impl CommandError {
                 VcsError::Discovery { .. } | VcsError::BareRepository { .. } | VcsError::MissingWorktree { .. } => 3,
                 VcsError::PathOutsideWorktree { .. } | VcsError::Operation { .. } => 1,
             },
-            Self::NotInitialized { .. } | Self::InvalidConfig { .. } | Self::SnapshotDisabled | Self::Domain(_) => 3,
-            Self::SnapshotExport(error) => match error.as_ref() {
-                SnapshotExportError::Conflict { .. } => 4,
+            Self::NotInitialized { .. } | Self::InvalidConfig { .. } | Self::WorkspaceDisabled | Self::Domain(_) => 3,
+            Self::WorkspaceExport(error) => match error.as_ref() {
+                WorkspaceExportError::Conflict { .. } => 4,
                 _ => 1,
             },
-            Self::SnapshotImport(error) => error.exit_code(),
+            Self::WorkspaceImport(error) => error.exit_code(),
             Self::ReadConfig { .. }
             | Self::ReadMarkdown { .. }
             | Self::ReadStdin { .. }

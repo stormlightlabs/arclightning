@@ -7,23 +7,23 @@ use super::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct Initialization {
     pub(super) root: PathBuf,
-    pub(super) snapshot_enabled: bool,
+    pub(super) workspace_enabled: bool,
 }
 
-pub(super) fn initialize(start: &Path, snapshot: bool) -> IResult<Initialization> {
+pub(super) fn initialize(start: &Path, workspace: bool) -> IResult<Initialization> {
     let root = initialization_root(start)?;
     let arcl_directory = root.join(ARCL_DIRECTORY);
     fs::create_dir_all(&arcl_directory)
         .map_err(|source| InitError::CreateDirectory { path: arcl_directory.clone(), source })?;
     let config_path = arcl_directory.join(CONFIG_FILE);
-    let config = load_or_create_config(&config_path, snapshot)?;
+    let config = load_or_create_config(&config_path, workspace)?;
     ensure_gitignore(&arcl_directory.join(GITIGNORE_FILE))?;
     let database_path = arcl_directory.join(DATABASE_FILE);
     Database::open(&database_path).map_err(|source| InitError::OpenDatabase { path: database_path, source })?;
-    if config.snapshot.enabled {
-        ensure_snapshot_layout(&root, &config)?;
+    if config.workspace.enabled {
+        ensure_workspace_layout(&root, &config)?;
     }
-    Ok(Initialization { root, snapshot_enabled: config.snapshot.enabled })
+    Ok(Initialization { root, workspace_enabled: config.workspace.enabled })
 }
 
 fn initialization_root(start: &Path) -> IResult<PathBuf> {
@@ -37,13 +37,13 @@ fn initialization_root(start: &Path) -> IResult<PathBuf> {
     }
 }
 
-fn load_or_create_config(path: &Path, snapshot: bool) -> IResult<ProjectConfig> {
+fn load_or_create_config(path: &Path, workspace: bool) -> IResult<ProjectConfig> {
     match fs::read_to_string(path) {
         Ok(input) => {
             let mut config = ProjectConfig::parse(&input)
                 .map_err(|source| InitError::InvalidConfig { path: path.to_owned(), source })?;
-            if snapshot && !config.snapshot.enabled {
-                config.snapshot.enabled = true;
+            if workspace && !config.workspace.enabled {
+                config.workspace.enabled = true;
                 let rendered = config
                     .render()
                     .map_err(|source| InitError::RenderConfig { path: path.to_owned(), source })?;
@@ -53,7 +53,7 @@ fn load_or_create_config(path: &Path, snapshot: bool) -> IResult<ProjectConfig> 
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             let mut config = ProjectConfig::default();
-            config.snapshot.enabled = snapshot;
+            config.workspace.enabled = workspace;
             let rendered = config
                 .render()
                 .map_err(|source| InitError::RenderConfig { path: path.to_owned(), source })?;
@@ -65,21 +65,21 @@ fn load_or_create_config(path: &Path, snapshot: bool) -> IResult<ProjectConfig> 
     }
 }
 
-fn ensure_snapshot_layout(root: &Path, config: &ProjectConfig) -> IResult<()> {
-    let snapshot_root = resolve_snapshot_root(root, &config.snapshot.path)
+fn ensure_workspace_layout(root: &Path, config: &ProjectConfig) -> IResult<()> {
+    let workspace_root = resolve_workspace_root(root, &config.workspace.path)
         .map_err(|source| InitError::InvalidConfig { path: root.join(ARCL_DIRECTORY).join(CONFIG_FILE), source })?;
-    fs::create_dir_all(&snapshot_root)
-        .map_err(|source| InitError::CreateSnapshotDirectory { path: snapshot_root.clone(), source })?;
-    for directory in SNAPSHOT_DIRECTORIES {
-        let path = snapshot_root.join(directory);
-        fs::create_dir_all(&path).map_err(|source| InitError::CreateSnapshotDirectory { path, source })?;
+    fs::create_dir_all(&workspace_root)
+        .map_err(|source| InitError::CreateWorkspaceDirectory { path: workspace_root.clone(), source })?;
+    for directory in WORKSPACE_DIRECTORIES {
+        let path = workspace_root.join(directory);
+        fs::create_dir_all(&path).map_err(|source| InitError::CreateWorkspaceDirectory { path, source })?;
     }
-    let manifest_path = snapshot_root.join("manifest.toml");
+    let manifest_path = workspace_root.join("manifest.toml");
     if !manifest_path.is_file() {
-        let manifest = encode_manifest(&SnapshotManifest::default())
-            .map_err(|source| InitError::RenderSnapshotManifest { path: manifest_path.clone(), source })?;
+        let manifest = encode_manifest(&WorkspaceManifest::default())
+            .map_err(|source| InitError::RenderWorkspaceManifest { path: manifest_path.clone(), source })?;
         create_file(&manifest_path, manifest.as_bytes())
-            .map_err(|source| InitError::WriteSnapshotManifest { path: manifest_path, source })?;
+            .map_err(|source| InitError::WriteWorkspaceManifest { path: manifest_path, source })?;
     }
     Ok(())
 }

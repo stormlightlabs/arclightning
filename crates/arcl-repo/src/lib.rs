@@ -1,4 +1,4 @@
-//! Repository files, snapshot interchange, and optional Git inspection.
+//! Repository files, workspace interchange, and optional Git inspection.
 
-pub mod snapshot;
 pub mod vcs;
+pub mod workspace;

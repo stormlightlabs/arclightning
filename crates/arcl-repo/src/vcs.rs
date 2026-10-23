@@ -11,7 +11,7 @@ pub trait Vcs {
     fn path_state(&self, path: &Path) -> Result<PathState, VcsError>;
 }
 
-/// The state of a worktree path relevant to snapshot synchronization.
+/// The state of a worktree path relevant to workspace synchronization.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PathState {
     Tracked,

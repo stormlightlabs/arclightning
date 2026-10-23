@@ -184,7 +184,7 @@ Acceptance criteria:
 
 - [x] Define and document a new manifest version and record encoding for
       captures, specs, plans, tasks, and notes
-- [x] Use the connected planning model as snapshot format version 1
+- [x] Use the connected planning model as workspace format version 1
 - [x] Render one deterministic file per record and preserve Markdown bodies
       through parse-render-parse round trips
 - [x] Validate the complete candidate graph before mutating the database
@@ -192,9 +192,9 @@ Acceptance criteria:
 
 Verification:
 
-- [x] `cargo test --workspace --all-features snapshot::codec`
-- [x] `cargo test --workspace --all-features snapshot::import`
-- [x] `cargo test --workspace --all-features snapshot::export`
+- [x] `cargo test --workspace --all-features workspace::codec`
+- [x] `cargo test --workspace --all-features workspace::import`
+- [x] `cargo test --workspace --all-features workspace::export`
 
 ## T09: Finish automatic reconciliation and conflict recovery
 
@@ -218,8 +218,8 @@ Acceptance criteria:
 
 Verification:
 
-- `cargo test --workspace --all-features snapshot::sync`
-- `cargo test --workspace --all-features snapshot::reconcile`
+- `cargo test --workspace --all-features workspace::sync`
+- `cargo test --workspace --all-features workspace::reconcile`
 - Exercise external edits, a branch switch, an unresolved merge, dual-side
   divergence, and interrupted export in disposable projects
 

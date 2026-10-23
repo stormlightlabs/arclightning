@@ -8,78 +8,80 @@ use std::{
 use thiserror::Error;
 
 use arcl_core::domain::*;
-use arcl_store::{ConnectedGraph, Database, SnapshotBaseFile, StorageError};
+use arcl_store::{ConnectedGraph, Database, StorageError, WorkspaceBaseFile};
 
 use super::{
-    CaptureRecord, NoteRecord, PhaseRecord, PlanRecord, ReleaseRecord, SnapshotError, SnapshotFile, SnapshotRecord,
-    SnapshotReference, SpecRecord, TaskRecord, decode_manifest, decode_record,
+    CaptureRecord, NoteRecord, PhaseRecord, PlanRecord, ReleaseRecord, SpecRecord, TaskRecord, WorkspaceError,
+    WorkspaceFile, WorkspaceRecord, WorkspaceReference, decode_manifest, decode_record,
 };
 use super::{export::export_observed, export::project_graph};
 
 const DEFAULT_PROJECT_ID: &str = "arcl-pj-00000000000000000000000000";
 const RECORD_DIRECTORIES: &[&str] = &["captures", "releases", "specs", "plans", "phases", "tasks", "notes"];
 
-/// A validation or I/O failure raised while importing a complete snapshot.
+/// A validation or I/O failure raised while importing a complete workspace.
 #[derive(Debug, Error)]
-pub enum SnapshotImportError {
+pub enum WorkspaceImportError {
     /// The workspace root or one of its record directories could not be read.
-    #[error("could not read snapshot directory `{path}`: {source}")]
+    #[error("could not read workspace directory `{path}`: {source}")]
     ReadDirectory { path: PathBuf, source: io::Error },
     /// A directory entry could not be inspected.
-    #[error("could not inspect snapshot entry `{path}`: {source}")]
+    #[error("could not inspect workspace entry `{path}`: {source}")]
     InspectEntry { path: PathBuf, source: io::Error },
     /// The required manifest was not present.
-    #[error("snapshot manifest `{path}` is missing")]
+    #[error("workspace manifest `{path}` is missing")]
     MissingManifest { path: PathBuf },
     /// A file or directory is outside the workspace layout.
-    #[error("snapshot entry `{path}` is not allowed in the snapshot layout")]
+    #[error("workspace entry `{path}` is not allowed in the workspace layout")]
     UnknownEntry { path: PathBuf },
     /// A known workspace path has the wrong file type.
-    #[error("snapshot entry `{path}` has the wrong type")]
+    #[error("workspace entry `{path}` has the wrong type")]
     WrongEntryType { path: PathBuf },
-    /// A snapshot file contains bytes that are not UTF-8.
-    #[error("snapshot file `{path}` is not valid UTF-8")]
+    /// A workspace file contains bytes that are not UTF-8.
+    #[error("workspace file `{path}` is not valid UTF-8")]
     NonUtf8 { path: PathBuf },
     /// The manifest could not be decoded or validated.
-    #[error("snapshot file `{path}`: field `format-version`: {source}")]
-    Manifest { path: PathBuf, source: SnapshotError },
-    /// A record could not be decoded or validated by the snapshot codec.
-    #[error("snapshot file `{path}`: field `front matter`: {source}")]
-    Record { path: PathBuf, source: SnapshotError },
+    #[error("workspace file `{path}`: field `format-version`: {source}")]
+    Manifest { path: PathBuf, source: WorkspaceError },
+    /// A record could not be decoded or validated by the workspace codec.
+    #[error("workspace file `{path}`: field `front matter`: {source}")]
+    Record { path: PathBuf, source: WorkspaceError },
     /// A scalar field violates a complete-graph invariant.
-    #[error("snapshot file `{path}`: field `{field}`: {message}")]
+    #[error("workspace file `{path}`: field `{field}`: {message}")]
     Field {
         path: PathBuf,
         field: String,
         message: String,
     },
     /// A relationship violates a complete-graph invariant.
-    #[error("snapshot file `{path}`: relationship `{relationship}`: {message}")]
+    #[error("workspace file `{path}`: relationship `{relationship}`: {message}")]
     Relationship {
         path: PathBuf,
         relationship: String,
         message: String,
     },
     /// A record ID represented in the stored base was removed or renamed.
-    #[error("snapshot file `{path}`: record ID `{id}` was removed or renamed; snapshots do not support hard deletion")]
+    #[error(
+        "workspace file `{path}`: record ID `{id}` was removed or renamed; the workspace does not support hard deletion"
+    )]
     ExistingRecordRemoved { path: PathBuf, id: String },
     /// Both the database projection and workspace changed since the last base.
-    #[error("snapshot file `{path}` has divergent database and workspace changes")]
+    #[error("workspace file `{path}` has divergent database and workspace changes")]
     Conflict { path: PathBuf },
     /// A filesystem export used to canonicalize the candidate failed.
     #[error(transparent)]
-    Export(#[from] super::SnapshotExportError),
+    Export(#[from] super::WorkspaceExportError),
     /// The complete replacement could not be committed to SQLite.
     #[error(transparent)]
     Storage(#[from] StorageError),
 }
 
-impl SnapshotImportError {
+impl WorkspaceImportError {
     /// Return the CLI exit category for this import failure.
     pub const fn exit_code(&self) -> u8 {
         match self {
             Self::Storage(_) | Self::ReadDirectory { .. } | Self::InspectEntry { .. } => 1,
-            Self::Export(super::SnapshotExportError::Conflict { .. }) => 4,
+            Self::Export(super::WorkspaceExportError::Conflict { .. }) => 4,
             Self::Export(_) => 1,
             Self::MissingManifest { .. }
             | Self::UnknownEntry { .. }
@@ -95,15 +97,15 @@ impl SnapshotImportError {
     }
 }
 
-struct CandidateSnapshot {
-    records: BTreeMap<PathBuf, SnapshotRecord>,
-    files: Vec<SnapshotFile>,
+struct CandidateWorkspace {
+    records: BTreeMap<PathBuf, WorkspaceRecord>,
+    files: Vec<WorkspaceFile>,
 }
 
 struct PreparedImport {
     graph: ConnectedGraph,
-    files: Vec<SnapshotFile>,
-    observed: Vec<SnapshotFile>,
+    files: Vec<WorkspaceFile>,
+    observed: Vec<WorkspaceFile>,
 }
 
 #[derive(Clone, Copy)]
@@ -124,7 +126,7 @@ struct RecordIndex {
 }
 
 impl RecordIndex {
-    fn from_records(records: &BTreeMap<PathBuf, SnapshotRecord>, project_id: ProjectId) -> Self {
+    fn from_records(records: &BTreeMap<PathBuf, WorkspaceRecord>, project_id: ProjectId) -> Self {
         let mut index = Self {
             captures: HashMap::new(),
             specs: HashMap::new(),
@@ -136,37 +138,37 @@ impl RecordIndex {
         };
         for (path, record) in records {
             match record {
-                SnapshotRecord::Capture(record) => {
+                WorkspaceRecord::Capture(record) => {
                     index
                         .captures
                         .insert(record.id, (capture_from_record(record, project_id), path.clone()));
                 }
-                SnapshotRecord::Spec(record) => {
+                WorkspaceRecord::Spec(record) => {
                     index
                         .specs
                         .insert(record.id, (spec_from_record(record, project_id), path.clone()));
                 }
-                SnapshotRecord::Plan(record) => {
+                WorkspaceRecord::Plan(record) => {
                     index
                         .plans
                         .insert(record.id, (plan_from_record(record, project_id), path.clone()));
                 }
-                SnapshotRecord::Phase(record) => {
+                WorkspaceRecord::Phase(record) => {
                     index
                         .phases
                         .insert(record.id, (phase_from_record(record, project_id), path.clone()));
                 }
-                SnapshotRecord::Task(record) => {
+                WorkspaceRecord::Task(record) => {
                     index
                         .tasks
                         .insert(record.id, (task_from_record(record, project_id), path.clone()));
                 }
-                SnapshotRecord::Note(record) => {
+                WorkspaceRecord::Note(record) => {
                     index
                         .notes
                         .insert(record.id, (note_from_record(record, project_id), path.clone()));
                 }
-                SnapshotRecord::Release(record) => {
+                WorkspaceRecord::Release(record) => {
                     index
                         .releases
                         .insert(record.id, (release_from_record(record), path.clone()));
@@ -253,7 +255,7 @@ impl RecordIndex {
         Ok(result)
     }
 
-    fn link_target(&self, path: &Path, reference: &SnapshotReference) -> Result<LinkedRecordKind> {
+    fn link_target(&self, path: &Path, reference: &WorkspaceReference) -> Result<LinkedRecordKind> {
         macro_rules! target {
             ($kind:expr, $id:ty, $records:expr) => {{
                 let id = parse_reference_id(path, "links", &reference.id, <$id>::parse)?;
@@ -286,13 +288,13 @@ impl RecordIndex {
     }
 }
 
-type Result<T> = std::result::Result<T, SnapshotImportError>;
+type Result<T> = std::result::Result<T, WorkspaceImportError>;
 
 /// Parse, validate, replace, and canonicalize a workspace using an open database.
 ///
 /// Files are parsed and the complete candidate graph is validated before the
 /// database replacement transaction starts.
-pub fn import_graph(root: &Path, worktree_root: &Path, database: &mut Database) -> Result<Vec<SnapshotFile>> {
+pub fn import_graph(root: &Path, worktree_root: &Path, database: &mut Database) -> Result<Vec<WorkspaceFile>> {
     let project = database.project()?;
     let prepared = prepare_import(root, worktree_root, project)?;
     apply_prepared(root, prepared, database)
@@ -302,12 +304,12 @@ pub fn import_graph(root: &Path, worktree_root: &Path, database: &mut Database) 
 ///
 /// This entry point supports cloning a project with no local SQLite file. The
 /// initial project ID is the same deterministic ID used by `arcl init`.
-pub fn import_snapshot(root: &Path, worktree_root: &Path, database_path: &Path) -> Result<Vec<SnapshotFile>> {
+pub fn import_workspace(root: &Path, worktree_root: &Path, database_path: &Path) -> Result<Vec<WorkspaceFile>> {
     let project = Project::from_parts(
         ProjectId::parse(DEFAULT_PROJECT_ID).expect("default project ID is canonical"),
         "Project".to_owned(),
     )
-    .map_err(|error| SnapshotImportError::Field {
+    .map_err(|error| WorkspaceImportError::Field {
         path: PathBuf::from("manifest.toml"),
         field: "project".to_owned(),
         message: error.to_string(),
@@ -320,7 +322,7 @@ pub fn import_snapshot(root: &Path, worktree_root: &Path, database_path: &Path) 
 fn prepare_import(root: &Path, worktree_root: &Path, project: Project) -> Result<PreparedImport> {
     let candidate = read_candidate(root)?;
     let graph = validate_candidate(candidate.records, project, worktree_root)?;
-    let files = project_graph(&graph).map_err(|source| SnapshotImportError::Field {
+    let files = project_graph(&graph).map_err(|source| WorkspaceImportError::Field {
         path: PathBuf::from("manifest.toml"),
         field: "canonical rendering".to_owned(),
         message: source.to_string(),
@@ -328,15 +330,15 @@ fn prepare_import(root: &Path, worktree_root: &Path, project: Project) -> Result
     Ok(PreparedImport { graph, files, observed: candidate.files })
 }
 
-fn apply_prepared(root: &Path, prepared: PreparedImport, database: &mut Database) -> Result<Vec<SnapshotFile>> {
-    let base = database.snapshot_base()?;
+fn apply_prepared(root: &Path, prepared: PreparedImport, database: &mut Database) -> Result<Vec<WorkspaceFile>> {
+    let base = database.workspace_base()?;
     reject_removed_base_records(&base, &prepared.files)?;
-    let current_files = project_graph(&database.connected_graph()?).map_err(|source| SnapshotImportError::Field {
+    let current_files = project_graph(&database.connected_graph()?).map_err(|source| WorkspaceImportError::Field {
         path: PathBuf::from("manifest.toml"),
         field: "current database projection".to_owned(),
         message: source.to_string(),
     })?;
-    reject_removed_snapshot_records(&current_files, &prepared.files)?;
+    reject_removed_workspace_records(&current_files, &prepared.files)?;
     reject_divergent_changes(&base, &current_files, &prepared.files)?;
 
     // Re-check exact bytes before filesystem canonicalization and before the
@@ -345,38 +347,38 @@ fn apply_prepared(root: &Path, prepared: PreparedImport, database: &mut Database
     let base = prepared
         .files
         .iter()
-        .map(|file| SnapshotBaseFile { path: file.path.to_string_lossy().into_owned(), content: file.content.clone() })
+        .map(|file| WorkspaceBaseFile { path: file.path.to_string_lossy().into_owned(), content: file.content.clone() })
         .collect::<Vec<_>>();
-    database.replace_graph_and_snapshot_base(&prepared.graph, &base)?;
+    database.replace_graph_and_workspace_base(&prepared.graph, &base)?;
     Ok(prepared.files)
 }
 
-fn read_candidate(root: &Path) -> Result<CandidateSnapshot> {
+fn read_candidate(root: &Path) -> Result<CandidateWorkspace> {
     let entries = read_entries(root)?;
     let Some(manifest_entry) = entries
         .iter()
         .find(|entry| entry.file_name() == OsStr::new("manifest.toml"))
     else {
-        return Err(SnapshotImportError::MissingManifest { path: root.join("manifest.toml") });
+        return Err(WorkspaceImportError::MissingManifest { path: root.join("manifest.toml") });
     };
     let manifest_path = root.join(manifest_entry.file_name());
     let manifest_type = manifest_entry
         .file_type()
-        .map_err(|source| SnapshotImportError::InspectEntry { path: manifest_path.clone(), source })?;
+        .map_err(|source| WorkspaceImportError::InspectEntry { path: manifest_path.clone(), source })?;
     if !manifest_type.is_file() {
-        return Err(SnapshotImportError::WrongEntryType { path: PathBuf::from("manifest.toml") });
+        return Err(WorkspaceImportError::WrongEntryType { path: PathBuf::from("manifest.toml") });
     }
     let manifest_input = read_utf8_file(&manifest_path, Path::new("manifest.toml"))?;
     decode_manifest(&manifest_input)
-        .map_err(|source| SnapshotImportError::Manifest { path: PathBuf::from("manifest.toml"), source })?;
+        .map_err(|source| WorkspaceImportError::Manifest { path: PathBuf::from("manifest.toml"), source })?;
     read_candidate_records(root, entries, manifest_input)
 }
 
 fn read_candidate_records(
     root: &Path, entries: Vec<fs::DirEntry>, manifest_input: String,
-) -> Result<CandidateSnapshot> {
+) -> Result<CandidateWorkspace> {
     let mut records = BTreeMap::new();
-    let mut files = vec![SnapshotFile { path: PathBuf::from("manifest.toml"), content: manifest_input.into_bytes() }];
+    let mut files = vec![WorkspaceFile { path: PathBuf::from("manifest.toml"), content: manifest_input.into_bytes() }];
     for entry in entries {
         let name = entry.file_name();
         if name == OsStr::new("manifest.toml") {
@@ -386,24 +388,24 @@ fn read_candidate_records(
         let path = root.join(&name);
         let file_type = entry
             .file_type()
-            .map_err(|source| SnapshotImportError::InspectEntry { path: path.clone(), source })?;
+            .map_err(|source| WorkspaceImportError::InspectEntry { path: path.clone(), source })?;
         let Some(directory) = name.to_str() else {
-            return Err(SnapshotImportError::UnknownEntry { path: relative });
+            return Err(WorkspaceImportError::UnknownEntry { path: relative });
         };
         if !RECORD_DIRECTORIES.contains(&directory) {
-            return Err(SnapshotImportError::UnknownEntry { path: relative });
+            return Err(WorkspaceImportError::UnknownEntry { path: relative });
         }
         if !file_type.is_dir() {
-            return Err(SnapshotImportError::WrongEntryType { path: relative });
+            return Err(WorkspaceImportError::WrongEntryType { path: relative });
         }
         read_record_directory(root, directory, &mut records, &mut files)?;
     }
     files.sort_by(|left, right| left.path.cmp(&right.path));
-    Ok(CandidateSnapshot { records, files })
+    Ok(CandidateWorkspace { records, files })
 }
 
 fn read_record_directory(
-    root: &Path, directory: &str, records: &mut BTreeMap<PathBuf, SnapshotRecord>, files: &mut Vec<SnapshotFile>,
+    root: &Path, directory: &str, records: &mut BTreeMap<PathBuf, WorkspaceRecord>, files: &mut Vec<WorkspaceFile>,
 ) -> Result<()> {
     for entry in read_entries(&root.join(directory))? {
         let name = entry.file_name();
@@ -411,29 +413,29 @@ fn read_record_directory(
         let path = root.join(&relative);
         let file_type = entry
             .file_type()
-            .map_err(|source| SnapshotImportError::InspectEntry { path: path.clone(), source })?;
+            .map_err(|source| WorkspaceImportError::InspectEntry { path: path.clone(), source })?;
         if !file_type.is_file() {
-            return Err(SnapshotImportError::UnknownEntry { path: relative });
+            return Err(WorkspaceImportError::UnknownEntry { path: relative });
         }
         let Some(filename) = name.to_str() else {
-            return Err(SnapshotImportError::UnknownEntry { path: relative });
+            return Err(WorkspaceImportError::UnknownEntry { path: relative });
         };
         if !filename.ends_with(".md") {
-            return Err(SnapshotImportError::UnknownEntry { path: relative });
+            return Err(WorkspaceImportError::UnknownEntry { path: relative });
         }
         let input = read_utf8_file(&path, &relative)?;
         let record = decode_record(&relative, &input)
-            .map_err(|source| SnapshotImportError::Record { path: relative.clone(), source })?;
-        files.push(SnapshotFile { path: relative.clone(), content: input.into_bytes() });
+            .map_err(|source| WorkspaceImportError::Record { path: relative.clone(), source })?;
+        files.push(WorkspaceFile { path: relative.clone(), content: input.into_bytes() });
         if records.insert(relative.clone(), record).is_some() {
-            return Err(SnapshotImportError::UnknownEntry { path: relative });
+            return Err(WorkspaceImportError::UnknownEntry { path: relative });
         }
     }
     Ok(())
 }
 
 fn validate_candidate(
-    records: BTreeMap<PathBuf, SnapshotRecord>, project: Project, _worktree_root: &Path,
+    records: BTreeMap<PathBuf, WorkspaceRecord>, project: Project, _worktree_root: &Path,
 ) -> Result<ConnectedGraph> {
     let mut ids = HashMap::<String, PathBuf>::new();
     for (path, record) in &records {
@@ -491,11 +493,11 @@ fn values<T: Clone>(records: &HashMap<impl std::hash::Hash + Eq, (T, PathBuf)>) 
 }
 
 fn validate_captures(
-    records: &BTreeMap<PathBuf, SnapshotRecord>, index: &RecordIndex,
+    records: &BTreeMap<PathBuf, WorkspaceRecord>, index: &RecordIndex,
 ) -> Result<Vec<CapturePromotion>> {
     let mut promotions = Vec::new();
     for (path, record) in records {
-        let SnapshotRecord::Capture(record) = record else { continue };
+        let WorkspaceRecord::Capture(record) = record else { continue };
         match (&record.status, &record.promoted_to) {
             (CaptureStatus::Promoted, Some(reference)) => {
                 let target = match reference.kind.as_str() {
@@ -567,10 +569,10 @@ fn validate_captures(
 }
 
 fn validate_specs(
-    records: &BTreeMap<PathBuf, SnapshotRecord>, index: &RecordIndex, promotions: &[CapturePromotion],
+    records: &BTreeMap<PathBuf, WorkspaceRecord>, index: &RecordIndex, promotions: &[CapturePromotion],
 ) -> Result<()> {
     for (path, record) in records {
-        let SnapshotRecord::Spec(record) = record else { continue };
+        let WorkspaceRecord::Spec(record) = record else { continue };
         let Some(capture_id) = record.source_capture_id else { continue };
         if !index.captures.contains_key(&capture_id) {
             return Err(relationship_error(
@@ -591,9 +593,9 @@ fn validate_specs(
     Ok(())
 }
 
-fn validate_plans(records: &BTreeMap<PathBuf, SnapshotRecord>, index: &RecordIndex) -> Result<()> {
+fn validate_plans(records: &BTreeMap<PathBuf, WorkspaceRecord>, index: &RecordIndex) -> Result<()> {
     for (path, record) in records {
-        if let SnapshotRecord::Plan(record) = record
+        if let WorkspaceRecord::Plan(record) = record
             && !index.specs.contains_key(&record.spec_id)
         {
             return Err(relationship_error(
@@ -606,9 +608,9 @@ fn validate_plans(records: &BTreeMap<PathBuf, SnapshotRecord>, index: &RecordInd
     Ok(())
 }
 
-fn validate_phases(records: &BTreeMap<PathBuf, SnapshotRecord>, index: &RecordIndex) -> Result<()> {
+fn validate_phases(records: &BTreeMap<PathBuf, WorkspaceRecord>, index: &RecordIndex) -> Result<()> {
     for (path, record) in records {
-        if let SnapshotRecord::Phase(record) = record
+        if let WorkspaceRecord::Phase(record) = record
             && !index.plans.contains_key(&record.plan_id)
         {
             return Err(relationship_error(
@@ -621,10 +623,10 @@ fn validate_phases(records: &BTreeMap<PathBuf, SnapshotRecord>, index: &RecordIn
     Ok(())
 }
 
-fn validate_tasks(records: &BTreeMap<PathBuf, SnapshotRecord>, index: &RecordIndex) -> Result<Vec<TaskDependency>> {
+fn validate_tasks(records: &BTreeMap<PathBuf, WorkspaceRecord>, index: &RecordIndex) -> Result<Vec<TaskDependency>> {
     let mut dependencies = Vec::new();
     for (path, record) in records {
-        let SnapshotRecord::Task(record) = record else { continue };
+        let WorkspaceRecord::Task(record) = record else { continue };
         if record.spec_id.is_some_and(|id| !index.specs.contains_key(&id)) {
             return Err(relationship_error(
                 path.clone(),
@@ -689,11 +691,11 @@ fn validate_tasks(records: &BTreeMap<PathBuf, SnapshotRecord>, index: &RecordInd
 }
 
 fn validate_releases(
-    records: &BTreeMap<PathBuf, SnapshotRecord>, index: &RecordIndex, project_id: ProjectId,
+    records: &BTreeMap<PathBuf, WorkspaceRecord>, index: &RecordIndex, project_id: ProjectId,
 ) -> Result<Vec<ReleaseMembership>> {
     let mut memberships = Vec::new();
     for (path, record) in records {
-        let SnapshotRecord::Release(record) = record else { continue };
+        let WorkspaceRecord::Release(record) = record else { continue };
         let mut seen = HashSet::new();
         for member in &record.members {
             let kind = match member.kind.as_str() {
@@ -768,23 +770,23 @@ fn validate_releases(
 }
 
 fn validate_links(
-    records: &BTreeMap<PathBuf, SnapshotRecord>, index: &RecordIndex, project_id: ProjectId,
+    records: &BTreeMap<PathBuf, WorkspaceRecord>, index: &RecordIndex, project_id: ProjectId,
 ) -> Result<Vec<RecordLink>> {
     let mut links = Vec::new();
     let mut seen = HashSet::new();
     for (path, record) in records {
         let (source_kind, source_id, references) = match record {
-            SnapshotRecord::Capture(record) => (
+            WorkspaceRecord::Capture(record) => (
                 LinkedRecordKind::Capture,
                 record.id.to_string(),
                 record.links.as_slice(),
             ),
-            SnapshotRecord::Spec(record) => (LinkedRecordKind::Spec, record.id.to_string(), record.links.as_slice()),
-            SnapshotRecord::Plan(record) => (LinkedRecordKind::Plan, record.id.to_string(), record.links.as_slice()),
-            SnapshotRecord::Phase(record) => (LinkedRecordKind::Phase, record.id.to_string(), record.links.as_slice()),
-            SnapshotRecord::Task(record) => (LinkedRecordKind::Task, record.id.to_string(), record.links.as_slice()),
-            SnapshotRecord::Note(record) => (LinkedRecordKind::Note, record.id.to_string(), record.links.as_slice()),
-            SnapshotRecord::Release(record) => (
+            WorkspaceRecord::Spec(record) => (LinkedRecordKind::Spec, record.id.to_string(), record.links.as_slice()),
+            WorkspaceRecord::Plan(record) => (LinkedRecordKind::Plan, record.id.to_string(), record.links.as_slice()),
+            WorkspaceRecord::Phase(record) => (LinkedRecordKind::Phase, record.id.to_string(), record.links.as_slice()),
+            WorkspaceRecord::Task(record) => (LinkedRecordKind::Task, record.id.to_string(), record.links.as_slice()),
+            WorkspaceRecord::Note(record) => (LinkedRecordKind::Note, record.id.to_string(), record.links.as_slice()),
+            WorkspaceRecord::Release(record) => (
                 LinkedRecordKind::Release,
                 record.id.to_string(),
                 record.links.as_slice(),
@@ -930,53 +932,53 @@ fn parse_reference_id<T>(
 ) -> Result<T> {
     parse(value).map_err(|error| relationship_error(path.to_owned(), relationship, error.to_string()))
 }
-fn field_error(path: PathBuf, field: impl Into<String>, message: impl Into<String>) -> SnapshotImportError {
-    SnapshotImportError::Field { path, field: field.into(), message: message.into() }
+fn field_error(path: PathBuf, field: impl Into<String>, message: impl Into<String>) -> WorkspaceImportError {
+    WorkspaceImportError::Field { path, field: field.into(), message: message.into() }
 }
 fn relationship_error(
     path: PathBuf, relationship: impl Into<String>, message: impl Into<String>,
-) -> SnapshotImportError {
-    SnapshotImportError::Relationship { path, relationship: relationship.into(), message: message.into() }
+) -> WorkspaceImportError {
+    WorkspaceImportError::Relationship { path, relationship: relationship.into(), message: message.into() }
 }
 fn read_entries(path: &Path) -> Result<Vec<fs::DirEntry>> {
     let entries =
-        fs::read_dir(path).map_err(|source| SnapshotImportError::ReadDirectory { path: path.to_owned(), source })?;
+        fs::read_dir(path).map_err(|source| WorkspaceImportError::ReadDirectory { path: path.to_owned(), source })?;
     let mut entries = entries
         .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|source| SnapshotImportError::ReadDirectory { path: path.to_owned(), source })?;
+        .map_err(|source| WorkspaceImportError::ReadDirectory { path: path.to_owned(), source })?;
     entries.sort_by_key(|entry| entry.file_name().to_string_lossy().into_owned());
     Ok(entries)
 }
 fn read_utf8_file(path: &Path, relative: &Path) -> Result<String> {
     let bytes =
-        fs::read(path).map_err(|source| SnapshotImportError::ReadDirectory { path: path.to_owned(), source })?;
-    String::from_utf8(bytes).map_err(|_| SnapshotImportError::NonUtf8 { path: relative.to_owned() })
+        fs::read(path).map_err(|source| WorkspaceImportError::ReadDirectory { path: path.to_owned(), source })?;
+    String::from_utf8(bytes).map_err(|_| WorkspaceImportError::NonUtf8 { path: relative.to_owned() })
 }
-fn reject_removed_base_records(base: &[SnapshotBaseFile], files: &[SnapshotFile]) -> Result<()> {
+fn reject_removed_base_records(base: &[WorkspaceBaseFile], files: &[WorkspaceFile]) -> Result<()> {
     let current_paths = files.iter().map(|file| file.path.clone()).collect::<HashSet<_>>();
     for base_file in base {
         let path = PathBuf::from(&base_file.path);
         if let Some(id) = record_id_from_path(&path)
             && !current_paths.contains(&path)
         {
-            return Err(SnapshotImportError::ExistingRecordRemoved { path, id });
+            return Err(WorkspaceImportError::ExistingRecordRemoved { path, id });
         }
     }
     Ok(())
 }
-fn reject_removed_snapshot_records(existing: &[SnapshotFile], candidate: &[SnapshotFile]) -> Result<()> {
+fn reject_removed_workspace_records(existing: &[WorkspaceFile], candidate: &[WorkspaceFile]) -> Result<()> {
     let candidate_paths = candidate.iter().map(|file| &file.path).collect::<HashSet<_>>();
     for file in existing {
         if let Some(id) = record_id_from_path(&file.path)
             && !candidate_paths.contains(&file.path)
         {
-            return Err(SnapshotImportError::ExistingRecordRemoved { path: file.path.clone(), id });
+            return Err(WorkspaceImportError::ExistingRecordRemoved { path: file.path.clone(), id });
         }
     }
     Ok(())
 }
 fn reject_divergent_changes(
-    base: &[SnapshotBaseFile], current: &[SnapshotFile], candidate: &[SnapshotFile],
+    base: &[WorkspaceBaseFile], current: &[WorkspaceFile], candidate: &[WorkspaceFile],
 ) -> Result<()> {
     let base = base
         .iter()
@@ -995,7 +997,7 @@ fn reject_divergent_changes(
         let database_changed = current.get(&file.path).is_none_or(|content| *content != *base_content);
         let workspace_changed = file.content.as_slice() != *base_content;
         if database_changed && workspace_changed && current.get(&file.path) != Some(&file.content.as_slice()) {
-            return Err(SnapshotImportError::Conflict { path: file.path.clone() });
+            return Err(WorkspaceImportError::Conflict { path: file.path.clone() });
         }
     }
     Ok(())
@@ -1022,7 +1024,7 @@ fn record_id_from_path(path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::snapshot::export::export_graph;
+    use crate::workspace::export::export_graph;
     use arcl_core::domain::TaskPriority;
     use arcl_store::PlanningTaskCreate;
 
@@ -1059,7 +1061,7 @@ mod tests {
         assert_eq!(graph.plans[0].body, "Plan body");
         assert_eq!(graph.tasks[0].body, "Task body");
         assert_eq!(graph.tasks[0].id, task.id);
-        assert_eq!(destination.snapshot_base().expect("base loads").len(), 4);
+        assert_eq!(destination.workspace_base().expect("base loads").len(), 4);
     }
 
     #[test]

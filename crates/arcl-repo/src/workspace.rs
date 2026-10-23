@@ -11,53 +11,53 @@ pub mod export;
 pub mod import;
 
 pub use codec::*;
-pub use export::{SnapshotExportError, SnapshotFile, export_graph, export_graph_with_base, project_graph};
-pub use import::{SnapshotImportError, import_graph, import_snapshot};
+pub use export::{WorkspaceExportError, WorkspaceFile, export_graph, export_graph_with_base, project_graph};
+pub use import::{WorkspaceImportError, import_graph, import_workspace};
 
 pub const CONFIG_FORMAT_VERSION: u32 = 1;
-/// The version of the on-disk snapshot format implemented by this crate.
-pub const SNAPSHOT_FORMAT_VERSION: u32 = 1;
+/// The version of the on-disk workspace format implemented by this crate.
+pub const WORKSPACE_FORMAT_VERSION: u32 = 1;
 
-/// Snapshot and configuration validation failures.
+/// Workspace and configuration validation failures.
 #[derive(Debug, Error)]
-pub enum SnapshotError {
+pub enum WorkspaceError {
     #[error("configuration TOML is invalid: {0}")]
     Parse(#[from] toml::de::Error),
     #[error("TOML could not be rendered: {0}")]
     Render(#[from] toml::ser::Error),
     #[error("unsupported configuration format version {found}; expected {expected}")]
     UnsupportedVersion { found: u32, expected: u32 },
-    #[error("snapshot path `{path}` must be a non-empty worktree-relative path")]
+    #[error("workspace path `{path}` must be a non-empty worktree-relative path")]
     InvalidPath { path: PathBuf },
-    #[error("snapshot path component `{path}` must not be a symbolic link")]
+    #[error("workspace path component `{path}` must not be a symbolic link")]
     SymlinkPath { path: PathBuf },
-    #[error("snapshot path component `{path}` could not be inspected: {source}")]
+    #[error("workspace path component `{path}` could not be inspected: {source}")]
     InspectPath { path: PathBuf, source: io::Error },
-    #[error("snapshot manifest TOML is invalid: {0}")]
+    #[error("workspace manifest TOML is invalid: {0}")]
     ManifestParse(#[source] toml::de::Error),
-    #[error("snapshot front matter TOML is invalid: {0}")]
+    #[error("workspace front matter TOML is invalid: {0}")]
     FrontMatterParse(#[source] toml::de::Error),
-    #[error("snapshot record format is invalid: {0}")]
+    #[error("workspace record format is invalid: {0}")]
     InvalidRecordFormat(String),
-    #[error("snapshot record path `{path}` is invalid")]
+    #[error("workspace record path `{path}` is invalid")]
     InvalidRecordPath { path: PathBuf },
-    #[error("snapshot record ID `{id}` does not match filename `{filename}`")]
+    #[error("workspace record ID `{id}` does not match filename `{filename}`")]
     FilenameIdMismatch { id: String, filename: String },
-    #[error("snapshot record kind `{kind}` does not match path `{path}`")]
+    #[error("workspace record kind `{kind}` does not match path `{path}`")]
     KindPathMismatch { kind: String, path: PathBuf },
-    #[error("snapshot record title cannot be empty")]
+    #[error("workspace record title cannot be empty")]
     EmptyRecordTitle,
-    #[error("snapshot record spec path cannot be empty")]
+    #[error("workspace record spec path cannot be empty")]
     EmptyRecordSpecPath,
-    #[error("snapshot record position {position} is invalid; positions must be non-negative")]
+    #[error("workspace record position {position} is invalid; positions must be non-negative")]
     InvalidRecordPosition { position: i64 },
-    #[error("snapshot capture creation time cannot be empty")]
+    #[error("workspace capture creation time cannot be empty")]
     EmptyRecordCreatedAt,
-    #[error("snapshot record relationship is invalid: {0}")]
+    #[error("workspace record relationship is invalid: {0}")]
     InvalidRecordRelationship(String),
 }
 
-type Result<T> = std::result::Result<T, SnapshotError>;
+type Result<T> = std::result::Result<T, WorkspaceError>;
 
 /// Project configuration persisted in `.arcl/config.toml`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -65,12 +65,12 @@ type Result<T> = std::result::Result<T, SnapshotError>;
 pub struct ProjectConfig {
     #[serde(rename = "format-version")]
     pub format_version: u32,
-    pub snapshot: SnapshotConfig,
+    pub workspace: WorkspaceConfig,
 }
 
 impl Default for ProjectConfig {
     fn default() -> Self {
-        Self { format_version: CONFIG_FORMAT_VERSION, snapshot: SnapshotConfig::default() }
+        Self { format_version: CONFIG_FORMAT_VERSION, workspace: WorkspaceConfig::default() }
     }
 }
 
@@ -83,12 +83,12 @@ impl ProjectConfig {
 
     pub fn validate(&self) -> Result<()> {
         if self.format_version != CONFIG_FORMAT_VERSION {
-            return Err(SnapshotError::UnsupportedVersion {
+            return Err(WorkspaceError::UnsupportedVersion {
                 found: self.format_version,
                 expected: CONFIG_FORMAT_VERSION,
             });
         }
-        validate_relative_path(&self.snapshot.path)
+        validate_relative_path(&self.workspace.path)
     }
 
     /// Render the canonical configuration representation.
@@ -97,17 +97,17 @@ impl ProjectConfig {
     }
 }
 
-/// Snapshot settings in project configuration.
+/// Workspace settings in project configuration.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct SnapshotConfig {
+pub struct WorkspaceConfig {
     pub enabled: bool,
     pub path: PathBuf,
 }
 
-impl Default for SnapshotConfig {
+impl Default for WorkspaceConfig {
     fn default() -> Self {
-        Self { enabled: false, path: PathBuf::from(".arcl/snapshot") }
+        Self { enabled: false, path: PathBuf::from(".arcl/workspace") }
     }
 }
 
@@ -117,11 +117,11 @@ fn validate_relative_path(path: &Path) -> Result<()> {
         || path
             .components()
             .any(|component| matches!(component, Component::ParentDir));
-    if invalid { Err(SnapshotError::InvalidPath { path: path.to_owned() }) } else { Ok(()) }
+    if invalid { Err(WorkspaceError::InvalidPath { path: path.to_owned() }) } else { Ok(()) }
 }
 
-/// Resolve a configured snapshot path while rejecting symbolic-link components.
-pub fn resolve_snapshot_root(worktree_root: &Path, relative: &Path) -> Result<PathBuf> {
+/// Resolve a configured workspace path while rejecting symbolic-link components.
+pub fn resolve_workspace_root(worktree_root: &Path, relative: &Path) -> Result<PathBuf> {
     validate_relative_path(relative)?;
 
     let mut resolved = worktree_root.to_owned();
@@ -132,11 +132,11 @@ pub fn resolve_snapshot_root(worktree_root: &Path, relative: &Path) -> Result<Pa
         resolved.push(component);
         match fs::symlink_metadata(&resolved) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
-                return Err(SnapshotError::SymlinkPath { path: resolved });
+                return Err(WorkspaceError::SymlinkPath { path: resolved });
             }
             Ok(_) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(source) => return Err(SnapshotError::InspectPath { path: resolved, source }),
+            Err(source) => return Err(WorkspaceError::InspectPath { path: resolved, source }),
         }
     }
     Ok(resolved)
@@ -152,17 +152,17 @@ mod tests {
     }
 
     #[test]
-    fn config_rejects_absolute_snapshot_paths() {
-        let input = "format-version = 1\n[snapshot]\nenabled = true\npath = \"/tmp/snapshot\"\n";
+    fn config_rejects_absolute_workspace_paths() {
+        let input = "format-version = 1\n[workspace]\nenabled = true\npath = \"/tmp/workspace\"\n";
         assert!(matches!(
             ProjectConfig::parse(input),
-            Err(SnapshotError::InvalidPath { .. })
+            Err(WorkspaceError::InvalidPath { .. })
         ));
     }
 
     #[cfg(unix)]
     #[test]
-    fn snapshot_root_rejects_symlink_components() {
+    fn workspace_root_rejects_symlink_components() {
         use std::os::unix::fs::symlink;
 
         let worktree = tempfile::tempdir().unwrap();
@@ -170,8 +170,8 @@ mod tests {
         symlink(outside.path(), worktree.path().join("linked")).unwrap();
 
         assert!(matches!(
-            resolve_snapshot_root(worktree.path(), Path::new("linked/snapshot")),
-            Err(SnapshotError::SymlinkPath { .. })
+            resolve_workspace_root(worktree.path(), Path::new("linked/workspace")),
+            Err(WorkspaceError::SymlinkPath { .. })
         ));
     }
 }

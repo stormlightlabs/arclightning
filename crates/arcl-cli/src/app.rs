@@ -6,8 +6,8 @@ use anyhow::Context;
 use thiserror::Error;
 
 use arcl_core::domain::*;
-use arcl_repo::snapshot::*;
 use arcl_repo::vcs::{GixVcs, Vcs, VcsError};
+use arcl_repo::workspace::*;
 use arcl_store::{
     CaptureTaskPromotion, CaptureUpdate, ConnectedGraph, Database, NoteUpdate, PhaseUpdate, PlanUpdate,
     PlanningReadyFilter, PlanningTaskCreate, PlanningTaskUpdate, SpecUpdate, StorageError,
@@ -20,14 +20,14 @@ const CONFIG_FILE: &str = "config.toml";
 const DATABASE_FILE: &str = "arcl.db";
 const GITIGNORE_FILE: &str = ".gitignore";
 const REQUIRED_GITIGNORE_ENTRIES: &[&str] = &["/arcl.db", "/arcl.db-*", "/*.tmp", "/conflicts/"];
-const SNAPSHOT_DIRECTORIES: &[&str] = &["captures", "releases", "specs", "plans", "phases", "tasks", "notes"];
+const WORKSPACE_DIRECTORIES: &[&str] = &["captures", "releases", "specs", "plans", "phases", "tasks", "notes"];
 
 mod commands;
 mod error;
 mod init;
 mod query;
-mod snapshot;
 mod support;
+mod workspace;
 
 use commands::{
     CaptureResult, exec_capture, exec_dependency, exec_note, exec_plan, exec_release, exec_spec, exec_task,
@@ -36,8 +36,8 @@ pub use error::ApplicationError;
 use error::{CResult, CommandError};
 use init::initialize;
 use query::{connected_tree, list_connected, resolve_ready_filter, show_record};
-use snapshot::exec_snapshot;
 use support::{open_database, parse_task_id, write_output};
+use workspace::exec_workspace;
 
 /// Run one parsed CLI invocation at the application boundary.
 pub fn run(cli: Cli) -> anyhow::Result<()> {
@@ -53,10 +53,10 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
     let renderer = Renderer::new(mode, cli.color);
 
     match cli.command {
-        Some(Command::Init { snapshot }) => {
+        Some(Command::Init { workspace }) => {
             let start = std::env::current_dir().context("could not determine the current directory")?;
-            let initialization = initialize(&start, snapshot).map_err(ApplicationError::from_init)?;
-            write_output(renderer.render_init(&initialization.root, initialization.snapshot_enabled)?)
+            let initialization = initialize(&start, workspace).map_err(ApplicationError::from_init)?;
+            write_output(renderer.render_init(&initialization.root, initialization.workspace_enabled)?)
         }
         Some(Command::Capture { command }) => {
             let result = exec_capture(command).map_err(ApplicationError::from_command)?;
@@ -115,8 +115,8 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
                 Err(ApplicationError::from_command(CommandError::Integrity { message: details }).into())
             }
         }
-        Some(Command::Snapshot { command }) => {
-            exec_snapshot(command).map_err(ApplicationError::from_command)?;
+        Some(Command::Workspace { command }) => {
+            exec_workspace(command).map_err(ApplicationError::from_command)?;
             write_output(None)
         }
         Some(Command::Ready { filters }) => {
