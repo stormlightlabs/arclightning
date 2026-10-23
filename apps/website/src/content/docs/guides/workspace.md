@@ -163,8 +163,8 @@ arcl workspace resolve --keep database captures/<capture-id>.md
 `--keep database` writes the database's version over the file. Either way the
 other version is lost, so copy anything you still need first. Resolve then syncs
 every other change. It stops without writing if another file still diverges, if
-a named file has nothing to resolve, or if Git reports a workspace file as
-unmerged.
+a named file has nothing to resolve, if another record file was removed from
+either side, or if Git reports a workspace file as unmerged.
 
 A record file removed from the workspace can be resolved with
 `--keep database`, which writes it back. The workspace cannot win a removal,

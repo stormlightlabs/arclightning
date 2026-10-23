@@ -29,6 +29,10 @@ use super::{
 };
 use crate::vcs::Vcs;
 
+/// The workspace manifest. It has one legal value, which the database
+/// projection always writes, so the workspace's copy is never imported.
+const MANIFEST: &str = "manifest.toml";
+
 /// The side of a sync that made a change.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Side {
@@ -123,7 +127,9 @@ pub struct SyncOutcome {
     /// Paths changed only in the database, or resolved in its favour, and
     /// exported to the workspace.
     pub exported: Vec<PathBuf>,
-    /// Paths both sides changed the same way; only the base moved.
+    /// Paths both sides changed the same way; only the base moved. A changed
+    /// `manifest.toml` is listed here too, after its canonical form is
+    /// written back over the workspace copy.
     pub converged: Vec<PathBuf>,
 }
 
@@ -154,31 +160,42 @@ pub fn sync_workspace(
 /// Resolve `paths` by keeping one side's version, then sync everything else.
 ///
 /// Each path must be one the database and the workspace changed differently,
-/// or a record file removed from the workspace. Keeping the database writes
+/// or a record file removed from the workspace. `manifest.toml` is never
+/// resolvable, since sync always writes its one legal value. Keeping the database writes
 /// its version to the workspace; keeping the workspace imports the file. The
 /// workspace cannot win a removal, since records are never hard deleted.
 /// Other divergent paths still stop the sync, and nothing is written then.
 ///
-/// Paths are workspace-relative, as `arcl workspace status` prints them. A
-/// leading `./`, the workspace path relative to `worktree_root`, or an
-/// absolute path under `root` is accepted too; see [`workspace_relative`].
+/// A relative path is first read against `current_dir`, following symbolic
+/// links; workspace-relative paths, as `arcl workspace status` prints them,
+/// work from any directory. See [`workspace_relative`].
 pub fn resolve_workspace(
-    root: &Path, worktree_root: &Path, database: &mut Database, vcs: Option<&dyn Vcs>, paths: &[PathBuf], keep: Side,
+    root: &Path, worktree_root: &Path, current_dir: &Path, database: &mut Database, vcs: Option<&dyn Vcs>,
+    paths: &[PathBuf], keep: Side,
 ) -> Result<SyncOutcome> {
     let choices = paths
         .iter()
-        .map(|path| (workspace_relative(path, root, worktree_root), keep))
+        .map(|path| (workspace_relative(path, current_dir, root, worktree_root), keep))
         .collect();
     run_sync(root, worktree_root, database, vcs, &choices)
 }
 
 /// Return `path` relative to the workspace at `root`.
 ///
-/// Leading `./` components are dropped. An absolute path under `root` loses
-/// that prefix, and a relative path that starts with the workspace's path
-/// relative to `worktree_root` (such as `.arcl/workspace/captures/x.md`) loses
-/// that prefix. Any other path is returned without its leading `./`.
-pub fn workspace_relative(path: &Path, root: &Path, worktree_root: &Path) -> PathBuf {
+/// A relative `path` is joined onto `current_dir`. When that file, or its
+/// parent directory for a removed file, exists and lies inside `root` after
+/// following symbolic links and `..` segments, the result is its path under
+/// `root`.
+///
+/// Otherwise the path is read as named: leading `./` components are dropped,
+/// an absolute path under `root` loses that prefix, and a relative path that
+/// starts with the workspace's path relative to `worktree_root` (such as
+/// `.arcl/workspace/captures/x.md`) loses that prefix. Any other path is
+/// returned without its leading `./`, and matches no workspace file.
+pub fn workspace_relative(path: &Path, current_dir: &Path, root: &Path, worktree_root: &Path) -> PathBuf {
+    if let Some(relative) = relative_on_disk(&current_dir.join(path), root) {
+        return relative;
+    }
     if path.is_absolute() {
         return path.strip_prefix(root).unwrap_or(path).to_owned();
     }
@@ -190,6 +207,18 @@ pub fn workspace_relative(path: &Path, root: &Path, worktree_root: &Path) -> Pat
         Ok(prefix) if !prefix.as_os_str().is_empty() => path.strip_prefix(prefix).map(Path::to_owned).unwrap_or(path),
         _ => path,
     }
+}
+
+/// Return the path of `named` under `root` after following symbolic links,
+/// when `named` or its parent exists and lies inside `root`.
+fn relative_on_disk(named: &Path, root: &Path) -> Option<PathBuf> {
+    let root = root.canonicalize().ok()?;
+    let canonical = named.canonicalize().ok().or_else(|| {
+        let name = named.file_name()?;
+        Some(named.parent()?.canonicalize().ok()?.join(name))
+    })?;
+    let relative = canonical.strip_prefix(&root).ok()?;
+    (!relative.as_os_str().is_empty()).then(|| relative.to_owned())
 }
 
 fn run_sync(
@@ -204,20 +233,21 @@ fn run_sync(
     let comparison = compare(&base, &database_files, &candidate.files);
 
     for path in choices.keys() {
-        let resolvable = comparison.records.iter().any(|record| {
-            &record.path == path
-                && matches!(
-                    record.state,
-                    RecordState::Divergent { .. } | RecordState::WorkspaceChanged(Change::Removed)
-                )
-        });
+        let resolvable = path != Path::new(MANIFEST)
+            && comparison.records.iter().any(|record| {
+                &record.path == path
+                    && matches!(
+                        record.state,
+                        RecordState::Divergent { .. } | RecordState::WorkspaceChanged(Change::Removed)
+                    )
+            });
         if !resolvable {
             return Err(WorkspaceSyncError::NothingToResolve { path: path.clone() });
         }
     }
     let divergent = comparison
         .divergent()
-        .filter(|record| !choices.contains_key(&record.path))
+        .filter(|record| record.path != Path::new(MANIFEST) && !choices.contains_key(&record.path))
         .map(|record| record.path.clone())
         .collect::<Vec<_>>();
     if !divergent.is_empty() {
@@ -235,6 +265,14 @@ fn run_sync(
         .collect::<BTreeMap<_, _>>();
     let mut outcome = SyncOutcome::default();
     for record in comparison.records {
+        if record.path == Path::new(MANIFEST) {
+            // The workspace reader requires the manifest, so it is never
+            // removed there. Any other change gives way to the canonical copy.
+            if record.state != RecordState::Unchanged {
+                outcome.converged.push(record.path);
+            }
+            continue;
+        }
         if let Some(keep) = choices.get(&record.path) {
             match (keep, workspace.get(&record.path)) {
                 (Side::Database, _) => outcome.exported.push(record.path),
@@ -273,7 +311,7 @@ fn run_sync(
         None
     } else {
         let mut records = BTreeMap::new();
-        for (path, content) in merged.iter().filter(|(path, _)| *path != Path::new("manifest.toml")) {
+        for (path, content) in merged.iter().filter(|(path, _)| *path != Path::new(MANIFEST)) {
             // Both sides hold UTF-8: the projection renders it and the
             // workspace reader rejects anything else.
             let input = String::from_utf8_lossy(content);
@@ -386,9 +424,15 @@ mod tests {
         }
 
         fn resolve(&mut self, paths: &[PathBuf], keep: Side) -> Result<SyncOutcome> {
+            let root = self.root.path().to_owned();
+            self.resolve_from(&root, paths, keep)
+        }
+
+        fn resolve_from(&mut self, current_dir: &Path, paths: &[PathBuf], keep: Side) -> Result<SyncOutcome> {
             resolve_workspace(
                 self.root.path(),
                 self.root.path(),
+                current_dir,
                 &mut self.database,
                 None,
                 paths,
@@ -551,18 +595,111 @@ mod tests {
             "/project/.arcl/workspace/captures/x.md",
         ] {
             assert_eq!(
-                workspace_relative(Path::new(named), root, worktree),
+                workspace_relative(Path::new(named), worktree, root, worktree),
                 expected,
                 "{named}"
             );
         }
         assert_eq!(
-            workspace_relative(Path::new("/elsewhere/captures/x.md"), root, worktree),
+            workspace_relative(Path::new("/elsewhere/captures/x.md"), worktree, root, worktree),
             Path::new("/elsewhere/captures/x.md")
         );
         assert_eq!(
-            workspace_relative(Path::new("./captures/x.md"), worktree, worktree),
+            workspace_relative(Path::new("./captures/x.md"), worktree, worktree, worktree),
             expected
+        );
+    }
+
+    #[test]
+    fn named_paths_resolve_against_the_current_directory() {
+        let worktree = tempfile::tempdir().expect("worktree creates");
+        let root = worktree.path().join(".arcl/workspace");
+        fs::create_dir_all(root.join("captures")).expect("workspace creates");
+        fs::write(root.join("captures/x.md"), "x").expect("record writes");
+        let subdirectory = worktree.path().join("src");
+        fs::create_dir(&subdirectory).expect("subdirectory creates");
+        fs::write(worktree.path().join("outside.md"), "o").expect("file writes");
+        let expected = Path::new("captures/x.md");
+
+        for (current, named) in [
+            (subdirectory.as_path(), "../.arcl/workspace/captures/x.md"),
+            (subdirectory.as_path(), ".arcl/workspace/captures/x.md"),
+            (subdirectory.as_path(), "captures/x.md"),
+            (root.join("captures").as_path(), "x.md"),
+            (root.join("captures").as_path(), "../captures/x.md"),
+            // Removed from disk: the parent directory still resolves.
+            (subdirectory.as_path(), "../.arcl/workspace/captures/gone.md"),
+        ] {
+            let relative = workspace_relative(Path::new(named), current, &root, worktree.path());
+            if named.ends_with("gone.md") {
+                assert_eq!(relative, Path::new("captures/gone.md"), "{named}");
+            } else {
+                assert_eq!(relative, expected, "{named}");
+            }
+        }
+        // A path that resolves outside the workspace matches no workspace file.
+        let outside = workspace_relative(Path::new("../outside.md"), &root, &root, worktree.path());
+        assert_eq!(outside, Path::new("../outside.md"));
+
+        #[cfg(unix)]
+        {
+            let link = worktree.path().join("link.md");
+            std::os::unix::fs::symlink(root.join("captures/x.md"), &link).expect("link creates");
+            assert_eq!(
+                workspace_relative(Path::new("link.md"), worktree.path(), &root, worktree.path()),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_reads_a_path_from_a_workspace_subdirectory() {
+        let mut project = Project::synced();
+        let capture = project.diverge_capture();
+        let captures = project.root.path().join("captures");
+        let name = PathBuf::from(capture.file_name().expect("capture has a name"));
+
+        let outcome = project
+            .resolve_from(&captures, &[name], Side::Database)
+            .expect("resolve succeeds");
+        assert_eq!(outcome.exported, std::slice::from_ref(&capture));
+        assert!(project.read(&capture).contains("Edited in the database"));
+    }
+
+    #[test]
+    fn a_changed_manifest_is_rewritten_without_an_import() {
+        let mut project = Project::synced();
+        let manifest = PathBuf::from(MANIFEST);
+        fs::write(project.root.path().join(MANIFEST), "# note\nformat-version = 1\n").expect("manifest writes");
+
+        let error = project
+            .resolve(std::slice::from_ref(&manifest), Side::Workspace)
+            .expect_err("the manifest has nothing to resolve");
+        assert!(matches!(&error, WorkspaceSyncError::NothingToResolve { path } if path == &manifest));
+        assert!(project.read(&manifest).starts_with("# note"));
+
+        let outcome = project.sync().expect("sync succeeds");
+        assert!(outcome.imported.is_empty());
+        assert_eq!(outcome.converged, std::slice::from_ref(&manifest));
+        assert_eq!(project.read(&manifest), "format-version = 1\n");
+        assert!(project.sync().expect("second sync succeeds").is_empty());
+    }
+
+    #[test]
+    fn a_manifest_that_differs_on_the_first_sync_does_not_diverge() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        database
+            .create_capture("Capture".to_owned(), "Capture body".to_owned())
+            .expect("capture creates");
+        let root = tempfile::tempdir().expect("workspace creates");
+        fs::write(root.path().join(MANIFEST), "# note\nformat-version = 1\n").expect("manifest writes");
+
+        let outcome = sync_workspace(root.path(), root.path(), &mut database, None).expect("sync succeeds");
+        assert!(outcome.imported.is_empty());
+        assert_eq!(outcome.converged, [PathBuf::from(MANIFEST)]);
+        assert_eq!(
+            fs::read_to_string(root.path().join(MANIFEST)).expect("manifest reads"),
+            "format-version = 1\n"
         );
     }
 

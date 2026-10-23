@@ -390,6 +390,22 @@ fn workspace_resolve_keeps_the_chosen_side_of_a_divergent_file() {
             .expect("record reads")
             .contains("Database wins")
     );
+
+    diverge("File from a subdirectory", "Database loses again");
+    let subdirectory = directory.path().join("src");
+    fs::create_dir(&subdirectory).expect("subdirectory creates");
+    let resolved = arcl_in(&subdirectory)
+        .args(["workspace", "resolve", "--keep", "workspace"])
+        .arg(format!("../.arcl/workspace/{record}"))
+        .output()
+        .expect("workspace command runs");
+    assert!(
+        resolved.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&resolved.stderr)
+    );
+    let shown = run_json(directory.path(), ["--json", "capture", "show", capture_id].as_ref());
+    assert_eq!(shown["data"]["capture"]["body"], "File from a subdirectory");
     assert!(workspace(&["sync"]).status.success());
 
     let nothing = workspace(&["resolve", "--keep", "database", &record]);

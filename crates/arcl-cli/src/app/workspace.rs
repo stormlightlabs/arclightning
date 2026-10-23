@@ -32,9 +32,11 @@ pub(super) fn exec_workspace(command: WorkspaceCommand) -> CResult<Option<Worksp
                 KeepSide::Database => Side::Database,
                 KeepSide::Workspace => Side::Workspace,
             };
+            let current_dir = std::env::current_dir().map_err(|source| CommandError::CurrentDirectory { source })?;
             resolve_workspace(
                 &workspace_root,
                 &worktree_root,
+                &current_dir,
                 &mut database,
                 as_dyn(&vcs),
                 &paths,
