@@ -6,14 +6,15 @@ acceptance criteria.
 
 ## Current foundation
 
-Arc Lightning already has a working Rust CLI and SQLite model for ideas,
-releases, spec-backed epics, milestones, tasks, dependencies, lifecycle state,
-ready-work queries, task context, handoffs, and evidence. Workspace encoding,
-export, and import are also implemented.
+Arc Lightning has a working Rust CLI over a shared application layer and
+SQLite. It covers projects with or without Git, captures, specs, plans, optional
+phases, flexible tasks, notes, releases, dependencies, lifecycle state,
+ready-work queries, task context, handoffs, and evidence. The shared Svelte UI
+package exists. Workspace encoding, export, import, and the three-way
+comparison are implemented.
 
-This foundation is retained. Automatic workspace reconciliation, conflict
-recovery, full plan application, MCP, desktop, and the new product model are
-unfinished.
+Workspace sync and recovery, strict blocking, MCP, the local web app, the new
+website, and the desktop app are unfinished.
 
 ## Milestone 1: Connected planning model
 
@@ -65,11 +66,32 @@ Deliverables:
 - explicit recovery for divergent database and file changes
 - branch, detached HEAD, unborn HEAD, and unresolved merge handling without Git
   mutation
+- this repository tracking its own roadmap and tasks in its committed workspace
 
 Exit criterion: two branches can change different records and merge normally,
 while Arc Lightning stops and explains true divergence before overwriting data
 
-## Milestone 4: Agent interface
+## Milestone 4: Blocking for automation
+
+Make blocking relationships strict and machine-readable so agents and
+automations can rely on them.
+
+Deliverables:
+
+- blockers on a parent task also block its descendants
+- `task start` from pending refuses work that is not ready unless the caller
+  passes `--force`; a repeat start stays a no-op
+- blocker edges cannot form a cycle or join a task to its own ancestor or
+  descendant
+- a cancelled blocker is reported as a decision to make, not a silent wait
+- typed readiness reasons in JSON alongside the human text
+- task completion reports the tasks it made ready
+
+Exit criterion: an automation can pick ready work, learn why other work is
+blocked, and chain from one completed task to the work it unblocked using JSON
+alone
+
+## Milestone 5: Agent interface
 
 Make the Rust application operations available directly to agents.
 
@@ -84,7 +106,7 @@ Deliverables:
 Exit criterion: an agent can inspect project context, claim ready work, leave a
 handoff, and complete a task without parsing human CLI output
 
-## Milestone 5: Shared interface system
+## Milestone 6: Shared interface system
 
 Create the Svelte UI package before building the graphical product surfaces.
 
@@ -105,23 +127,27 @@ Deliverables:
 Exit criterion: the website and a desktop test shell consume the same packaged
 components without importing application-specific adapters
 
-## Milestone 6: Desktop planning and execution
+## Milestone 7: Local web app
 
-Build the Tauri app over the Rust application layer and shared UI package.
+Serve the planning and execution workflow in the browser from the `arcl`
+binary.
 
 Deliverables:
 
-- project opening and switching
-- Inbox, Work, Planning, and Task views
-- CodeMirror 6 Markdown editing and structured metadata controls
-- readiness explanations, handoff, and completion flows
-- keyboard, responsive, theme, and failure-state coverage
-- Playwright workflow and screenshot coverage for the four primary views
+- `arcl serve`, bound to `127.0.0.1` on an ephemeral port by default, with
+  `--port` to pin one
+- a `Host` header check and a per-run token in a request header on every
+  request, an `Origin` check on mutations, no CORS headers, and no state
+  changes on GET
+- Inbox, Work, Planning, and Task views built from the shared UI package
+- an HTTP adapter over the Rust application layer with the same validation and
+  errors as the CLI
+- Playwright workflow and screenshot coverage for the four views
 
 Exit criterion: a developer can complete the primary planning and execution
-workflow in the desktop app and observe the same results through the CLI
+workflow in the browser and observe the same results through the CLI
 
-## Milestone 7: Website and documentation
+## Milestone 8: Website and documentation
 
 Replace the current site with the shared visual system and the Stormlight
 documentation house style.
@@ -138,22 +164,40 @@ Deliverables:
   layouts
 
 Exit criterion: the static site builds cleanly, passes accessibility checks,
-and documents the desktop, CLI, MCP, and repository-native workflows
+and documents the CLI, web app, MCP, and repository-native workflows
 
-## Milestone 8: Integrated release
+## Milestone 9: Integrated release
 
 Verify the complete system as one product and close only defects that block the
 specified workflows.
 
 Deliverables:
 
-- end-to-end coverage across CLI, desktop, MCP, and repository-native files
-- reviewed Playwright screenshot baselines for stable shared UI, desktop, and
+- end-to-end coverage across CLI, web app, MCP, and repository-native files
+- reviewed Playwright screenshot baselines for stable shared UI, web app, and
   website states
 - consistent errors and output across adapters
 - packaging and installation documentation
-- a release checklist tied to the success criteria in [SPEC.md](SPEC.md)
+- a release checklist tied to the first-release success criteria in
+  [SPEC.md](SPEC.md)
 
-Exit criterion: every success criterion has automated evidence or a recorded
-human review, and a new user can install Arc Lightning and complete the primary
-workflow from the documentation
+Exit criterion: every first-release success criterion has automated evidence
+or a recorded human review, and a new user can install Arc Lightning and
+complete the primary workflow from the documentation
+
+## Milestone 10: Desktop planning and execution
+
+Build the Tauri app over the Rust application layer and shared UI package after
+the first release, reusing the web app's views.
+
+Deliverables:
+
+- project opening and switching
+- Inbox, Work, Planning, and Task views
+- CodeMirror 6 Markdown editing and structured metadata controls
+- readiness explanations, handoff, and completion flows
+- keyboard, responsive, theme, and failure-state coverage
+- Playwright workflow and screenshot coverage for the four primary views
+
+Exit criterion: a developer can complete the primary planning and execution
+workflow in the desktop app and observe the same results through the CLI
