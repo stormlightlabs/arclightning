@@ -23,6 +23,9 @@ pub const WORKSPACE_FORMAT_VERSION: u32 = 1;
 pub enum WorkspaceError {
     #[error("configuration TOML is invalid: {0}")]
     Parse(#[from] toml::de::Error),
+    /// The configuration still uses the `[snapshot]` table that `[workspace]` replaced.
+    #[error("the `[snapshot]` table is now `[workspace]`; rename it in `.arcl/config.toml`")]
+    LegacySnapshotTable,
     #[error("TOML could not be rendered: {0}")]
     Render(#[from] toml::ser::Error),
     #[error("unsupported configuration format version {found}; expected {expected}")]
@@ -75,8 +78,15 @@ impl Default for ProjectConfig {
 }
 
 impl ProjectConfig {
+    /// Parse and validate configuration TOML.
+    ///
+    /// A config that still has a `[snapshot]` table fails with
+    /// [`WorkspaceError::LegacySnapshotTable`] so the user knows to rename it.
     pub fn parse(input: &str) -> Result<Self> {
-        let config = toml::from_str::<Self>(input)?;
+        let config = toml::from_str::<Self>(input).map_err(|error| {
+            let legacy = toml::from_str::<toml::Table>(input).is_ok_and(|table| table.contains_key("snapshot"));
+            if legacy { WorkspaceError::LegacySnapshotTable } else { error.into() }
+        })?;
         config.validate()?;
         Ok(config)
     }
@@ -158,6 +168,14 @@ mod tests {
             ProjectConfig::parse(input),
             Err(WorkspaceError::InvalidPath { .. })
         ));
+    }
+
+    #[test]
+    fn config_names_the_snapshot_table_rename() {
+        let input = "format-version = 1\n[snapshot]\nenabled = true\npath = \".arcl/snapshot\"\n";
+        let error = ProjectConfig::parse(input).unwrap_err();
+        assert!(matches!(error, WorkspaceError::LegacySnapshotTable));
+        assert!(error.to_string().contains("rename it"));
     }
 
     #[cfg(unix)]
