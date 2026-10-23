@@ -1,7 +1,7 @@
 +++
 id = "arcl-c-01M5NH405KDPY2486GVFGCV2SX"
 title = "Order plan children by position in arcl tree"
-status = "captured"
+status = "discarded"
 created-at = "2026-10-23T23:21:44.371Z"
 +++
 
