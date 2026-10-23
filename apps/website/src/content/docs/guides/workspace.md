@@ -51,17 +51,32 @@ sides changed differently stops the sync with status code `4` and the paths
 involved, and nothing is written. A record written by another `arcl` command
 while sync runs also stops it with status code `4`; run sync again.
 
-In a Git worktree, a file Git reports as unmerged stops sync and import with
-status code `4` and the paths involved, and nothing is written. Finish the
-merge, then run the command again. Sync and import read Git's state, not the
-file text, so a record body can show a sample conflict.
-
-Switching to a branch that lacks records synced elsewhere stops sync with status
-code `3`, since sync does not delete records. Run `arcl workspace export` to
-write those records back, then run sync again.
-
 Sync writes workspace files before it updates the database. If a sync or an
 export stops partway, the next sync finishes the work.
+
+## Work with Git
+
+Commit, pull, merge, and switch branches with Git as usual. The next `arcl`
+command syncs whatever Git left in the workspace. Arc Lightning reads Git's
+state but never changes HEAD, branches, the index, remotes, or configuration.
+Commit the workspace files that commands write, like any other change.
+
+When two branches change different records, Git merges their files without a
+conflict, and the next command imports both changes. When both branches change
+the same record, Git may leave the file unmerged.
+
+A file Git reports as unmerged stops sync and import with status code `4` and
+the paths involved, and nothing is written. Commands that change records refuse
+the same way; commands that only read records warn and still run. Resolve the
+file in Git, `git add` it, commit the merge, and run the command again. Sync and
+import read Git's state, not the file text, so a record body can show a sample
+conflict.
+
+Switching branches imports the records the new branch adds or changes.
+Switching to a branch that lacks records synced elsewhere stops sync with status
+code `3`, since sync does not delete records. Run `arcl workspace export` to
+write those records back, then run sync again. Git shows the restored files as
+untracked on that branch.
 
 ## Check before you sync
 

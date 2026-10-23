@@ -4,6 +4,37 @@ use assert_cmd::Command;
 use serde_json::Value;
 use tempfile::{TempDir, tempdir};
 
+/// The Git state arcl must leave alone: HEAD, refs, an unfinished merge, the
+/// index, local configuration and changes outside the workspace.
+#[derive(Debug, Eq, PartialEq)]
+struct GitState {
+    head: String,
+    refs: String,
+    merge_head: Option<String>,
+    index: String,
+    config: String,
+    outside_workspace: String,
+}
+
+impl GitState {
+    /// Read the state of the Git worktree at `directory`.
+    fn read(directory: &Path) -> Self {
+        let git_dir = directory.join(".git");
+        let head = fs::read_to_string(git_dir.join("HEAD")).expect("HEAD reads");
+        Self {
+            head: head + &git(directory, &["rev-parse", "HEAD"]),
+            refs: git(directory, &["for-each-ref"]),
+            merge_head: fs::read_to_string(git_dir.join("MERGE_HEAD")).ok(),
+            index: git(directory, &["ls-files", "--stage"]),
+            config: git(directory, &["config", "--list", "--local"]),
+            outside_workspace: git(
+                directory,
+                &["status", "--porcelain", "--", ".", ":(exclude).arcl/workspace"],
+            ),
+        }
+    }
+}
+
 fn arcl_in(directory: &Path) -> Command {
     let mut command = Command::cargo_bin("arcl").expect("Cargo exposes the arcl binary");
     command.current_dir(directory);
@@ -228,8 +259,10 @@ fn with_workspace_off<T>(directory: &Path, action: impl FnOnce() -> T) -> T {
     result
 }
 
-fn git(directory: &Path, args: &[&str]) {
-    let output = std::process::Command::new("git")
+/// Run `git` in `directory` with a fixed identity and default branch, and
+/// return its output whether or not it succeeded.
+fn git_output(directory: &Path, args: &[&str]) -> std::process::Output {
+    std::process::Command::new("git")
         .args([
             "-c",
             "user.name=Test",
@@ -237,17 +270,25 @@ fn git(directory: &Path, args: &[&str]) {
             "user.email=test@example.com",
             "-c",
             "init.defaultBranch=main",
+            "-c",
+            "commit.gpgsign=false",
         ])
         .args(args)
         .current_dir(directory)
         .output()
-        .expect("git runs");
+        .expect("git runs")
+}
+
+/// Run `git` in `directory`, require success and return its stdout.
+fn git(directory: &Path, args: &[&str]) -> String {
+    let output = git_output(directory, args);
     assert!(
         output.status.success(),
         "git {}: {}",
         args.join(" "),
         String::from_utf8_lossy(&output.stderr)
     );
+    String::from_utf8(output.stdout).expect("git prints UTF-8")
 }
 
 #[test]
@@ -307,19 +348,7 @@ fn workspace_status_reports_changes_head_and_unresolved_merges() {
     git(directory.path(), &["checkout", "-q", "main"]);
     fs::write(&record_path, base.replace("First body", "Main body")).expect("record writes");
     git(directory.path(), &["commit", "-q", "-am", "main"]);
-    let merge = std::process::Command::new("git")
-        .args([
-            "-c",
-            "user.name=Test",
-            "-c",
-            "user.email=test@example.com",
-            "merge",
-            "-q",
-            "other",
-        ])
-        .current_dir(directory.path())
-        .output()
-        .expect("git merge runs");
+    let merge = git_output(directory.path(), &["merge", "-q", "other"]);
     assert!(!merge.status.success(), "the merge should conflict");
 
     let conflicted = run_json(directory.path(), ["--json", "workspace", "status"].as_ref());
@@ -922,4 +951,301 @@ fn notes_release_membership_and_file_bodies_are_exposed_as_json() {
     assert_eq!(links["data"]["link"]["record_id"], release_id);
     let shown = run_json(directory.path(), ["--json", "note", "show", &note_id].as_ref());
     assert_eq!(shown["data"]["note"]["title"], "Decision");
+}
+
+/// Create a Git repository with an arcl project and the workspace on.
+fn git_project() -> TempDir {
+    let directory = tempdir().expect("temporary directory can be created");
+    git(directory.path(), &["init", "-q"]);
+    run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
+    directory
+}
+
+fn commit_all(directory: &Path, message: &str) {
+    git(directory, &["add", "-A"]);
+    git(directory, &["commit", "-q", "-m", message]);
+}
+
+fn create_capture(directory: &Path, title: &str, body: &str) -> String {
+    let created = run_json(
+        directory,
+        ["--json", "capture", "create", title, "--body", body].as_ref(),
+    );
+    created["data"]["capture"]["id"]
+        .as_str()
+        .expect("capture ID")
+        .to_owned()
+}
+
+fn update_body(directory: &Path, capture_id: &str, body: &str) {
+    run_json(
+        directory,
+        ["--json", "capture", "update", capture_id, "--body", body].as_ref(),
+    );
+}
+
+fn capture_field(directory: &Path, capture_id: &str, field: &str) -> String {
+    let shown = run_json(directory, ["--json", "capture", "show", capture_id].as_ref());
+    shown["data"]["capture"][field]
+        .as_str()
+        .expect("capture field")
+        .to_owned()
+}
+
+fn assert_success(output: &std::process::Output) {
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstderr: {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn git_branches_that_change_different_records_merge_and_import() {
+    let directory = git_project();
+    let path = directory.path();
+    let first = create_capture(path, "First", "First body");
+    let second = create_capture(path, "Second", "Second body");
+    commit_all(path, "base");
+
+    git(path, &["checkout", "-q", "-b", "left"]);
+    update_body(path, &first, "Left body");
+    commit_all(path, "left");
+    git(path, &["checkout", "-q", "main"]);
+    assert_eq!(
+        capture_field(path, &first, "body"),
+        "First body",
+        "the checkout's files import"
+    );
+    update_body(path, &second, "Main body");
+    commit_all(path, "main");
+    git(path, &["merge", "-q", "--no-edit", "left"]);
+
+    let before = GitState::read(path);
+    let listed = run_json(path, ["--json", "capture", "list"].as_ref());
+    assert_eq!(listed["data"]["captures"].as_array().map(Vec::len), Some(2));
+    assert_eq!(capture_field(path, &first, "body"), "Left body");
+    assert_eq!(capture_field(path, &second, "body"), "Main body");
+    assert_eq!(GitState::read(path), before);
+    assert_eq!(
+        git(path, &["status", "--porcelain"]),
+        "",
+        "the import leaves the merged files as committed"
+    );
+}
+
+#[test]
+fn an_external_edit_in_a_git_worktree_imports_without_staging() {
+    let directory = git_project();
+    let path = directory.path();
+    let capture_id = create_capture(path, "Edited", "Committed body");
+    commit_all(path, "base");
+
+    let record = format!(".arcl/workspace/captures/{capture_id}.md");
+    let content = fs::read_to_string(path.join(&record)).expect("record reads");
+    fs::write(path.join(&record), content.replace("Committed body", "Edited body")).expect("record writes");
+    let before = GitState::read(path);
+    assert_eq!(capture_field(path, &capture_id, "body"), "Edited body");
+    assert_eq!(GitState::read(path), before);
+    assert_eq!(git(path, &["status", "--porcelain"]), format!(" M {record}\n"));
+}
+
+#[test]
+fn a_branch_switch_imports_its_records_and_stops_on_records_it_lacks() {
+    let origin = git_project();
+    let kept = create_capture(origin.path(), "On main", "Main body");
+    commit_all(origin.path(), "base");
+    git(origin.path(), &["checkout", "-q", "-b", "feature"]);
+    let added = create_capture(origin.path(), "On feature", "Feature body");
+    commit_all(origin.path(), "feature");
+    git(origin.path(), &["checkout", "-q", "main"]);
+
+    let parent = tempdir().expect("temporary directory can be created");
+    let source = origin.path().to_str().expect("UTF-8 path");
+    git(parent.path(), &["clone", "-q", source, "clone"]);
+    let path = &parent.path().join("clone");
+    run_json(path, ["--json", "init", "--workspace"].as_ref());
+    assert_success(
+        &arcl_in(path)
+            .args(["workspace", "import"])
+            .output()
+            .expect("import runs"),
+    );
+    assert_eq!(capture_field(path, &kept, "body"), "Main body");
+
+    git(path, &["checkout", "-q", "feature"]);
+    assert_eq!(
+        capture_field(path, &added, "body"),
+        "Feature body",
+        "the branch's records appear"
+    );
+
+    git(path, &["checkout", "-q", "main"]);
+    let before = GitState::read(path);
+    let record = format!("captures/{added}.md");
+    let refused = arcl_in(path)
+        .args(["capture", "update", &kept, "--title", "Blocked"])
+        .output()
+        .expect("update runs");
+    assert_eq!(refused.status.code(), Some(3));
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(
+        stderr.contains(&record) && stderr.contains("does not support hard deletion"),
+        "stderr: {stderr}"
+    );
+
+    assert_success(
+        &arcl_in(path)
+            .args(["workspace", "export"])
+            .output()
+            .expect("export runs"),
+    );
+    assert!(path.join(".arcl/workspace").join(&record).is_file());
+    assert_success(&arcl_in(path).args(["workspace", "sync"]).output().expect("sync runs"));
+    assert_eq!(capture_field(path, &kept, "title"), "On main");
+    assert_eq!(GitState::read(path), before);
+    assert_eq!(
+        git(path, &["status", "--porcelain"]),
+        format!("?? .arcl/workspace/{record}\n")
+    );
+}
+
+#[test]
+fn an_unresolved_merge_stops_writes_until_git_finishes_it() {
+    let directory = git_project();
+    let path = directory.path();
+    let capture_id = create_capture(path, "Merged", "First body");
+    commit_all(path, "base");
+    git(path, &["checkout", "-q", "-b", "other"]);
+    update_body(path, &capture_id, "Other body");
+    commit_all(path, "other");
+    git(path, &["checkout", "-q", "main"]);
+    update_body(path, &capture_id, "Main body");
+    commit_all(path, "main");
+    let merge = git_output(path, &["merge", "-q", "other"]);
+    assert!(!merge.status.success(), "the merge should conflict");
+
+    let record = format!("captures/{capture_id}.md");
+    let record_path = path.join(".arcl/workspace").join(&record);
+    let conflicted = fs::read(&record_path).expect("record reads");
+    let before = GitState::read(path);
+    assert!(before.merge_head.is_some());
+    for args in [
+        ["capture", "update", capture_id.as_str(), "--title", "Blocked"].as_ref(),
+        ["workspace", "sync"].as_ref(),
+    ] {
+        let refused = arcl_in(path).args(args).output().expect("command runs");
+        assert_eq!(refused.status.code(), Some(4), "{}", args.join(" "));
+        let stderr = String::from_utf8_lossy(&refused.stderr);
+        assert!(
+            stderr.contains("unmerged in Git") && stderr.contains(&record),
+            "stderr: {stderr}"
+        );
+    }
+    assert_eq!(GitState::read(path), before);
+    assert_eq!(fs::read(&record_path).expect("record reads"), conflicted);
+
+    let ours = git(path, &["show", &format!("HEAD:.arcl/workspace/{record}")]);
+    fs::write(&record_path, ours.replace("Main body", "Merged body")).expect("record writes");
+    git(path, &["add", "-A"]);
+    git(path, &["commit", "-q", "--no-edit"]);
+    assert_success(&arcl_in(path).args(["workspace", "sync"]).output().expect("sync runs"));
+    assert_eq!(capture_field(path, &capture_id, "body"), "Merged body");
+    assert_eq!(capture_field(path, &capture_id, "title"), "Merged");
+}
+
+#[test]
+fn a_pull_over_an_unsynced_database_change_needs_an_explicit_side() {
+    let directory = git_project();
+    let path = directory.path();
+    let capture_id = create_capture(path, "Diverged", "First body");
+    commit_all(path, "base");
+    let record = format!("captures/{capture_id}.md");
+    let record_path = path.join(".arcl/workspace").join(&record);
+
+    // A branch changes the file while the database holds a change that never
+    // reached the workspace, then the branch merges in.
+    let diverge = |branch: &str, file_body: &str, database_body: &str| {
+        let current = capture_field(path, &capture_id, "body");
+        git(path, &["checkout", "-q", "-b", branch]);
+        let content = fs::read_to_string(&record_path).expect("record reads");
+        fs::write(&record_path, content.replace(&current, file_body)).expect("record writes");
+        commit_all(path, branch);
+        git(path, &["checkout", "-q", "main"]);
+        with_workspace_off(path, || update_body(path, &capture_id, database_body));
+        git(path, &["merge", "-q", "--ff-only", branch]);
+    };
+    let resolve = |keep: &str| {
+        arcl_in(path)
+            .args(["workspace", "resolve", "--keep", keep, &record])
+            .output()
+            .expect("resolve runs")
+    };
+
+    diverge("file-wins", "File wins", "Database loses");
+    let before = GitState::read(path);
+    let refused = arcl_in(path).args(["workspace", "sync"]).output().expect("sync runs");
+    assert_eq!(refused.status.code(), Some(4));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains(&record));
+    assert_success(&resolve("workspace"));
+    assert_eq!(capture_field(path, &capture_id, "body"), "File wins");
+    assert_eq!(GitState::read(path), before);
+    assert_eq!(git(path, &["status", "--porcelain"]), "");
+
+    diverge("database-wins", "File loses", "Database wins");
+    let before = GitState::read(path);
+    assert_success(&resolve("database"));
+    assert_eq!(capture_field(path, &capture_id, "body"), "Database wins");
+    assert!(
+        fs::read_to_string(&record_path)
+            .expect("record reads")
+            .contains("Database wins")
+    );
+    assert_eq!(GitState::read(path), before);
+    assert_eq!(
+        git(path, &["status", "--porcelain"]),
+        format!(" M .arcl/workspace/{record}\n")
+    );
+}
+
+#[test]
+fn the_next_command_restores_workspace_files_a_write_left_behind() {
+    let directory = git_project();
+    let path = directory.path();
+    let capture_id = create_capture(path, "Exported", "First body");
+    commit_all(path, "base");
+    let record = format!("captures/{capture_id}.md");
+    let record_path = path.join(".arcl/workspace").join(&record);
+
+    // A write whose export never ran, as when arcl stops after the database
+    // commits.
+    with_workspace_off(path, || update_body(path, &capture_id, "Saved body"));
+    let before = GitState::read(path);
+    run_json(path, ["--json", "list"].as_ref());
+    let content = fs::read_to_string(&record_path).expect("record reads");
+    assert!(content.contains("Saved body"), "record: {content}");
+    assert_eq!(GitState::read(path), before);
+
+    // A record file deleted after a write is not a request to delete the
+    // record: writes stop, and resolve writes the file back.
+    fs::remove_file(&record_path).expect("record is removed");
+    let refused = arcl_in(path)
+        .args(["note", "create", "Blocked"])
+        .output()
+        .expect("note create runs");
+    assert_eq!(refused.status.code(), Some(3));
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(
+        stderr.contains(&format!("arcl workspace resolve --keep database {record}")),
+        "stderr: {stderr}"
+    );
+    assert_success(
+        &arcl_in(path)
+            .args(["workspace", "resolve", "--keep", "database", &record])
+            .output()
+            .expect("resolve runs"),
+    );
+    assert_eq!(fs::read_to_string(&record_path).expect("record reads"), content);
+    assert_eq!(GitState::read(path), before);
 }
