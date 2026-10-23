@@ -446,6 +446,9 @@ fn task_tree_node(
 }
 
 /// Returns the tasks that match `keep`, sorted by `position`, then ID.
+///
+/// The store already loads tasks in that order; sorting here keeps the tree
+/// correct for any graph built another way.
 fn positioned_tasks(graph: &ConnectedGraph, keep: impl Fn(&PlanningTask) -> bool) -> Vec<&PlanningTask> {
     let mut tasks = graph.tasks.iter().filter(|task| keep(task)).collect::<Vec<_>>();
     tasks.sort_by(|left, right| left.position.cmp(&right.position).then_with(|| left.id.cmp(&right.id)));
