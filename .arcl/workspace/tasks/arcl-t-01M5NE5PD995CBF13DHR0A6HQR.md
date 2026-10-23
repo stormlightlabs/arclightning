@@ -5,7 +5,7 @@ title = "T13: Add desktop work, planning, and task views"
 status = "pending"
 priority = "normal"
 position = 1
-blocked-by = ["arcl-t-01M5NE5PC91T2G9ZQRVP19AGNY"]
+blocked-by = ["arcl-t-01M5NE5PC91T2G9ZQRVP19AGNY", "arcl-t-01M5NH23576GMX0CPHRBWK4DA1"]
 +++
 
 Complete the graphical planning and execution workflow over the shared project

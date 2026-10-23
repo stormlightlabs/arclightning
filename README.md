@@ -55,8 +55,9 @@ cargo build
 cargo test --workspace --all-features
 ```
 
-This repository tracks its remaining roadmap and tasks in `.arcl/workspace`. On
-a fresh clone, `arcl init` loads them; then run `arcl ready`.
+This repository keeps its roadmap and tasks in `.arcl/workspace`, which is
+its only plan. On a fresh clone, `arcl init` loads them. Run `arcl tree` for
+the whole plan and `arcl ready` for the work that can start.
 
 Install the pnpm workspace and run the documentation site:
 

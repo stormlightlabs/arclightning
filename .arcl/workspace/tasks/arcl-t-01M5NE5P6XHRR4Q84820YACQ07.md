@@ -5,7 +5,7 @@ title = "T18: Serve the local web app"
 status = "pending"
 priority = "normal"
 position = 0
-blocked-by = ["arcl-t-01M5NE5P2N1AMT731RJBAZ66YT"]
+blocked-by = ["arcl-t-01M5NE5P2N1AMT731RJBAZ66YT", "arcl-t-01M5NH1N3R9AX3XZH6XG9ZX1QE"]
 +++
 
 Serve the Inbox, Work, Planning, and Task workflow in the browser from the

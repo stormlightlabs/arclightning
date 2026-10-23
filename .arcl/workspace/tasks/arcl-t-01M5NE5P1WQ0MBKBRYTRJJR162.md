@@ -5,6 +5,7 @@ title = "T16: Make blocking relationships strict"
 status = "pending"
 priority = "normal"
 position = 0
+blocked-by = ["arcl-t-01M5NH23576GMX0CPHRBWK4DA1"]
 +++
 
 Make blockers apply through the task hierarchy and to task transitions, so
