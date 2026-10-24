@@ -7,6 +7,7 @@
 //! returns version 2 for a task and 1 for any other record, as the CLI does.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use rmcp::{
     Json, ServerHandler,
@@ -14,6 +15,7 @@ use rmcp::{
     model::{Implementation, MetaObject, ServerCapabilities, ServerConfig},
     tool, tool_handler, tool_router,
 };
+use tokio_util::sync::CancellationToken;
 
 use arcl_core::domain::{
     CaptureId, NoteId, PhaseId, PlanId, PlanningTask, ReleaseId, SpecId, TaskAction, TaskId, TaskPriority,
@@ -31,6 +33,19 @@ use crate::tools::*;
 /// The `_meta` key that names the `format_version` a tool's result carries.
 pub const FORMAT_VERSION_META_KEY: &str = "arcl/format_version";
 
+/// A read tool's description, ending with the sentence that qualifies its
+/// `read_only_hint`: the call changes no records, but with the workspace on
+/// it syncs first, as a command does.
+macro_rules! read_description {
+    ($text:literal) => {
+        concat!(
+            $text,
+            " With the workspace on, the call first imports workspace changes into the database and exports \
+            the result, as a command does."
+        )
+    };
+}
+
 const INSTRUCTIONS: &str = "Arc Lightning tracks this project's tasks. Find work with `ready`, \
 claim it with `task_start`, read `context`, then finish with `task_complete` or park it with \
 `task_handoff`. `explain` says why a task is not ready. Record work outside the task with \
@@ -40,6 +55,7 @@ claim it with `task_start`, read `context`, then finish with `task_complete` or 
 #[derive(Clone, Debug)]
 pub struct ArclServer {
     start: PathBuf,
+    lock_wait: Duration,
     tool_router: ToolRouter<Self>,
 }
 
@@ -48,7 +64,14 @@ impl ArclServer {
     /// Each call finds the project again, so a project initialized after the
     /// server starts is picked up.
     pub fn new(start: PathBuf) -> Self {
-        Self { start, tool_router: Self::tool_router() }
+        Self { start, lock_wait: project::LOCK_WAIT, tool_router: Self::tool_router() }
+    }
+
+    /// The same server with calls waiting at most `lock_wait` for the sync
+    /// lock instead of [`project::LOCK_WAIT`].
+    pub fn with_lock_wait(mut self, lock_wait: Duration) -> Self {
+        self.lock_wait = lock_wait;
+        self
     }
 
     /// The tools this server lists.
@@ -58,22 +81,32 @@ impl ArclServer {
 
     /// Run `operation` on a blocking thread with the project's sync around
     /// it, and wrap its value in an envelope of `format_version`.
-    async fn call<T, F>(&self, access: Access, format_version: u8, operation: F) -> Result<Json<Envelope<T>>, ToolError>
+    async fn call<T, F>(
+        &self, access: Access, format_version: u8, cancelled: CancellationToken, operation: F,
+    ) -> Result<Json<Envelope<T>>, ToolError>
     where
         T: Send + 'static,
         F: FnOnce(&mut Database) -> Result<T, ToolError> + Send + 'static,
     {
-        let (data, warnings) = self.run(access, operation).await?;
+        let (data, warnings) = self.run(access, cancelled, operation).await?;
         Ok(Json(Envelope { format_version, data, warnings }))
     }
 
-    async fn run<T, F>(&self, access: Access, operation: F) -> Result<(T, Vec<project::Warning>), ToolError>
+    /// Run `operation` on a blocking thread. The call stops before
+    /// `operation` starts if the client cancels the request, or if this future
+    /// is dropped, as a client-side timeout does.
+    async fn run<T, F>(
+        &self, access: Access, cancelled: CancellationToken, operation: F,
+    ) -> Result<(T, Vec<project::Warning>), ToolError>
     where
         T: Send + 'static,
         F: FnOnce(&mut Database) -> Result<T, ToolError> + Send + 'static,
     {
         let start = self.start.clone();
-        tokio::task::spawn_blocking(move || project::run(&start, access, operation))
+        let lock_wait = self.lock_wait;
+        let token = cancelled.child_token();
+        let _cancel_on_drop = token.clone().drop_guard();
+        tokio::task::spawn_blocking(move || project::run(&start, access, lock_wait, &token, operation))
             .await
             .map_err(|error| ToolError::new(1, format!("the tool call stopped: {error}")))?
     }
@@ -83,31 +116,35 @@ impl ArclServer {
 impl ArclServer {
     /// Show one record by ID, like `arcl show`.
     #[tool(
-        description = "Show one record by ID, like `arcl show`. A task returns its readiness view \
-        (format_version 2); any other record returns {action: \"shown\", <kind>: record} (format_version 1).",
+        description = read_description!("Show one record by ID, like `arcl show`. A task returns its readiness view \
+        (format_version 2); any other record returns {action: \"shown\", <kind>: record} (format_version 1)."),
         annotations(read_only_hint = true, open_world_hint = false),
         meta = version_meta(READINESS_FORMAT_VERSION)
     )]
     pub async fn show(
-        &self, Parameters(input): Parameters<RecordInput>,
+        &self, Parameters(input): Parameters<RecordInput>, cancelled: CancellationToken,
     ) -> Result<Json<Envelope<ShowData>>, ToolError> {
         let input = input?;
         let ((format_version, data), warnings) = self
-            .run(Access::Read, move |database| show_record(database, &input.id))
+            .run(Access::Read, cancelled, move |database| {
+                show_record(database, &input.id)
+            })
             .await?;
         Ok(Json(Envelope { format_version, data, warnings }))
     }
 
     /// List record summaries, like `arcl list`.
     #[tool(
-        description = "List record summaries ordered by kind, then ID, like `arcl list`. Filter by kind \
-        and status. Returns at most `limit` records (1 to 200, default 50) and a `next_cursor` while more remain.",
+        description = read_description!("List record summaries ordered by kind, then ID, like `arcl list`. Filter by kind \
+        and status. Returns at most `limit` records (1 to 200, default 50) and a `next_cursor` while more remain."),
         annotations(read_only_hint = true, open_world_hint = false),
         meta = version_meta(FORMAT_VERSION)
     )]
-    pub async fn list(&self, Parameters(input): Parameters<ListInput>) -> Result<Json<Envelope<ListData>>, ToolError> {
+    pub async fn list(
+        &self, Parameters(input): Parameters<ListInput>, cancelled: CancellationToken,
+    ) -> Result<Json<Envelope<ListData>>, ToolError> {
         let input = input?;
-        self.call(Access::Read, FORMAT_VERSION, move |database| {
+        self.call(Access::Read, FORMAT_VERSION, cancelled, move |database| {
             list_records(database, input)
         })
         .await
@@ -115,16 +152,16 @@ impl ArclServer {
 
     /// List the tasks that can start, like `arcl ready`.
     #[tool(
-        description = "List the tasks that can start, in order, like `arcl ready`. Returns at most \
-        `limit` tasks (1 to 200, default 50) and a `next_cursor` while more remain.",
+        description = read_description!("List the tasks that can start, in order, like `arcl ready`. Returns at most \
+        `limit` tasks (1 to 200, default 50) and a `next_cursor` while more remain."),
         annotations(read_only_hint = true, open_world_hint = false),
         meta = version_meta(FORMAT_VERSION)
     )]
     pub async fn ready(
-        &self, Parameters(input): Parameters<ReadyInput>,
+        &self, Parameters(input): Parameters<ReadyInput>, cancelled: CancellationToken,
     ) -> Result<Json<Envelope<ReadyData>>, ToolError> {
         let input = input?;
-        self.call(Access::Read, FORMAT_VERSION, move |database| {
+        self.call(Access::Read, FORMAT_VERSION, cancelled, move |database| {
             ready_tasks(database, input)
         })
         .await
@@ -132,16 +169,16 @@ impl ArclServer {
 
     /// Explain a task's readiness, like `arcl explain`.
     #[tool(
-        description = "Explain whether a task is ready and why not, like `arcl explain`. \
-        `data.readiness.reasons` lists typed reasons.",
+        description = read_description!("Explain whether a task is ready and why not, like `arcl explain`. \
+        `data.readiness.reasons` lists typed reasons."),
         annotations(read_only_hint = true, open_world_hint = false),
         meta = version_meta(READINESS_FORMAT_VERSION)
     )]
     pub async fn explain(
-        &self, Parameters(input): Parameters<TaskInput>,
+        &self, Parameters(input): Parameters<TaskInput>, cancelled: CancellationToken,
     ) -> Result<Json<Envelope<arcl_store::PlanningTaskView>>, ToolError> {
         let input = input?;
-        self.call(Access::Read, READINESS_FORMAT_VERSION, move |database| {
+        self.call(Access::Read, READINESS_FORMAT_VERSION, cancelled, move |database| {
             Ok(database.planning_task_view(TaskId::parse(&input.task_id)?)?)
         })
         .await
@@ -149,16 +186,16 @@ impl ArclServer {
 
     /// Return a task's context packet, like `arcl context`.
     #[tool(
-        description = "Return a task with its ancestors, spec, plan, phase, blockers, dependents, \
-        readiness and earlier evidence, like `arcl context`. `data.task.handoff` holds the last resume note.",
+        description = read_description!("Return a task with its ancestors, spec, plan, phase, blockers, dependents, \
+        readiness and earlier evidence, like `arcl context`. `data.task.handoff` holds the last resume note."),
         annotations(read_only_hint = true, open_world_hint = false),
         meta = version_meta(READINESS_FORMAT_VERSION)
     )]
     pub async fn context(
-        &self, Parameters(input): Parameters<TaskInput>,
+        &self, Parameters(input): Parameters<TaskInput>, cancelled: CancellationToken,
     ) -> Result<Json<Envelope<PlanningContext>>, ToolError> {
         let input = input?;
-        self.call(Access::Read, READINESS_FORMAT_VERSION, move |database| {
+        self.call(Access::Read, READINESS_FORMAT_VERSION, cancelled, move |database| {
             Ok(database.planning_context(TaskId::parse(&input.task_id)?)?)
         })
         .await
@@ -171,10 +208,10 @@ impl ArclServer {
         meta = version_meta(FORMAT_VERSION)
     )]
     pub async fn capture_create(
-        &self, Parameters(input): Parameters<CaptureCreateInput>,
+        &self, Parameters(input): Parameters<CaptureCreateInput>, cancelled: CancellationToken,
     ) -> Result<Json<Envelope<CaptureData>>, ToolError> {
         let input = input?;
-        self.call(Access::Write, FORMAT_VERSION, move |database| {
+        self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
             validate_title(&input.title)?;
             let capture = database.create_capture(input.title, input.body)?;
             Ok(CaptureData { action: "created".to_owned(), capture })
@@ -189,10 +226,10 @@ impl ArclServer {
         meta = version_meta(FORMAT_VERSION)
     )]
     pub async fn spec_create(
-        &self, Parameters(input): Parameters<SpecCreateInput>,
+        &self, Parameters(input): Parameters<SpecCreateInput>, cancelled: CancellationToken,
     ) -> Result<Json<Envelope<SpecData>>, ToolError> {
         let input = input?;
-        self.call(Access::Write, FORMAT_VERSION, move |database| {
+        self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
             validate_title(&input.title)?;
             let spec = database.create_spec(input.title, input.body, input.acceptance_criteria)?;
             Ok(SpecData { action: "created".to_owned(), spec })
@@ -207,10 +244,10 @@ impl ArclServer {
         meta = version_meta(FORMAT_VERSION)
     )]
     pub async fn plan_create(
-        &self, Parameters(input): Parameters<PlanCreateInput>,
+        &self, Parameters(input): Parameters<PlanCreateInput>, cancelled: CancellationToken,
     ) -> Result<Json<Envelope<PlanData>>, ToolError> {
         let input = input?;
-        self.call(Access::Write, FORMAT_VERSION, move |database| {
+        self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
             validate_title(&input.title)?;
             let spec_id = SpecId::parse(&input.spec)?;
             let plan = database.create_plan(spec_id, input.title, input.body)?;
@@ -227,10 +264,10 @@ impl ArclServer {
         meta = version_meta(FORMAT_VERSION)
     )]
     pub async fn task_create(
-        &self, Parameters(input): Parameters<TaskCreateInput>,
+        &self, Parameters(input): Parameters<TaskCreateInput>, cancelled: CancellationToken,
     ) -> Result<Json<Envelope<TaskData>>, ToolError> {
         let input = input?;
-        self.call(Access::Write, FORMAT_VERSION, move |database| {
+        self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
             validate_title(&input.title)?;
             let create = PlanningTaskCreate {
                 project_id: database.project()?.id,
@@ -262,10 +299,10 @@ impl ArclServer {
         meta = version_meta(FORMAT_VERSION)
     )]
     pub async fn task_update(
-        &self, Parameters(input): Parameters<TaskUpdateInput>,
+        &self, Parameters(input): Parameters<TaskUpdateInput>, cancelled: CancellationToken,
     ) -> Result<Json<Envelope<TaskData>>, ToolError> {
         let input = input?;
-        self.call(Access::Write, FORMAT_VERSION, move |database| {
+        self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
             let id = TaskId::parse(&input.task_id)?;
             if let Some(title) = &input.title {
                 validate_title(title)?;
@@ -290,10 +327,10 @@ impl ArclServer {
         meta = version_meta(FORMAT_VERSION)
     )]
     pub async fn note_create(
-        &self, Parameters(input): Parameters<NoteCreateInput>,
+        &self, Parameters(input): Parameters<NoteCreateInput>, cancelled: CancellationToken,
     ) -> Result<Json<Envelope<NoteData>>, ToolError> {
         let input = input?;
-        self.call(Access::Write, FORMAT_VERSION, move |database| {
+        self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
             validate_title(&input.title)?;
             let note = database.create_note(input.title, input.body)?;
             Ok(NoteData { action: "created".to_owned(), note })
@@ -309,10 +346,10 @@ impl ArclServer {
         meta = version_meta(FORMAT_VERSION)
     )]
     pub async fn task_start(
-        &self, Parameters(input): Parameters<TaskInput>,
+        &self, Parameters(input): Parameters<TaskInput>, cancelled: CancellationToken,
     ) -> Result<Json<Envelope<TaskData>>, ToolError> {
         let input = input?;
-        self.call(Access::Write, FORMAT_VERSION, move |database| {
+        self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
             let task = database.start_planning_task(TaskId::parse(&input.task_id)?, false)?;
             Ok(TaskData { action: "started".to_owned(), task })
         })
@@ -327,10 +364,10 @@ impl ArclServer {
         meta = version_meta(FORMAT_VERSION)
     )]
     pub async fn task_handoff(
-        &self, Parameters(input): Parameters<TaskHandoffInput>,
+        &self, Parameters(input): Parameters<TaskHandoffInput>, cancelled: CancellationToken,
     ) -> Result<Json<Envelope<TaskData>>, ToolError> {
         let input = input?;
-        self.call(Access::Write, FORMAT_VERSION, move |database| {
+        self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
             let task = database.handoff_planning_task(TaskId::parse(&input.task_id)?, input.note)?;
             Ok(TaskData { action: "handed_off".to_owned(), task })
         })
@@ -344,10 +381,10 @@ impl ArclServer {
         meta = version_meta(FORMAT_VERSION)
     )]
     pub async fn task_unpark(
-        &self, Parameters(input): Parameters<TaskInput>,
+        &self, Parameters(input): Parameters<TaskInput>, cancelled: CancellationToken,
     ) -> Result<Json<Envelope<TaskData>>, ToolError> {
         let input = input?;
-        self.call(Access::Write, FORMAT_VERSION, move |database| {
+        self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
             let task = database.transition_planning_task(TaskId::parse(&input.task_id)?, TaskAction::Unpark, false)?;
             Ok(TaskData { action: "unparked".to_owned(), task })
         })
@@ -362,10 +399,10 @@ impl ArclServer {
         meta = version_meta(READINESS_FORMAT_VERSION)
     )]
     pub async fn task_complete(
-        &self, Parameters(input): Parameters<TaskCompleteInput>,
+        &self, Parameters(input): Parameters<TaskCompleteInput>, cancelled: CancellationToken,
     ) -> Result<Json<Envelope<CompletionData>>, ToolError> {
         let input = input?;
-        self.call(Access::Write, READINESS_FORMAT_VERSION, move |database| {
+        self.call(Access::Write, READINESS_FORMAT_VERSION, cancelled, move |database| {
             let open_subtasks = match input.open_subtasks {
                 OpenSubtasks::Refuse => arcl_store::OpenSubtasks::Refuse,
                 OpenSubtasks::Leave => arcl_store::OpenSubtasks::Leave,

@@ -6,13 +6,21 @@
 //! warns and reads the database as it is. After a write, a second sync
 //! exports it, and a failure there is a warning, since the change is saved.
 //! The lock file is the CLI's, so the server and `arcl` commands in one
-//! project run one at a time.
+//! project run one at a time. A call waits at most [`LOCK_WAIT`] for it, then
+//! fails with `conflict`.
+//!
+//! A cancelled call stops while it waits for the lock, and checks once more
+//! before its operation starts. Once the operation starts it runs to the end:
+//! a write is not cancellable after that point.
 
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use schemars::JsonSchema;
 use serde::Serialize;
+use tokio_util::sync::CancellationToken;
 
 use arcl_repo::vcs::{GixVcs, Vcs, VcsError};
 use arcl_repo::workspace::{ProjectConfig, WorkspaceSyncError, resolve_workspace_root, sync_workspace};
@@ -20,6 +28,12 @@ use arcl_store::{Database, StorageError};
 
 use crate::error::ToolError;
 
+/// How long a call waits for the sync lock an `arcl` command holds before it
+/// fails with `conflict`.
+pub const LOCK_WAIT: Duration = Duration::from_secs(10);
+
+/// How often a waiting call tries the lock again and checks for cancellation.
+const LOCK_POLL: Duration = Duration::from_millis(25);
 const ARCL_DIRECTORY: &str = ".arcl";
 const CONFIG_FILE: &str = "config.toml";
 const DATABASE_FILE: &str = "arcl.db";
@@ -57,61 +71,66 @@ impl Warning {
 }
 
 /// A sync, or the setup before it, that did not run.
-struct SyncFailure {
-    message: String,
-    exit_code: u8,
-    /// A database written by another connection since the sync read it. A
-    /// write reports it as it is, since running again settles it.
-    changed_since_read: bool,
-    /// The recovery hint for a write this failure stops, from
-    /// [`WorkspaceSyncError::resolve_hint`].
-    resolve_hint: &'static str,
+enum SyncFailure {
+    /// The setup before the sync failed, such as an invalid workspace path. A
+    /// write returns it as it is; a read warns and goes on.
+    Setup(ToolError),
+    /// The call cannot go on, read or write: the lock wait ran out or the call
+    /// was cancelled.
+    Stopped(ToolError),
+    /// The sync itself stopped.
+    Sync(WorkspaceSyncError),
 }
 
 impl SyncFailure {
-    /// The error for a write that cannot run because the sync stopped.
+    /// The error for a write that cannot run. Only a sync that stopped gets
+    /// the `arcl workspace status` wrapper, as in the CLI, and a database
+    /// written by another connection since the sync read it is reported as it
+    /// is, since running again settles it.
     fn before_write(self) -> ToolError {
-        if self.changed_since_read {
-            return ToolError::new(self.exit_code, self.message);
-        }
-        ToolError::new(
-            self.exit_code,
-            format!(
-                "the workspace must sync before this change, and the sync stopped: {}; run `arcl workspace status` to see why{}",
-                self.message, self.resolve_hint
+        match self {
+            Self::Setup(error) | Self::Stopped(error) => error,
+            Self::Sync(error @ WorkspaceSyncError::Storage(StorageError::ChangedSinceRead)) => error.into(),
+            Self::Sync(error) => ToolError::new(
+                error.exit_code(),
+                format!(
+                    "the workspace must sync before this change, and the sync stopped: {error}; run `arcl workspace status` to see why{}",
+                    error.resolve_hint()
+                ),
             ),
-        )
+        }
+    }
+
+    fn message(&self) -> String {
+        match self {
+            Self::Setup(error) | Self::Stopped(error) => error.to_string(),
+            Self::Sync(error) => error.to_string(),
+        }
     }
 }
 
 impl From<ToolError> for SyncFailure {
     fn from(error: ToolError) -> Self {
-        Self {
-            message: error.to_string(),
-            exit_code: error.exit_code(),
-            changed_since_read: false,
-            resolve_hint: "",
-        }
+        Self::Setup(error)
     }
 }
 
 impl From<WorkspaceSyncError> for SyncFailure {
     fn from(error: WorkspaceSyncError) -> Self {
-        let changed_since_read = matches!(error, WorkspaceSyncError::Storage(StorageError::ChangedSinceRead));
-        Self {
-            message: error.to_string(),
-            exit_code: error.exit_code(),
-            changed_since_read,
-            resolve_hint: error.resolve_hint(),
-        }
+        Self::Sync(error)
     }
 }
 
 /// Run `operation` against the project that holds `start`, syncing the
 /// workspace around it as the CLI does. Returns the operation's value and the
 /// warnings the call collected.
+///
+/// The call waits at most `lock_wait` for the sync lock. Once `cancelled`
+/// fires, the call stops before `operation` starts; after that it runs to the
+/// end.
 pub fn run<T>(
-    start: &Path, access: Access, operation: impl FnOnce(&mut Database) -> Result<T, ToolError>,
+    start: &Path, access: Access, lock_wait: Duration, cancelled: &CancellationToken,
+    operation: impl FnOnce(&mut Database) -> Result<T, ToolError>,
 ) -> Result<(T, Vec<Warning>), ToolError> {
     let root = nearest_project_root(start).ok_or_else(|| not_initialized(start))?;
     let config = read_config(&root)?;
@@ -124,20 +143,24 @@ pub fn run<T>(
     let mut workspace = None;
     let synced = workspace_root(&root, &config).and_then(|workspace_root| {
         let Some(workspace_root) = workspace_root else { return Ok(Vec::new()) };
-        let lock = lock_project(&root)?;
+        let lock = lock_project(&root, lock_wait, cancelled)?;
         let found = sync(&root, &workspace_root, &database_path);
         workspace = Some((workspace_root, lock));
         found
     });
     match synced {
         Ok(found) => warnings.extend(found.into_iter().map(Warning::blocker_edge)),
+        Err(failure @ SyncFailure::Stopped(_)) => return Err(failure.before_write()),
         Err(failure) if access == Access::Write => return Err(failure.before_write()),
         Err(failure) => warnings.push(Warning::workspace_sync(format!(
             "the workspace did not sync, so this shows the database as it is: {}",
-            failure.message
+            failure.message()
         ))),
     }
 
+    if cancelled.is_cancelled() {
+        return Err(cancelled_error());
+    }
     let mut database = open_database(&database_path)?;
     let value = operation(&mut database)?;
     drop(database);
@@ -149,7 +172,7 @@ pub fn run<T>(
             Ok(found) => warnings.extend(found.into_iter().map(Warning::blocker_edge)),
             Err(failure) => warnings.push(Warning::workspace_sync(format!(
                 "the change is saved, but the workspace was not updated: {}; the next command updates it",
-                failure.message
+                failure.message()
             ))),
         }
     }
@@ -208,9 +231,11 @@ fn workspace_root(root: &Path, config: &ProjectConfig) -> Result<Option<PathBuf>
         })
 }
 
-/// Take an exclusive lock on the project's sync lock file, blocking until no
-/// other process holds it. The lock lasts until the file drops.
-fn lock_project(root: &Path) -> Result<File, SyncFailure> {
+/// Take an exclusive lock on the project's sync lock file. Tries again every
+/// [`LOCK_POLL`] while another process holds it, and fails with `conflict`
+/// once `wait` runs out, or stops once `cancelled` fires. The lock lasts until
+/// the file drops.
+fn lock_project(root: &Path, wait: Duration, cancelled: &CancellationToken) -> Result<File, SyncFailure> {
     let path = root.join(ARCL_DIRECTORY).join(SYNC_LOCK_FILE);
     let lock_error =
         |source: std::io::Error| ToolError::new(1, format!("could not lock `{}`: {source}", path.display()));
@@ -220,8 +245,32 @@ fn lock_project(root: &Path) -> Result<File, SyncFailure> {
         .write(true)
         .open(&path)
         .map_err(lock_error)?;
-    file.lock().map_err(lock_error)?;
-    Ok(file)
+    let deadline = Instant::now() + wait;
+    loop {
+        if cancelled.is_cancelled() {
+            return Err(SyncFailure::Stopped(cancelled_error()));
+        }
+        match file.try_lock() {
+            Ok(()) => return Ok(file),
+            Err(TryLockError::Error(source)) => return Err(lock_error(source).into()),
+            Err(TryLockError::WouldBlock) if Instant::now() >= deadline => {
+                return Err(SyncFailure::Stopped(ToolError::new(
+                    4,
+                    format!(
+                        "another `arcl` command held the sync lock `{}` for more than {} s; try again when it finishes",
+                        path.display(),
+                        wait.as_secs_f64()
+                    ),
+                )));
+            }
+            Err(TryLockError::WouldBlock) => thread::sleep(LOCK_POLL),
+        }
+    }
+}
+
+/// The error for a call cancelled before its operation started.
+fn cancelled_error() -> ToolError {
+    ToolError::new(1, "the call was cancelled before it changed anything")
 }
 
 /// Sync the database and the workspace once and return the sync's blocker

@@ -114,7 +114,14 @@ claude mcp add arcl -- arcl-mcp
 ```
 
 Each tool calls the application operations directly and syncs the workspace
-around the call, as a command does.
+around the call, as a command does. The read tools carry `readOnlyHint`
+because they change no records, but with the workspace on, a read first
+imports workspace changes into the database and exports the result.
+
+A call waits up to 10 seconds for an `arcl` command in the same project to
+finish, then fails with `conflict` (exit code `4`) naming the
+`.arcl/arcl.db-sync.lock` file. A call the client cancels while it waits
+changes nothing. Once its operation starts, a write runs to the end.
 
 | Tool             | Command          | `format_version`              |
 | ---------------- | ---------------- | ----------------------------- |

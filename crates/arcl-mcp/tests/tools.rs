@@ -5,10 +5,12 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use arcl_mcp::params::Parameters;
 use serde_json::{Value, json};
 use tempfile::TempDir;
+use tokio_util::sync::CancellationToken;
 
 use arcl_core::domain::{TaskId, TaskPriority, TaskStatus};
 use arcl_mcp::{error::ToolError, server::ArclServer, tools::*};
@@ -85,7 +87,7 @@ async fn an_agent_claims_hands_off_and_completes_work() {
     let second = create_task(&server, "Second", &[&first]).await;
 
     let ready = server
-        .ready(Parameters::from(ReadyInput::default()))
+        .ready(Parameters::from(ReadyInput::default()), CancellationToken::new())
         .await
         .expect("ready")
         .0;
@@ -93,14 +95,20 @@ async fn an_agent_claims_hands_off_and_completes_work() {
     assert_eq!(ids(&ready.data.tasks), vec![first.clone()]);
 
     let refused = server
-        .task_start(Parameters::from(TaskInput { task_id: second.clone() }))
+        .task_start(
+            Parameters::from(TaskInput { task_id: second.clone() }),
+            CancellationToken::new(),
+        )
         .await
         .err()
         .expect("a blocked task does not start");
     assert_eq!((refused.code(), refused.exit_code()), ("invalid_request", 3));
 
     let explained = server
-        .explain(Parameters::from(TaskInput { task_id: second.clone() }))
+        .explain(
+            Parameters::from(TaskInput { task_id: second.clone() }),
+            CancellationToken::new(),
+        )
         .await
         .expect("explain")
         .0;
@@ -112,7 +120,10 @@ async fn an_agent_claims_hands_off_and_completes_work() {
     );
 
     let started = server
-        .task_start(Parameters::from(TaskInput { task_id: first.clone() }))
+        .task_start(
+            Parameters::from(TaskInput { task_id: first.clone() }),
+            CancellationToken::new(),
+        )
         .await
         .expect("start")
         .0;
@@ -122,25 +133,34 @@ async fn an_agent_claims_hands_off_and_completes_work() {
     );
 
     let handed_off = server
-        .task_handoff(Parameters::from(TaskHandoffInput {
-            task_id: first.clone(),
-            note: "Half done.".to_owned(),
-        }))
+        .task_handoff(
+            Parameters::from(TaskHandoffInput { task_id: first.clone(), note: "Half done.".to_owned() }),
+            CancellationToken::new(),
+        )
         .await
         .expect("handoff")
         .0;
     assert_eq!(handed_off.data.task.status, TaskStatus::Parked);
 
     server
-        .task_unpark(Parameters::from(TaskInput { task_id: first.clone() }))
+        .task_unpark(
+            Parameters::from(TaskInput { task_id: first.clone() }),
+            CancellationToken::new(),
+        )
         .await
         .expect("unpark");
     server
-        .task_start(Parameters::from(TaskInput { task_id: first.clone() }))
+        .task_start(
+            Parameters::from(TaskInput { task_id: first.clone() }),
+            CancellationToken::new(),
+        )
         .await
         .expect("start again");
     let context = server
-        .context(Parameters::from(TaskInput { task_id: first.clone() }))
+        .context(
+            Parameters::from(TaskInput { task_id: first.clone() }),
+            CancellationToken::new(),
+        )
         .await
         .expect("context")
         .0;
@@ -150,11 +170,14 @@ async fn an_agent_claims_hands_off_and_completes_work() {
     );
 
     let completed = server
-        .task_complete(Parameters::from(TaskCompleteInput {
-            task_id: first.clone(),
-            evidence: Some("Tests pass.".to_owned()),
-            open_subtasks: OpenSubtasks::Refuse,
-        }))
+        .task_complete(
+            Parameters::from(TaskCompleteInput {
+                task_id: first.clone(),
+                evidence: Some("Tests pass.".to_owned()),
+                open_subtasks: OpenSubtasks::Refuse,
+            }),
+            CancellationToken::new(),
+        )
         .await
         .expect("complete")
         .0;
@@ -164,23 +187,27 @@ async fn an_agent_claims_hands_off_and_completes_work() {
     assert_eq!(data["unblocked"], json!([second]));
 
     let shown = server
-        .show(Parameters::from(RecordInput { id: second.clone() }))
+        .show(
+            Parameters::from(RecordInput { id: second.clone() }),
+            CancellationToken::new(),
+        )
         .await
         .expect("show task")
         .0;
     assert_eq!(shown.format_version, 2);
     let captured = server
-        .capture_create(Parameters::from(CaptureCreateInput {
-            title: "Later".to_owned(),
-            body: String::new(),
-        }))
+        .capture_create(
+            Parameters::from(CaptureCreateInput { title: "Later".to_owned(), body: String::new() }),
+            CancellationToken::new(),
+        )
         .await
         .expect("capture")
         .0;
     let shown = server
-        .show(Parameters::from(RecordInput {
-            id: captured.data.capture.id.to_string(),
-        }))
+        .show(
+            Parameters::from(RecordInput { id: captured.data.capture.id.to_string() }),
+            CancellationToken::new(),
+        )
         .await
         .expect("show capture")
         .0;
@@ -204,12 +231,15 @@ async fn lists_page_with_bounded_limits() {
     let mut cursor = None;
     loop {
         let page = server
-            .list(Parameters::from(ListInput {
-                kind: Some(RecordKind::Task),
-                limit: Some(2),
-                cursor,
-                ..ListInput::default()
-            }))
+            .list(
+                Parameters::from(ListInput {
+                    kind: Some(RecordKind::Task),
+                    limit: Some(2),
+                    cursor,
+                    ..ListInput::default()
+                }),
+                CancellationToken::new(),
+            )
             .await
             .expect("list")
             .0;
@@ -224,16 +254,18 @@ async fn lists_page_with_bounded_limits() {
     assert_eq!(listed, created);
 
     let first = server
-        .ready(Parameters::from(ReadyInput { limit: Some(3), ..ReadyInput::default() }))
+        .ready(
+            Parameters::from(ReadyInput { limit: Some(3), ..ReadyInput::default() }),
+            CancellationToken::new(),
+        )
         .await
         .expect("ready")
         .0;
     let rest = server
-        .ready(Parameters::from(ReadyInput {
-            limit: Some(3),
-            cursor: first.data.next_cursor,
-            ..ReadyInput::default()
-        }))
+        .ready(
+            Parameters::from(ReadyInput { limit: Some(3), cursor: first.data.next_cursor, ..ReadyInput::default() }),
+            CancellationToken::new(),
+        )
         .await
         .expect("ready page two")
         .0;
@@ -244,21 +276,24 @@ async fn lists_page_with_bounded_limits() {
 
     for limit in [0, MAX_LIMIT + 1] {
         let error = server
-            .list(Parameters::from(ListInput {
-                limit: Some(limit),
-                ..ListInput::default()
-            }))
+            .list(
+                Parameters::from(ListInput { limit: Some(limit), ..ListInput::default() }),
+                CancellationToken::new(),
+            )
             .await
             .err()
             .expect("limit out of range");
         assert_eq!(error.code(), "invalid_request");
     }
     let error = server
-        .list(Parameters::from(ListInput {
-            kind: Some(RecordKind::Capture),
-            status: vec![RecordStatus::Pending],
-            ..ListInput::default()
-        }))
+        .list(
+            Parameters::from(ListInput {
+                kind: Some(RecordKind::Capture),
+                status: vec![RecordStatus::Pending],
+                ..ListInput::default()
+            }),
+            CancellationToken::new(),
+        )
         .await
         .err()
         .expect("pending is not a capture status");
@@ -271,9 +306,10 @@ async fn failures_use_the_cli_error_envelope() {
     let server = ArclServer::new(project.path().to_owned());
 
     let missing = server
-        .context(Parameters::from(TaskInput {
-            task_id: "arcl-t-01M5QPZZKW6X9JPSGZ4VWRAMCY".to_owned(),
-        }))
+        .context(
+            Parameters::from(TaskInput { task_id: "arcl-t-01M5QPZZKW6X9JPSGZ4VWRAMCY".to_owned() }),
+            CancellationToken::new(),
+        )
         .await
         .err()
         .expect("no such task");
@@ -290,7 +326,10 @@ async fn failures_use_the_cli_error_envelope() {
     );
 
     let invalid = server
-        .show(Parameters::from(RecordInput { id: "arcl-t-nope".to_owned() }))
+        .show(
+            Parameters::from(RecordInput { id: "arcl-t-nope".to_owned() }),
+            CancellationToken::new(),
+        )
         .await
         .err()
         .expect("invalid ID");
@@ -298,7 +337,7 @@ async fn failures_use_the_cli_error_envelope() {
 
     let empty = TempDir::new().expect("temp dir");
     let uninitialized = ArclServer::new(empty.path().to_owned())
-        .ready(Parameters::from(ReadyInput::default()))
+        .ready(Parameters::from(ReadyInput::default()), CancellationToken::new())
         .await
         .err()
         .expect("no project");
@@ -318,13 +357,16 @@ async fn writes_sync_the_workspace() {
     assert!(content.contains("title = \"Synced\""));
 
     let updated = server
-        .task_update(Parameters::from(TaskUpdateInput {
-            task_id: id.clone(),
-            title: None,
-            body: None,
-            priority: Some(TaskPriority::High),
-            position: None,
-        }))
+        .task_update(
+            Parameters::from(TaskUpdateInput {
+                task_id: id.clone(),
+                title: None,
+                body: None,
+                priority: Some(TaskPriority::High),
+                position: None,
+            }),
+            CancellationToken::new(),
+        )
         .await
         .expect("update")
         .0;
@@ -339,7 +381,10 @@ async fn bad_arguments_fail_with_the_failure_envelope() {
     let server = ArclServer::new(project.path().to_owned());
 
     let unknown = server
-        .task_start(Parameters::from_arguments(arguments(json!({"force": true}))))
+        .task_start(
+            Parameters::from_arguments(arguments(json!({"force": true}))),
+            CancellationToken::new(),
+        )
         .await
         .err()
         .expect("an unknown field fails");
@@ -347,14 +392,17 @@ async fn bad_arguments_fail_with_the_failure_envelope() {
     assert!(unknown.to_string().contains("unknown field `force`"), "{unknown}");
 
     let wrong_type = server
-        .list(Parameters::from_arguments(arguments(json!({"limit": "5"}))))
+        .list(
+            Parameters::from_arguments(arguments(json!({"limit": "5"}))),
+            CancellationToken::new(),
+        )
         .await
         .err()
         .expect("a string limit fails");
     assert_eq!(wrong_type.code(), "invalid_request");
 
     let missing = server
-        .explain(Parameters::from_arguments(None))
+        .explain(Parameters::from_arguments(None), CancellationToken::new())
         .await
         .err()
         .expect("a missing field fails");
@@ -372,22 +420,27 @@ async fn ready_pages_by_ready_order_key() {
     created.sort();
 
     let first = server
-        .ready(Parameters::from(ReadyInput { limit: Some(1), ..ReadyInput::default() }))
+        .ready(
+            Parameters::from(ReadyInput { limit: Some(1), ..ReadyInput::default() }),
+            CancellationToken::new(),
+        )
         .await
         .expect("ready")
         .0;
     assert_eq!(ids(&first.data.tasks), vec![created[0].clone()]);
     server
-        .task_start(Parameters::from(TaskInput { task_id: created[0].clone() }))
+        .task_start(
+            Parameters::from(TaskInput { task_id: created[0].clone() }),
+            CancellationToken::new(),
+        )
         .await
         .expect("start A");
 
     let second = server
-        .ready(Parameters::from(ReadyInput {
-            limit: Some(1),
-            cursor: first.data.next_cursor,
-            ..ReadyInput::default()
-        }))
+        .ready(
+            Parameters::from(ReadyInput { limit: Some(1), cursor: first.data.next_cursor, ..ReadyInput::default() }),
+            CancellationToken::new(),
+        )
         .await
         .expect("ready page two")
         .0;
@@ -408,20 +461,20 @@ async fn malformed_cursors_are_rejected() {
         format!("note:{task}"),
     ] {
         let error = server
-            .list(Parameters::from(ListInput {
-                cursor: Some(cursor.clone()),
-                ..ListInput::default()
-            }))
+            .list(
+                Parameters::from(ListInput { cursor: Some(cursor.clone()), ..ListInput::default() }),
+                CancellationToken::new(),
+            )
             .await
             .err()
             .unwrap_or_else(|| panic!("list cursor `{cursor}` is rejected"));
         assert_eq!(error.code(), "invalid_request", "{cursor}");
     }
     let accepted = server
-        .list(Parameters::from(ListInput {
-            cursor: Some(format!("task:{task}")),
-            ..ListInput::default()
-        }))
+        .list(
+            Parameters::from(ListInput { cursor: Some(format!("task:{task}")), ..ListInput::default() }),
+            CancellationToken::new(),
+        )
         .await
         .expect("a cursor `list` returns is accepted")
         .0;
@@ -434,10 +487,10 @@ async fn malformed_cursors_are_rejected() {
         "normal:0:arcl-t-nope".to_owned(),
     ] {
         let error = server
-            .ready(Parameters::from(ReadyInput {
-                cursor: Some(cursor.clone()),
-                ..ReadyInput::default()
-            }))
+            .ready(
+                Parameters::from(ReadyInput { cursor: Some(cursor.clone()), ..ReadyInput::default() }),
+                CancellationToken::new(),
+            )
             .await
             .err()
             .unwrap_or_else(|| panic!("ready cursor `{cursor}` is rejected"));
@@ -465,47 +518,62 @@ async fn outputs_match_their_output_schemas() {
     let second = create_task(&server, "Second", &[&first]).await;
 
     let ready = server
-        .ready(Parameters::from(ReadyInput { limit: Some(1), ..ReadyInput::default() }))
+        .ready(
+            Parameters::from(ReadyInput { limit: Some(1), ..ReadyInput::default() }),
+            CancellationToken::new(),
+        )
         .await
         .expect("ready")
         .0;
     check("ready", to_json(&ready));
     let list = server
-        .list(Parameters::from(ListInput::default()))
+        .list(Parameters::from(ListInput::default()), CancellationToken::new())
         .await
         .expect("list")
         .0;
     check("list", to_json(&list));
     let explain = server
-        .explain(Parameters::from(TaskInput { task_id: second.clone() }))
+        .explain(
+            Parameters::from(TaskInput { task_id: second.clone() }),
+            CancellationToken::new(),
+        )
         .await
         .expect("explain")
         .0;
     check("explain", to_json(&explain));
     let started = server
-        .task_start(Parameters::from(TaskInput { task_id: first.clone() }))
+        .task_start(
+            Parameters::from(TaskInput { task_id: first.clone() }),
+            CancellationToken::new(),
+        )
         .await
         .expect("start")
         .0;
     check("task_start", to_json(&started));
     let context = server
-        .context(Parameters::from(TaskInput { task_id: first.clone() }))
+        .context(
+            Parameters::from(TaskInput { task_id: first.clone() }),
+            CancellationToken::new(),
+        )
         .await
         .expect("context")
         .0;
     check("context", to_json(&context));
     let completed = server
-        .task_complete(Parameters::from(TaskCompleteInput {
-            task_id: first,
-            evidence: Some("Done.".to_owned()),
-            open_subtasks: OpenSubtasks::Refuse,
-        }))
+        .task_complete(
+            Parameters::from(TaskCompleteInput {
+                task_id: first,
+                evidence: Some("Done.".to_owned()),
+                open_subtasks: OpenSubtasks::Refuse,
+            }),
+            CancellationToken::new(),
+        )
         .await
         .expect("complete")
         .0;
     check("task_complete", to_json(&completed));
     let shown = server
-        .show(Parameters::from(RecordInput { id: second }))
+        .show(Parameters::from(RecordInput { id: second }), CancellationToken::new())
         .await
         .expect("show")
         .0;
@@ -520,7 +588,7 @@ async fn a_failed_sync_warns_reads_and_refuses_writes() {
     fs::write(project.path().join(".arcl/workspace/manifest.toml"), "not = [valid").expect("break the manifest");
 
     let ready = server
-        .ready(Parameters::from(ReadyInput::default()))
+        .ready(Parameters::from(ReadyInput::default()), CancellationToken::new())
         .await
         .expect("ready")
         .0;
@@ -536,10 +604,10 @@ async fn a_failed_sync_warns_reads_and_refuses_writes() {
     );
 
     let refused = server
-        .capture_create(Parameters::from(CaptureCreateInput {
-            title: "Refused".to_owned(),
-            body: String::new(),
-        }))
+        .capture_create(
+            Parameters::from(CaptureCreateInput { title: "Refused".to_owned(), body: String::new() }),
+            CancellationToken::new(),
+        )
         .await
         .err()
         .expect("a write does not run without a sync");
@@ -577,12 +645,119 @@ async fn a_divergent_sync_names_workspace_resolve() {
     drop(database);
 
     let refused = server
-        .task_start(Parameters::from(TaskInput { task_id: id }))
+        .task_start(Parameters::from(TaskInput { task_id: id }), CancellationToken::new())
         .await
         .err()
         .expect("a divergent sync stops the write");
     assert_eq!((refused.code(), refused.exit_code()), ("conflict", 4));
     assert!(refused.to_string().contains("arcl workspace resolve"), "{refused}");
+}
+
+#[tokio::test]
+async fn a_held_sync_lock_fails_with_conflict_after_the_wait() {
+    let project = project(true);
+    let server = ArclServer::new(project.path().to_owned()).with_lock_wait(Duration::from_millis(200));
+    let lock = hold_sync_lock(project.path());
+
+    let refused = server
+        .capture_create(
+            Parameters::from(CaptureCreateInput { title: "Waited".to_owned(), body: String::new() }),
+            CancellationToken::new(),
+        )
+        .await
+        .err()
+        .expect("the write gives up on the lock");
+    assert_eq!((refused.code(), refused.exit_code()), ("conflict", 4));
+    assert!(refused.to_string().contains("arcl.db-sync.lock"), "{refused}");
+
+    let read = server
+        .ready(Parameters::from(ReadyInput::default()), CancellationToken::new())
+        .await
+        .err()
+        .expect("the read gives up on the lock");
+    assert_eq!(read.code(), "conflict");
+
+    drop(lock);
+    let database = Database::open(project.path().join(".arcl/arcl.db")).expect("open database");
+    assert!(database.captures().expect("captures").is_empty());
+}
+
+#[tokio::test]
+async fn a_cancelled_write_does_not_run() {
+    let project = project(true);
+    let server = ArclServer::new(project.path().to_owned());
+    let lock = hold_sync_lock(project.path());
+
+    // The client cancels the request while it waits for the lock.
+    let cancelled = CancellationToken::new();
+    let call = {
+        let server = server.clone();
+        let cancelled = cancelled.clone();
+        tokio::spawn(async move {
+            server
+                .capture_create(
+                    Parameters::from(CaptureCreateInput { title: "Cancelled".to_owned(), body: String::new() }),
+                    cancelled,
+                )
+                .await
+        })
+    };
+    // The client drops the call, as a client-side timeout does.
+    let dropped = {
+        let server = server.clone();
+        tokio::spawn(async move {
+            server
+                .capture_create(
+                    Parameters::from(CaptureCreateInput { title: "Dropped".to_owned(), body: String::new() }),
+                    CancellationToken::new(),
+                )
+                .await
+        })
+    };
+    // Both calls are now waiting for the lock.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    cancelled.cancel();
+    let error = call
+        .await
+        .expect("the call ends")
+        .err()
+        .expect("a cancelled call fails");
+    assert!(error.to_string().contains("cancelled"), "{error}");
+    dropped.abort();
+    assert!(dropped.await.err().is_some_and(|error| error.is_cancelled()));
+
+    drop(lock);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let database = Database::open(project.path().join(".arcl/arcl.db")).expect("open database");
+    assert!(database.captures().expect("captures").is_empty());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn an_invalid_workspace_path_is_not_a_sync_refusal() {
+    let project = project(true);
+    let outside = TempDir::new().expect("temp dir");
+    let workspace = project.path().join(".arcl/workspace");
+    fs::remove_dir_all(&workspace).expect("remove workspace");
+    std::os::unix::fs::symlink(outside.path(), &workspace).expect("symlink the workspace");
+    let server = ArclServer::new(project.path().to_owned());
+
+    let refused = server
+        .capture_create(
+            Parameters::from(CaptureCreateInput { title: "Refused".to_owned(), body: String::new() }),
+            CancellationToken::new(),
+        )
+        .await
+        .err()
+        .expect("an invalid workspace path stops the write");
+    assert_eq!((refused.code(), refused.exit_code()), ("invalid_request", 3));
+    assert!(
+        refused
+            .to_string()
+            .starts_with("invalid project or record: project configuration"),
+        "{refused}"
+    );
+    assert!(!refused.to_string().contains("must sync"), "{refused}");
 }
 
 #[test]
@@ -657,19 +832,35 @@ fn project(workspace: bool) -> TempDir {
     directory
 }
 
+/// Hold the project's sync lock, as a running `arcl` command does, until the
+/// file drops.
+fn hold_sync_lock(root: &std::path::Path) -> fs::File {
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(root.join(".arcl/arcl.db-sync.lock"))
+        .expect("open the sync lock");
+    lock.lock().expect("hold the sync lock");
+    lock
+}
+
 async fn create_task(server: &ArclServer, title: &str, blocked_by: &[&str]) -> String {
     let created = server
-        .task_create(Parameters::from(TaskCreateInput {
-            title: title.to_owned(),
-            body: String::new(),
-            spec: None,
-            plan: None,
-            phase: None,
-            parent: None,
-            priority: TaskPriority::Normal,
-            position: 0,
-            blocked_by: blocked_by.iter().map(|id| (*id).to_owned()).collect(),
-        }))
+        .task_create(
+            Parameters::from(TaskCreateInput {
+                title: title.to_owned(),
+                body: String::new(),
+                spec: None,
+                plan: None,
+                phase: None,
+                parent: None,
+                priority: TaskPriority::Normal,
+                position: 0,
+                blocked_by: blocked_by.iter().map(|id| (*id).to_owned()).collect(),
+            }),
+            CancellationToken::new(),
+        )
         .await
         .unwrap_or_else(|error: ToolError| panic!("create {title}: {error}"))
         .0;
