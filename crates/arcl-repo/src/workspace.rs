@@ -15,7 +15,7 @@ pub mod sync;
 
 pub use codec::*;
 pub use export::{WorkspaceExportError, WorkspaceFile, export_graph, export_graph_with_base, project_graph};
-pub use import::{WorkspaceImportError, import_graph, import_workspace};
+pub use import::{ImportOutcome, WorkspaceImportError, import_graph, import_workspace};
 pub use reconcile::{Change, Comparison, RecordComparison, RecordState, compare};
 pub use status::{GitChange, RecordStatus, RecordStatusKind, WorkspaceStatus, WorkspaceStatusError, workspace_status};
 pub use sync::{Side, SyncOutcome, WorkspaceSyncError, resolve_workspace, sync_workspace, workspace_relative};

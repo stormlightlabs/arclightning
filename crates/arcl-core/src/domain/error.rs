@@ -41,8 +41,6 @@ pub enum DomainError {
     ParentCycle { task: String, parent: String },
     #[error("task `{task}` cannot depend on itself")]
     SelfDependency { task: String },
-    #[error("adding dependency from task `{task}` to blocker `{blocker}` would create a cycle")]
-    DependencyCycle { task: String, blocker: String },
     /// Blocker edges form a cycle; each task in `path` is blocked by the next.
     #[error("blocker edges would form a cycle: {}; each task is blocked by the next", .path.join(" -> "))]
     BlockerCycle { path: Vec<String> },

@@ -56,6 +56,17 @@ impl EdgeViolation {
         }
     }
 
+    /// Whether the parent chain of an ancestry violation steps from `child` up
+    /// to `parent`. A reparent that sets that link causes every violation that
+    /// crosses it; a violation that does not cross it existed before the move.
+    /// A cycle never crosses a parent link.
+    pub fn crosses_parent_link(&self, child: TaskId, parent: TaskId) -> bool {
+        match self {
+            Self::Cycle { .. } => false,
+            Self::Ancestry { chain, .. } => chain.windows(2).any(|pair| pair[0] == child && pair[1] == parent),
+        }
+    }
+
     /// Rotate a cycle so its path starts with `edge`. Ancestry violations, and
     /// cycles that do not contain `edge`, are returned unchanged.
     pub fn starting_at(self, edge: &TaskDependency) -> Self {
@@ -73,15 +84,22 @@ impl EdgeViolation {
         Self::Cycle { path: rotated }
     }
 
-    /// The domain error that reports this violation.
+    /// The domain error that reports this violation, naming tasks by ID.
     pub fn to_error(&self) -> DomainError {
+        self.to_error_with(|id| id.to_string())
+    }
+
+    /// The domain error that reports this violation, naming each task with
+    /// `name`. A plan uses it to name tasks it has yet to create by their
+    /// plan path, since their IDs exist only for the check.
+    pub fn to_error_with(&self, name: impl Fn(TaskId) -> String) -> DomainError {
         match self {
-            Self::Cycle { path } => DomainError::BlockerCycle { path: path.iter().map(ToString::to_string).collect() },
+            Self::Cycle { path } => DomainError::BlockerCycle { path: path.iter().map(|id| name(*id)).collect() },
             Self::Ancestry { edge, kinship, chain } => DomainError::BlockerAncestry {
-                task: edge.task_id.to_string(),
-                blocker: edge.blocker_id.to_string(),
+                task: name(edge.task_id),
+                blocker: name(edge.blocker_id),
                 kinship: kinship.as_str(),
-                chain: chain.iter().map(ToString::to_string).collect(),
+                chain: chain.iter().map(|id| name(*id)).collect(),
             },
         }
     }
@@ -143,6 +161,56 @@ pub fn validate_blocker_edges(parents: &HashMap<TaskId, TaskId>, edges: &[TaskDe
         }
     }
     violations
+}
+
+/// The first violation in a whole graph that a change causes.
+///
+/// `parents` and `edges` describe the graph after the change. The change
+/// causes a violation that involves one of `new_edges`, or whose parent chain
+/// crosses one of `new_parents`, the `(child, parent)` links the change sets.
+/// A cycle is rotated to start at the new edge. Any other violation was
+/// already in the graph and is left for reporting.
+pub fn caused_violation(
+    parents: &HashMap<TaskId, TaskId>, edges: &[TaskDependency], new_edges: &[TaskDependency],
+    new_parents: &[(TaskId, TaskId)],
+) -> Option<EdgeViolation> {
+    validate_blocker_edges(parents, edges)
+        .into_iter()
+        .find_map(|violation| caused_by(violation, new_edges, new_parents))
+}
+
+/// Split every violation in a whole graph into those a change causes and
+/// those already in the graph.
+///
+/// The arguments are as for [`caused_violation`]. The first list holds each
+/// caused violation, cycles rotated to start at their new edge; the second
+/// holds the rest, in the order [`validate_blocker_edges`] reports them.
+pub fn partition_violations(
+    parents: &HashMap<TaskId, TaskId>, edges: &[TaskDependency], new_edges: &[TaskDependency],
+    new_parents: &[(TaskId, TaskId)],
+) -> (Vec<EdgeViolation>, Vec<EdgeViolation>) {
+    let mut caused = Vec::new();
+    let mut existing = Vec::new();
+    for violation in validate_blocker_edges(parents, edges) {
+        match caused_by(violation.clone(), new_edges, new_parents) {
+            Some(violation) => caused.push(violation),
+            None => existing.push(violation),
+        }
+    }
+    (caused, existing)
+}
+
+/// `violation`, rotated to its new edge, when the change caused it.
+fn caused_by(
+    violation: EdgeViolation, new_edges: &[TaskDependency], new_parents: &[(TaskId, TaskId)],
+) -> Option<EdgeViolation> {
+    if let Some(edge) = new_edges.iter().find(|edge| violation.involves(edge)) {
+        return Some(violation.starting_at(edge));
+    }
+    new_parents
+        .iter()
+        .any(|(child, parent)| violation.crosses_parent_link(*child, *parent))
+        .then_some(violation)
 }
 
 /// The shortest path of blocker edges from `from` to `to`, both included.
@@ -242,6 +310,9 @@ mod tests {
                 "task `{leaf}` cannot be blocked by `{root}`, its ancestor; parent chain: {leaf} -> {middle} -> {root}"
             )
         );
+        assert!(violations[0].crosses_parent_link(middle, root));
+        assert!(violations[0].crosses_parent_link(leaf, middle));
+        assert!(!violations[0].crosses_parent_link(root, middle));
     }
 
     #[test]

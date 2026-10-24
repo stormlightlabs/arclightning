@@ -47,8 +47,8 @@ arcl task update arcl-t-02J... --parent arcl-t-01J...
 arcl task update arcl-t-02J... --no-parent
 ```
 
-Cycles and invalid cross-milestone relationships are rejected before rows
-change.
+Cycles, invalid cross-milestone relationships, and moves after which a task is
+blocked by its own ancestor or descendant are rejected before rows change.
 
 ## Move work through its lifecycle
 
