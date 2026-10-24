@@ -19,12 +19,17 @@ arcl next --plain
 arcl explain <task-id>
 ```
 
-`dependency add` and `task create --blocked-by` refuse a blocker edge that
-closes a cycle or joins a task to its own ancestor or descendant. The error
+`dependency add`, `task create --blocked-by`, and `plan apply` refuse a blocker
+edge that closes a cycle or joins a task to its own ancestor or descendant.
+`task update --parent` and `plan apply` also refuse a move after which a task
+in the moved subtree is blocked by a new ancestor, or blocks one. The error
 lists the task IDs along the cycle, or the parent chain from the descendant up
-to the ancestor, and nothing is written. A bad edge already stored elsewhere in
-the project does not block an unrelated new edge. `check` reports it, and
-`explain` gives it as a readiness reason for the task that holds it.
+to the ancestor, and nothing is written. Plan errors name tasks the plan would
+create by their plan path. A bad edge already stored elsewhere in the project
+does not block an unrelated write. `check` reports it, and `explain` gives it as
+a readiness reason for the task that holds it. `plan check` and `plan diff`
+report the same errors as `plan apply`. Workspace sync and import load bad edges
+the database already holds, with a warning.
 
 `ready` returns actionable leaf tasks in deterministic priority and position
 order. `next` returns the first result, or an empty result when no work is ready.

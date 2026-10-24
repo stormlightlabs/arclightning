@@ -27,12 +27,13 @@ With the workspace on, every command that reads or changes records syncs first,
 and every change is written to the workspace as soon as it is saved. Edit a
 record file, pull, or switch branches, and the next `arcl` command picks it up.
 
-If that first sync stops, a command that changes records refuses with the
-sync's status code and names the files, before it changes anything. A command
-that only reads records still runs, shows the database as it is, and prints a
-warning: one line of JSON on stderr under `--json`, and none under `--quiet`. If
-the export after a change fails, the change is saved and the next command writes
-it to the workspace.
+If that first sync stops, a command that changes records refuses with the sync's
+status code and names the files, before it changes anything. A command that only
+reads records still runs, shows the database as it is, and prints a warning.
+Under `--json`, a command's warnings go to stderr as one line of JSON whose
+`warnings` array holds a `code` and a `message` for each; `--quiet` prints none.
+If the export after a change fails, the change is saved and the next command
+writes it to the workspace.
 
 While the workspace is on, `arcl` commands in one project run one at a time. A
 command waits on the lock file `.arcl/arcl.db-sync.lock` until the one before it
@@ -46,10 +47,16 @@ arcl workspace sync
 
 Sync compares each file with the version stored at the last sync. A change made
 only in the database is written to the workspace. A change made only in the
-workspace is validated with the complete graph and imported. A file that both
-sides changed differently stops the sync with status code `4` and the paths
-involved, and nothing is written. A record written by another `arcl` command
-while sync runs also stops it with status code `4`; run sync again.
+workspace is validated with the complete graph and imported. Sync compares
+blocker edges and parent links with the database. When a workspace change adds
+one that closes a blocker cycle or ties a task to its own ancestor or
+descendant, sync stops with status code `3` and names the record and field. Two
+changes that are each valid can meet this way in a merge; edit that record to
+clear it. A bad edge the database already holds loads with a warning, code
+`blocker_edge` under `--json`. A file that both sides changed differently stops
+the sync with status code `4` and the paths involved, and nothing is written. A
+record written by another `arcl` command while sync runs also stops it with
+status code `4`; run sync again.
 
 Sync writes workspace files before it updates the database. If a sync or an
 export stops partway, the next sync finishes the work.
@@ -119,8 +126,13 @@ arcl workspace import
 ```
 
 Import reads every record and validates IDs, references, task ancestry, parent
-cycles, dependency cycles, and the complete relationship graph. Arc Lightning
-replaces the database only after the whole workspace passes validation.
+cycles, and the complete relationship graph. Like sync, it refuses a blocker
+edge or parent link new to the database that closes a cycle or joins a task to
+its own ancestor or descendant, and names the blocked task's record and the
+tasks involved. Bad edges the database already holds load with a warning, and so
+do all of them when the project has never synced or its database holds no
+records, as in a fresh clone. Arc Lightning replaces the database only after the
+whole workspace passes validation.
 
 For a fresh clone, initialize the local database first, then import the
 committed workspace:

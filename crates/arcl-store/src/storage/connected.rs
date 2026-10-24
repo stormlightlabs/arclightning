@@ -730,7 +730,7 @@ pub fn create_planning_task_with_dependencies(
         )?;
         new_edges.push(dependency);
     }
-    ensure_blocker_edges_valid(&tx, create.project_id, &new_edges)?;
+    ensure_blocker_edges_valid(&tx, create.project_id, &new_edges, &[])?;
     tx.commit()?;
     Ok(task)
 }
@@ -759,6 +759,7 @@ pub fn update_planning_task(
     }
     let tx = connection.transaction()?;
     let current = planning_task(&tx, id)?.ok_or_else(|| StorageError::PlanningTaskNotFound { id: id.to_string() })?;
+    let previous_parent = current.parent_id;
     let next = PlanningTask {
         id,
         project_id: current.project_id,
@@ -780,6 +781,9 @@ pub fn update_planning_task(
         "UPDATE planning_tasks SET spec_id = ?1, plan_id = ?2, phase_id = ?3, parent_id = ?4, title = ?5, body = ?6, priority = ?7, position = ?8 WHERE id = ?9",
         params![next.spec_id.map(|x| x.to_string()), next.plan_id.map(|x| x.to_string()), next.phase_id.map(|x| x.to_string()), next.parent_id.map(|x| x.to_string()), next.title, next.body, next.priority.as_str(), next.position, next.id.to_string()],
     )?;
+    if let Some(parent) = next.parent_id.filter(|parent| previous_parent != Some(*parent)) {
+        ensure_blocker_edges_valid(&tx, next.project_id, &[], &[(id, parent)])?;
+    }
     tx.commit()?;
     Ok(next)
 }
@@ -832,7 +836,7 @@ pub fn add_planning_dependency(
         "INSERT INTO planning_task_dependencies (project_id, task_id, blocker_id) VALUES (?1, ?2, ?3)",
         params![project_id.to_string(), task_id.to_string(), blocker_id.to_string()],
     )?;
-    ensure_blocker_edges_valid(&tx, project_id, &[dependency])?;
+    ensure_blocker_edges_valid(&tx, project_id, &[dependency], &[])?;
     tx.commit()?;
     Ok(dependency)
 }
@@ -1374,14 +1378,25 @@ fn ensure_phase(c: &Connection, p: ProjectId, id: PhaseId) -> Result<()> {
         StorageError::PhaseNotFound { id: id.to_string() },
     )
 }
-/// Refuse the first blocker rule violation that involves one of `new_edges`.
+/// Refuse the first blocker rule violation a write causes.
 ///
-/// The edges must already be written in `c`, so the validator sees the whole
-/// graph. A violation that involves none of them is left for reporting.
-fn ensure_blocker_edges_valid(c: &Connection, project_id: ProjectId, new_edges: &[TaskDependency]) -> Result<()> {
+/// The write must already be applied in `c`, so the validator sees the whole
+/// graph after it. See [`caused_violation`] for which violations count.
+fn ensure_blocker_edges_valid(
+    c: &Connection, project_id: ProjectId, new_edges: &[TaskDependency], new_parents: &[(TaskId, TaskId)],
+) -> Result<()> {
+    let parents = task_parents(c, project_id)?;
+    let edges = planning_dependencies(c, project_id)?;
+    match caused_violation(&parents, &edges, new_edges, new_parents) {
+        Some(violation) => Err(StorageError::InvalidPlanningDependency(violation.to_error())),
+        None => Ok(()),
+    }
+}
+/// Map each task in the project that has a parent to that parent.
+fn task_parents(c: &Connection, project_id: ProjectId) -> Result<HashMap<TaskId, TaskId>> {
     let mut statement =
         c.prepare("SELECT id, parent_id FROM planning_tasks WHERE project_id = ?1 AND parent_id IS NOT NULL")?;
-    let parents = statement
+    statement
         .query_map([project_id.to_string()], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?
@@ -1394,25 +1409,7 @@ fn ensure_blocker_edges_valid(c: &Connection, project_id: ProjectId, new_edges: 
             };
             Ok((parse(&task)?, parse(&parent)?))
         })
-        .collect::<Result<HashMap<_, _>>>()?;
-    // Listing the new edges first gives each one the shortest cycle through
-    // it, not a longer one that an earlier stored edge found.
-    let stored = planning_dependencies(c, project_id)?;
-    let edges: Vec<TaskDependency> = new_edges
-        .iter()
-        .copied()
-        .chain(stored.into_iter().filter(|edge| !new_edges.contains(edge)))
-        .collect();
-    let violation = validate_blocker_edges(&parents, &edges)
-        .into_iter()
-        .find_map(|violation| {
-            let edge = new_edges.iter().find(|edge| violation.involves(edge))?;
-            Some(violation.starting_at(edge))
-        });
-    match violation {
-        Some(violation) => Err(StorageError::InvalidPlanningDependency(violation.to_error())),
-        None => Ok(()),
-    }
+        .collect()
 }
 fn ensure_task(c: &Connection, p: ProjectId, id: TaskId) -> Result<()> {
     ensure_record(

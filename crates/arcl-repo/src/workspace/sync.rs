@@ -24,7 +24,7 @@ use arcl_store::{Database, StorageError, WorkspaceBaseFile};
 use super::{
     Change, RecordState, WorkspaceExportError, WorkspaceImportError, compare, decode_record,
     export::export_observed,
-    import::{read_candidate, reject_unmerged, validate_candidate},
+    import::{comparison_graph, read_candidate, reject_unmerged, validate_candidate},
     list_paths, project_graph,
 };
 use crate::vcs::Vcs;
@@ -131,6 +131,10 @@ pub struct SyncOutcome {
     /// `manifest.toml` is listed here too, after its canonical form is
     /// written back over the workspace copy.
     pub converged: Vec<PathBuf>,
+    /// One message for each blocker rule violation the merged graph holds
+    /// that the workspace changes did not introduce. Sync loads these and
+    /// refuses only the violations a workspace change causes.
+    pub warnings: Vec<String>,
 }
 
 impl SyncOutcome {
@@ -228,7 +232,8 @@ fn run_sync(
     reject_unmerged(root, vcs)?;
     let read = database.data_version()?;
     let base = database.workspace_base()?;
-    let database_files = project_graph(&database.connected_graph()?)?;
+    let before = database.connected_graph()?;
+    let database_files = project_graph(&before)?;
     let candidate = read_candidate(root)?;
     let comparison = compare(&base, &database_files, &candidate.files);
 
@@ -319,7 +324,14 @@ fn run_sync(
                 .map_err(|source| WorkspaceImportError::Record { path: path.clone(), source })?;
             records.insert(path.clone(), record);
         }
-        Some(validate_candidate(records, database.project()?, worktree_root)?)
+        let (graph, warnings) = validate_candidate(
+            records,
+            database.project()?,
+            worktree_root,
+            comparison_graph(&before, &base),
+        )?;
+        outcome.warnings = warnings;
+        Some(graph)
     };
     let files = match &graph {
         Some(graph) => project_graph(graph)?,
@@ -855,6 +867,59 @@ mod tests {
     }
 
     #[test]
+    fn a_synced_project_without_tasks_refuses_a_blocker_cycle_a_pull_adds() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        database
+            .create_capture("Capture".to_owned(), "Capture body".to_owned())
+            .expect("capture creates");
+        let root = tempfile::tempdir().expect("workspace creates");
+        fs::write(root.path().join("manifest.toml"), "format-version = 1\n").expect("manifest writes");
+        let mut project = Project { root, database };
+        project.sync().expect("first sync succeeds");
+        assert!(!project.database.workspace_base().expect("base loads").is_empty());
+
+        // A pull brings tasks A and B, each blocked by the other.
+        let mut other = Database::open_in_memory().expect("database opens");
+        let project_id = other.project().expect("project exists").id;
+        let create = |title: &str| arcl_store::PlanningTaskCreate {
+            project_id,
+            spec_id: None,
+            plan_id: None,
+            phase_id: None,
+            parent_id: None,
+            title: title.to_owned(),
+            body: String::new(),
+            priority: arcl_core::domain::TaskPriority::Normal,
+            position: 0,
+        };
+        let a = other.create_planning_task(create("A")).expect("task creates").id;
+        let b = other.create_planning_task(create("B")).expect("task creates").id;
+        let mut graph = other.connected_graph().expect("graph loads");
+        graph.dependencies = vec![
+            arcl_core::domain::TaskDependency::new(a, b).expect("edge"),
+            arcl_core::domain::TaskDependency::new(b, a).expect("edge"),
+        ];
+        fs::create_dir_all(project.root.path().join("tasks")).expect("tasks directory creates");
+        for file in project_graph(&graph).expect("projection succeeds") {
+            if file.path.starts_with("tasks") {
+                fs::write(project.root.path().join(&file.path), &file.content).expect("task writes");
+            }
+        }
+
+        let error = project.sync().expect_err("a new cycle refuses the sync");
+        assert!(error.to_string().contains("would form a cycle"), "{error}");
+        assert_eq!(error.exit_code(), 3);
+        assert!(
+            project
+                .database
+                .connected_graph()
+                .expect("graph loads")
+                .tasks
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn an_import_cut_off_after_the_file_writes_imports_on_the_next_sync() {
         let mut project = Project::synced();
         let spec = project.path_of("specs");
@@ -864,10 +929,12 @@ mod tests {
         // Run a sync's steps up to its file writes, then stop before the
         // database commits the merged graph and the new base.
         let candidate = read_candidate(project.root.path()).expect("workspace reads");
-        let graph = validate_candidate(
+        let before = project.database.connected_graph().expect("graph loads");
+        let (graph, _) = validate_candidate(
             candidate.records,
             project.database.project().expect("project loads"),
             project.root.path(),
+            Some(&before),
         )
         .expect("merged graph validates");
         let files = project_graph(&graph).expect("projection succeeds");

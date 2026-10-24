@@ -95,12 +95,12 @@ pub(super) fn workspace_roots() -> CResult<Option<WorkspaceRoots>> {
     }
 }
 
-/// Sync the database and the workspace once.
-pub(super) fn auto_sync(roots: &WorkspaceRoots) -> CResult<()> {
+/// Sync the database and the workspace once, and return the sync's warnings.
+pub(super) fn auto_sync(roots: &WorkspaceRoots) -> CResult<Vec<String>> {
     let mut database = open_database()?;
     let vcs = discover_vcs(&roots.worktree_root)?;
-    sync_workspace(&roots.workspace_root, &roots.worktree_root, &mut database, as_dyn(&vcs))?;
-    Ok(())
+    let outcome = sync_workspace(&roots.workspace_root, &roots.worktree_root, &mut database, as_dyn(&vcs))?;
+    Ok(outcome.warnings)
 }
 
 /// Take an exclusive lock on `.arcl/arcl.db-sync.lock` under `project_root`,
