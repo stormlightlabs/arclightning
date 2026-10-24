@@ -890,6 +890,33 @@ mod tests {
     }
 
     #[test]
+    fn invalid_self_loop_is_a_one_task_cycle_that_can_be_removed() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let a = task(&mut database, project.id, "a");
+        let other = task(&mut database, project.id, "other");
+        insert_raw_edge(&database, project.id, a.id, a.id);
+        let cycle = format!("blocker cycle: {0} -> {0}; each task is blocked by the next", a.id);
+
+        let report = database.check().expect("check runs");
+        assert!(!report.valid);
+        assert_eq!(report.errors, vec![cycle.clone()]);
+        let view = database.planning_task_view(a.id).expect("view reads");
+        assert!(!view.readiness.ready);
+        assert!(view.readiness.reasons.contains(&cycle), "{:?}", view.readiness.reasons);
+        let ready = database.ready_planning_tasks().expect("ready tasks query");
+        assert_eq!(ready.iter().map(|value| value.id).collect::<Vec<_>>(), vec![other.id]);
+
+        // Writes still refuse creating one, and removing it clears the report.
+        assert!(database.add_planning_dependency(other.id, other.id).is_err());
+        database
+            .remove_planning_dependency(a.id, a.id)
+            .expect("self-loop removes");
+        assert!(database.check().expect("check runs").valid);
+        assert!(database.planning_task_view(a.id).expect("view reads").readiness.ready);
+    }
+
+    #[test]
     fn invalid_edge_to_an_ancestor_is_reported_by_check_and_by_readiness() {
         let mut database = Database::open_in_memory().expect("database opens");
         let project = database.project().expect("project exists");

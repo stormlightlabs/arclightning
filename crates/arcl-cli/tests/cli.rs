@@ -1949,6 +1949,35 @@ fn invalid_edge_cycle_is_reported_by_check_and_explain() {
 }
 
 #[test]
+fn invalid_self_loop_is_reported_by_check_and_explain_and_removes() {
+    let directory = initialized_directory();
+    let path = directory.path();
+    let (a, other) = (create_task(path, "A", None), create_task(path, "Other", None));
+    insert_raw_edges(path, &[(&a, &a)]);
+    let cycle = format!("blocker cycle: {a} -> {a}; each task is blocked by the next");
+
+    assert_eq!(failed_check_errors(path), vec![cycle.clone()]);
+    let explained = readiness(path, &a);
+    assert_eq!(explained["ready"], false);
+    assert!(
+        explained["reasons"]
+            .as_array()
+            .expect("reason array")
+            .contains(&Value::from(cycle.as_str())),
+        "{explained}"
+    );
+    assert_eq!(ready_ids(path), vec![other]);
+    assert_eq!(dependency_pairs(path), vec![(a.clone(), a.clone())]);
+
+    run_json(
+        path,
+        ["--json", "dependency", "remove", &a, "--blocked-by", &a].as_ref(),
+    );
+    assert!(dependency_pairs(path).is_empty());
+    assert_eq!(readiness(path, &a)["ready"], true);
+}
+
+#[test]
 fn invalid_edge_to_an_ancestor_is_reported_by_check_and_explain() {
     let directory = initialized_directory();
     let path = directory.path();

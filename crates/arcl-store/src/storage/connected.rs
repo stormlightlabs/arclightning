@@ -784,7 +784,8 @@ pub fn update_planning_task(
     Ok(next)
 }
 
-/// Read all connected-model dependency edges.
+/// Read all connected-model dependency edges, including any that break the
+/// blocker rules, such as a task blocked by itself.
 pub fn planning_dependencies(connection: &Connection, project_id: ProjectId) -> Result<Vec<TaskDependency>> {
     let mut statement = connection.prepare(
         "SELECT task_id, blocker_id FROM planning_task_dependencies
@@ -801,7 +802,9 @@ pub fn planning_dependencies(connection: &Connection, project_id: ProjectId) -> 
         let blocker_id = TaskId::parse(&blocker)
             .map_err(DomainError::from)
             .map_err(StorageError::InvalidPlanningDependency)?;
-        TaskDependency::new(task_id, blocker_id).map_err(StorageError::InvalidPlanningDependency)
+        // A hand-edited database can hold a task blocked by itself. Read it as
+        // stored so `check` and readiness report it as a one-task cycle.
+        Ok(TaskDependency { task_id, blocker_id })
     })
     .collect()
 }
@@ -834,11 +837,12 @@ pub fn add_planning_dependency(
     Ok(dependency)
 }
 
-/// Remove a connected-model dependency.
+/// Remove a connected-model dependency. A stored self-dependency can be
+/// removed too, since removing never breaks the blocker rules.
 pub fn remove_planning_dependency(
     connection: &mut Connection, project_id: ProjectId, task_id: TaskId, blocker_id: TaskId,
 ) -> Result<TaskDependency> {
-    let dependency = TaskDependency::new(task_id, blocker_id).map_err(StorageError::InvalidPlanningDependency)?;
+    let dependency = TaskDependency { task_id, blocker_id };
     let tx = connection.transaction()?;
     ensure_task(&tx, project_id, task_id)?;
     ensure_task(&tx, project_id, blocker_id)?;
@@ -1391,7 +1395,14 @@ fn ensure_blocker_edges_valid(c: &Connection, project_id: ProjectId, new_edges: 
             Ok((parse(&task)?, parse(&parent)?))
         })
         .collect::<Result<HashMap<_, _>>>()?;
-    let edges = planning_dependencies(c, project_id)?;
+    // Listing the new edges first gives each one the shortest cycle through
+    // it, not a longer one that an earlier stored edge found.
+    let stored = planning_dependencies(c, project_id)?;
+    let edges: Vec<TaskDependency> = new_edges
+        .iter()
+        .copied()
+        .chain(stored.into_iter().filter(|edge| !new_edges.contains(edge)))
+        .collect();
     let violation = validate_blocker_edges(&parents, &edges)
         .into_iter()
         .find_map(|violation| {
@@ -1594,7 +1605,7 @@ mod tests {
         CapturePromotionInput, CapturePromotionRecord, CaptureTaskPromotion, Database, PlanningTaskCreate, StorageError,
     };
     use arcl_core::domain::{
-        ContainerAction, DomainError, LinkedRecordKind, ProjectId, ReleaseMemberKind, TaskPriority,
+        ContainerAction, DomainError, LinkedRecordKind, ProjectId, ReleaseMemberKind, TaskId, TaskPriority,
     };
     use arcl_core::plan::{PlanDocument, PlanPhase, PlanTask};
 
@@ -2138,6 +2149,47 @@ mod tests {
         };
         assert_eq!(path, [second.id, first.id, second.id].map(|id| id.to_string()));
         assert_eq!(database.planning_dependencies().expect("dependencies read").len(), 1);
+    }
+
+    #[test]
+    fn refused_edge_names_the_shortest_cycle_through_it() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let mut ids: Vec<TaskId> = (0..4)
+            .map(|position| {
+                database
+                    .create_planning_task(PlanningTaskCreate {
+                        project_id: project.id,
+                        spec_id: None,
+                        plan_id: None,
+                        phase_id: None,
+                        parent_id: None,
+                        title: format!("Task {position}"),
+                        body: String::new(),
+                        priority: TaskPriority::Normal,
+                        position,
+                    })
+                    .expect("task creates")
+                    .id
+            })
+            .collect();
+        ids.sort();
+        let (p, q, x, y) = (ids[0], ids[1], ids[2], ids[3]);
+        for (task, blocker) in [(p, q), (q, x), (y, p), (y, x)] {
+            database
+                .add_planning_dependency(task, blocker)
+                .expect("dependency creates");
+        }
+        // `x -> y` closes `x -> y -> x` and `p -> q -> x -> y -> p`. The
+        // stored edge `p -> q` comes first in ID order and its shortest cycle
+        // holds `x -> y`, but the refusal names the shortest one through it.
+        let error = database
+            .add_planning_dependency(x, y)
+            .expect_err("dependency cycle rejects");
+        let StorageError::InvalidPlanningDependency(DomainError::BlockerCycle { path }) = error else {
+            panic!("expected a blocker cycle, got {error:?}");
+        };
+        assert_eq!(path, [x, y, x].map(|id| id.to_string()));
     }
 
     #[test]

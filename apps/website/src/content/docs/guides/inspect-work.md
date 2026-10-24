@@ -93,7 +93,8 @@ A database can hold blocker edges that `dependency add` refuses, for example
 ones edited in by hand. `check` reports each one as an error:
 
 - A cycle, once, with the tasks along it, starting at the smallest task ID:
-  `blocker cycle: <a> -> <b> -> <a>; each task is blocked by the next`.
+  `blocker cycle: <a> -> <b> -> <a>; each task is blocked by the next`. A
+  task blocked by itself is a cycle of one task: `<a> -> <a>`.
 - An edge to the task's own ancestor or descendant, with the parent chain from
   the descendant up to the ancestor:
   ``task `<a>` is blocked by `<b>`, its ancestor; parent chain: <a> -> <b>``.
