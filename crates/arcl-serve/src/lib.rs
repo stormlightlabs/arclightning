@@ -18,9 +18,16 @@
 //! | `/api/ready`                | `arcl ready`             |
 //! | `/api/tasks/{id}/explain`   | `arcl explain <task-id>` |
 //! | `/api/tasks/{id}/context`   | `arcl context <task-id>` |
+//! | `/api/work`                 | none; see below          |
 //!
 //! `/api/records` and `/api/ready` take the CLI's filter flags as query
 //! parameters, such as `?kind=task&status=pending&status=parked`.
+//!
+//! `/api/work` answers the web app's Work list in one request: every task
+//! with the readiness `arcl explain` reports and its effective phase ID, and
+//! every phase, as `{"format_version": 2, "data": {"tasks": [{"task",
+//! "readiness", "phase_id"}], "phases": [...]}}`. It takes no query
+//! parameters.
 
 use std::io;
 use std::net::{Ipv4Addr, TcpListener};
@@ -72,6 +79,9 @@ enum Route {
     Explain(String),
     /// `arcl context <task-id>`.
     Context(String),
+    /// Every task with its readiness and phase, and every phase. Holds
+    /// whether the request carried query parameters, which it refuses.
+    Work { has_query: bool },
     /// An `/api` path with no endpoint.
     UnknownApi,
     /// A web app page. The app routes on the client, so every page is
@@ -266,6 +276,10 @@ impl Gate {
             Route::Ready(query) => Answer::json(reads.ready(&query)),
             Route::Explain(id) => Answer::json(reads.explain(&id)),
             Route::Context(id) => Answer::json(reads.context(&id)),
+            Route::Work { has_query: true } => {
+                Answer::json(Reply::invalid_request("`/api/work` takes no query parameters"))
+            }
+            Route::Work { has_query: false } => Answer::json(reads.work()),
             Route::UnknownApi => Answer::json(Reply::refusal(404, "not_found", "no endpoint has this path")),
             Route::Page => page(),
         }
@@ -338,6 +352,9 @@ pub trait Reads {
     fn explain(&self, task_id: &str) -> Reply;
     /// `arcl context <task-id>`.
     fn context(&self, task_id: &str) -> Reply;
+    /// Every task with its readiness and effective phase, and every phase,
+    /// for the Work list.
+    fn work(&self) -> Reply;
 }
 
 /// Generate a token from the operating system's random source.
@@ -412,6 +429,7 @@ fn route(path: &str, query: Vec<(String, String)>) -> Route {
         ["api", "ready"] => Route::Ready(query),
         ["api", "tasks", id, "explain"] if !id.is_empty() => Route::Explain((*id).to_owned()),
         ["api", "tasks", id, "context"] if !id.is_empty() => Route::Context((*id).to_owned()),
+        ["api", "work"] => Route::Work { has_query: !query.is_empty() },
         ["api", ..] => Route::UnknownApi,
         _ => Route::Page,
     }
@@ -452,6 +470,9 @@ mod tests {
         }
         fn context(&self, task_id: &str) -> Reply {
             Reply::failure(5, format!("context {task_id}"))
+        }
+        fn work(&self) -> Reply {
+            Reply::success("work".to_owned())
         }
     }
 
@@ -531,6 +552,17 @@ mod tests {
     }
 
     #[test]
+    fn serve_checks_the_host_and_token_on_the_work_endpoint() {
+        assert_eq!(gate().answer(&get("/api/work", None), &Echo).status, 401);
+        assert_eq!(gate().answer(&get("/api/work", Some("abc124")), &Echo).status, 401);
+        let wrong_host = Incoming { host: Some("evil.example:4321".to_owned()), ..get("/api/work", Some(TOKEN)) };
+        assert_eq!(gate().answer(&wrong_host, &Echo).status, 403);
+        let query_token = gate().answer(&get(&format!("/api/work?token={TOKEN}"), None), &Echo);
+        assert_eq!(query_token.status, 401);
+        assert_eq!(gate().answer(&get("/api/work", Some(TOKEN)), &Echo).status, 200);
+    }
+
+    #[test]
     fn serve_answers_only_get() {
         let incoming = Incoming { method: "POST".to_owned(), ..get("/api/records", Some(TOKEN)) };
         let answer = gate().answer(&incoming, &Echo);
@@ -577,6 +609,11 @@ mod tests {
             body("/api/tasks/arcl-t-1/context"),
             (404, "context arcl-t-1".to_owned())
         );
+        assert_eq!(body("/api/work"), (200, "work".to_owned()));
+        let (status, refused) = body("/api/work?status=pending");
+        assert_eq!(status, 400);
+        assert!(refused.contains("invalid_request"), "{refused}");
+        assert_eq!(body("/api/work/x").0, 404);
         assert_eq!(body("/api/nothing").0, 404);
         assert_eq!(body("/api/records/a%ZZ").0, 400);
     }

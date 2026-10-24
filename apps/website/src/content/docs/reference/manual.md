@@ -213,14 +213,29 @@ headers. The server runs until interrupted.
 | `GET /api/ready`              | `arcl ready`             |
 | `GET /api/tasks/<id>/explain` | `arcl explain <task-id>` |
 | `GET /api/tasks/<id>/context` | `arcl context <task-id>` |
+| `GET /api/work`               | none (see below)         |
 
 `/api/records` and `/api/ready` take the command's flags as query parameters,
-such as `?kind=task&status=pending&status=parked`. A failure returns the CLI's
+such as `?kind=task&status=pending&status=parked`. `/api/work` takes none and
+returns the Work list in one request: every task with the readiness
+`arcl explain` reports and its phase ID, inherited from an ancestor where the
+task has none, and every phase. Its envelope is
+`{"format_version": 2, "data": {"tasks": [{"task", "readiness", "phase_id"}], "phases": [...]}}`. A failure returns the CLI's
 error envelope with status 400 for exit codes 2 and 3, 404 for 5, 409 for 4,
 and 500 otherwise. The server reads the database without syncing the
 workspace, and a read never changes records; opening the database can still
 run its migrations. Any other `arcl` command syncs the workspace. Outside a
 project, `arcl serve` exits with code 3 before it binds.
+
+The Work view lists every task by milestone, then by status, in the order
+`arcl tree` gives: milestones by plan and position, and tasks by position,
+each followed by its subtasks. A glyph leads each row; for a pending or parked
+task, hover over it or focus the row to read why the task is not ready. `j` and `k` move the selection, and `Enter`
+opens the task. Filters narrow the list by status, priority, milestone and
+readiness: ready, blocked by an incomplete task, or waiting for another
+reason, such as open subtasks. The page URL keeps the filters. A task deleted
+while the list loads is left out; any other failed read shows an error with a
+Retry button.
 
 `arcl` embeds the web app from `apps/web/build` when it compiles. That build is
 not committed, so `cargo install --git` produces an `arcl` whose `serve` shows

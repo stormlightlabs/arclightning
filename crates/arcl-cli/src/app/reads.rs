@@ -45,3 +45,11 @@ pub(super) fn read_ready(filters: ReadyArgs, renderer: &Renderer) -> anyhow::Res
         .map_err(ApplicationError::from_command)?;
     Ok(renderer.render_planning_ready_tasks(&tasks)?)
 }
+
+/// Every task with its readiness and effective phase, and every phase, for
+/// the web app's Work list.
+pub(super) fn read_work(renderer: &Renderer) -> anyhow::Result<Option<String>> {
+    let database = open_database().map_err(ApplicationError::from_command)?;
+    let work = database.planning_work().map_err(ApplicationError::from_command)?;
+    Ok(renderer.render_planning_work(&work)?)
+}

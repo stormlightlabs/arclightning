@@ -41,6 +41,10 @@ impl Reads for ServeReads {
     fn context(&self, task_id: &str) -> Reply {
         reply(read_context(task_id, &self.renderer))
     }
+
+    fn work(&self) -> Reply {
+        reply(read_work(&self.renderer))
+    }
 }
 
 /// Bind the server, print its URL and serve until interrupted. The database

@@ -204,6 +204,29 @@ pub struct PlanningContext {
     pub completion_evidence: Vec<PlanningBlockerView>,
 }
 
+/// One task in the work list: the task, its readiness and its effective
+/// phase.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PlanningWorkItem {
+    /// The task.
+    pub task: PlanningTask,
+    /// The computed readiness result, as [`planning_task_view`] reports it.
+    pub readiness: PlanningReadiness,
+    /// The task's effective phase: its own, or its nearest ancestor's.
+    pub phase_id: Option<PhaseId>,
+}
+
+/// Every task with its readiness, and every phase, read in one pass.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PlanningWork {
+    /// Every task, ordered by position, then ID.
+    pub tasks: Vec<PlanningWorkItem>,
+    /// Every phase, ordered by plan, then position, then ID.
+    pub phases: Vec<Phase>,
+}
+
 /// The result of completing a connected-model task.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct PlanningCompletion {
@@ -311,6 +334,25 @@ pub fn planning_task_view(connection: &Connection, id: TaskId) -> Result<Plannin
         plan: ancestry_ids.plan_id.and_then(|value| data.plans.get(&value).cloned()),
         phase: ancestry_ids.phase_id.and_then(|value| data.phases.get(&value).cloned()),
     })
+}
+
+/// Read every task with its readiness and effective phase, and every phase,
+/// loading the project's planning records once.
+pub fn planning_work(connection: &Connection, project_id: ProjectId) -> Result<PlanningWork> {
+    let data = load_data(connection, project_id)?;
+    let mut tasks = Vec::with_capacity(data.tasks.len());
+    for task in data.tasks.values() {
+        let ancestry = effective_ancestry(&data, task.id, &mut HashSet::new())?;
+        let readiness = readiness(&data, task, &ancestry)?;
+        tasks.push(PlanningWorkItem { task: task.clone(), readiness, phase_id: ancestry.phase_id });
+    }
+    tasks.sort_by(|left, right| {
+        left.task
+            .position
+            .cmp(&right.task.position)
+            .then_with(|| left.task.id.cmp(&right.task.id))
+    });
+    Ok(PlanningWork { tasks, phases: phases(connection, project_id)? })
 }
 
 /// Build the bounded task context packet used by agents and execution adapters.
@@ -1352,6 +1394,64 @@ mod tests {
         assert!(!view.readiness.blocked);
         let ready = database.ready_planning_tasks().expect("ready tasks query");
         assert!(ready.iter().any(|value| value.id == leaf.id));
+    }
+
+    #[test]
+    fn work_matches_each_task_view_and_lists_every_phase() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let spec = database
+            .create_spec("Spec".to_owned(), "Spec body".to_owned(), "Acceptance".to_owned())
+            .expect("spec creates");
+        let plan = database
+            .create_plan(spec.id, "Plan".to_owned(), "Plan body".to_owned())
+            .expect("plan creates");
+        let phase = database
+            .create_phase(plan.id, "Phase".to_owned(), String::new(), 0)
+            .expect("phase creates");
+        let empty = database
+            .create_phase(plan.id, "Empty".to_owned(), String::new(), 1)
+            .expect("phase creates");
+        let parent = database
+            .create_planning_task(PlanningTaskCreate {
+                project_id: project.id,
+                spec_id: None,
+                plan_id: None,
+                phase_id: Some(phase.id),
+                parent_id: None,
+                title: "parent".to_owned(),
+                body: String::new(),
+                priority: TaskPriority::High,
+                position: 1,
+            })
+            .expect("phase task creates");
+        let leaf = child(&mut database, project.id, parent.id, "leaf");
+        let blocker = task(&mut database, project.id, "blocker");
+        database
+            .add_planning_dependency(leaf.id, blocker.id)
+            .expect("dependency creates");
+
+        let work = database.planning_work().expect("work reads");
+        let ids: Vec<TaskId> = work.tasks.iter().map(|item| item.task.id).collect();
+        let mut expected = vec![leaf.id, blocker.id];
+        expected.sort();
+        expected.push(parent.id);
+        assert_eq!(ids, expected, "ordered by position, then ID");
+        for item in &work.tasks {
+            let view = database.planning_task_view(item.task.id).expect("view reads");
+            assert_eq!(item.task, view.task);
+            assert_eq!(item.readiness, view.readiness);
+            assert_eq!(item.phase_id, view.phase.map(|phase| phase.id));
+        }
+        let leaf_item = work.tasks.iter().find(|item| item.task.id == leaf.id).expect("leaf");
+        assert_eq!(
+            leaf_item.phase_id,
+            Some(phase.id),
+            "the leaf inherits its parent's phase"
+        );
+        assert!(leaf_item.readiness.blocked);
+        let phases: Vec<PhaseId> = work.phases.iter().map(|phase| phase.id).collect();
+        assert_eq!(phases, vec![phase.id, empty.id]);
     }
 
     #[test]

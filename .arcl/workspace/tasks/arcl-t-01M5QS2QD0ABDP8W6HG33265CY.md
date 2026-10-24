@@ -2,10 +2,11 @@
 id = "arcl-t-01M5QS2QD0ABDP8W6HG33265CY"
 parent = "arcl-t-01M5NE5P6XHRR4Q84820YACQ07"
 title = "T18.2: Build the Work list"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 2
 blocked-by = ["arcl-t-01M5QS2Q9VBVA27RW5M3V30HKF"]
+evidence = "Delivered by #39: the Work list in apps/web, ordered like arcl tree; the data module in apps/web/src/lib/data; and TaskList, TaskGroupHeader, TaskRow, TaskGlyph and the SelectMenu filter control in packages/ui. Verified with pnpm --filter @arclightning/web check and test, the packages/ui unit and browser tests, a headless Chromium run against arcl serve on this repository, and the just check steps."
 +++
 
 Build the Work view: the list a person opens to pick the next task, laid out
@@ -21,15 +22,15 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] Work lists tasks grouped by milestone, then by status, in the CLI's
+- [x] Work lists tasks grouped by milestone, then by status, in the CLI's
       deterministic order
-- [ ] Each row shows a readiness glyph, with the reason on hover and focus
-- [ ] `j` and `k` move the selection, `enter` opens the task, and focus stays
+- [x] Each row shows a readiness glyph, with the reason on hover and focus
+- [x] `j` and `k` move the selection, `enter` opens the task, and focus stays
       visible
-- [ ] Filters narrow the list by status, readiness, priority and milestone,
+- [x] Filters narrow the list by status, readiness, priority and milestone,
       and the URL keeps them
-- [ ] An empty or filtered-out list says so with `EmptyState`
-- [ ] Views read records only through the data module, whose `arcl serve`
+- [x] An empty or filtered-out list says so with `EmptyState`
+- [x] Views read records only through the data module, whose `arcl serve`
       backend can be swapped for the artifact backend in T20
 
 Verification:
