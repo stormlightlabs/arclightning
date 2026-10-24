@@ -24,6 +24,7 @@ pub enum OpenSubtasks {
 /// The fixed set of conditions that keep a connected-model task from being
 /// ready. JSON writes each as a snake_case `kind`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ReadinessReasonKind {
     /// The task is not pending. Names the task.
@@ -67,6 +68,7 @@ pub struct PlanningReadyFilter {
 
 /// Every readiness condition that applies to a connected-model task.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PlanningReadiness {
     /// Whether the task is an actionable pending leaf with satisfied blockers.
     pub ready: bool,
@@ -88,6 +90,7 @@ impl PlanningReadiness {
 /// text and the IDs of the records it names. JSON omits the ID fields a kind
 /// does not use.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReadinessReason {
     /// Which condition this is.
     pub kind: ReadinessReasonKind,
@@ -129,6 +132,7 @@ impl std::fmt::Display for ReadinessReason {
 /// A connected-model blocker of a task or of one of its ancestors, with its
 /// completion evidence.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PlanningBlockerView {
     /// The blocking task.
     pub task: PlanningTask,
@@ -145,6 +149,7 @@ pub struct PlanningBlockerView {
 
 /// An enriched connected-model task view.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PlanningTaskView {
     /// The task being inspected.
     pub task: PlanningTask,
@@ -172,6 +177,7 @@ pub struct PlanningTaskView {
 
 /// The focused context packet for a connected-model task.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PlanningContext {
     /// The task, including its Markdown body, handoff, and evidence.
     pub task: PlanningTask,

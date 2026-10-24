@@ -189,55 +189,13 @@ impl CommandError {
             | Self::OpenDatabase { source: StorageError::Sqlite(_), .. }
             | Self::CurrentDirectory { .. }
             | Self::SyncLock { .. } => 1,
-            Self::OpenDatabase { source, .. } => source.storage_exit_code(),
-            Self::Storage(error) => error.storage_exit_code(),
+            Self::OpenDatabase { source, .. } => source.exit_code(),
+            Self::Storage(error) => error.exit_code(),
             Self::InvalidMarkdown { .. }
             | Self::InvalidStdin
             | Self::InvalidFilter { .. }
             | Self::Integrity { .. }
             | Self::StdinIsTerminal => 3,
-        }
-    }
-}
-
-trait StorageErrorExitCode {
-    fn storage_exit_code(&self) -> u8;
-}
-
-impl StorageErrorExitCode for StorageError {
-    fn storage_exit_code(&self) -> u8 {
-        match self {
-            StorageError::ProjectNotFound => 3,
-            StorageError::ReleaseNotFound { .. }
-            | StorageError::CaptureNotFound { .. }
-            | StorageError::SpecNotFound { .. }
-            | StorageError::PlanNotFound { .. }
-            | StorageError::PhaseNotFound { .. }
-            | StorageError::PlanningTaskNotFound { .. }
-            | StorageError::NoteNotFound { .. }
-            | StorageError::ReleaseMembershipNotFound { .. }
-            | StorageError::NoteLinkNotFound { .. }
-            | StorageError::RecordLinkNotFound { .. }
-            | StorageError::PlanningDependencyNotFound { .. } => 5,
-            StorageError::InvalidProject(_)
-            | StorageError::InvalidCapture(_)
-            | StorageError::InvalidSpec(_)
-            | StorageError::InvalidPlan(_)
-            | StorageError::InvalidPhase(_)
-            | StorageError::InvalidPlanningTask(_)
-            | StorageError::InvalidNote(_)
-            | StorageError::InvalidMembership(_)
-            | StorageError::InvalidLink(_)
-            | StorageError::InvalidPlanningDependency(_)
-            | StorageError::InvalidRelease(_)
-            | StorageError::CaptureNotPromotable { .. }
-            | StorageError::AmbiguousCapturePromotion { .. }
-            | StorageError::InconsistentCapturePromotion { .. }
-            | StorageError::InvalidPlanInput(_)
-            | StorageError::NewerDatabase { .. }
-            | StorageError::MigrationGap { .. } => 3,
-            StorageError::ChangedSinceRead => 4,
-            StorageError::Sqlite(_) => 1,
         }
     }
 }

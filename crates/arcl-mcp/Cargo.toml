@@ -1,0 +1,22 @@
+[package]
+name = "arcl-mcp"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "arcl-mcp"
+path = "src/main.rs"
+
+[dependencies]
+arcl-core = { path = "../arcl-core", features = ["schema"] }
+arcl-repo = { path = "../arcl-repo" }
+arcl-store = { path = "../arcl-store", features = ["schema"] }
+rmcp.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile = "3.23"

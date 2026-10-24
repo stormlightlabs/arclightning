@@ -100,6 +100,47 @@ pub enum StorageError {
     ChangedSinceRead,
 }
 
+impl StorageError {
+    /// Return the exit category adapters report for this failure: `3` for an
+    /// invalid project or request, `4` for a conflict, `5` for a missing
+    /// record, and `1` for any other failure.
+    pub const fn exit_code(&self) -> u8 {
+        match self {
+            Self::ProjectNotFound => 3,
+            Self::ReleaseNotFound { .. }
+            | Self::CaptureNotFound { .. }
+            | Self::SpecNotFound { .. }
+            | Self::PlanNotFound { .. }
+            | Self::PhaseNotFound { .. }
+            | Self::PlanningTaskNotFound { .. }
+            | Self::NoteNotFound { .. }
+            | Self::ReleaseMembershipNotFound { .. }
+            | Self::NoteLinkNotFound { .. }
+            | Self::RecordLinkNotFound { .. }
+            | Self::PlanningDependencyNotFound { .. } => 5,
+            Self::InvalidProject(_)
+            | Self::InvalidCapture(_)
+            | Self::InvalidSpec(_)
+            | Self::InvalidPlan(_)
+            | Self::InvalidPhase(_)
+            | Self::InvalidPlanningTask(_)
+            | Self::InvalidNote(_)
+            | Self::InvalidMembership(_)
+            | Self::InvalidLink(_)
+            | Self::InvalidPlanningDependency(_)
+            | Self::InvalidRelease(_)
+            | Self::CaptureNotPromotable { .. }
+            | Self::AmbiguousCapturePromotion { .. }
+            | Self::InconsistentCapturePromotion { .. }
+            | Self::InvalidPlanInput(_)
+            | Self::NewerDatabase { .. }
+            | Self::MigrationGap { .. } => 3,
+            Self::ChangedSinceRead => 4,
+            Self::Sqlite(_) => 1,
+        }
+    }
+}
+
 /// The database's data version as one connection observed it.
 ///
 /// Read it with [`Database::data_version`] before reading the state a later

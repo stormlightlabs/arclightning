@@ -6,6 +6,7 @@ use super::error::{DomainError, invalid_transition};
 
 /// The lifecycle of a task or subtask.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
     Pending,
@@ -83,6 +84,7 @@ impl TaskAction {
 
 /// The lifecycle of a release, epic, or milestone.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ContainerStatus {
     Open,
@@ -140,6 +142,7 @@ impl ContainerAction {
 
 /// The stable task-priority ordering used by ready-work queries.
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum TaskPriority {
     Critical,

@@ -11,6 +11,7 @@ use super::{
 /// therefore be project-level, attached to a spec, attached to a plan, inside
 /// a phase, or nested below another task.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PlanningTask {
     pub id: TaskId,
     pub project_id: ProjectId,
