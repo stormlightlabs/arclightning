@@ -84,6 +84,44 @@ impl DependencyMutation {
     }
 }
 
+/// Whether a `skill install` report comes from an install or a `--check`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillAction {
+    /// `skill install` wrote missing and changed files.
+    Installed,
+    /// `skill install --check` compared the files and wrote nothing.
+    Checked,
+}
+
+/// What `skill install` did, or with `--check` found, for one skill file.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillFileStatus {
+    /// The file was missing and was written.
+    Created,
+    /// The file differed and was overwritten.
+    Updated,
+    /// The file already matched.
+    Unchanged,
+    /// `--check` found the file missing.
+    Missing,
+    /// `--check` found the file different.
+    Changed,
+}
+
+impl SkillFileStatus {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Updated => "updated",
+            Self::Unchanged => "unchanged",
+            Self::Missing => "missing",
+            Self::Changed => "changed",
+        }
+    }
+}
+
 /// Output failures that can occur before the application boundary adds context.
 #[derive(Debug, Error)]
 pub enum OutputError {
@@ -697,6 +735,47 @@ impl Renderer {
         Ok(Some(self.style(message)))
     }
 
+    /// Render a `skill install` report. Human output lists only the files
+    /// that are not unchanged; plain output lists every file as
+    /// `<status>\t<path>`.
+    pub fn render_skill(&self, report: &SkillReport) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human => {
+                let changed = report
+                    .files
+                    .iter()
+                    .filter(|file| file.status != SkillFileStatus::Unchanged)
+                    .collect::<Vec<_>>();
+                let root = &report.root;
+                let heading = match (report.action, changed.is_empty()) {
+                    (SkillAction::Checked, true) => format!("The Arc Lightning skill in `{root}` matches this arcl."),
+                    (SkillAction::Checked, false) => {
+                        format!("The Arc Lightning skill in `{root}` differs from this arcl:")
+                    }
+                    (SkillAction::Installed, true) => format!("The Arc Lightning skill in `{root}` is up to date."),
+                    (SkillAction::Installed, false) => format!("Installed the Arc Lightning skill in `{root}`:"),
+                };
+                std::iter::once(heading)
+                    .chain(
+                        changed
+                            .iter()
+                            .map(|file| format!("  {} {}", file.status.as_str(), file.path)),
+                    )
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+            OutputMode::Plain => report
+                .files
+                .iter()
+                .map(|file| format!("{}\t{}", file.status.as_str(), plain_escape(&file.path)))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            OutputMode::Json => serde_json::to_string(&Envelope { format_version: FORMAT_VERSION, data: report })?,
+            OutputMode::Quiet => return Ok(None),
+        };
+        Ok(Some(self.style(message)))
+    }
+
     /// Render a workspace status report.
     pub fn render_workspace_status(&self, status: &WorkspaceStatus) -> Result<Option<String>, OutputError> {
         let message = match self.mode {
@@ -759,6 +838,26 @@ struct ReleaseMutationData<'a> {
 struct DependencyMutationData<'a> {
     action: &'static str,
     dependency: &'a TaskDependency,
+}
+
+/// One skill file in a [`SkillReport`].
+#[derive(Clone, Debug, Serialize)]
+pub struct SkillFile {
+    /// The path relative to the project root, with `/` separators.
+    pub path: String,
+    /// What the install did to the file, or what `--check` found.
+    pub status: SkillFileStatus,
+}
+
+/// The result of `skill install`, with or without `--check`.
+#[derive(Clone, Debug, Serialize)]
+pub struct SkillReport {
+    /// `installed`, or `checked` under `--check`.
+    pub action: SkillAction,
+    /// The project root the paths are relative to.
+    pub root: String,
+    /// One entry per agent directory and skill file, in install order.
+    pub files: Vec<SkillFile>,
 }
 
 /// A compact connected-record summary used by human and plain list output.

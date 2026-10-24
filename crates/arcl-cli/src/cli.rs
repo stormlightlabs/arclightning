@@ -75,6 +75,11 @@ pub enum Command {
         #[command(subcommand)]
         command: NoteCommand,
     },
+    /// Install the Arc Lightning agent skill into the project.
+    Skill {
+        #[command(subcommand)]
+        command: SkillCommand,
+    },
     /// Inspect one record selected by its typed ID prefix.
     Show {
         /// The record identifier.
@@ -698,6 +703,19 @@ pub enum NoteLinkCommand {
     List {
         /// The note ID to list.
         note_id: String,
+    },
+}
+
+/// Agent skill commands.
+#[derive(Clone, Debug, Subcommand)]
+pub enum SkillCommand {
+    /// Write the skill into `.claude/skills/arclightning/` and
+    /// `.agents/skills/arclightning/`, leaving identical files unchanged.
+    Install {
+        /// Write nothing; report each missing or changed file and exit with
+        /// status 4 when any differs.
+        #[arg(long)]
+        check: bool,
     },
 }
 

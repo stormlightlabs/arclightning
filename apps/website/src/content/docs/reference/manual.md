@@ -34,6 +34,35 @@ The command creates `.arcl/config.toml`, `.arcl/arcl.db`, and a scoped
 `.arcl/.gitignore`. It rejects directories outside Git worktrees and bare
 repositories. Re-running initialization preserves existing project state.
 
+### `arcl skill install`
+
+Install the Arc Lightning agent skill into the project.
+
+```sh
+arcl skill install
+arcl skill install --check
+```
+
+The command writes the skill into `.claude/skills/arclightning/` and
+`.agents/skills/arclightning/` under the project root, and leaves identical
+files unchanged. The files are built into `arcl` from the repository's
+`skills/arclightning/` directory, so the installed skill matches the binary
+that wrote it.
+
+`--check` writes nothing. It reports each file as `unchanged`, `missing`, or
+`changed`, and exits with status code `4` when any file is missing or changed.
+Without `--check`, each file is `created`, `updated`, or `unchanged`. `--plain`
+prints `<status>\t<path>` per file, and `--json` prints `action` (`installed`
+or `checked`), `root`, and a `files` array of `path` and `status`.
+
+The command checks every target before it writes any file, and replaces a file
+by writing a temporary file beside it and renaming it. It exits with status
+code `3` and writes nothing when a skill file is a symbolic link or not a
+regular file, a skill directory is not a directory, or a path resolves outside
+the project root. A linked directory, such as `.agents/skills` pointing at
+`../.claude/skills`, is followed: the file is written once and its second path
+is reported as `unchanged`.
+
 ## Workspace
 
 | Command                                          | Purpose                                                         |
@@ -211,11 +240,11 @@ for automation that needs stable field names rather than human prose.
 
 The CLI uses these status categories/codes:
 
-| Code | Meaning                                                      |
-| ---- | ------------------------------------------------------------ |
-| `0`  | Success.                                                     |
-| `1`  | Runtime, filesystem, Git operation, or SQLite failure.       |
-| `2`  | Command-line parsing failure reported by `clap`.             |
-| `3`  | Invalid project, record, input, or lifecycle transition.     |
-| `4`  | Reserved for workspace or concurrent-modification conflicts. |
-| `5`  | Requested record was not found.                              |
+| Code | Meaning                                                        |
+| ---- | -------------------------------------------------------------- |
+| `0`  | Success.                                                       |
+| `1`  | Runtime, filesystem, Git operation, or SQLite failure.         |
+| `2`  | Command-line parsing failure reported by `clap`.               |
+| `3`  | Invalid project, record, input, or lifecycle transition.       |
+| `4`  | Workspace or concurrent-modification conflict, or skill drift. |
+| `5`  | Requested record was not found.                                |
