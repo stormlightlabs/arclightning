@@ -3068,3 +3068,47 @@ fn reason_kind_invalid_edge_names_the_edge_and_parent_chain() {
         })
     );
 }
+
+#[test]
+fn json_only_chain_picks_work_reads_reasons_and_starts_what_completion_unblocked() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let blocker = create_task(dir, "Blocker", None);
+    let dependent = create_task(dir, "Dependent", None);
+    block_start_task(dir, &dependent, &blocker);
+
+    assert_eq!(run_json(dir, ["--json", "ready"].as_ref())["format_version"], 1);
+    let picked = ready_ids(dir);
+    assert_eq!(picked, std::slice::from_ref(&blocker));
+
+    let explained = run_json(dir, ["--json", "explain", &dependent].as_ref());
+    assert_eq!(explained["format_version"], 2);
+    assert_eq!(explained["data"]["readiness"]["ready"], false);
+    let reasons = explained["data"]["readiness"]["reasons"].as_array().expect("reasons");
+    assert_eq!(reasons.len(), 1);
+    assert_eq!(reasons[0]["kind"], "direct_blocker");
+    assert_eq!(reasons[0]["blocker"], blocker.as_str());
+
+    let refused = refused(dir, ["--json", "task", "start", &dependent].as_ref());
+    assert_eq!(refused["format_version"], 1);
+    assert_eq!(refused["error"]["code"], "invalid_request");
+
+    let started = run_json(dir, ["--json", "task", "start", &picked[0]].as_ref());
+    assert_eq!(started["format_version"], 1);
+    assert_eq!(started["data"]["task"]["status"], "in_progress");
+
+    let completed = run_json(dir, ["--json", "task", "complete", &picked[0]].as_ref());
+    assert_eq!(completed["format_version"], 2);
+    assert_eq!(completed["data"]["completed_subtasks"], serde_json::json!([]));
+    let unblocked = completed["data"]["unblocked"].as_array().expect("unblocked");
+    assert_eq!(*unblocked, [serde_json::json!(dependent)]);
+
+    let next = unblocked[0].as_str().expect("unblocked ID");
+    let started = run_json(dir, ["--json", "task", "start", next].as_ref());
+    assert_eq!(started["data"]["task"]["status"], "in_progress");
+
+    let context = run_json(dir, ["--json", "context", next].as_ref());
+    assert_eq!(context["format_version"], 2);
+    assert_eq!(context["data"]["readiness"]["reasons"][0]["kind"], "status");
+    assert_eq!(context["data"]["readiness"]["reasons"][0]["task"], next);
+}

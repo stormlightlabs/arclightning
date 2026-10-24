@@ -15,6 +15,14 @@ use arcl_store::{CheckReport, PlanApplyResult, PlanDiff, PlanningCompletion, Pla
 /// The heading for files with lines that look like conflict markers.
 const MARKER_LABEL: &str = "Lines that look like conflict markers (sync accepts them as content):";
 
+/// The JSON `format_version` of every envelope whose shape has not changed.
+const FORMAT_VERSION: u8 = 1;
+
+/// The JSON `format_version` of the task view (`show`, `explain`), context
+/// and `task complete` envelopes. Version 2 made readiness reasons typed
+/// objects and added `completed_subtasks` and `unblocked` to completion.
+const READINESS_FORMAT_VERSION: u8 = 2;
+
 /// The output format for a command result.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OutputMode {
@@ -101,7 +109,7 @@ impl Renderer {
             OutputMode::Human => self.msg(),
             OutputMode::Plain => "ready".to_owned(),
             OutputMode::Json => serde_json::to_string(&Envelope {
-                format_version: 1,
+                format_version: FORMAT_VERSION,
                 data: StartupData { status: "ready", message: "Arc Lightning foundation ready" },
             })?,
             OutputMode::Quiet => return Ok(None),
@@ -120,7 +128,7 @@ impl Renderer {
             }
             OutputMode::Plain => format!("initialized\t{root}"),
             OutputMode::Json => serde_json::to_string(&Envelope {
-                format_version: 1,
+                format_version: FORMAT_VERSION,
                 data: InitData { status: "initialized", root: root.as_ref(), workspace_enabled },
             })?,
             OutputMode::Quiet => return Ok(None),
@@ -255,7 +263,7 @@ impl Renderer {
                 .collect::<Vec<_>>()
                 .join("\n"),
             OutputMode::Json => serde_json::to_string(&Envelope {
-                format_version: 1,
+                format_version: READINESS_FORMAT_VERSION,
                 data: CompletionData {
                     action: "completed",
                     task,
@@ -328,7 +336,9 @@ impl Renderer {
         let message = match self.mode {
             OutputMode::Human => view.human(),
             OutputMode::Plain => view.plain(),
-            OutputMode::Json => serde_json::to_string(&Envelope { format_version: 1, data: view })?,
+            OutputMode::Json => {
+                serde_json::to_string(&Envelope { format_version: READINESS_FORMAT_VERSION, data: view })?
+            }
             OutputMode::Quiet => return Ok(None),
         };
         Ok(Some(self.style(message)))
@@ -339,7 +349,9 @@ impl Renderer {
         let message = match self.mode {
             OutputMode::Human => context.human(),
             OutputMode::Plain => context.plain(),
-            OutputMode::Json => serde_json::to_string(&Envelope { format_version: 1, data: context })?,
+            OutputMode::Json => {
+                serde_json::to_string(&Envelope { format_version: READINESS_FORMAT_VERSION, data: context })?
+            }
             OutputMode::Quiet => return Ok(None),
         };
         Ok(Some(self.style(message)))
@@ -365,7 +377,7 @@ impl Renderer {
                 .collect::<Vec<_>>()
                 .join("\n"),
             OutputMode::Json => {
-                serde_json::to_string(&Envelope { format_version: 1, data: ReadyPlanningData { tasks } })?
+                serde_json::to_string(&Envelope { format_version: FORMAT_VERSION, data: ReadyPlanningData { tasks } })?
             }
             OutputMode::Quiet => return Ok(None),
         };
@@ -381,7 +393,7 @@ impl Renderer {
             OutputMode::Human => task.map_or_else(|| "No ready work.".to_owned(), PlanningTask::human_line),
             OutputMode::Plain => task.map(|task| task.id.to_string()).unwrap_or_default(),
             OutputMode::Json => {
-                serde_json::to_string(&Envelope { format_version: 1, data: NextPlanningData { task } })?
+                serde_json::to_string(&Envelope { format_version: FORMAT_VERSION, data: NextPlanningData { task } })?
             }
             OutputMode::Quiet => return Ok(None),
         };
@@ -396,7 +408,7 @@ impl Renderer {
         let message = match self.mode {
             OutputMode::Human => diff.human(),
             OutputMode::Plain => diff.plain(),
-            OutputMode::Json => serde_json::to_string(&Envelope { format_version: 1, data: diff })?,
+            OutputMode::Json => serde_json::to_string(&Envelope { format_version: FORMAT_VERSION, data: diff })?,
             OutputMode::Quiet => return Ok(None),
         };
         Ok(Some(self.style(message)))
@@ -412,7 +424,7 @@ impl Renderer {
                 result.tasks.len()
             ),
             OutputMode::Plain => result.plan.id.to_string(),
-            OutputMode::Json => serde_json::to_string(&Envelope { format_version: 1, data: result })?,
+            OutputMode::Json => serde_json::to_string(&Envelope { format_version: FORMAT_VERSION, data: result })?,
             OutputMode::Quiet => return Ok(None),
         };
         Ok(Some(self.style(message)))
@@ -432,7 +444,9 @@ impl Renderer {
                 .flat_map(|node| node.plain_lines(0))
                 .collect::<Vec<_>>()
                 .join("\n"),
-            OutputMode::Json => serde_json::to_string(&Envelope { format_version: 1, data: TreeNodesData { nodes } })?,
+            OutputMode::Json => {
+                serde_json::to_string(&Envelope { format_version: FORMAT_VERSION, data: TreeNodesData { nodes } })?
+            }
             OutputMode::Quiet => return Ok(None),
         };
         Ok(Some(self.style(message)))
@@ -458,7 +472,7 @@ impl Renderer {
                 detail.phases.len(),
                 detail.tasks.len()
             ),
-            OutputMode::Json => serde_json::to_string(&Envelope { format_version: 1, data: detail })?,
+            OutputMode::Json => serde_json::to_string(&Envelope { format_version: FORMAT_VERSION, data: detail })?,
             OutputMode::Quiet => return Ok(None),
         };
         Ok(Some(self.style(message)))
@@ -495,7 +509,10 @@ impl Renderer {
                 let mut data = serde_json::Map::new();
                 data.insert("action".to_owned(), serde_json::Value::String(action.to_owned()));
                 data.insert(key.to_owned(), serde_json::to_value(relationship)?);
-                serde_json::to_string(&Envelope { format_version: 1, data: serde_json::Value::Object(data) })?
+                serde_json::to_string(&Envelope {
+                    format_version: FORMAT_VERSION,
+                    data: serde_json::Value::Object(data),
+                })?
             }
             OutputMode::Quiet => return Ok(None),
         };
@@ -528,7 +545,10 @@ impl Renderer {
                     arcl_store::CapturePromotionRecord::Note(record) => ("note", serde_json::to_value(record)?),
                 };
                 data.insert(kind.to_owned(), record);
-                serde_json::to_string(&Envelope { format_version: 1, data: serde_json::Value::Object(data) })?
+                serde_json::to_string(&Envelope {
+                    format_version: FORMAT_VERSION,
+                    data: serde_json::Value::Object(data),
+                })?
             }
             OutputMode::Quiet => return Ok(None),
         };
@@ -551,7 +571,10 @@ impl Renderer {
             OutputMode::Json => {
                 let mut data = serde_json::Map::new();
                 data.insert(key.to_owned(), serde_json::to_value(relationships)?);
-                serde_json::to_string(&Envelope { format_version: 1, data: serde_json::Value::Object(data) })?
+                serde_json::to_string(&Envelope {
+                    format_version: FORMAT_VERSION,
+                    data: serde_json::Value::Object(data),
+                })?
             }
             OutputMode::Quiet => return Ok(None),
         };
@@ -568,7 +591,10 @@ impl Renderer {
                 let mut data = serde_json::Map::new();
                 data.insert("action".to_owned(), serde_json::Value::String(action.to_owned()));
                 data.insert(kind.to_owned(), serde_json::to_value(record)?);
-                serde_json::to_string(&Envelope { format_version: 1, data: serde_json::Value::Object(data) })?
+                serde_json::to_string(&Envelope {
+                    format_version: FORMAT_VERSION,
+                    data: serde_json::Value::Object(data),
+                })?
             }
             OutputMode::Quiet => return Ok(None),
         };
@@ -598,7 +624,10 @@ impl Renderer {
             OutputMode::Json => {
                 let mut data = serde_json::Map::new();
                 data.insert(key.to_owned(), serde_json::to_value(records)?);
-                serde_json::to_string(&Envelope { format_version: 1, data: serde_json::Value::Object(data) })?
+                serde_json::to_string(&Envelope {
+                    format_version: FORMAT_VERSION,
+                    data: serde_json::Value::Object(data),
+                })?
             }
             OutputMode::Quiet => return Ok(None),
         };
@@ -612,7 +641,7 @@ impl Renderer {
             OutputMode::Human => format!("{} release `{id}`: {}", mutation.human_verb(), release.title),
             OutputMode::Plain | OutputMode::Quiet => id,
             OutputMode::Json => serde_json::to_string(&Envelope {
-                format_version: 1,
+                format_version: FORMAT_VERSION,
                 data: ReleaseMutationData { action: mutation.as_str(), release },
             })?,
         };
@@ -639,7 +668,7 @@ impl Renderer {
             ),
             OutputMode::Plain => dependency.task_id.to_string(),
             OutputMode::Json => serde_json::to_string(&Envelope {
-                format_version: 1,
+                format_version: FORMAT_VERSION,
                 data: DependencyMutationData { action: mutation.as_str(), dependency },
             })?,
             OutputMode::Quiet => return Ok(None),
@@ -662,7 +691,7 @@ impl Renderer {
                 .map(|error| format!("error\t{}", plain_escape(error)))
                 .collect::<Vec<_>>()
                 .join("\n"),
-            OutputMode::Json => serde_json::to_string(&Envelope { format_version: 1, data: report })?,
+            OutputMode::Json => serde_json::to_string(&Envelope { format_version: FORMAT_VERSION, data: report })?,
             OutputMode::Quiet => return Ok(None),
         };
         Ok(Some(self.style(message)))
@@ -673,7 +702,7 @@ impl Renderer {
         let message = match self.mode {
             OutputMode::Human => human_workspace_status(status),
             OutputMode::Plain => plain_workspace_status(status),
-            OutputMode::Json => serde_json::to_string(&Envelope { format_version: 1, data: status })?,
+            OutputMode::Json => serde_json::to_string(&Envelope { format_version: FORMAT_VERSION, data: status })?,
             OutputMode::Quiet => return Ok(None),
         };
         Ok(Some(self.style(message)))
@@ -1295,6 +1324,39 @@ mod tests {
 
         assert_eq!(rendered, "ready");
         assert!(!rendered.contains('\u{1b}'));
+    }
+
+    fn json_version(rendered: Option<String>) -> serde_json::Value {
+        let rendered = rendered.expect("JSON output is not quiet");
+        serde_json::from_str::<serde_json::Value>(&rendered).expect("JSON parses")["format_version"].clone()
+    }
+
+    #[test]
+    fn completion_json_uses_the_readiness_version_and_ready_keeps_the_first() {
+        let renderer = Renderer::new(OutputMode::Json, ColorChoice::Never);
+        let task = PlanningTask::new(
+            arcl_core::domain::ProjectId::new(),
+            None,
+            None,
+            None,
+            None,
+            "Task".to_owned(),
+            String::new(),
+            arcl_core::domain::TaskPriority::Normal,
+            0,
+        )
+        .expect("task is valid");
+        let completion =
+            PlanningCompletion { task: task.clone(), completed_subtasks: Vec::new(), unblocked: Vec::new() };
+
+        assert_eq!(
+            json_version(renderer.render_planning_completion(&completion).expect("renders")),
+            2
+        );
+        assert_eq!(
+            json_version(renderer.render_planning_ready_tasks(&[task]).expect("renders")),
+            1
+        );
     }
 
     #[test]

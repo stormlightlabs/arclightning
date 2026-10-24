@@ -2,10 +2,11 @@
 id = "arcl-t-01M5NJTQYC0CDMV0YS4JY7Z6KX"
 parent = "arcl-t-01M5NE5P2N1AMT731RJBAZ66YT"
 title = "T17.3: Version and document the readiness JSON shapes"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 3
 blocked-by = ["arcl-t-01M5NJTQSVWEDN7GN2GB7TXBW5", "arcl-t-01M5NJTQWCZTH6DWQ3F9VDVX4Z"]
+evidence = "Delivered on branch `claude/t17-3-version-docs`: the task view (`show`, `task show`, `explain`, `task explain`), context (`context`, `task context`) and `task complete` envelopes write `format_version: 2`; every other envelope, failures and warnings keep 1. The automation guide and manual list each reason `kind` with its ID fields, `completed_subtasks`, `unblocked`, the start refusal error, and the version per command. Tests: `output::tests` and `cli json_only_chain_picks_work_reads_reasons_and_starts_what_completion_unblocked`. Gates: cargo fmt --check, clippy -D warnings, cargo test --workspace, pnpm check, pnpm test, arcl check."
 +++
 
 Version the JSON shapes T17.1 and T17.2 changed and document them for the MCP
