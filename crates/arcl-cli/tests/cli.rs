@@ -3280,6 +3280,18 @@ fn serve_refuses_requests_without_the_host_and_token() {
     assert_eq!(served.get("/", &[served.host(), token]).0, 200);
 }
 
+#[test]
+fn serve_outside_a_project_fails_before_binding() {
+    let directory = tempdir().expect("temporary directory can be created");
+    let output = arcl_in(directory.path())
+        .args(["--plain", "serve"])
+        .timeout(std::time::Duration::from_secs(30))
+        .output()
+        .expect("arcl serve runs");
+    assert_eq!(output.status.code(), Some(3));
+    assert!(output.stdout.is_empty(), "serve printed a URL outside a project");
+}
+
 /// The skill paths `arcl skill install` writes, relative to the project root.
 const SKILL_PATHS: [&str; 2] = [
     ".claude/skills/arclightning/SKILL.md",

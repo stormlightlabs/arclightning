@@ -13,9 +13,14 @@ fn main() -> io::Result<()> {
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));
     let web = manifest.join("../../apps/web");
     let index = web.join("build/index.html");
-    println!("cargo::rerun-if-changed={}", index.display());
-    // Rerun once `vite build` creates the file.
-    println!("cargo::rerun-if-changed={}", web.join("build").display());
+    // Cargo reruns the script on every build while a watched path is
+    // missing, so watch the nearest path that exists. A directory's mtime
+    // changes when `vite build` creates the entry below it.
+    let watched = [index.clone(), web.join("build"), web.clone()]
+        .into_iter()
+        .find(|path| path.exists())
+        .unwrap_or_else(|| manifest.join("build.rs"));
+    println!("cargo::rerun-if-changed={}", watched.display());
 
     let value = if index.is_file() {
         format!(

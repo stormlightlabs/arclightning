@@ -218,7 +218,15 @@ headers. The server runs until interrupted.
 such as `?kind=task&status=pending&status=parked`. A failure returns the CLI's
 error envelope with status 400 for exit codes 2 and 3, 404 for 5, 409 for 4,
 and 500 otherwise. The server reads the database without syncing the
-workspace, so a GET never writes; any other `arcl` command syncs it.
+workspace, and a read never changes records; opening the database can still
+run its migrations. Any other `arcl` command syncs the workspace. Outside a
+project, `arcl serve` exits with code 3 before it binds.
+
+`arcl` embeds the web app from `apps/web/build` when it compiles. That build is
+not committed, so `cargo install --git` produces an `arcl` whose `serve` shows
+a page saying the web app was not built. To get the web app, run
+`pnpm install` and `pnpm --filter @arclightning/web build` in a checkout, then
+`cargo install --path .`.
 
 ## Lifecycle
 

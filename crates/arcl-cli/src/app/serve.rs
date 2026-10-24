@@ -1,8 +1,9 @@
 //! `arcl serve`: the web app and its read endpoints over the read commands.
 //!
 //! Each request opens the database and runs the same read as the CLI, with
-//! no workspace sync, so a GET never writes. The server holds no sync lock,
-//! so other arcl commands run while it serves.
+//! no workspace sync. A read never changes records, though opening the
+//! database can run its migrations. The server holds no sync lock, so other
+//! arcl commands run while it serves.
 
 use arcl_serve::{Reads, Reply, Server};
 
@@ -42,8 +43,11 @@ impl Reads for ServeReads {
     }
 }
 
-/// Bind the server, print its URL and serve until interrupted.
+/// Bind the server, print its URL and serve until interrupted. The database
+/// opens first, so outside a project `serve` fails like other commands
+/// instead of serving endpoints that all fail.
 pub(super) fn exec_serve(port: Option<u16>, renderer: &Renderer) -> anyhow::Result<()> {
+    drop(open_database().map_err(ApplicationError::from_command)?);
     let server = Server::bind(port).context("could not start the web app server")?;
     write_output(renderer.render_serve(&server.url())?)?;
     let reads = ServeReads { renderer: Renderer::new(OutputMode::Json, ColorChoice::Never) };

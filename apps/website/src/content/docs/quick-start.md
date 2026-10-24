@@ -22,8 +22,14 @@ directory:
 ```sh
 git clone https://github.com/stormlightlabs/arclightning.git
 cd arclightning
+pnpm install
+pnpm --filter @arclightning/web build
 cargo install --path .
 ```
+
+The `pnpm` steps build the web app that `arcl serve` embeds. Without them,
+`arcl` still installs, and `arcl serve` serves a page that says the web app was
+not built.
 
 For development, keep the checkout and run the CLI with Cargo instead:
 
@@ -42,6 +48,10 @@ cargo install --git https://github.com/stormlightlabs/arclightning --tag v0.1.0-
 
 This installs the `arcl` binary. Pre-release tags can change JSON shapes, and
 each envelope's `format_version` names the shape it carries.
+
+A Git install does not include the web app, since its build is not committed,
+so `arcl serve` serves a page that says the web app was not built. To get the
+web app, build from a checkout as above.
 
 ## Initialize a project
 
