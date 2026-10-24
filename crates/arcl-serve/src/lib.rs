@@ -11,6 +11,10 @@
 //! printed URL; the server accepts a query token once, and never on an API
 //! path. Responses carry no CORS headers, and only GET is served.
 //!
+//! The page's Content-Security-Policy runs only the app's own inline script,
+//! by hash, and lets it load images and fonts from itself or `data:` URLs and
+//! connect only to this server. API responses allow nothing to load.
+//!
 //! | Path                        | CLI equivalent           |
 //! | --------------------------- | ------------------------ |
 //! | `/api/records`              | `arcl list`              |
@@ -31,6 +35,7 @@
 
 use std::io;
 use std::net::{Ipv4Addr, TcpListener};
+use std::sync::LazyLock;
 
 use thiserror::Error;
 use tiny_http::{Header, Response};
@@ -48,6 +53,20 @@ const TOKEN_BYTES: usize = 32;
 
 /// The page served when `apps/web` was not built before `arcl` was compiled.
 const NOT_BUILT_PAGE: &str = include_str!("not_built.html");
+
+/// The Content-Security-Policy of every API response: a JSON body loads nothing.
+const API_CSP: &str = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+
+/// The Content-Security-Policy of the page. Scripts run only when their hash
+/// is one of the built page's inline scripts. Styles may be inline, since
+/// Svelte and CodeMirror set style attributes and elements at run time.
+static PAGE_CSP: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "default-src 'self'; script-src 'self' {INDEX_SCRIPT_HASHES}; style-src 'self' 'unsafe-inline'; \
+         img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; \
+         frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+    )
+});
 
 /// A failure to start or run the server.
 #[derive(Debug, Error)]
@@ -218,6 +237,8 @@ struct Answer {
     content_type: &'static str,
     body: Vec<u8>,
     allow_get: bool,
+    /// The Content-Security-Policy header's value.
+    csp: &'static str,
 }
 
 impl Answer {
@@ -229,6 +250,7 @@ impl Answer {
             ("X-Content-Type-Options", "nosniff"),
             ("Referrer-Policy", "no-referrer"),
             ("X-Frame-Options", "DENY"),
+            ("Content-Security-Policy", self.csp),
         ];
         if self.allow_get {
             headers.push(("Allow", "GET"));
@@ -242,6 +264,7 @@ impl Answer {
             content_type: "application/json",
             body: reply.body.into_bytes(),
             allow_get: reply.status == 405,
+            csp: API_CSP,
         }
     }
 }
@@ -442,12 +465,14 @@ fn page() -> Answer {
         content_type: "text/html; charset=utf-8",
         body: INDEX_HTML.unwrap_or(NOT_BUILT_PAGE.as_bytes()).to_vec(),
         allow_get: false,
+        csp: PAGE_CSP.as_str(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sha2::Digest;
 
     const TOKEN: &str = "abc123";
     const PORT: u16 = 4321;
@@ -623,6 +648,72 @@ mod tests {
         let answer = gate().answer(&get("/planning/anything", Some(TOKEN)), &Echo);
         assert_eq!(answer.status, 200);
         assert_eq!(answer.content_type, "text/html; charset=utf-8");
+    }
+
+    #[test]
+    fn serve_sends_a_content_security_policy() {
+        let csp = |answer: &Answer| {
+            let headers = answer.headers();
+            let found = headers.iter().find(|(name, _)| *name == "Content-Security-Policy");
+            found.expect("a Content-Security-Policy header").1.to_owned()
+        };
+        let page = gate().answer(&get("/", Some(TOKEN)), &Echo);
+        let policy = csp(&page);
+        for directive in [
+            "default-src 'self'",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data:",
+            "font-src 'self' data:",
+            "connect-src 'self'",
+            "object-src 'none'",
+            "frame-ancestors 'none'",
+            "base-uri 'none'",
+            "form-action 'self'",
+        ] {
+            assert!(
+                policy.split("; ").any(|part| part == directive),
+                "{directive} in {policy}"
+            );
+        }
+        let script_src = policy
+            .split("; ")
+            .find(|part| part.starts_with("script-src "))
+            .expect("script-src");
+        assert!(!script_src.contains("unsafe"), "{script_src}");
+        // Each inline script in the page runs, and nothing else inline does.
+        let html = String::from_utf8(page.body).expect("UTF-8");
+        let scripts: Vec<String> = html
+            .split("<script>")
+            .skip(1)
+            .map(|rest| rest.split("</script>").next().expect("a closing tag"))
+            .map(|script| format!("'sha256-{}'", base64(&sha2::Sha256::digest(script.as_bytes()))))
+            .collect();
+        let sources: Vec<&str> = script_src.split(' ').skip(2).collect();
+        assert_eq!(sources, scripts.iter().map(String::as_str).collect::<Vec<_>>());
+
+        let api = gate().answer(&get("/api/records", Some(TOKEN)), &Echo);
+        assert_eq!(csp(&api), API_CSP);
+        assert!(API_CSP.starts_with("default-src 'none'"));
+    }
+
+    /// `bytes` in padded standard base64, as CSP hash sources write them.
+    fn base64(bytes: &[u8]) -> String {
+        const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::new();
+        for chunk in bytes.chunks(3) {
+            let word = chunk
+                .iter()
+                .enumerate()
+                .fold(0u32, |word, (i, byte)| word | u32::from(*byte) << (16 - 8 * i));
+            for i in 0..4 {
+                out.push(if i <= chunk.len() {
+                    char::from(ALPHABET[(word >> (18 - 6 * i)) as usize & 63])
+                } else {
+                    '='
+                });
+            }
+        }
+        out
     }
 
     #[test]

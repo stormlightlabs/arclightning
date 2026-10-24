@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { Feedback } from "@arclightning/ui";
+  import { Button, Feedback } from "@arclightning/ui";
   import { afterNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
-  import { dataSource, type TaskDetail } from "$lib/data";
+  import { dataSource, latestRead, type TaskDetail } from "$lib/data";
   import { taskKeyAction } from "$lib/task";
   import TaskDetailView from "$lib/task/TaskDetail.svelte";
   import { workHref } from "$lib/work";
@@ -19,19 +19,25 @@
     if (navigation.from?.url.pathname === "/") from = navigation.from.url;
   });
 
+  // The id the read in flight asks for. Each start aborts the read before it,
+  // so a slow answer for a task left behind never replaces the one shown.
+  let requested = "";
+  const read = latestRead((signal) => dataSource().task(requested, signal), {
+    loaded: (loaded) => (detail = loaded),
+    failed: (error) => (failure = error instanceof Error ? error.message : String(error)),
+  });
+
   $effect(() => {
-    const current = id;
+    requested = id;
+    load();
+    return read.stop;
+  });
+
+  function load() {
     detail = null;
     failure = null;
-    dataSource()
-      .task(current)
-      .then((loaded) => {
-        if (current === id) detail = loaded;
-      })
-      .catch((error: unknown) => {
-        if (current === id) failure = error instanceof Error ? error.message : String(error);
-      });
-  });
+    read.start();
+  }
 
   function onkeydown(event: KeyboardEvent) {
     const action = taskKeyAction(event);
@@ -42,11 +48,15 @@
   }
 </script>
 
-<svelte:head><title>{detail?.task.title ?? id} · Arc Lightning</title></svelte:head>
+<svelte:head><title>{detail === null ? "Task" : detail.task.title} · Arc Lightning</title></svelte:head>
 <svelte:window {onkeydown} />
 
 {#if failure !== null}
-  <Feedback tone="danger" title="Could not load this task" message={failure} />
+  <Feedback tone="danger" title="Could not load this task" message={failure}>
+    {#snippet actions()}
+      <Button label="Retry" onclick={load} />
+    {/snippet}
+  </Feedback>
 {:else if detail === null}
   <p class="loading" role="status">Loading task…</p>
 {:else}

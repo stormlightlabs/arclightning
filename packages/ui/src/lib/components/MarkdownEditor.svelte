@@ -35,10 +35,13 @@
     { tag: [tags.quote, tags.processingInstruction, tags.meta], color: "var(--arcl-text-muted)" },
   ]);
 
+  // Read-only content is not editable, so page shortcuts work inside it, but
+  // keeps a tab stop so a keyboard user can still reach, read and select it.
   function accessFor(readonly: boolean) {
     return [
       EditorState.readOnly.of(readonly),
-      EditorView.contentAttributes.of({ "aria-label": label, "aria-readonly": String(readonly) }),
+      EditorView.editable.of(!readonly),
+      EditorView.contentAttributes.of({ "aria-label": label, "aria-readonly": String(readonly), ...(readonly ? { tabindex: "0" } : {}) }),
     ];
   }
 
@@ -52,8 +55,9 @@
           syntaxHighlighting(highlight),
           EditorView.lineWrapping,
           access.of(accessFor(readonly)),
-          // Escape leaves the editor, so the next Escape reaches the page.
-          keymap.of([{ key: "Escape", run: (editor) => (editor.contentDOM.blur(), true) }]),
+          // Escape moves focus out to the editor's frame, so the next Escape
+          // reaches the page and Tab goes on from here.
+          keymap.of([{ key: "Escape", run: () => (host.focus(), true) }]),
           EditorView.updateListener.of((update) => {
             const edited = update.transactions.some((tr) => tr.docChanged && !tr.annotation(fromProps));
             if (edited) onchange?.(update.state.doc.toString());
@@ -75,10 +79,11 @@
   });
 </script>
 
-<div class="arcl-markdown-editor" bind:this={host}></div>
+<div class="arcl-markdown-editor" tabindex="-1" bind:this={host}></div>
 
 <style>
   .arcl-markdown-editor { overflow: hidden; border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-md); background: var(--arcl-canvas); }
+  .arcl-markdown-editor:focus-visible { outline: var(--arcl-focus-width) solid var(--arcl-focus); outline-offset: 2px; }
   .arcl-markdown-editor :global(.cm-editor) { color: var(--arcl-text); font: var(--arcl-type-sm) / 1.6 var(--arcl-font-code); }
   .arcl-markdown-editor :global(.cm-editor.cm-focused) { outline: var(--arcl-focus-width) solid var(--arcl-focus); outline-offset: -2px; }
   .arcl-markdown-editor :global(.cm-scroller) { font-family: inherit; }
