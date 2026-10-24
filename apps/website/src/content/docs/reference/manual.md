@@ -229,6 +229,15 @@ opens the task. Filters narrow the list by status, priority, milestone and
 readiness: ready, blocked by an incomplete task, or waiting for another
 reason, such as open subtasks. The page URL keeps the filters.
 
+The Task view shows what `arcl show <task-id>` returns: why the task is not
+ready, its direct blockers, the blockers it inherits from each ancestor, its
+subtasks, the tasks it unblocks, the latest handoff and the evidence. Each
+task it names links to that task's view. The description renders as Markdown,
+and **View Markdown** opens the source in a read-only editor. The properties
+panel lists status, readiness, priority, parent, spec, plan and phase; `]`
+collapses and expands it. `Escape` returns to the Work list with its filters
+and the task selected. The view only reads records.
+
 `arcl` embeds the web app from `apps/web/build` when it compiles. That build is
 not committed, so `cargo install --git` produces an `arcl` whose `serve` shows
 a page saying the web app was not built. To get the web app, run
