@@ -20,7 +20,7 @@ const FORMAT_VERSION: u8 = 1;
 
 /// The JSON `format_version` of the task view (`show`, `explain`), context
 /// and `task complete` envelopes. Version 2 made readiness reasons typed
-/// objects and added `completed_subtasks` and `unblocked` to completion.
+/// objects and added `unblocked` to completion.
 const READINESS_FORMAT_VERSION: u8 = 2;
 
 /// The output format for a command result.

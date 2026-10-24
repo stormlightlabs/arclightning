@@ -31,8 +31,8 @@ it before reading fields.
 | `2`     | `show <task-id>`, `task show`, `explain`, `task explain`, `context`, `task context`, `task complete`        |
 | `1`     | Every other command, including `ready`, `next`, `task start`, failures on standard error, and sync warnings |
 
-Version 2 made each readiness reason an object and added `completed_subtasks`
-and `unblocked` to `task complete`.
+Version 2 made each readiness reason an object and added `unblocked` to
+`task complete`.
 
 ## Read readiness reasons
 
@@ -40,7 +40,7 @@ Task views and context packets carry `data.readiness`:
 
 | Field     | Type    | Meaning                                                                                              |
 | --------- | ------- | ---------------------------------------------------------------------------------------------------- |
-| `ready`   | boolean | `reasons` is empty, and `ready` lists the task.                                                      |
+| `ready`   | boolean | `reasons` is empty, and the `ready` command lists the task.                                          |
 | `blocked` | boolean | A blocker of the task or of an ancestor is unfinished or missing.                                    |
 | `reasons` | array   | Every condition that keeps the task from being ready, in an order that does not change between runs. |
 

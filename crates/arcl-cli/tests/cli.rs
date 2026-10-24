@@ -3077,9 +3077,15 @@ fn json_only_chain_picks_work_reads_reasons_and_starts_what_completion_unblocked
     let dependent = create_task(dir, "Dependent", None);
     block_start_task(dir, &dependent, &blocker);
 
-    assert_eq!(run_json(dir, ["--json", "ready"].as_ref())["format_version"], 1);
-    let picked = ready_ids(dir);
-    assert_eq!(picked, std::slice::from_ref(&blocker));
+    let ready = run_json(dir, ["--json", "ready"].as_ref());
+    assert_eq!(ready["format_version"], 1);
+    let picked: Vec<&str> = ready["data"]["tasks"]
+        .as_array()
+        .expect("ready tasks")
+        .iter()
+        .map(|task| task["id"].as_str().expect("ready task ID"))
+        .collect();
+    assert_eq!(picked, [blocker.as_str()]);
 
     let explained = run_json(dir, ["--json", "explain", &dependent].as_ref());
     assert_eq!(explained["format_version"], 2);
@@ -3093,11 +3099,11 @@ fn json_only_chain_picks_work_reads_reasons_and_starts_what_completion_unblocked
     assert_eq!(refused["format_version"], 1);
     assert_eq!(refused["error"]["code"], "invalid_request");
 
-    let started = run_json(dir, ["--json", "task", "start", &picked[0]].as_ref());
+    let started = run_json(dir, ["--json", "task", "start", picked[0]].as_ref());
     assert_eq!(started["format_version"], 1);
     assert_eq!(started["data"]["task"]["status"], "in_progress");
 
-    let completed = run_json(dir, ["--json", "task", "complete", &picked[0]].as_ref());
+    let completed = run_json(dir, ["--json", "task", "complete", picked[0]].as_ref());
     assert_eq!(completed["format_version"], 2);
     assert_eq!(completed["data"]["completed_subtasks"], serde_json::json!([]));
     let unblocked = completed["data"]["unblocked"].as_array().expect("unblocked");
