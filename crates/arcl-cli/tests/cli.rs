@@ -3120,3 +3120,162 @@ fn json_only_chain_picks_work_reads_reasons_and_starts_what_completion_unblocked
     assert_eq!(context["data"]["readiness"]["reasons"][0]["kind"], "status");
     assert_eq!(context["data"]["readiness"]["reasons"][0]["task"], next);
 }
+
+/// A running `arcl serve`, stopped when dropped.
+struct Served {
+    child: std::process::Child,
+    port: u16,
+    token: String,
+}
+
+impl Served {
+    /// Start `arcl --plain serve` in `directory` and read the URL it prints.
+    fn start(directory: &Path) -> Self {
+        use std::io::BufRead;
+
+        let mut child = isolated_command(assert_cmd::cargo::cargo_bin("arcl"), directory)
+            .args(["--plain", "serve"])
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("arcl serve starts");
+        let mut line = String::new();
+        std::io::BufReader::new(child.stdout.take().expect("stdout is piped"))
+            .read_line(&mut line)
+            .expect("arcl serve prints its URL");
+        let rest = line
+            .trim()
+            .strip_prefix("http://127.0.0.1:")
+            .expect("the URL names 127.0.0.1");
+        let (port, token) = rest.split_once("/?token=").expect("the URL carries the token");
+        Self { child, port: port.parse().expect("the URL has a port"), token: token.to_owned() }
+    }
+
+    /// Send a GET for `path` with these extra header lines, and return the
+    /// status and body.
+    fn get(&self, path: &str, headers: &[String]) -> (u16, String) {
+        use std::io::{Read, Write};
+
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", self.port)).expect("arcl serve accepts");
+        let mut request = format!("GET {path} HTTP/1.1\r\nConnection: close\r\n");
+        for header in headers {
+            request.push_str(header);
+            request.push_str("\r\n");
+        }
+        request.push_str("\r\n");
+        stream.write_all(request.as_bytes()).expect("the request writes");
+        let mut response = String::new();
+        stream.read_to_string(&mut response).expect("the response reads");
+        let (head, body) = response.split_once("\r\n\r\n").expect("the response has a body");
+        assert!(
+            !head.to_ascii_lowercase().contains("access-control-"),
+            "the response carries CORS headers: {head}"
+        );
+        let status = head
+            .split(' ')
+            .nth(1)
+            .expect("a status line")
+            .parse()
+            .expect("a numeric status");
+        (status, body.to_owned())
+    }
+
+    /// GET `path` with the right `Host` and token.
+    fn read(&self, path: &str) -> (u16, Value) {
+        let (status, body) = self.get(path, &[self.host(), format!("X-Arcl-Token: {}", self.token)]);
+        (status, serde_json::from_str(&body).expect("the body is JSON"))
+    }
+
+    fn host(&self) -> String {
+        format!("Host: 127.0.0.1:{}", self.port)
+    }
+}
+
+impl Drop for Served {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+#[test]
+fn serve_read_endpoints_match_the_cli_json() {
+    let directory = initialized_directory();
+    let blocker = run_json(directory.path(), ["--json", "task", "create", "Blocker"].as_ref());
+    let blocker = blocker["data"]["task"]["id"].as_str().expect("a task ID").to_owned();
+    let task = run_json(
+        directory.path(),
+        ["--json", "task", "create", "Blocked", "--priority", "high"].as_ref(),
+    );
+    let task = task["data"]["task"]["id"].as_str().expect("a task ID").to_owned();
+    run_json(
+        directory.path(),
+        ["--json", "dependency", "add", &task, "--blocked-by", &blocker].as_ref(),
+    );
+
+    let served = Served::start(directory.path());
+    let pairs: [(String, &[&str]); 6] = [
+        (format!("/api/records/{task}"), &["show", &task]),
+        (
+            "/api/records?kind=task&status=pending".to_owned(),
+            &["list", "--kind", "task", "--status", "pending"],
+        ),
+        ("/api/ready".to_owned(), &["ready"]),
+        ("/api/ready?priority=high".to_owned(), &["ready", "--priority", "high"]),
+        (format!("/api/tasks/{task}/explain"), &["explain", &task]),
+        (format!("/api/tasks/{task}/context"), &["context", &task]),
+    ];
+    for (path, command) in pairs {
+        let expected = run_json(directory.path(), &[&["--json"], command].concat());
+        assert_eq!(served.read(&path), (200, expected), "{path}");
+    }
+
+    let missing = "arcl-t-00000000000000000000000000";
+    let cli = arcl_in(directory.path())
+        .args(["--json", "show", missing])
+        .output()
+        .expect("arcl show runs");
+    assert_eq!(cli.status.code(), Some(5));
+    assert_eq!(
+        served.read(&format!("/api/records/{missing}")),
+        (404, json(&cli.stderr))
+    );
+
+    let (status, body) = served.read("/api/records?kind=nothing");
+    assert_eq!(status, 400);
+    assert_eq!(body["error"]["code"], "invalid_request");
+}
+
+#[test]
+fn serve_refuses_requests_without_the_host_and_token() {
+    let directory = initialized_directory();
+    let served = Served::start(directory.path());
+    let token = format!("X-Arcl-Token: {}", served.token);
+
+    assert_eq!(served.get("/api/ready", &[served.host()]).0, 401);
+    assert_eq!(
+        served
+            .get("/api/ready", &[served.host(), "X-Arcl-Token: wrong".to_owned()])
+            .0,
+        401
+    );
+    assert_eq!(
+        served
+            .get("/api/ready", &["Host: evil.example".to_owned(), token.clone()])
+            .0,
+        403
+    );
+    assert_eq!(served.get("/api/ready", std::slice::from_ref(&token)).0, 403);
+
+    let first_load = format!("/?token={}", served.token);
+    let (status, page) = served.get(&first_load, &[served.host()]);
+    assert_eq!(status, 200);
+    assert!(page.contains("<html"), "the first load serves the app page");
+    assert_eq!(served.get(&first_load, &[served.host()]).0, 401);
+    assert_eq!(
+        served
+            .get(&format!("/api/ready?token={}", served.token), &[served.host()])
+            .0,
+        401
+    );
+    assert_eq!(served.get("/", &[served.host(), token]).0, 200);
+}

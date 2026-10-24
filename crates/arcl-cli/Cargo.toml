@@ -11,6 +11,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 arcl-core = { path = "../arcl-core" }
 arcl-repo = { path = "../arcl-repo" }
+arcl-serve = { path = "../arcl-serve" }
 arcl-store = { path = "../arcl-store" }
 clap.workspace = true
 owo-colors.workspace = true

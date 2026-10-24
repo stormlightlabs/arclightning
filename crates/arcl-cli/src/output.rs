@@ -697,6 +697,20 @@ impl Renderer {
         Ok(Some(self.style(message)))
     }
 
+    /// Render the URL `arcl serve` listens on. Quiet mode prints the URL
+    /// alone, since it is the command's result.
+    pub fn render_serve(&self, url: &str) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human => format!("Serving Arc Lightning at {url}\nPress Ctrl-C to stop."),
+            OutputMode::Plain | OutputMode::Quiet => url.to_owned(),
+            OutputMode::Json => serde_json::to_string(&Envelope {
+                format_version: FORMAT_VERSION,
+                data: ServeData { status: "serving", url },
+            })?,
+        };
+        Ok(Some(self.style(message)))
+    }
+
     /// Render a workspace status report.
     pub fn render_workspace_status(&self, status: &WorkspaceStatus) -> Result<Option<String>, OutputError> {
         let message = match self.mode {
@@ -740,6 +754,12 @@ struct Envelope<T> {
 struct StartupData {
     status: &'static str,
     message: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct ServeData<'a> {
+    status: &'static str,
+    url: &'a str,
 }
 
 #[derive(Debug, Serialize)]

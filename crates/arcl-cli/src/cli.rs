@@ -117,6 +117,12 @@ pub enum Command {
         #[command(flatten)]
         filters: ReadyArgs,
     },
+    /// Serve the web app on 127.0.0.1 until interrupted.
+    Serve {
+        /// Listen on this port instead of an ephemeral one.
+        #[arg(long, value_name = "PORT")]
+        port: Option<u16>,
+    },
 }
 
 /// Inbox capture commands.
@@ -823,6 +829,7 @@ pub struct AcceptanceArgs {
     arcl plan create "Import validation" --spec arcl-s-…
     arcl task create "Validate records" --plan arcl-pl-…
     arcl ready
+    arcl serve
 "#
 )]
 pub struct Cli {

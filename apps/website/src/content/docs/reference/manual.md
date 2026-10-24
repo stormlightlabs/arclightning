@@ -167,6 +167,30 @@ association filters.
 
 See [Inspecting Work](/guides/inspect-work/) for the query workflow and context contents.
 
+## Web app
+
+`arcl serve` serves the web app and its read endpoints on `127.0.0.1`, on an
+ephemeral port unless `--port` pins one. It prints the URL to open, which
+carries a per-run token for the first page load. The app moves the token out
+of the URL and sends it in the `X-Arcl-Token` header on every later request.
+The server refuses a request without the token, with a `Host` header that does
+not name the server, or with a method other than GET. Responses carry no CORS
+headers. The server runs until interrupted.
+
+| Endpoint                      | Same JSON as             |
+| ----------------------------- | ------------------------ |
+| `GET /api/records`            | `arcl list`              |
+| `GET /api/records/<id>`       | `arcl show <id>`         |
+| `GET /api/ready`              | `arcl ready`             |
+| `GET /api/tasks/<id>/explain` | `arcl explain <task-id>` |
+| `GET /api/tasks/<id>/context` | `arcl context <task-id>` |
+
+`/api/records` and `/api/ready` take the command's flags as query parameters,
+such as `?kind=task&status=pending&status=parked`. A failure returns the CLI's
+error envelope with status 400 for exit codes 2 and 3, 404 for 5, 409 for 4,
+and 500 otherwise. The server reads the database without syncing the
+workspace, so a GET never writes; any other `arcl` command syncs it.
+
 ## Lifecycle
 
 Container records—releases, epics, and milestones—use `open`, `completed`, and
