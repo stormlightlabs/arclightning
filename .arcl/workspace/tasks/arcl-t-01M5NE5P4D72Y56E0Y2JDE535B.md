@@ -13,18 +13,26 @@ planning, context, handoff, and evidence workflow in a project skill.
 
 Blocked by: T06, T17
 
+Delivered by subtasks T10.1–T10.4. The PR for T10.4, the last of them,
+completes T10 as well (Decision: Parent completion).
+
 Acceptance criteria:
 
 - [ ] Add MCP tools for record reads and mutations, ready work, readiness
-      explanation, context, handoff, and completion
+      explanation, context, handoff, and completion (T10.3)
 - [ ] Reuse application operations and errors without invoking or scraping the
-      CLI
+      CLI (T10.3)
 - [ ] Publish versioned input and output schemas with bounded list pagination
+      (T10.3)
 - [ ] Add an Arc Lightning skill that refers to product commands and MCP tools
-      without restating domain rules
+      without restating domain rules (T10.1, T10.3)
+- [ ] Install the skill with `npx skills add` and with `arcl skill install`
+      (T10.1, T10.2)
 - [ ] Cover tool authorization boundaries and invalid-transition errors
+      (T10.4)
 
 Verification:
 
 - `cargo test --workspace --all-features -p arcl-mcp`
-- Run one capture-to-completion workflow through MCP
+- Run one capture-to-completion workflow through MCP (T10.4)
+- `just check`
