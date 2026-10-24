@@ -9,10 +9,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use arcl_core::domain::{
-    Capture, CapturePromotion, Note, Phase, Plan, PlanningTask, Release, Spec, TaskId, TaskPriority,
-};
-use arcl_store::PlanningTaskView;
+use arcl_core::prelude::*;
+use arcl_store::prelude::*;
 
 use crate::project::Warning;
 
@@ -246,9 +244,8 @@ pub struct CapturePromoteInput {
     pub parent: Option<String>,
     /// For a task: `critical`, `high`, `normal` or `low`. Defaults to
     /// `normal`. Checked only when the target is a task, as the CLI checks it.
-    #[serde(default = "normal_priority")]
-    #[schemars(extend("examples" = ["critical", "high", "normal", "low"]))]
-    pub priority: String,
+    #[schemars(extend("default" = "normal", "examples" = ["critical", "high", "normal", "low"]))]
+    pub priority: Option<String>,
     /// For a task: the order among its siblings. Defaults to 0.
     #[serde(default)]
     pub position: i64,
@@ -480,10 +477,4 @@ pub struct ReadyData {
     /// Pass as `cursor` for the next page. Left out on the last page.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
-}
-
-/// The priority a promoted task gets when the call names none, as the CLI's
-/// `--priority` defaults.
-fn normal_priority() -> String {
-    TaskPriority::Normal.as_str().to_owned()
 }

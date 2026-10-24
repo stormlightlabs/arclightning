@@ -17,19 +17,15 @@ use rmcp::{
 };
 use tokio_util::sync::CancellationToken;
 
-use arcl_core::domain::{
-    CaptureId, CapturePromotionKind, NoteId, PhaseId, PlanId, PlanningTask, ReleaseId, SpecId, TaskAction, TaskId,
-    TaskPriority, validate_title,
-};
-use arcl_store::{
-    CapturePromotionRecord, CaptureTaskPromotion, Database, PlanningContext, PlanningReadyFilter, PlanningTaskCreate,
-    PlanningTaskUpdate, StorageError,
-};
+use arcl_core::prelude::*;
+use arcl_store::prelude::*;
 
 use crate::error::ToolError;
 use crate::params::Parameters;
 use crate::project::{self, Access};
 use crate::tools::*;
+// The MCP input enum, which the store prelude's `OpenSubtasks` would otherwise make ambiguous.
+use crate::tools::OpenSubtasks;
 
 /// The `_meta` key that names the `format_version` a tool's result carries.
 pub const FORMAT_VERSION_META_KEY: &str = "arcl/format_version";
@@ -177,7 +173,7 @@ impl ArclServer {
     )]
     pub async fn explain(
         &self, Parameters(input): Parameters<TaskInput>, cancelled: CancellationToken,
-    ) -> Result<Json<Envelope<arcl_store::PlanningTaskView>>, ToolError> {
+    ) -> Result<Json<Envelope<PlanningTaskView>>, ToolError> {
         let input = input?;
         self.call(Access::Read, READINESS_FORMAT_VERSION, cancelled, move |database| {
             Ok(database.planning_task_view(TaskId::parse(&input.task_id)?)?)
@@ -483,7 +479,10 @@ fn promote_capture(database: &mut Database, input: CapturePromoteInput) -> Resul
             database.promote_capture_to_spec(id, title, body, input.acceptance_criteria.unwrap_or_default())?
         }
         Some(CapturePromotionKind::Task) => {
-            let priority = TaskPriority::parse(&input.priority)?;
+            let priority = input
+                .priority
+                .as_deref()
+                .map_or(Ok(TaskPriority::Normal), TaskPriority::parse)?;
             database.promote_capture_to_task(
                 id,
                 CaptureTaskPromotion {
