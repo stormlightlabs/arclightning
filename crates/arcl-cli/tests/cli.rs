@@ -3075,6 +3075,7 @@ fn json_only_chain_picks_work_reads_reasons_and_starts_what_completion_unblocked
     let dir = directory.path();
     let blocker = create_task(dir, "Blocker", None);
     let dependent = create_task(dir, "Dependent", None);
+    let unrelated = create_task(dir, "Unrelated", None);
     block_start_task(dir, &dependent, &blocker);
 
     let ready = run_json(dir, ["--json", "ready"].as_ref());
@@ -3085,7 +3086,8 @@ fn json_only_chain_picks_work_reads_reasons_and_starts_what_completion_unblocked
         .iter()
         .map(|task| task["id"].as_str().expect("ready task ID"))
         .collect();
-    assert_eq!(picked, [blocker.as_str()]);
+    assert!(picked.contains(&blocker.as_str()) && picked.contains(&unrelated.as_str()));
+    assert_eq!(picked.len(), 2);
 
     let explained = run_json(dir, ["--json", "explain", &dependent].as_ref());
     assert_eq!(explained["format_version"], 2);
@@ -3099,11 +3101,11 @@ fn json_only_chain_picks_work_reads_reasons_and_starts_what_completion_unblocked
     assert_eq!(refused["format_version"], 1);
     assert_eq!(refused["error"]["code"], "invalid_request");
 
-    let started = run_json(dir, ["--json", "task", "start", picked[0]].as_ref());
+    let started = run_json(dir, ["--json", "task", "start", &blocker].as_ref());
     assert_eq!(started["format_version"], 1);
     assert_eq!(started["data"]["task"]["status"], "in_progress");
 
-    let completed = run_json(dir, ["--json", "task", "complete", picked[0]].as_ref());
+    let completed = run_json(dir, ["--json", "task", "complete", &blocker].as_ref());
     assert_eq!(completed["format_version"], 2);
     assert_eq!(completed["data"]["completed_subtasks"], serde_json::json!([]));
     let unblocked = completed["data"]["unblocked"].as_array().expect("unblocked");

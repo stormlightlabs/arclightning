@@ -6,7 +6,7 @@ status = "completed"
 priority = "normal"
 position = 1
 blocked-by = ["arcl-t-01M5NE5P1WQ0MBKBRYTRJJR162"]
-evidence = "Delivered by T17.1–T17.3: #23, #22 and the PR completing T17.3."
+evidence = "Delivered by T17.1–T17.3: #23, #22 and #25."
 +++
 
 Give automations typed readiness reasons and the tasks a completion unblocks.
@@ -18,10 +18,10 @@ completes T17 as well (Decision: Parent completion).
 
 Acceptance criteria:
 
-- [ ] Add a stable `kind` and record IDs to every readiness reason in JSON,
+- [x] Add a stable `kind` and record IDs to every readiness reason in JSON,
       alongside the existing human text
-- [ ] Return the tasks that became ready when a task completes
-- [ ] Version the JSON shapes and document them for the MCP server
+- [x] Return the tasks that became ready when a task completes
+- [x] Version the JSON shapes and document them for the MCP server
 
 Verification:
 

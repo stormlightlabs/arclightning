@@ -76,10 +76,11 @@ edge that joins a task to its ancestor, `task` and `blocker` are that edge and
   it, in `ready` order.
 
 A loop can run `ready`, start a task, complete it, and start a task from
-`unblocked` next. `task start` refuses a pending task that is not ready, exits
-with status `3`, and writes a version 1 failure with `code: "invalid_request"`.
-Its `message` lists the reasons as text. Read the typed reasons from `explain`
-instead. `--force` starts the task anyway.
+`unblocked` next. `task start` refuses a pending task that is not ready for
+any reason other than `has_children`, so a parent can start while its children
+are open. A refusal exits with status `3` and writes a version 1 failure with
+`code: "invalid_request"`. Its `message` lists the reasons as text. Read the
+typed reasons from `explain` instead. `--force` starts the task anyway.
 
 ## Use plain or quiet output
 
