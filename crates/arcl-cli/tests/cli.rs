@@ -1529,7 +1529,7 @@ fn start_starts_a_child_its_parent_is_blocked_by_without_force() {
     let directory = initialized_directory();
     let parent = create_task(directory.path(), "Parent", None);
     let child = create_task(directory.path(), "Child", Some(&parent));
-    // `dependency add` refuses this edge, so insert it as an older project would hold it.
+    // `dependency add` refuses this edge, so insert it directly.
     let database = rusqlite::Connection::open(directory.path().join(".arcl/arcl.db")).expect("database opens");
     database
         .execute(
@@ -1755,7 +1755,7 @@ fn a_parent_blocked_by_its_own_child_leaves_the_child_ready() {
     let directory = initialized_directory();
     let parent = create_task(directory.path(), "Parent", None);
     let leaf = create_task(directory.path(), "Leaf", Some(&parent));
-    // `dependency add` refuses this edge, so insert it as an older project would hold it.
+    // `dependency add` refuses this edge, so insert it directly.
     let database = rusqlite::Connection::open(directory.path().join(".arcl/arcl.db")).expect("database opens");
     database
         .execute(
@@ -1888,8 +1888,8 @@ fn dependency_edge_descendant_is_refused() {
     assert!(dependency_pairs(path).is_empty());
 }
 
-/// Store blocker edges the way an older or hand-edited database holds them,
-/// since `dependency add` refuses them.
+/// Store blocker edges without the validator, as a database edited by hand
+/// can hold edges that `dependency add` refuses.
 fn insert_raw_edges(directory: &Path, edges: &[(&str, &str)]) {
     let database = rusqlite::Connection::open(directory.join(".arcl/arcl.db")).expect("database opens");
     for (task, blocker) in edges {

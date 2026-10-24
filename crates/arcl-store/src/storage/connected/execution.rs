@@ -122,6 +122,9 @@ struct PlanningData {
     dependencies: Vec<TaskDependency>,
     /// Every blocker rule violation already stored in the project.
     violations: Vec<EdgeViolation>,
+    /// For each task, the indexes into `violations` of those that involve one
+    /// of its own blocker edges, in violation order.
+    violations_by_task: HashMap<TaskId, Vec<usize>>,
 }
 
 /// Compute ready leaf tasks without requiring a plan, phase, or milestone.
@@ -416,6 +419,19 @@ fn load_data(connection: &Connection, project_id: ProjectId) -> Result<PlanningD
         .filter_map(|task| Some((task.id, task.parent_id?)))
         .collect();
     let violations = validate_blocker_edges(&parents, &dependencies);
+    let mut violations_by_task: HashMap<TaskId, Vec<usize>> = HashMap::new();
+    for (index, violation) in violations.iter().enumerate() {
+        // A cycle visits each of its tasks once, and each step is an edge
+        // the task holds, so every task on it but the closing repeat gets
+        // the violation once.
+        let holders = match violation {
+            EdgeViolation::Cycle { path } => &path[..path.len().saturating_sub(1)],
+            EdgeViolation::Ancestry { edge, .. } => std::slice::from_ref(&edge.task_id),
+        };
+        for holder in holders {
+            violations_by_task.entry(*holder).or_default().push(index);
+        }
+    }
     Ok(PlanningData {
         tasks,
         specs: specs(connection, project_id)?
@@ -432,6 +448,7 @@ fn load_data(connection: &Connection, project_id: ProjectId) -> Result<PlanningD
             .collect(),
         dependencies,
         violations,
+        violations_by_task,
     })
 }
 
@@ -652,14 +669,11 @@ fn readiness_counting_children(
 /// task's own blocker edges, once per violation, in the same words `check`
 /// uses for it.
 fn invalid_edge_reasons(data: &PlanningData, task_id: TaskId) -> Vec<String> {
-    data.violations
-        .iter()
-        .filter(|violation| {
-            data.dependencies
-                .iter()
-                .any(|dependency| dependency.task_id == task_id && violation.involves(dependency))
-        })
-        .map(ToString::to_string)
+    data.violations_by_task
+        .get(&task_id)
+        .into_iter()
+        .flatten()
+        .map(|&index| data.violations[index].to_string())
         .collect()
 }
 
@@ -826,8 +840,8 @@ mod tests {
             .expect("child creates")
     }
 
-    /// Store a blocker edge the way an older or hand-edited database holds it,
-    /// bypassing the validator that refuses it today.
+    /// Store a blocker edge without the validator, as a database edited by
+    /// hand can hold an edge that `add_planning_dependency` refuses.
     fn insert_raw_edge(database: &Database, project_id: ProjectId, task_id: TaskId, blocker_id: TaskId) {
         database
             .connection()
@@ -899,6 +913,32 @@ mod tests {
             "{:?}",
             view.readiness.reasons
         );
+    }
+
+    #[test]
+    fn invalid_edge_to_a_descendant_is_a_reason_on_the_parent() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let parent = task(&mut database, project.id, "parent");
+        let leaf = child(&mut database, project.id, parent.id, "leaf");
+        insert_raw_edge(&database, project.id, parent.id, leaf.id);
+        let descendant = format!(
+            "task `{}` is blocked by `{}`, its descendant; parent chain: {} -> {}",
+            parent.id, leaf.id, leaf.id, parent.id
+        );
+
+        let report = database.check().expect("check runs");
+        assert_eq!(report.errors, vec![descendant.clone()]);
+
+        let view = database.planning_task_view(parent.id).expect("parent view reads");
+        assert!(!view.readiness.ready);
+        assert!(
+            view.readiness.reasons.contains(&descendant),
+            "{:?}",
+            view.readiness.reasons
+        );
+        let view = database.planning_task_view(leaf.id).expect("leaf view reads");
+        assert!(!view.readiness.reasons.contains(&descendant));
     }
 
     #[test]
@@ -977,7 +1017,7 @@ mod tests {
         let project = database.project().expect("project exists");
         let parent = task(&mut database, project.id, "parent");
         let leaf = child(&mut database, project.id, parent.id, "leaf");
-        // `add_planning_dependency` refuses this edge, so insert it as an older project would hold it.
+        // `add_planning_dependency` refuses this edge, so insert it directly.
         database
             .connection()
             .execute(

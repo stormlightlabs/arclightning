@@ -146,10 +146,23 @@ pub fn validate_blocker_edges(parents: &HashMap<TaskId, TaskId>, edges: &[TaskDe
     for edge in edges {
         blockers.entry(edge.task_id).or_default().push(edge.blocker_id);
     }
+    // An edge lies on a cycle exactly when both its ends share a strongly
+    // connected component, and every path from its blocker back to its task
+    // stays inside that component. One linear pass finds the components, so
+    // the shortest-path search runs only for edges on a cycle. Searching from
+    // every edge would cost O(E * (V + E)) on each read, which a long acyclic
+    // blocker chain makes quadratic.
+    let component = strong_components(&blockers);
     let mut violations = Vec::new();
     let mut seen_cycles = HashSet::new();
     for edge in edges {
-        if let Some(path) = blocker_path(&blockers, edge.blocker_id, edge.task_id) {
+        let on_cycle = component
+            .get(&edge.task_id)
+            .is_some_and(|own| component.get(&edge.blocker_id) == Some(own));
+        if let Some(path) = on_cycle
+            .then(|| blocker_path(&blockers, edge.blocker_id, edge.task_id))
+            .flatten()
+        {
             let mut open = vec![edge.task_id];
             open.extend(&path[..path.len() - 1]);
             let lowest = (0..open.len()).min_by_key(|&index| open[index]).unwrap_or(0);
@@ -167,6 +180,70 @@ pub fn validate_blocker_edges(parents: &HashMap<TaskId, TaskId>, edges: &[TaskDe
         }
     }
     violations
+}
+
+/// Map each task in `blockers` to the index of its strongly connected
+/// component, using Tarjan's algorithm.
+///
+/// The depth-first search keeps its own stack of frames instead of
+/// recursing, so a blocker chain thousands of tasks deep cannot overflow the
+/// thread's stack.
+fn strong_components(blockers: &HashMap<TaskId, Vec<TaskId>>) -> HashMap<TaskId, usize> {
+    let mut order: HashMap<TaskId, usize> = HashMap::new();
+    let mut low: Vec<usize> = Vec::new();
+    let mut on_stack: Vec<bool> = Vec::new();
+    let mut stack: Vec<TaskId> = Vec::new();
+    let mut component: HashMap<TaskId, usize> = HashMap::new();
+    let mut count = 0;
+    let none: &[TaskId] = &[];
+    for &root in blockers.keys() {
+        if order.contains_key(&root) {
+            continue;
+        }
+        // Each frame holds a task and how many of its blockers it has visited.
+        let mut frames: Vec<(TaskId, usize)> = Vec::new();
+        let mut arrive = Some(root);
+        loop {
+            if let Some(task) = arrive.take() {
+                order.insert(task, low.len());
+                low.push(low.len());
+                on_stack.push(true);
+                stack.push(task);
+                frames.push((task, 0));
+            }
+            let Some(frame) = frames.last_mut() else {
+                break;
+            };
+            let (task, next) = *frame;
+            let at = order[&task];
+            let next_blockers = blockers.get(&task).map_or(none, Vec::as_slice);
+            if let Some(&blocker) = next_blockers.get(next) {
+                frame.1 += 1;
+                match order.get(&blocker) {
+                    None => arrive = Some(blocker),
+                    Some(&seen) if on_stack[seen] => low[at] = low[at].min(seen),
+                    Some(_) => {}
+                }
+                continue;
+            }
+            frames.pop();
+            if let Some(&(parent, _)) = frames.last() {
+                let parent_at = order[&parent];
+                low[parent_at] = low[parent_at].min(low[at]);
+            }
+            if low[at] == at {
+                while let Some(member) = stack.pop() {
+                    on_stack[order[&member]] = false;
+                    component.insert(member, count);
+                    if member == task {
+                        break;
+                    }
+                }
+                count += 1;
+            }
+        }
+    }
+    component
 }
 
 /// The shortest path of blocker edges from `from` to `to`, both included.
@@ -311,6 +388,25 @@ mod tests {
                 chain: vec![leaf, middle, root],
             }]
         );
+    }
+
+    #[test]
+    fn long_acyclic_chain_is_valid() {
+        let tasks: Vec<TaskId> = (0..5_000).map(|_| TaskId::new()).collect();
+        let edges: Vec<TaskDependency> = tasks.windows(2).map(|pair| edge(pair[0], pair[1])).collect();
+        assert!(validate_blocker_edges(&HashMap::new(), &edges).is_empty());
+    }
+
+    #[test]
+    fn chain_closed_into_a_cycle_reports_it_once() {
+        let mut tasks: Vec<TaskId> = (0..300).map(|_| TaskId::new()).collect();
+        tasks.sort();
+        let mut edges: Vec<TaskDependency> = tasks.windows(2).map(|pair| edge(pair[0], pair[1])).collect();
+        edges.push(edge(tasks[tasks.len() - 1], tasks[0]));
+        let violations = validate_blocker_edges(&HashMap::new(), &edges);
+        let mut path = tasks.clone();
+        path.push(tasks[0]);
+        assert_eq!(violations, vec![EdgeViolation::Cycle { path }]);
     }
 
     #[test]
