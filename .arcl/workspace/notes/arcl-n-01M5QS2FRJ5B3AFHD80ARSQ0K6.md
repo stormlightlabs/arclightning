@@ -11,6 +11,6 @@ kind = "plan"
 id = "arcl-pl-01M5NE5P0CWMJNP2A7B0ZQW6XC"
 +++
 
-The web app is Svelte and shares `packages/ui` with the desktop app. Styling is UnoCSS, with the icons preset serving Phosphor, Bootstrap and Remix icons from Iconify. Headings use Google Sans and body text uses Inter. The light theme is light grey and blue; the dark theme is black and blue. The layout follows Linear's patterns: a sidebar, dense grouped lists, a detail view with a properties panel, and a command menu. T18 lands as seven stacked PRs, each based on the one before.
+The web app is Svelte and shares `packages/ui` with the desktop app. Styling is UnoCSS, with the icons preset serving Phosphor, Bootstrap and Remix icons from Iconify. Headings use Google Sans and body text uses Inter. The light theme is light grey and blue; the dark theme is black and blue. The layout follows Linear's patterns: a sidebar, dense grouped lists, a detail view with a properties panel, and a command menu. T18 lands as seven stacked PRs, each based on the one before. Views read records through one data module, so T20 can publish the same app as a claude.ai artifact with another backend.
 
 Decided 2026-10-24.
