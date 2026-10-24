@@ -1949,6 +1949,16 @@ fn readiness(directory: &Path, task_id: &str) -> Value {
     run_json(directory, ["--json", "explain", task_id].as_ref())["data"]["readiness"].clone()
 }
 
+/// The `message` of each readiness reason, in order.
+fn reason_messages(readiness: &Value) -> Vec<String> {
+    readiness["reasons"]
+        .as_array()
+        .expect("reason array")
+        .iter()
+        .map(|reason| reason["message"].as_str().expect("reason message").to_owned())
+        .collect()
+}
+
 #[test]
 fn readiness_inherits_a_blocker_through_two_levels_of_parents() {
     let directory = initialized_directory();
@@ -1965,8 +1975,8 @@ fn readiness_inherits_a_blocker_through_two_levels_of_parents() {
     assert_eq!(readiness["ready"], false);
     assert_eq!(readiness["blocked"], true);
     assert_eq!(
-        readiness["reasons"],
-        serde_json::json!([format!("ancestor `{grandparent}` is blocked by `{blocker}` (pending)")])
+        reason_messages(&readiness),
+        vec![format!("ancestor `{grandparent}` is blocked by `{blocker}` (pending)")]
     );
     assert_eq!(ready_ids(directory.path()), vec![blocker]);
 
@@ -1994,10 +2004,10 @@ fn readiness_asks_to_replace_a_cancelled_direct_blocker() {
     let readiness = readiness(directory.path(), &task);
     assert_eq!(readiness["blocked"], true);
     assert_eq!(
-        readiness["reasons"],
-        serde_json::json!([format!(
+        reason_messages(&readiness),
+        vec![format!(
             "blocked by cancelled `{blocker}`; remove or replace the dependency"
-        )])
+        )]
     );
     assert!(ready_ids(directory.path()).is_empty());
 }
@@ -2017,10 +2027,10 @@ fn readiness_asks_to_replace_a_cancelled_inherited_blocker() {
     let readiness = readiness(directory.path(), &leaf);
     assert_eq!(readiness["blocked"], true);
     assert_eq!(
-        readiness["reasons"],
-        serde_json::json!([format!(
+        reason_messages(&readiness),
+        vec![format!(
             "ancestor `{parent}` is blocked by cancelled `{blocker}`; remove or replace the dependency"
-        )])
+        )]
     );
     assert!(ready_ids(directory.path()).is_empty());
 }
@@ -2074,8 +2084,8 @@ fn explain_and_context_list_a_blocker_inherited_through_a_grandparent() {
         grandparent.as_str()
     );
     assert_eq!(
-        explained["data"]["readiness"]["reasons"],
-        serde_json::json!([format!("ancestor `{grandparent}` is blocked by `{blocker}` (pending)")])
+        reason_messages(&explained["data"]["readiness"]),
+        vec![format!("ancestor `{grandparent}` is blocked by `{blocker}` (pending)")]
     );
 
     let human = stdout_of(directory.path(), &["--color", "never", "explain", &leaf]);
@@ -2329,13 +2339,7 @@ fn invalid_edge_cycle_is_reported_by_check_and_explain() {
     for task in [&a, &b] {
         let readiness = run_json(path, ["--json", "task", "explain", task].as_ref())["data"]["readiness"].clone();
         assert_eq!(readiness["ready"], false);
-        assert!(
-            readiness["reasons"]
-                .as_array()
-                .expect("reason array")
-                .contains(&Value::from(cycle.as_str())),
-            "{readiness}"
-        );
+        assert!(reason_messages(&readiness).contains(&cycle), "{readiness}");
     }
 }
 
@@ -2350,13 +2354,7 @@ fn invalid_self_loop_is_reported_by_check_and_explain_and_removes() {
     assert_eq!(failed_check_errors(path), vec![cycle.clone()]);
     let explained = readiness(path, &a);
     assert_eq!(explained["ready"], false);
-    assert!(
-        explained["reasons"]
-            .as_array()
-            .expect("reason array")
-            .contains(&Value::from(cycle.as_str())),
-        "{explained}"
-    );
+    assert!(reason_messages(&explained).contains(&cycle), "{explained}");
     assert_eq!(ready_ids(path), vec![other]);
     assert_eq!(dependency_pairs(path), vec![(a.clone(), a.clone())]);
 
@@ -2380,13 +2378,7 @@ fn invalid_edge_to_an_ancestor_is_reported_by_check_and_explain() {
     assert_eq!(failed_check_errors(path), vec![ancestry.clone()]);
     let readiness = run_json(path, ["--json", "task", "explain", &child].as_ref())["data"]["readiness"].clone();
     assert_eq!(readiness["ready"], false);
-    assert!(
-        readiness["reasons"]
-            .as_array()
-            .expect("reason array")
-            .contains(&Value::from(ancestry.as_str())),
-        "{readiness}"
-    );
+    assert!(reason_messages(&readiness).contains(&ancestry), "{readiness}");
     let human = stdout_of(path, &["--color", "never", "task", "explain", &child]);
     assert!(human.contains(&ancestry), "{human}");
 }
@@ -2865,4 +2857,214 @@ fn dependency_edge_a_workspace_change_adds_is_refused_by_sync() {
         "message: {message}"
     );
     assert_eq!(with_workspace_off(path, || parent_of(path, &root)), None);
+}
+
+/// The readiness reasons `--json task explain` reports for `task`.
+fn explained_reasons(directory: &Path, task: &str) -> Value {
+    run_json(directory, ["--json", "task", "explain", task].as_ref())["data"]["readiness"]["reasons"].clone()
+}
+
+#[test]
+fn reason_kind_status_names_the_task() {
+    let directory = initialized_directory();
+    let task = create_task(directory.path(), "Task", None);
+    run_json(directory.path(), ["--json", "task", "start", &task].as_ref());
+
+    assert_eq!(
+        explained_reasons(directory.path(), &task),
+        serde_json::json!([{
+            "kind": "status",
+            "message": "task status is `in_progress`",
+            "task": task,
+        }])
+    );
+}
+
+#[test]
+fn reason_kind_has_children_names_the_task() {
+    let directory = initialized_directory();
+    let parent = create_task(directory.path(), "Parent", None);
+    create_task(directory.path(), "Child", Some(&parent));
+
+    assert_eq!(
+        explained_reasons(directory.path(), &parent),
+        serde_json::json!([{
+            "kind": "has_children",
+            "message": "task has 1 child task(s)",
+            "task": parent,
+        }])
+    );
+}
+
+#[test]
+fn reason_kind_closed_ancestor_names_the_ancestor() {
+    let directory = initialized_directory();
+    let parent = create_task(directory.path(), "Parent", None);
+    let child = create_task(directory.path(), "Child", Some(&parent));
+    run_json(directory.path(), ["--json", "task", "park", &parent].as_ref());
+
+    assert_eq!(
+        explained_reasons(directory.path(), &child),
+        serde_json::json!([{
+            "kind": "closed_ancestor",
+            "message": format!("ancestor `{parent}` is `parked`"),
+            "ancestor": parent,
+        }])
+    );
+}
+
+#[test]
+fn reason_kind_closed_container_names_the_container() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let spec = run_json(dir, ["--json", "spec", "create", "Feature"].as_ref());
+    let spec_id = spec["data"]["spec"]["id"].as_str().expect("spec ID");
+    let plan = run_json(dir, ["--json", "plan", "create", "Build", "--spec", spec_id].as_ref());
+    let plan_id = plan["data"]["plan"]["id"].as_str().expect("plan ID").to_owned();
+    let task = run_json(dir, ["--json", "task", "create", "Task", "--plan", &plan_id].as_ref())["data"]["task"]["id"]
+        .as_str()
+        .expect("task ID")
+        .to_owned();
+    run_json(
+        dir,
+        ["--json", "plan", "cancel", &plan_id, "--allow-open-children"].as_ref(),
+    );
+
+    assert_eq!(
+        explained_reasons(dir, &task),
+        serde_json::json!([{
+            "kind": "closed_container",
+            "message": format!("plan `{plan_id}` is `cancelled`"),
+            "container": plan_id,
+        }])
+    );
+}
+
+#[test]
+fn reason_kind_direct_blocker_names_the_blocker() {
+    let directory = initialized_directory();
+    let blocker = create_task(directory.path(), "Blocker", None);
+    let task = create_task(directory.path(), "Task", None);
+    block_start_task(directory.path(), &task, &blocker);
+
+    assert_eq!(
+        explained_reasons(directory.path(), &task),
+        serde_json::json!([{
+            "kind": "direct_blocker",
+            "message": format!("blocked by `{blocker}` (pending)"),
+            "blocker": blocker,
+        }])
+    );
+}
+
+#[test]
+fn reason_kind_inherited_blocker_names_the_ancestor_and_blocker() {
+    let directory = initialized_directory();
+    let blocker = create_task(directory.path(), "Blocker", None);
+    let parent = create_task(directory.path(), "Parent", None);
+    let child = create_task(directory.path(), "Child", Some(&parent));
+    block_start_task(directory.path(), &parent, &blocker);
+
+    assert_eq!(
+        explained_reasons(directory.path(), &child),
+        serde_json::json!([{
+            "kind": "inherited_blocker",
+            "message": format!("ancestor `{parent}` is blocked by `{blocker}` (pending)"),
+            "ancestor": parent,
+            "blocker": blocker,
+        }])
+    );
+}
+
+#[test]
+fn reason_kind_cancelled_blocker_names_the_blocker() {
+    let directory = initialized_directory();
+    let blocker = create_task(directory.path(), "Blocker", None);
+    let task = create_task(directory.path(), "Task", None);
+    block_start_task(directory.path(), &task, &blocker);
+    run_json(directory.path(), ["--json", "task", "cancel", &blocker].as_ref());
+
+    assert_eq!(
+        explained_reasons(directory.path(), &task),
+        serde_json::json!([{
+            "kind": "cancelled_blocker",
+            "message": format!("blocked by cancelled `{blocker}`; remove or replace the dependency"),
+            "blocker": blocker,
+        }])
+    );
+}
+
+#[test]
+fn reason_kind_invalid_edge_names_the_cycle_path() {
+    let directory = initialized_directory();
+    let path = directory.path();
+    let (a, b) = (create_task(path, "A", None), create_task(path, "B", None));
+    insert_raw_edges(path, &[(&a, &b), (&b, &a)]);
+    let (low, high) = if a < b { (&a, &b) } else { (&b, &a) };
+
+    let reasons = explained_reasons(path, &a);
+    let invalid: Vec<&Value> = reasons
+        .as_array()
+        .expect("reason array")
+        .iter()
+        .filter(|reason| reason["kind"] == "invalid_edge")
+        .collect();
+    assert_eq!(invalid.len(), 1, "{reasons}");
+    assert_eq!(invalid[0]["path"], serde_json::json!([low, high, low]));
+    // `a` holds the edge to the next step on the cycle, which is `b`.
+    assert_eq!(invalid[0]["task"], serde_json::json!(a));
+    assert_eq!(invalid[0]["blocker"], serde_json::json!(b));
+}
+
+#[test]
+fn reason_kind_invalid_edge_names_a_self_loop_twice() {
+    let directory = initialized_directory();
+    let path = directory.path();
+    let a = create_task(path, "A", None);
+    insert_raw_edges(path, &[(&a, &a)]);
+
+    let reasons = explained_reasons(path, &a);
+    let invalid = reasons
+        .as_array()
+        .expect("reason array")
+        .iter()
+        .find(|reason| reason["kind"] == "invalid_edge")
+        .expect("invalid edge reason");
+    assert_eq!(
+        *invalid,
+        serde_json::json!({
+            "kind": "invalid_edge",
+            "message": format!("blocker cycle: {a} -> {a}; each task is blocked by the next"),
+            "task": a,
+            "blocker": a,
+            "path": [a, a],
+        })
+    );
+}
+
+#[test]
+fn reason_kind_invalid_edge_names_the_edge_and_parent_chain() {
+    let directory = initialized_directory();
+    let path = directory.path();
+    let root = create_task(path, "Root", None);
+    let child = create_task(path, "Child", Some(&root));
+    insert_raw_edges(path, &[(&child, &root)]);
+
+    let reasons = explained_reasons(path, &child);
+    let invalid = reasons
+        .as_array()
+        .expect("reason array")
+        .iter()
+        .find(|reason| reason["kind"] == "invalid_edge")
+        .expect("invalid edge reason");
+    assert_eq!(
+        *invalid,
+        serde_json::json!({
+            "kind": "invalid_edge",
+            "message": format!("task `{child}` is blocked by `{root}`, its ancestor; parent chain: {child} -> {root}"),
+            "task": child,
+            "blocker": root,
+            "path": [child, root],
+        })
+    );
 }

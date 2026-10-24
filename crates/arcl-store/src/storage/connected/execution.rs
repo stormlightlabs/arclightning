@@ -21,6 +21,35 @@ pub enum OpenSubtasks {
     Complete,
 }
 
+/// The fixed set of conditions that keep a connected-model task from being
+/// ready. JSON writes each as a snake_case `kind`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadinessReasonKind {
+    /// The task is not pending. Names the task.
+    Status,
+    /// The task has child tasks. Names the task.
+    HasChildren,
+    /// An ancestor task is parked, completed or cancelled. Names the ancestor.
+    ClosedAncestor,
+    /// The effective spec, plan or phase is not open. Names the container.
+    ClosedContainer,
+    /// One of the task's own blockers is unfinished. Names the blocker.
+    DirectBlocker,
+    /// A blocker held by an ancestor is unfinished. Names the ancestor and
+    /// the blocker.
+    InheritedBlocker,
+    /// A direct or inherited blocker was cancelled and needs a decision.
+    /// Names the blocker, and the ancestor when inherited.
+    CancelledBlocker,
+    /// A direct or inherited blocker task does not exist. Names the blocker
+    /// ID, and the ancestor when inherited.
+    MissingBlocker,
+    /// One of the task's blocker edges breaks the blocking rules. Names the
+    /// cycle path, or the edge's task and blocker with the parent chain.
+    InvalidEdge,
+}
+
 /// Optional filters for connected-model ready work.
 #[derive(Clone, Debug, Default)]
 pub struct PlanningReadyFilter {
@@ -44,8 +73,57 @@ pub struct PlanningReadiness {
     /// Whether at least one blocker of the task or of an ancestor task is
     /// unfinished or missing.
     pub blocked: bool,
-    /// Stable, user-facing explanations for every condition that prevents readiness.
-    pub reasons: Vec<String>,
+    /// Every condition that prevents readiness, in a stable order.
+    pub reasons: Vec<ReadinessReason>,
+}
+
+impl PlanningReadiness {
+    /// The human text of each reason, in order.
+    pub fn messages(&self) -> Vec<String> {
+        self.reasons.iter().map(|reason| reason.message.clone()).collect()
+    }
+}
+
+/// One condition that keeps a task from being ready, with its kind, its human
+/// text and the IDs of the records it names. JSON omits the ID fields a kind
+/// does not use.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ReadinessReason {
+    /// Which condition this is.
+    pub kind: ReadinessReasonKind,
+    /// The user-facing explanation that human and plain output print.
+    pub message: String,
+    /// The task the condition is on: the inspected task for `status` and
+    /// `has_children`, or the task that holds the edge for an
+    /// `invalid_edge`: the inspected task on a cycle.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<TaskId>,
+    /// The closed ancestor, or the ancestor that holds an inherited blocker.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ancestor: Option<TaskId>,
+    /// The blocker task ID. For an `invalid_edge` cycle, the step after
+    /// `task` on `path`, which is `task` itself on a self-loop.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocker: Option<TaskId>,
+    /// The ID of the spec, plan or phase that is not open.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub container: Option<String>,
+    /// For an `invalid_edge`, the cycle closed by repeating its first task,
+    /// or the parent chain from the descendant up to the ancestor.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub path: Vec<TaskId>,
+}
+
+impl ReadinessReason {
+    fn new(kind: ReadinessReasonKind, message: String) -> Self {
+        Self { kind, message, task: None, ancestor: None, blocker: None, container: None, path: Vec::new() }
+    }
+}
+
+impl std::fmt::Display for ReadinessReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
 }
 
 /// A connected-model blocker of a task or of one of its ancestors, with its
@@ -358,7 +436,7 @@ fn transition(
         if !readiness.ready {
             return Err(StorageError::InvalidPlanningTask(DomainError::NotReady {
                 id: id.to_string(),
-                reasons: readiness.reasons,
+                reasons: readiness.messages(),
             }));
         }
     }
@@ -773,11 +851,23 @@ fn readiness_counting_children(
 ) -> Result<PlanningReadiness> {
     let mut reasons = Vec::new();
     if task.status != TaskStatus::Pending {
-        reasons.push(format!("task status is `{}`", task.status.as_str()));
+        reasons.push(ReadinessReason {
+            task: Some(task.id),
+            ..ReadinessReason::new(
+                ReadinessReasonKind::Status,
+                format!("task status is `{}`", task.status.as_str()),
+            )
+        });
     }
     let children = child_tasks(data, task.id);
     if count_children && !children.is_empty() {
-        reasons.push(format!("task has {} child task(s)", children.len()));
+        reasons.push(ReadinessReason {
+            task: Some(task.id),
+            ..ReadinessReason::new(
+                ReadinessReasonKind::HasChildren,
+                format!("task has {} child task(s)", children.len()),
+            )
+        });
     }
     let ancestors = parent_chain(data, task.id)?;
     for ancestor in &ancestors {
@@ -785,7 +875,13 @@ fn readiness_counting_children(
             ancestor.status,
             TaskStatus::Parked | TaskStatus::Completed | TaskStatus::Cancelled
         ) {
-            reasons.push(format!("ancestor `{}` is `{}`", ancestor.id, ancestor.status.as_str()));
+            reasons.push(ReadinessReason {
+                ancestor: Some(ancestor.id),
+                ..ReadinessReason::new(
+                    ReadinessReasonKind::ClosedAncestor,
+                    format!("ancestor `{}` is `{}`", ancestor.id, ancestor.status.as_str()),
+                )
+            });
         }
     }
     for (entity, id, status) in [
@@ -809,7 +905,11 @@ fn readiness_counting_children(
     .flatten()
     {
         if status != ContainerStatus::Open {
-            reasons.push(format!("{entity} `{id}` is `{}`", status.as_str()));
+            let message = format!("{entity} `{id}` is `{}`", status.as_str());
+            reasons.push(ReadinessReason {
+                container: Some(id),
+                ..ReadinessReason::new(ReadinessReasonKind::ClosedContainer, message)
+            });
         }
     }
 
@@ -836,13 +936,37 @@ fn readiness_counting_children(
 
 /// Describe each stored blocker rule violation that involves one of the
 /// task's own blocker edges, once per violation, in the same words `check`
-/// uses for it.
-fn invalid_edge_reasons(data: &PlanningData, task_id: TaskId) -> Vec<String> {
+/// uses for it. `task` and `blocker` name the task's own edge in the
+/// violation.
+fn invalid_edge_reasons(data: &PlanningData, task_id: TaskId) -> Vec<ReadinessReason> {
     data.violations_by_task
         .get(&task_id)
         .into_iter()
         .flatten()
-        .map(|&index| data.violations[index].to_string())
+        .map(|&index| {
+            let violation = &data.violations[index];
+            let reason = ReadinessReason::new(ReadinessReasonKind::InvalidEdge, violation.to_string());
+            match violation {
+                // `task` holds the edge to the next step on the cycle, so
+                // removing `task` -> `blocker` breaks it. A self-loop names
+                // the task twice.
+                EdgeViolation::Cycle { path } => ReadinessReason {
+                    task: Some(task_id),
+                    blocker: path
+                        .iter()
+                        .position(|&id| id == task_id)
+                        .and_then(|index| path.get(index + 1).copied()),
+                    path: path.clone(),
+                    ..reason
+                },
+                EdgeViolation::Ancestry { edge, chain, .. } => ReadinessReason {
+                    task: Some(edge.task_id),
+                    blocker: Some(edge.blocker_id),
+                    path: chain.clone(),
+                    ..reason
+                },
+            }
+        })
         .collect()
 }
 
@@ -852,22 +976,39 @@ fn invalid_edge_reasons(data: &PlanningData, task_id: TaskId) -> Vec<String> {
 /// `ancestor` names the parent task that owns the edge when the blocker is
 /// inherited. A cancelled blocker will never complete, so its reason asks for
 /// the dependency to be removed or replaced instead of waited on.
-fn blocker_reason(data: &PlanningData, dependency: &TaskDependency, ancestor: Option<&PlanningTask>) -> Option<String> {
+fn blocker_reason(
+    data: &PlanningData, dependency: &TaskDependency, ancestor: Option<&PlanningTask>,
+) -> Option<ReadinessReason> {
     let subject = ancestor.map_or_else(
         || "blocked by".to_owned(),
         |ancestor| format!("ancestor `{}` is blocked by", ancestor.id),
     );
-    let Some(blocker) = data.tasks.get(&dependency.blocker_id) else {
-        return Some(format!("{subject} missing task `{}`", dependency.blocker_id));
+    let (kind, message) = match data.tasks.get(&dependency.blocker_id) {
+        None => (
+            ReadinessReasonKind::MissingBlocker,
+            format!("{subject} missing task `{}`", dependency.blocker_id),
+        ),
+        Some(blocker) => match blocker.status {
+            TaskStatus::Completed => return None,
+            TaskStatus::Cancelled => (
+                ReadinessReasonKind::CancelledBlocker,
+                format!("{subject} cancelled `{}`; remove or replace the dependency", blocker.id),
+            ),
+            status if ancestor.is_some() => (
+                ReadinessReasonKind::InheritedBlocker,
+                format!("{subject} `{}` ({})", blocker.id, status.as_str()),
+            ),
+            status => (
+                ReadinessReasonKind::DirectBlocker,
+                format!("{subject} `{}` ({})", blocker.id, status.as_str()),
+            ),
+        },
     };
-    match blocker.status {
-        TaskStatus::Completed => None,
-        TaskStatus::Cancelled => Some(format!(
-            "{subject} cancelled `{}`; remove or replace the dependency",
-            blocker.id
-        )),
-        status => Some(format!("{subject} `{}` ({})", blocker.id, status.as_str())),
-    }
+    Some(ReadinessReason {
+        ancestor: ancestor.map(|ancestor| ancestor.id),
+        blocker: Some(dependency.blocker_id),
+        ..ReadinessReason::new(kind, message)
+    })
 }
 
 fn parent_chain(data: &PlanningData, id: TaskId) -> Result<Vec<PlanningTask>> {
@@ -1052,9 +1193,22 @@ mod tests {
 
         let view = database.planning_task_view(c.id).expect("view reads");
         assert!(!view.readiness.ready);
-        assert_eq!(view.readiness.reasons, vec![cycle.clone()]);
+        assert_eq!(view.readiness.messages(), vec![cycle.clone()]);
+        let reason = &view.readiness.reasons[0];
+        assert_eq!(reason.kind, ReadinessReasonKind::InvalidEdge);
+        let ids: Vec<String> = reason.path.iter().map(ToString::to_string).collect();
+        assert_eq!(ids, path);
+        // Each task on the cycle names its own edge to the next step.
+        assert_eq!((reason.task, reason.blocker), (Some(c.id), Some(a.id)));
         let view = database.planning_task_view(b.id).expect("view reads");
-        assert!(view.readiness.reasons.contains(&cycle));
+        assert!(view.readiness.messages().contains(&cycle));
+        let reason = view
+            .readiness
+            .reasons
+            .iter()
+            .find(|reason| reason.kind == ReadinessReasonKind::InvalidEdge)
+            .expect("invalid edge reason");
+        assert_eq!((reason.task, reason.blocker), (Some(b.id), Some(c.id)));
         let ready = database.ready_planning_tasks().expect("ready tasks query");
         assert!(!ready.iter().any(|value| value.id == c.id));
     }
@@ -1073,7 +1227,19 @@ mod tests {
         assert_eq!(report.errors, vec![cycle.clone()]);
         let view = database.planning_task_view(a.id).expect("view reads");
         assert!(!view.readiness.ready);
-        assert!(view.readiness.reasons.contains(&cycle), "{:?}", view.readiness.reasons);
+        assert!(
+            view.readiness.messages().contains(&cycle),
+            "{:?}",
+            view.readiness.messages()
+        );
+        let reason = view
+            .readiness
+            .reasons
+            .iter()
+            .find(|reason| reason.kind == ReadinessReasonKind::InvalidEdge)
+            .expect("invalid edge reason");
+        assert_eq!((reason.task, reason.blocker), (Some(a.id), Some(a.id)));
+        assert_eq!(reason.path, vec![a.id, a.id]);
         let ready = database.ready_planning_tasks().expect("ready tasks query");
         assert_eq!(ready.iter().map(|value| value.id).collect::<Vec<_>>(), vec![other.id]);
 
@@ -1106,10 +1272,18 @@ mod tests {
         let view = database.planning_task_view(leaf.id).expect("view reads");
         assert!(!view.readiness.ready);
         assert!(
-            view.readiness.reasons.contains(&ancestry),
+            view.readiness.messages().contains(&ancestry),
             "{:?}",
-            view.readiness.reasons
+            view.readiness.messages()
         );
+        let reason = view
+            .readiness
+            .reasons
+            .iter()
+            .find(|reason| reason.kind == ReadinessReasonKind::InvalidEdge)
+            .expect("invalid edge reason");
+        assert_eq!((reason.task, reason.blocker), (Some(leaf.id), Some(root.id)));
+        assert_eq!(reason.path, vec![leaf.id, middle.id, root.id]);
     }
 
     #[test]
@@ -1130,12 +1304,12 @@ mod tests {
         let view = database.planning_task_view(parent.id).expect("parent view reads");
         assert!(!view.readiness.ready);
         assert!(
-            view.readiness.reasons.contains(&descendant),
+            view.readiness.messages().contains(&descendant),
             "{:?}",
-            view.readiness.reasons
+            view.readiness.messages()
         );
         let view = database.planning_task_view(leaf.id).expect("leaf view reads");
-        assert!(!view.readiness.reasons.contains(&descendant));
+        assert!(!view.readiness.messages().contains(&descendant));
     }
 
     #[test]
@@ -1154,7 +1328,7 @@ mod tests {
         assert!(!view.readiness.ready);
         assert!(view.readiness.blocked);
         assert_eq!(
-            view.readiness.reasons,
+            view.readiness.messages(),
             vec![format!(
                 "ancestor `{}` is blocked by `{}` (pending)",
                 grandparent.id, blocker.id
@@ -1196,7 +1370,7 @@ mod tests {
 
         let view = database.planning_task_view(leaf.id).expect("leaf view reads");
         assert!(view.readiness.blocked);
-        let reasons = &view.readiness.reasons;
+        let reasons = view.readiness.messages();
         assert!(reasons.contains(&format!(
             "ancestor `{}` is blocked by cancelled `{}`; remove or replace the dependency",
             parent.id, cancelled.id
@@ -1206,6 +1380,130 @@ mod tests {
             cancelled.id
         )));
         assert!(reasons.contains(&format!("blocked by `{}` (pending)", pending.id)));
+    }
+
+    /// The kind and the named record IDs of each reason, without the text.
+    fn kinds_and_ids(readiness: &PlanningReadiness) -> Vec<(ReadinessReasonKind, Option<TaskId>, Option<TaskId>)> {
+        readiness
+            .reasons
+            .iter()
+            .map(|reason| (reason.kind, reason.ancestor, reason.blocker))
+            .collect()
+    }
+
+    #[test]
+    fn readiness_reasons_carry_kinds_and_record_ids() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let cancelled = task(&mut database, project.id, "cancelled");
+        let pending = task(&mut database, project.id, "pending");
+        let parent = task(&mut database, project.id, "parent");
+        let leaf = child(&mut database, project.id, parent.id, "leaf");
+        for (holder, blocker) in [
+            (parent.id, cancelled.id),
+            (parent.id, pending.id),
+            (leaf.id, pending.id),
+        ] {
+            database
+                .add_planning_dependency(holder, blocker)
+                .expect("dependency creates");
+        }
+        database
+            .transition_planning_task(cancelled.id, TaskAction::Cancel, false)
+            .expect("blocker cancels");
+
+        let view = database.planning_task_view(leaf.id).expect("leaf view reads");
+        assert_eq!(
+            kinds_and_ids(&view.readiness),
+            vec![
+                (ReadinessReasonKind::DirectBlocker, None, Some(pending.id)),
+                (
+                    ReadinessReasonKind::CancelledBlocker,
+                    Some(parent.id),
+                    Some(cancelled.id)
+                ),
+                (ReadinessReasonKind::InheritedBlocker, Some(parent.id), Some(pending.id)),
+            ]
+        );
+
+        database
+            .transition_planning_task(parent.id, TaskAction::Park, false)
+            .expect("parent parks");
+        let view = database.planning_task_view(parent.id).expect("parent view reads");
+        let own: Vec<_> = view
+            .readiness
+            .reasons
+            .iter()
+            .take(2)
+            .map(|reason| (reason.kind, reason.task))
+            .collect();
+        assert_eq!(
+            own,
+            vec![
+                (ReadinessReasonKind::Status, Some(parent.id)),
+                (ReadinessReasonKind::HasChildren, Some(parent.id)),
+            ]
+        );
+        let view = database.planning_task_view(leaf.id).expect("leaf view reads");
+        assert_eq!(
+            kinds_and_ids(&view.readiness)[0],
+            (ReadinessReasonKind::ClosedAncestor, Some(parent.id), None)
+        );
+    }
+
+    #[test]
+    fn readiness_names_a_missing_blocker_by_id() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let blocker = task(&mut database, project.id, "blocker");
+        let leaf = task(&mut database, project.id, "leaf");
+        database
+            .add_planning_dependency(leaf.id, blocker.id)
+            .expect("dependency creates");
+        // Foreign keys keep a dangling edge out of the database, so drop the
+        // blocker from the loaded records instead.
+        let mut data = load_data(database.connection(), project.id).expect("data loads");
+        data.tasks.remove(&blocker.id);
+        let ancestry = effective_ancestry(&data, leaf.id, &mut HashSet::new()).expect("ancestry resolves");
+
+        let readiness = readiness(&data, &leaf, &ancestry).expect("readiness computes");
+        assert_eq!(
+            kinds_and_ids(&readiness),
+            vec![(ReadinessReasonKind::MissingBlocker, None, Some(blocker.id))]
+        );
+        assert_eq!(
+            readiness.messages(),
+            vec![format!("blocked by missing task `{}`", blocker.id)]
+        );
+    }
+
+    #[test]
+    fn readiness_names_the_ancestor_holding_a_missing_blocker() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let blocker = task(&mut database, project.id, "blocker");
+        let parent = task(&mut database, project.id, "parent");
+        let leaf = child(&mut database, project.id, parent.id, "leaf");
+        database
+            .add_planning_dependency(parent.id, blocker.id)
+            .expect("dependency creates");
+        let mut data = load_data(database.connection(), project.id).expect("data loads");
+        data.tasks.remove(&blocker.id);
+        let leaf = data.tasks[&leaf.id].clone();
+        let ancestry = effective_ancestry(&data, leaf.id, &mut HashSet::new()).expect("ancestry resolves");
+
+        let readiness = readiness(&data, &leaf, &ancestry).expect("readiness computes");
+        assert_eq!(
+            kinds_and_ids(&readiness),
+            vec![(ReadinessReasonKind::MissingBlocker, Some(parent.id), Some(blocker.id))]
+        );
+        assert_eq!(
+            readiness.messages(),
+            vec![format!(
+                "ancestor `{}` is blocked by missing task `{}`",
+                parent.id, blocker.id
+            )]
+        );
     }
 
     #[test]
@@ -1224,7 +1522,7 @@ mod tests {
             .expect("dependency inserts");
 
         let view = database.planning_task_view(leaf.id).expect("leaf view reads");
-        assert!(view.readiness.ready, "{:?}", view.readiness.reasons);
+        assert!(view.readiness.ready, "{:?}", view.readiness.messages());
         assert!(!view.readiness.blocked);
         assert!(view.inherited_blockers.is_empty());
         let ready = database.ready_planning_tasks().expect("ready tasks query");
@@ -1253,7 +1551,7 @@ mod tests {
 
         let view = database.planning_task_view(leaf.id).expect("leaf view reads");
         assert_eq!(
-            view.readiness.reasons,
+            view.readiness.messages(),
             vec![
                 format!("blocked by `{}` (pending)", own.id),
                 format!("ancestor `{}` is blocked by `{}` (pending)", parent.id, near.id),
@@ -1431,7 +1729,7 @@ mod tests {
             view.readiness
                 .reasons
                 .iter()
-                .any(|reason| reason.contains("blocked by"))
+                .any(|reason| reason.message.contains("blocked by"))
         );
         assert_eq!(view.spec.as_ref().expect("spec context").body, "spec markdown");
         assert_eq!(view.plan.as_ref().expect("plan context").body, "plan markdown");

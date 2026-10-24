@@ -2,10 +2,11 @@
 id = "arcl-t-01M5NJTQSVWEDN7GN2GB7TXBW5"
 parent = "arcl-t-01M5NE5P2N1AMT731RJBAZ66YT"
 title = "T17.1: Add typed kinds and record IDs to readiness reasons"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 1
 blocked-by = ["arcl-t-01M5NJTQJRC8CNJFBF5T4RVRZS", "arcl-t-01M5NJTQMF15EBBYPCAH5H816H", "arcl-t-01M5NJTQR1PZ1QHC309R63EY1J"]
+evidence = "Each readiness reason in JSON is an object with a snake_case `kind` (status, has_children, closed_ancestor, closed_container, direct_blocker, inherited_blocker, cancelled_blocker, missing_blocker, invalid_edge), its `message`, and the IDs it names (`task`, `ancestor`, `blocker`, `container`, `path`). Human and plain output print the message. Store tests in execution::tests cover every kind; CLI `reason_kind_` tests cover every kind but missing_blocker through `--json task explain`, which refuses a dangling edge before readiness. Gates: cargo fmt --check, clippy -D warnings, cargo test --workspace, pnpm check, pnpm test, arcl check. Branch claude/t17-1-typed-reasons."
 +++
 
 Give every readiness reason a stable `kind` and the record IDs it refers to,
