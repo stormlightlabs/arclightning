@@ -43,6 +43,18 @@ pub enum DomainError {
     SelfDependency { task: String },
     #[error("adding dependency from task `{task}` to blocker `{blocker}` would create a cycle")]
     DependencyCycle { task: String, blocker: String },
+    /// Blocker edges form a cycle; each task in `path` is blocked by the next.
+    #[error("blocker edges would form a cycle: {}; each task is blocked by the next", .path.join(" -> "))]
+    BlockerCycle { path: Vec<String> },
+    /// A task is blocked by its own ancestor or descendant. `chain` runs from
+    /// the descendant up to the ancestor.
+    #[error("task `{task}` cannot be blocked by `{blocker}`, its {kinship}; parent chain: {}", .chain.join(" -> "))]
+    BlockerAncestry {
+        task: String,
+        blocker: String,
+        kinship: &'static str,
+        chain: Vec<String>,
+    },
     #[error("task `{task}` is already blocked by `{blocker}`")]
     DuplicateDependency { task: String, blocker: String },
     #[error("task subtree rooted at `{task}` contains tasks from different milestones")]

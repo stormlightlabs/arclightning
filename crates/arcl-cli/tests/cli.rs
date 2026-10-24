@@ -1361,3 +1361,169 @@ fn the_next_command_restores_workspace_files_a_write_left_behind() {
     assert_eq!(fs::read_to_string(&record_path).expect("record reads"), content);
     assert_eq!(GitState::read(path), before);
 }
+
+/// Create a task, under `parent` when given, and return its ID.
+fn create_task(directory: &Path, title: &str, parent: Option<&str>) -> String {
+    let mut args = vec!["--json", "task", "create", title];
+    if let Some(parent) = parent {
+        args.extend(["--parent", parent]);
+    }
+    run_json(directory, &args)["data"]["task"]["id"]
+        .as_str()
+        .expect("task ID")
+        .to_owned()
+}
+
+/// Run a command that must fail with exit code 3 and return its error message.
+fn refused_message(directory: &Path, args: &[&str]) -> String {
+    let output = arcl_in(directory).args(args).output().expect("command runs");
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    json(&output.stderr)["error"]["message"]
+        .as_str()
+        .expect("error message")
+        .to_owned()
+}
+
+/// The blocker edges stored for the project, as `(task, blocker)` pairs.
+fn dependency_pairs(directory: &Path) -> Vec<(String, String)> {
+    let list = run_json(directory, ["--json", "dependency", "list"].as_ref());
+    list["data"]["dependencies"]
+        .as_array()
+        .expect("dependency array")
+        .iter()
+        .map(|edge| {
+            (
+                edge["task_id"].as_str().expect("task ID").to_owned(),
+                edge["blocker_id"].as_str().expect("blocker ID").to_owned(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn dependency_edge_cycle_is_refused_with_its_path() {
+    let directory = initialized_directory();
+    let path = directory.path();
+    let (a, b, c) = (
+        create_task(path, "A", None),
+        create_task(path, "B", None),
+        create_task(path, "C", None),
+    );
+    run_json(path, ["--json", "dependency", "add", &a, "--blocked-by", &b].as_ref());
+    run_json(path, ["--json", "dependency", "add", &b, "--blocked-by", &c].as_ref());
+    let before = dependency_pairs(path);
+
+    let message = refused_message(path, ["--json", "dependency", "add", &c, "--blocked-by", &a].as_ref());
+    assert!(
+        message.contains(&format!("cycle: {c} -> {a} -> {b} -> {c}")),
+        "message: {message}"
+    );
+    assert_eq!(dependency_pairs(path), before);
+}
+
+#[test]
+fn dependency_edge_ancestor_is_refused_by_add_and_create() {
+    let directory = initialized_directory();
+    let path = directory.path();
+    let root = create_task(path, "Root", None);
+    let child = create_task(path, "Child", Some(&root));
+
+    let message = refused_message(
+        path,
+        ["--json", "dependency", "add", &child, "--blocked-by", &root].as_ref(),
+    );
+    assert!(
+        message.contains(&format!("its ancestor; parent chain: {child} -> {root}")),
+        "message: {message}"
+    );
+
+    let message = refused_message(
+        path,
+        [
+            "--json",
+            "task",
+            "create",
+            "Grandchild",
+            "--parent",
+            &child,
+            "--blocked-by",
+            &root,
+        ]
+        .as_ref(),
+    );
+    assert!(message.contains("its ancestor; parent chain: "), "message: {message}");
+    assert!(
+        message.ends_with(&format!(" -> {child} -> {root}")),
+        "message: {message}"
+    );
+    assert!(dependency_pairs(path).is_empty());
+    let tasks = run_json(path, ["--json", "task", "list"].as_ref());
+    assert_eq!(tasks["data"]["tasks"].as_array().expect("task array").len(), 2);
+}
+
+#[test]
+fn dependency_edge_descendant_is_refused() {
+    let directory = initialized_directory();
+    let path = directory.path();
+    let root = create_task(path, "Root", None);
+    let child = create_task(path, "Child", Some(&root));
+    let grandchild = create_task(path, "Grandchild", Some(&child));
+
+    let message = refused_message(
+        path,
+        ["--json", "dependency", "add", &root, "--blocked-by", &grandchild].as_ref(),
+    );
+    assert!(
+        message.contains(&format!(
+            "its descendant; parent chain: {grandchild} -> {child} -> {root}"
+        )),
+        "message: {message}"
+    );
+    assert!(dependency_pairs(path).is_empty());
+}
+
+#[test]
+fn dependency_edge_existing_violation_does_not_block_unrelated_add() {
+    let directory = initialized_directory();
+    let path = directory.path();
+    let root = create_task(path, "Root", None);
+    let child = create_task(path, "Child", Some(&root));
+    let (a, b) = (create_task(path, "A", None), create_task(path, "B", None));
+    let database = rusqlite::Connection::open(path.join(".arcl/arcl.db")).expect("database opens");
+    for (task, blocker) in [(&child, &root), (&a, &b), (&b, &a)] {
+        database
+            .execute(
+                "INSERT INTO planning_task_dependencies (project_id, task_id, blocker_id)
+                 SELECT project_id, ?1, ?2 FROM planning_tasks WHERE id = ?1",
+                [task, blocker],
+            )
+            .expect("bad edge inserts");
+    }
+    drop(database);
+
+    let other = create_task(path, "Other", None);
+    run_json(
+        path,
+        ["--json", "dependency", "add", &other, "--blocked-by", &a].as_ref(),
+    );
+    run_json(
+        path,
+        [
+            "--json",
+            "task",
+            "create",
+            "Late",
+            "--parent",
+            &root,
+            "--blocked-by",
+            &b,
+        ]
+        .as_ref(),
+    );
+    assert_eq!(dependency_pairs(path).len(), 5);
+}
