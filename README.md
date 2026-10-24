@@ -46,6 +46,15 @@ Small work can move directly from a capture to a task:
 arcl capture promote arcl-c-… task --priority high
 ```
 
+## Agents
+
+Give a coding agent the Arc Lightning skill, which teaches it to pick up, hand
+off, and complete tasks with `arcl --json`:
+
+```sh
+npx skills add stormlightlabs/arclightning --skill arclightning
+```
+
 ## Local development
 
 Build and check the CLI from the repository root:
