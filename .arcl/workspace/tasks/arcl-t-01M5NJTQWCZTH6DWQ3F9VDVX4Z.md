@@ -28,14 +28,18 @@ Acceptance criteria:
 - [ ] The list includes descendants of a task that the completed task blocked
       (inherited blockers, T16.1), and excludes tasks still waiting on another
       blocker
+- [ ] With `--with-subtasks` (T16.6), the list covers every task the command
+      completed
 - [ ] Human and plain output name the unblocked tasks
 - [ ] A completion that unblocks nothing returns an empty list
 
 Verification:
 
-- `cargo test --workspace --all-features cli`
-- New tests: direct dependent unblocked, child of a dependent unblocked,
-  dependent with a second open blocker not listed
+- `cargo test -p arcl-store execution::tests`
+- `cargo test -p arcl-cli --test cli unblocked_` (new tests, named
+  `unblocked_…`): direct dependent unblocked, child of a dependent unblocked,
+  dependent with a second open blocker not listed, dependent of a subtask
+  completed by `--with-subtasks` listed, nothing unblocked gives an empty list
 - `just check`
 
 Out of scope:

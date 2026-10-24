@@ -34,9 +34,10 @@ Acceptance criteria:
 
 Verification:
 
-- `cargo test -p arcl-store ready`
-- `cargo test --workspace --all-features ready`
-- New tests: inherited blocker through two levels of parents; cancelled
+- `cargo test -p arcl-store execution::tests` (existing tests, plus the new
+  store tests in that module)
+- `cargo test -p arcl-cli --test cli readiness_` (new tests, named
+  `readiness_…`): inherited blocker through two levels of parents; cancelled
   direct blocker; cancelled inherited blocker; blocker completion restores
   readiness
 - `just check`
@@ -44,5 +45,5 @@ Verification:
 Out of scope:
 
 - Gating `task start` on readiness (T16.2)
-- Refusing or reporting invalid edges (T16.3, T16.4)
+- Refusing or reporting invalid edges (T16.3–T16.5)
 - Typed reason kinds in JSON (T17.1)

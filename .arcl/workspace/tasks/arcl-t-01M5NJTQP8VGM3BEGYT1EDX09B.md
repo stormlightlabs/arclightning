@@ -1,19 +1,17 @@
 +++
 id = "arcl-t-01M5NJTQP8VGM3BEGYT1EDX09B"
 parent = "arcl-t-01M5NE5P1WQ0MBKBRYTRJJR162"
-title = "T16.3: Validate blocker edges the same way everywhere"
+title = "T16.3: Add a shared blocker edge validator for dependency add and task create"
 status = "pending"
 priority = "normal"
 position = 3
 +++
 
-Validate blocker edges with one shared check, used by `dependency add`,
-`task create --blocked-by`, plan application, and workspace import. The check
-refuses an edge that closes a cycle or joins a task to its own ancestor or
-descendant, and names the path that forms it. Today each path has its own
-cycle check (three recursive SQL queries in arcl-store, `dependency_reaches`
-in plan application, `validate_dependency_cycles` in import) and none checks
-ancestry.
+Add one blocker edge validator and use it for `dependency add` and
+`task create --blocked-by`. The validator refuses an edge that closes a cycle
+or joins a task to its own ancestor or descendant, and names the path that
+forms it. Today each of these commands runs its own recursive SQL cycle query
+and neither checks ancestry.
 
 Scope:
 
@@ -21,36 +19,37 @@ Scope:
   parents and edges, returning a violation with its path; new error variants
   in `crates/arcl-core/src/domain/error.rs`
 - `add_planning_dependency` and `create_planning_task_with_dependencies` in
-  `crates/arcl-store/src/storage/connected.rs`
-- `prepare` and `insert_plan_dependency` in
-  `crates/arcl-store/src/storage/connected/plan_ops.rs`
-- `validate_dependency_cycles` in `crates/arcl-repo/src/workspace/import.rs`
-- reparenting through `task update --parent` and plan application, so a move
-  cannot put a task under its own blocker or blocked task
+  `crates/arcl-store/src/storage/connected.rs`, which drop their recursive SQL
+  queries
+- tests in `dependency.rs`, `connected.rs`, and `crates/arcl-cli/tests/cli.rs`
 
 Acceptance criteria:
 
 - [ ] Adding an edge that closes a cycle fails with an error that lists the
-      task IDs along the cycle
+      task IDs along the cycle, and writes nothing
 - [ ] Adding an edge between a task and its ancestor or descendant fails, in
       either direction, and the error names the parent chain that joins them
-- [ ] Reparenting that would join a task to its blocker or blocked task fails
-      the same way
-- [ ] The CLI, plan application, and workspace import call the same validator
-      and refuse the same edges; import names the record path and the task
-      path
-- [ ] The three SQL cycle queries and `dependency_reaches` are gone
+- [ ] `dependency add` and `task create --blocked-by` call the validator and
+      refuse the same edges
+- [ ] The validator is public in arcl-core, takes the whole graph of parents
+      and edges, and reports every violation in it, so T16.4 and T16.5 can
+      reuse it unchanged
+- [ ] The recursive SQL cycle queries in `add_planning_dependency` and
+      `create_planning_task_with_dependencies` are gone
 
 Verification:
 
-- `cargo test -p arcl-core dependency`
-- `cargo test --workspace --all-features dependency`
-- New tests for each entry point: cycle, ancestor edge, descendant edge,
-  reparent under a blocker; one table-driven test that feeds the same graph to
-  CLI, plan application, and import and expects the same refusal
+- `cargo test -p arcl-core dependency::tests` (new module): cycle, ancestor
+  edge, descendant edge, valid graph
+- `cargo test -p arcl-store connected_dependencies` (existing
+  `connected_dependencies_preserve_links_and_reject_cycles`, updated for the
+  new error)
+- `cargo test -p arcl-cli --test cli dependency_edge_` (new tests, named
+  `dependency_edge_…`): cycle, ancestor edge, and descendant edge through
+  `dependency add` and through `task create --blocked-by`
 - `just check`
 
 Out of scope:
 
-- Reporting invalid edges already in the database through readiness and
-  `arcl check` (T16.4)
+- Plan application, workspace import, and reparenting (T16.4)
+- Reporting invalid edges already in the database (T16.5)

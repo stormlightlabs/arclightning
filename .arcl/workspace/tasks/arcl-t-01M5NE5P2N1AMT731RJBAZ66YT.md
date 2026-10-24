@@ -12,7 +12,8 @@ Give automations typed readiness reasons and the tasks a completion unblocks.
 
 Blocked by: T16
 
-Delivered by subtasks T17.1–T17.3.
+Delivered by subtasks T17.1–T17.3. The PR for T17.3, the last of them,
+completes T17 as well (Decision: Parent completion).
 
 Acceptance criteria:
 
@@ -23,5 +24,7 @@ Acceptance criteria:
 
 Verification:
 
-- `cargo test --workspace --all-features cli`
+- `cargo test -p arcl-cli --test cli task_dependencies`
+- The new test filters each subtask names
 - Chain completion to newly ready work using JSON output only
+- `just check`
