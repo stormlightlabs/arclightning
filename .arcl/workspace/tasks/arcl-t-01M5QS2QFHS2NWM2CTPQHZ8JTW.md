@@ -6,7 +6,7 @@ status = "completed"
 priority = "normal"
 position = 3
 blocked-by = ["arcl-t-01M5QS2QD0ABDP8W6HG33265CY"]
-evidence = "Delivered by #PR: the Task view in apps/web, DataSource.task in apps/web/src/lib/data, and PropertiesPanel and MarkdownEditor (CodeMirror 6) in packages/ui. Verified with pnpm --filter @arclightning/web check and test, the packages/ui browser tests, a headless Chromium run against arcl serve on this repository, and the just check steps."
+evidence = "Delivered by #40: the Task view in apps/web, DataSource.task in apps/web/src/lib/data, and PropertiesPanel and MarkdownEditor (CodeMirror 6) in packages/ui. Verified with pnpm --filter @arclightning/web check and test, the packages/ui browser tests, a headless Chromium run against arcl serve on this repository, and the just check steps."
 +++
 
 Build the Task view: everything needed to decide whether a task can be worked
