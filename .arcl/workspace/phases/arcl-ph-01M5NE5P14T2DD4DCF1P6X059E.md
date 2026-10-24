@@ -2,7 +2,7 @@
 id = "arcl-ph-01M5NE5P14T2DD4DCF1P6X059E"
 plan = "arcl-pl-01M5NE5P0CWMJNP2A7B0ZQW6XC"
 title = "Milestone 4: Blocking for automation"
-status = "open"
+status = "completed"
 position = 4
 +++
 

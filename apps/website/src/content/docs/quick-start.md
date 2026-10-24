@@ -158,5 +158,5 @@ arcl --plain idea list
 arcl --quiet task complete arcl-t-01J...
 ```
 
-`--json` emits a versioned envelope with `format_version: 1`, `--plain` emits
+`--json` emits an envelope with a `format_version`, `--plain` emits
 stable unstyled records, and `--quiet` prints only the affected ID for mutations.

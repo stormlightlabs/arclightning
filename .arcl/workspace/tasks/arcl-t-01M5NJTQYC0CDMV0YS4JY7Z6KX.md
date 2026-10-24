@@ -2,10 +2,11 @@
 id = "arcl-t-01M5NJTQYC0CDMV0YS4JY7Z6KX"
 parent = "arcl-t-01M5NE5P2N1AMT731RJBAZ66YT"
 title = "T17.3: Version and document the readiness JSON shapes"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 3
 blocked-by = ["arcl-t-01M5NJTQSVWEDN7GN2GB7TXBW5", "arcl-t-01M5NJTQWCZTH6DWQ3F9VDVX4Z"]
+evidence = "Delivered by #25: the task view (`show`, `task show`, `explain`, `task explain`), context (`context`, `task context`) and `task complete` envelopes write `format_version: 2`; every other envelope, failures and warnings keep 1. The automation guide and manual list each reason `kind` with its ID fields, `completed_subtasks`, `unblocked`, the start refusal error, and the version per command. Tests: `output::tests` and `cli json_only_chain_picks_work_reads_reasons_and_starts_what_completion_unblocked`. Gates: cargo fmt --check, clippy -D warnings, cargo test --workspace, pnpm check, pnpm test, arcl check."
 +++
 
 Version the JSON shapes T17.1 and T17.2 changed and document them for the MCP
@@ -26,16 +27,16 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] Envelopes whose shape changed carry a new `format_version`; unchanged
+- [x] Envelopes whose shape changed carry a new `format_version`; unchanged
       envelopes keep theirs
-- [ ] The docs list every reason `kind`, its ID fields, the `unblocked` and
+- [x] The docs list every reason `kind`, its ID fields, the `unblocked` and
       `completed_subtasks` fields, and the version per command, in a form the
       MCP server can reuse
-- [ ] A CLI test drives `ready`, `task start`, `task complete`, and `explain`
+- [x] A CLI test drives `ready`, `task start`, `task complete`, and `explain`
       with `--json` only: it picks ready work, reads why another task is
       blocked, completes a blocker, and starts a task from the `unblocked`
       list
-- [ ] This PR also completes T17, with the T17 subtask PRs as its evidence
+- [x] This PR also completes T17, with the T17 subtask PRs as its evidence
 
 Verification:
 

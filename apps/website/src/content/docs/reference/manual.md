@@ -183,8 +183,20 @@ and cancelled is rejected.
 
 Human output is concise and may use ANSI colors. `--plain` emits stable unstyled
 records for shell pipelines. `--quiet` prints only the affected ID for a
-mutation. `--json` emits a top-level object with `format_version: 1` and a
+mutation. `--json` emits a top-level object with a `format_version` and a
 command-specific `data` object containing the action and record fields.
+
+| `format_version` | Commands                                                                                             |
+| ---------------- | ---------------------------------------------------------------------------------------------------- |
+| `2`              | `show <task-id>`, `task show`, `explain`, `task explain`, `context`, `task context`, `task complete` |
+| `1`              | Every other command, failures, and sync warnings                                                     |
+
+Task views and context packets report `readiness` with `ready`, `blocked`, and
+`reasons`. Each reason has a `kind`: `status`, `has_children`,
+`closed_ancestor`, `closed_container`, `direct_blocker`, `inherited_blocker`,
+`cancelled_blocker`, `missing_blocker`, or `invalid_edge`. It also has a
+`message` and the `task`, `ancestor`, `blocker`, `container`, or `path` fields
+its kind names. [Automation](/guides/automation/) lists the fields per kind.
 
 For example:
 
