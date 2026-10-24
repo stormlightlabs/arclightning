@@ -73,6 +73,9 @@ pub enum DomainError {
         id: String,
         action: &'static str,
     },
+    /// Starting a pending task that readiness reports as not ready, without `--force`.
+    #[error("cannot start task `{id}` while it is not ready: {}; pass --force to override", reasons.join("; "))]
+    NotReady { id: String, reasons: Vec<String> },
     #[error(transparent)]
     InvalidId(#[from] IdError),
 }

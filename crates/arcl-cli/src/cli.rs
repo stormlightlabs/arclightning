@@ -548,6 +548,9 @@ pub enum TaskCommand {
     Start {
         /// The task ID to start.
         id: String,
+        /// Start the task even when it is not ready.
+        #[arg(long)]
+        force: bool,
     },
     /// Temporarily exclude work from readiness.
     Park {

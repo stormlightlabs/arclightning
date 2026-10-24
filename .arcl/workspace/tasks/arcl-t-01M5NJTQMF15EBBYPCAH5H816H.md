@@ -2,9 +2,10 @@
 id = "arcl-t-01M5NJTQMF15EBBYPCAH5H816H"
 parent = "arcl-t-01M5NE5P1WQ0MBKBRYTRJJR162"
 title = "T16.2: Refuse starting unready tasks without --force"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 2
+evidence = "`arcl task start` refuses a pending task that is not ready, apart from having child tasks, and lists the reasons in `DomainError::NotReady`; `--force` starts it anyway. The store exposes `start_planning_task(id, force)`. Store and CLI `start_` tests cover a blocked task, a parked ancestor, a cancelled plan, a parent with children, a blocked parent and a repeat start. Gates: cargo fmt --check, clippy -D warnings, cargo test --workspace, pnpm check, pnpm test. Branch claude/t16-2-start-gating."
 +++
 
 Make `arcl task start` refuse a pending task that is not ready unless the
@@ -32,17 +33,17 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] `task start` on a pending task whose readiness is false fails with an
+- [x] `task start` on a pending task whose readiness is false fails with an
       error that lists the readiness reasons, and writes nothing
-- [ ] `task start --force` starts the same task
-- [ ] The "has child tasks" reason is the only one start skips: a pending
+- [x] `task start --force` starts the same task
+- [x] The "has child tasks" reason is the only one start skips: a pending
       parent with no other reason starts without `--force`, and a parent with
       an unfinished blocker is refused
-- [ ] `task start` on an in-progress task stays a no-op and succeeds, with or
+- [x] `task start` on an in-progress task stays a no-op and succeeds, with or
       without `--force`
-- [ ] The store API keeps force as an explicit argument, so the MCP start tool
+- [x] The store API keeps force as an explicit argument, so the MCP start tool
       (T10) can call start without exposing it
-- [ ] `connected_execution_keeps_invalid_writes_atomic` passes `force` for its
+- [x] `connected_execution_keeps_invalid_writes_atomic` passes `force` for its
       start after the forced plan close, changed on purpose with a comment
       saying why
 
