@@ -15,14 +15,14 @@
   import { Markdown, MarkdownEditor, PropertiesPanel, StatusBadge } from "@arclightning/ui";
   import type { Task } from "$lib/data";
   import { taskHref } from "$lib/work";
-  import { inheritedGroups, propertiesOf, reasonSegments, titlesOf } from "./view";
+  import { blockersOf, propertiesOf, reasonSegments, titlesOf, type DoneBlocker } from "./view";
 
   let { detail, workHref, panelOpen = $bindable(true) }: TaskDetailProps = $props();
   let showSource = $state(false);
 
   let task = $derived(detail.task);
   let titles = $derived(titlesOf(detail));
-  let inherited = $derived(inheritedGroups(detail));
+  let blockers = $derived(blockersOf(detail));
   let reasons = $derived(detail.readiness.reasons);
   let reasonCount = $derived(reasons.length === 1 ? "1 reason" : `${reasons.length} reasons`);
 </script>
@@ -32,6 +32,22 @@
     <a href={taskHref(related.id)}>{related.title}</a>
     <code>{related.id}</code>
     <StatusBadge status={related.status} />
+  </li>
+{/snippet}
+
+{#snippet done({ blocker, ancestor }: DoneBlocker)}
+  <li>
+    <div class="row">
+      <a href={taskHref(blocker.task.id)}>{blocker.task.title}</a>
+      <code>{blocker.task.id}</code>
+      <StatusBadge status={blocker.task.status} />
+    </div>
+    {#if ancestor}<p class="muted via">Inherited from <a href={taskHref(ancestor.id)}>{ancestor.title}</a></p>{/if}
+    {#if blocker.evidence}
+      <Markdown source={blocker.evidence} label={`Evidence for ${blocker.task.title}`} />
+    {:else}
+      <p class="muted">No evidence recorded.</p>
+    {/if}
   </li>
 {/snippet}
 
@@ -60,7 +76,7 @@
       </p>
       {#if reasons.length}
         <ul>
-          {#each reasons as reason, index (index)}
+          {#each reasons as reason}
             <li data-kind={reason.kind}>
               {#each reasonSegments(reason, titles) as segment, part (part)}
                 {#if "href" in segment}<a href={segment.href} title={segment.id}>{segment.label}</a>{:else}{segment.text}{/if}
@@ -90,20 +106,29 @@
       {/if}
     </section>
 
-    {#if detail.blockers.length || inherited.length}
+    {#if blockers.direct.length || blockers.inherited.length}
       <section aria-labelledby="task-blockers">
         <h2 id="task-blockers">Blocked by</h2>
-        {#if detail.blockers.length}
+        {#if blockers.direct.length}
           <ul class="relations" aria-label="Direct blockers">
-            {#each detail.blockers as blocker (blocker.task.id)}{@render relation(blocker.task)}{/each}
+            {#each blockers.direct as blocker (blocker.task.id)}{@render relation(blocker.task)}{/each}
           </ul>
         {/if}
-        {#each inherited as group (group.ancestor.id)}
+        {#each blockers.inherited as group (group.ancestor.id)}
           <h3>Inherited from <a href={taskHref(group.ancestor.id)}>{group.ancestor.title}</a></h3>
           <ul class="relations" aria-label={`Inherited from ${group.ancestor.title}`}>
             {#each group.blockers as blocker (blocker.task.id)}{@render relation(blocker.task)}{/each}
           </ul>
         {/each}
+      </section>
+    {/if}
+
+    {#if blockers.done.length}
+      <section aria-labelledby="task-done-blockers">
+        <h2 id="task-done-blockers">Completed blockers</h2>
+        <ul class="relations done">
+          {#each blockers.done as entry (`${entry.ancestor?.id ?? ""}/${entry.blocker.task.id}`)}{@render done(entry)}{/each}
+        </ul>
       </section>
     {/if}
 
@@ -178,6 +203,10 @@
   .relations li + li { border-top: var(--arcl-border-width) solid var(--arcl-surface-subtle); }
   .relations a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .relations code { color: var(--arcl-text-muted); font: var(--arcl-type-xs) var(--arcl-font-code); }
+  .done li { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--arcl-space-1); padding: var(--arcl-space-2) var(--arcl-space-3); }
+  .done .row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--arcl-space-3); }
+  .done .via { font-size: var(--arcl-type-xs); }
+  .done .via a { color: var(--arcl-link); text-decoration: none; }
   .entry + .entry { margin-top: var(--arcl-space-2); }
   @media (max-width: 60rem) {
     .layout, .layout[data-panel="closed"] { grid-template-columns: minmax(0, 1fr); }

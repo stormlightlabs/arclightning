@@ -5,7 +5,7 @@
     /** The editor's accessible name. */
     label: string;
     readonly?: boolean;
-    /** Called with the whole text after each edit. */
+    /** Called with the whole text after each edit a person makes, not when `value` changes. */
     onchange?: (value: string) => void;
   }
 </script>
@@ -13,7 +13,7 @@
 <script lang="ts">
   import { markdown } from "@codemirror/lang-markdown";
   import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-  import { Compartment, EditorState } from "@codemirror/state";
+  import { Annotation, Compartment, EditorState } from "@codemirror/state";
   import { EditorView, keymap } from "@codemirror/view";
   import { tags } from "@lezer/highlight";
   import { onMount } from "svelte";
@@ -22,6 +22,8 @@
   let host: HTMLDivElement;
   let view = $state<EditorView>();
   const access = new Compartment();
+  // Marks the transactions that copy `value` in, so they do not report an edit.
+  const fromProps = Annotation.define<boolean>();
 
   // Colours come from the theme tokens, so the editor follows light and dark.
   const highlight = HighlightStyle.define([
@@ -53,7 +55,8 @@
           // Escape leaves the editor, so the next Escape reaches the page.
           keymap.of([{ key: "Escape", run: (editor) => (editor.contentDOM.blur(), true) }]),
           EditorView.updateListener.of((update) => {
-            if (update.docChanged) onchange?.(update.state.doc.toString());
+            const edited = update.transactions.some((tr) => tr.docChanged && !tr.annotation(fromProps));
+            if (edited) onchange?.(update.state.doc.toString());
           }),
         ],
       }),
@@ -63,7 +66,7 @@
 
   $effect(() => {
     if (view && view.state.doc.toString() !== value) {
-      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } });
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value }, annotations: fromProps.of(true) });
     }
   });
 

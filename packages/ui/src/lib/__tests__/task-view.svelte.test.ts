@@ -39,6 +39,17 @@ describe("MarkdownEditor", () => {
     await expect.element(page.getByText("1 edits")).toBeInTheDocument();
   });
 
+  it("does not report an edit when the value changes from props", async () => {
+    await render(TaskViewHarness, { readonly: false });
+    const editor = page.getByRole("textbox", { name: "Description Markdown" });
+    await page.getByRole("button", { name: "Replace value" }).click();
+    await expect.element(editor).toHaveTextContent("Replaced from props.");
+    await expect.element(page.getByText("0 edits")).toBeInTheDocument();
+    editor.element().focus();
+    await userEvent.keyboard("x");
+    await expect.element(page.getByText("1 edits")).toBeInTheDocument();
+  });
+
   it("gives up focus on Escape", async () => {
     await render(TaskViewHarness);
     const editor = page.getByRole("textbox", { name: "Description Markdown" });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { blockedDetail, bareDetail } from "./fixtures";
-import { inheritedGroups, propertiesOf, reasonSegments, taskKeyAction, titlesOf } from "./view";
+import { blockedDetail, bareDetail, doneBlockersDetail } from "./fixtures";
+import { blockersOf, inheritedGroups, propertiesOf, reasonSegments, taskKeyAction, titlesOf } from "./view";
 
 const key = (key: string, fields: Partial<Parameters<typeof taskKeyAction>[0]> = {}) => ({
   key,
@@ -63,6 +63,24 @@ describe("inheritedGroups", () => {
   });
 });
 
+describe("blockersOf", () => {
+  it("keeps completed blockers out of the ones the task waits on", () => {
+    const { direct, inherited, done } = blockersOf(doneBlockersDetail());
+    expect(direct.map((blocker) => blocker.task.id)).toEqual(["t-10.3"]);
+    expect(inherited.map((group) => group.blockers.map((blocker) => blocker.task.id))).toEqual([["t-17"]]);
+    expect(done.map(({ blocker, ancestor }) => [blocker.task.id, blocker.evidence, ancestor])).toEqual([
+      ["t-10.2", "Landed in **#38**.", null],
+      ["t-9", "", { id: "t-10", title: "T10: Add the MCP server" }],
+    ]);
+  });
+
+  it("leaves out an ancestor whose blockers are all completed", () => {
+    const detail = doneBlockersDetail();
+    detail.inherited_blockers = detail.inherited_blockers.filter((blocker) => blocker.completed);
+    expect(blockersOf(detail).inherited).toEqual([]);
+  });
+});
+
 describe("propertiesOf", () => {
   it("lists status, readiness, priority, parent, spec, plan and phase", () => {
     expect(propertiesOf(blockedDetail())).toEqual([
@@ -89,9 +107,19 @@ describe("taskKeyAction", () => {
     expect(taskKeyAction(key("j"))).toBeNull();
   });
 
+  it("toggles the panel on ] typed with AltGr or Option", () => {
+    const altGraph = (on: boolean) => (name: string) => name === "AltGraph" && on;
+    expect(taskKeyAction(key("]", { ctrlKey: true, altKey: true, getModifierState: altGraph(true) }))).toBe("properties");
+    expect(taskKeyAction(key("]", { ctrlKey: true, altKey: true }))).toBe("properties");
+    expect(taskKeyAction(key("]", { altKey: true, getModifierState: altGraph(false) }))).toBe("properties");
+    expect(taskKeyAction(key("]", { ctrlKey: true, altKey: true, getModifierState: altGraph(false) }))).toBeNull();
+  });
+
   it("leaves keys that are handled, held with a modifier, or typed into a field", () => {
     expect(taskKeyAction(key("Escape", { defaultPrevented: true }))).toBeNull();
     expect(taskKeyAction(key("]", { metaKey: true }))).toBeNull();
+    expect(taskKeyAction(key("]", { ctrlKey: true }))).toBeNull();
+    expect(taskKeyAction(key("Escape", { altKey: true }))).toBeNull();
     const editor = { closest: (selector: string) => (selector.includes("contenteditable") ? {} : null) } as unknown as EventTarget;
     expect(taskKeyAction(key("Escape", { target: editor }))).toBeNull();
   });
