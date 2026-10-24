@@ -40,9 +40,7 @@ pub const TOKEN_QUERY: &str = "token";
 const TOKEN_BYTES: usize = 32;
 
 /// The page served when `apps/web` was not built before `arcl` was compiled.
-const NOT_BUILT_PAGE: &str = "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>Arc Lightning</title></head>\
-<body><p>This <code>arcl</code> was built without the web app. Run <code>pnpm --filter @arclightning/web build</code>, \
-then rebuild <code>arcl</code>.</p></body></html>\n";
+const NOT_BUILT_PAGE: &str = include_str!("not_built.html");
 
 /// A failure to start or run the server.
 #[derive(Debug, Error)]
