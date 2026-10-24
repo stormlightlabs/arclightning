@@ -2026,6 +2026,17 @@ mod tests {
             .status
     }
 
+    /// Tasks created in the same millisecond can get IDs out of creation order,
+    /// so tests compare equal-position siblings as sorted lists.
+    fn sorted(mut ids: Vec<TaskId>) -> Vec<TaskId> {
+        ids.sort();
+        ids
+    }
+
+    fn sorted_ids(tasks: &[PlanningTask]) -> Vec<TaskId> {
+        sorted(tasks.iter().map(|task| task.id).collect())
+    }
+
     #[test]
     fn complete_with_subtasks_completes_open_descendants_in_tree_order() {
         let mut database = Database::open_in_memory().expect("database opens");
@@ -2053,12 +2064,8 @@ mod tests {
         assert_eq!(completion.task.status, TaskStatus::Completed);
         assert_eq!(completion.task.evidence, "all of it");
         assert_eq!(
-            completion
-                .completed_subtasks
-                .iter()
-                .map(|subtask| subtask.id)
-                .collect::<Vec<_>>(),
-            vec![started.id, grandchild.id, pending.id]
+            sorted_ids(&completion.completed_subtasks),
+            sorted(vec![started.id, grandchild.id, pending.id])
         );
         for id in [parent.id, started.id, grandchild.id, done.id, pending.id] {
             assert_eq!(status(&database, id), TaskStatus::Completed);
@@ -2151,12 +2158,8 @@ mod tests {
             .expect("inside blockers do not count");
 
         assert_eq!(
-            completion
-                .completed_subtasks
-                .iter()
-                .map(|subtask| subtask.id)
-                .collect::<Vec<_>>(),
-            vec![after_dropped.id, first.id, second.id]
+            sorted_ids(&completion.completed_subtasks),
+            sorted(vec![after_dropped.id, first.id, second.id])
         );
         assert_eq!(status(&database, dropped.id), TaskStatus::Cancelled);
         assert_eq!(status(&database, after_dropped.id), TaskStatus::Completed);
