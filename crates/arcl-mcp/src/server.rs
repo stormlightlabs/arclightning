@@ -458,8 +458,14 @@ fn version_meta(format_version: u8) -> MetaObject {
 
 /// Promote a capture as `arcl capture promote` does: the capture's title and
 /// body unless the input gives others, and task placement only for a task.
+/// The checks run in the CLI's order, so a call both reject fails the same
+/// way: the capture ID, the capture's existence, task placement, then the
+/// store's own checks, title included.
 fn promote_capture(database: &mut Database, input: CapturePromoteInput) -> Result<CapturePromotionData, ToolError> {
     let id = CaptureId::parse(&input.capture_id)?;
+    let capture = database
+        .capture(id)?
+        .ok_or_else(|| StorageError::CaptureNotFound { id: id.to_string() })?;
     if input.target != PromotionTarget::Task
         && (input.spec.is_some() || input.plan.is_some() || input.phase.is_some() || input.parent.is_some())
     {
@@ -467,12 +473,6 @@ fn promote_capture(database: &mut Database, input: CapturePromoteInput) -> Resul
             "task placement options apply only when promoting to a task",
         ));
     }
-    if let Some(title) = &input.title {
-        validate_title(title)?;
-    }
-    let capture = database
-        .capture(id)?
-        .ok_or_else(|| StorageError::CaptureNotFound { id: id.to_string() })?;
     let title = input.title.unwrap_or(capture.title);
     let body = input.body.unwrap_or(capture.body);
     let result = match input.target {

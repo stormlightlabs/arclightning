@@ -6,7 +6,7 @@ status = "completed"
 priority = "normal"
 position = 0
 blocked-by = ["arcl-t-01M5NE5P2N1AMT731RJBAZ66YT", "arcl-t-01M5NH23GE6N1SXWVK9BHVGP5V"]
-evidence = "Delivered by #38: completes T10 with its subtask PRs as evidence: #30 adds the Arc Lightning skill (T10.1), #33 adds `arcl skill install` (T10.2), #34 adds the `arcl-mcp` server (T10.3), and this PR covers a capture-to-completion workflow and the error boundaries over stdio (T10.4)."
+evidence = "Delivered by T10.1–T10.4: #30, #33, #34 and #38."
 +++
 
 Expose agent operations through typed MCP tools and document the intended

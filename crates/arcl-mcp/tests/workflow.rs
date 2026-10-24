@@ -11,10 +11,12 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
+use arcl_cli::cli::ColorChoice;
+use arcl_cli::output::{OutputMode, Renderer};
 use arcl_core::domain::{CaptureId, TaskAction, TaskId};
 use arcl_mcp::error::ToolError;
 use arcl_repo::workspace::ProjectConfig;
-use arcl_store::{Database, StorageError};
+use arcl_store::{CaptureTaskPromotion, Database, StorageError};
 
 /// The tools that change no records. Every other tool writes.
 const READ_TOOLS: &[&str] = &["context", "explain", "list", "ready", "show"];
@@ -302,6 +304,90 @@ fn invalid_transitions_carry_the_application_error() {
     let failed = client.fail("capture_promote", json!({"capture_id": missing, "target": "task"}));
     let expected = Err(StorageError::CaptureNotFound { id: missing });
     assert_same_failure(&failed, expected, ("not_found", 5));
+    client.finish();
+}
+
+#[test]
+fn capture_promote_checks_run_in_the_cli_order() {
+    let project = project();
+    let mut client = Client::start(project.path());
+    let database = || Database::open(project.path().join(".arcl/arcl.db")).expect("open database");
+    let parent = create_task(&mut client, json!({"title": "Parent"}));
+
+    // A missing capture is reported before misplaced task options.
+    let missing = "arcl-c-01M5QPZZKW6X9JPSGZ4VWRAMCY".to_owned();
+    let failed = client.fail(
+        "capture_promote",
+        json!({"capture_id": missing, "target": "note", "parent": parent}),
+    );
+    let expected = Err(StorageError::CaptureNotFound { id: missing });
+    assert_same_failure(&failed, expected, ("not_found", 5));
+
+    // A blank title is the store's to refuse, after the capture is found.
+    let captured = client.ok("capture_create", json!({"title": "Keep the title"}));
+    let capture = captured["data"]["capture"]["id"]
+        .as_str()
+        .expect("capture ID")
+        .to_owned();
+    let capture_id = CaptureId::parse(&capture).expect("capture ID");
+    let failed = client.fail(
+        "capture_promote",
+        json!({"capture_id": capture, "target": "note", "title": " "}),
+    );
+    let expected = database().promote_capture_to_note(capture_id, " ".to_owned(), String::new());
+    assert_same_failure(&failed, expected.map(drop), ("invalid_request", 3));
+    client.finish();
+}
+
+#[test]
+fn capture_promote_data_matches_the_cli() {
+    let project = project();
+    let mut client = Client::start(project.path());
+    let database = || Database::open(project.path().join(".arcl/arcl.db")).expect("open database");
+    let renderer = Renderer::new(OutputMode::Json, ColorChoice::Never);
+
+    for target in ["spec", "task", "note"] {
+        let captured = client.ok(
+            "capture_create",
+            json!({"title": format!("Promote to a {target}"), "body": "Body text."}),
+        );
+        let capture = captured["data"]["capture"]["id"]
+            .as_str()
+            .expect("capture ID")
+            .to_owned();
+        let promoted = client.ok("capture_promote", json!({"capture_id": capture, "target": target}));
+
+        // Promoting again to the same target returns the same records, so the
+        // CLI's rendering of the store's result must match the tool's output.
+        let id = CaptureId::parse(&capture).expect("capture ID");
+        let title = format!("Promote to a {target}");
+        let body = "Body text.".to_owned();
+        let result = match target {
+            "spec" => database().promote_capture_to_spec(id, title, body, String::new()),
+            "task" => database().promote_capture_to_task(
+                id,
+                CaptureTaskPromotion {
+                    spec_id: None,
+                    plan_id: None,
+                    phase_id: None,
+                    parent_id: None,
+                    title,
+                    body,
+                    priority: Default::default(),
+                    position: 0,
+                },
+            ),
+            _ => database().promote_capture_to_note(id, title, body),
+        }
+        .expect("the store returns the promotion");
+        let rendered = renderer
+            .render_capture_promotion(&result)
+            .expect("render")
+            .expect("JSON output");
+        let cli: Value = serde_json::from_str(&rendered).expect("CLI JSON");
+        assert_eq!(promoted["data"], cli["data"], "{target}");
+        assert_eq!(promoted["format_version"], cli["format_version"], "{target}");
+    }
     client.finish();
 }
 
