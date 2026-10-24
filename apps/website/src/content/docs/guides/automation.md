@@ -123,23 +123,24 @@ finish, then fails with `application_error` (exit code `1`) naming the
 `.arcl/arcl.db-sync.lock` file. A call the client cancels while it waits
 changes nothing. Once its operation starts, a write runs to the end.
 
-| Tool             | Command          | `format_version`              |
-| ---------------- | ---------------- | ----------------------------- |
-| `show`           | `show`           | `2` for a task, `1` otherwise |
-| `list`           | `list`           | `1`                           |
-| `ready`          | `ready`          | `1`                           |
-| `explain`        | `explain`        | `2`                           |
-| `context`        | `context`        | `2`                           |
-| `capture_create` | `capture create` | `1`                           |
-| `spec_create`    | `spec create`    | `1`                           |
-| `plan_create`    | `plan create`    | `1`                           |
-| `task_create`    | `task create`    | `1`                           |
-| `task_update`    | `task update`    | `1`                           |
-| `note_create`    | `note create`    | `1`                           |
-| `task_start`     | `task start`     | `1`                           |
-| `task_handoff`   | `task handoff`   | `1`                           |
-| `task_unpark`    | `task unpark`    | `1`                           |
-| `task_complete`  | `task complete`  | `2`                           |
+| Tool              | Command           | `format_version`              |
+| ----------------- | ----------------- | ----------------------------- |
+| `show`            | `show`            | `2` for a task, `1` otherwise |
+| `list`            | `list`            | `1`                           |
+| `ready`           | `ready`           | `1`                           |
+| `explain`         | `explain`         | `2`                           |
+| `context`         | `context`         | `2`                           |
+| `capture_create`  | `capture create`  | `1`                           |
+| `capture_promote` | `capture promote` | `1`                           |
+| `spec_create`     | `spec create`     | `1`                           |
+| `plan_create`     | `plan create`     | `1`                           |
+| `task_create`     | `task create`     | `1`                           |
+| `task_update`     | `task update`     | `1`                           |
+| `note_create`     | `note create`     | `1`                           |
+| `task_start`      | `task start`      | `1`                           |
+| `task_handoff`    | `task handoff`    | `1`                           |
+| `task_unpark`     | `task unpark`     | `1`                           |
+| `task_complete`   | `task complete`   | `2`                           |
 
 A tool's structured content is the command's envelope: `format_version`,
 `data`, and a `warnings` array of `code` and `message` objects when the call

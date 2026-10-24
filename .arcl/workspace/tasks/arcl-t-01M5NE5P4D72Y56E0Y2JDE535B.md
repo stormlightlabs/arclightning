@@ -2,10 +2,11 @@
 id = "arcl-t-01M5NE5P4D72Y56E0Y2JDE535B"
 phase = "arcl-ph-01M5NE5P3EMQJC9Z5CNYZXVHBW"
 title = "T10: Add the MCP server and Arc Lightning skill"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 0
 blocked-by = ["arcl-t-01M5NE5P2N1AMT731RJBAZ66YT", "arcl-t-01M5NH23GE6N1SXWVK9BHVGP5V"]
+evidence = "Delivered by T10.1–T10.4: #30, #33, #34 and #38."
 +++
 
 Expose agent operations through typed MCP tools and document the intended
@@ -18,17 +19,17 @@ completes T10 as well (Decision: Parent completion).
 
 Acceptance criteria:
 
-- [ ] Add MCP tools for record reads and mutations, ready work, readiness
+- [x] Add MCP tools for record reads and mutations, ready work, readiness
       explanation, context, handoff, and completion (T10.3)
-- [ ] Reuse application operations and errors without invoking or scraping the
+- [x] Reuse application operations and errors without invoking or scraping the
       CLI (T10.3)
-- [ ] Publish versioned input and output schemas with bounded list pagination
+- [x] Publish versioned input and output schemas with bounded list pagination
       (T10.3)
-- [ ] Add an Arc Lightning skill that refers to product commands and MCP tools
+- [x] Add an Arc Lightning skill that refers to product commands and MCP tools
       without restating domain rules (T10.1, T10.3)
-- [ ] Install the skill with `npx skills add` and with `arcl skill install`
+- [x] Install the skill with `npx skills add` and with `arcl skill install`
       (T10.1, T10.2)
-- [ ] Cover tool authorization boundaries and invalid-transition errors
+- [x] Cover tool authorization boundaries and invalid-transition errors
       (T10.4)
 
 Verification:

@@ -22,8 +22,8 @@ pub use id::{
 };
 pub use lifecycle::{ContainerAction, ContainerStatus, TaskAction, TaskPriority, TaskStatus};
 pub use membership::{
-    CapturePromotion, CapturePromotionTarget, LinkedRecordKind, NoteLink, RecordLink, ReleaseMemberId,
-    ReleaseMemberKind, ReleaseMembership,
+    CapturePromotion, CapturePromotionKind, CapturePromotionTarget, LinkedRecordKind, NoteLink, RecordLink,
+    ReleaseMemberId, ReleaseMemberKind, ReleaseMembership,
 };
 pub use note::Note;
 pub use phase::Phase;
