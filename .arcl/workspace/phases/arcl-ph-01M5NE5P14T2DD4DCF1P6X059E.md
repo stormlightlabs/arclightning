@@ -13,10 +13,13 @@ Deliverables:
 
 - blockers on a parent task also block its descendants
 - `task start` from pending refuses work that is not ready unless the caller
-  passes `--force`; a repeat start stays a no-op
+  passes `--force`; a repeat start stays a no-op, and having child tasks does
+  not count against start
 - blocker edges cannot form a cycle or join a task to its own ancestor or
   descendant
 - a cancelled blocker is reported as a decision to make, not a silent wait
+- `task complete --with-subtasks` completes a task and its open subtasks in
+  one write
 - typed readiness reasons in JSON alongside the human text
 - task completion reports the tasks it made ready
 
