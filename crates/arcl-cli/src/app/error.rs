@@ -141,6 +141,12 @@ pub(super) enum CommandError {
     InvalidFilter { message: String },
     #[error("database or graph integrity check failed: {message}")]
     Integrity { message: String },
+    #[error("could not read skill file `{path}`: {source}")]
+    ReadSkill { path: PathBuf, source: io::Error },
+    #[error("could not write skill file `{path}`: {source}")]
+    WriteSkill { path: PathBuf, source: io::Error },
+    #[error("{count} skill file(s) are missing or differ from this arcl; run `arcl skill install`")]
+    SkillDrift { count: usize },
 }
 
 impl From<WorkspaceExportError> for CommandError {
@@ -188,7 +194,10 @@ impl CommandError {
             | Self::ReadStdin { .. }
             | Self::OpenDatabase { source: StorageError::Sqlite(_), .. }
             | Self::CurrentDirectory { .. }
-            | Self::SyncLock { .. } => 1,
+            | Self::SyncLock { .. }
+            | Self::ReadSkill { .. }
+            | Self::WriteSkill { .. } => 1,
+            Self::SkillDrift { .. } => 4,
             Self::OpenDatabase { source, .. } => source.storage_exit_code(),
             Self::Storage(error) => error.storage_exit_code(),
             Self::InvalidMarkdown { .. }

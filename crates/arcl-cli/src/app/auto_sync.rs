@@ -46,7 +46,7 @@ impl WorkspaceRoots {
 pub(super) fn command_access(command: Option<&Command>) -> Access {
     let read_when = |read: bool| if read { Access::Read } else { Access::Write };
     match command {
-        None | Some(Command::Init { .. } | Command::Workspace { .. }) => Access::Untracked,
+        None | Some(Command::Init { .. } | Command::Workspace { .. } | Command::Skill { .. }) => Access::Untracked,
         Some(
             Command::Show { .. }
             | Command::List { .. }

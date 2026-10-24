@@ -3120,3 +3120,180 @@ fn json_only_chain_picks_work_reads_reasons_and_starts_what_completion_unblocked
     assert_eq!(context["data"]["readiness"]["reasons"][0]["kind"], "status");
     assert_eq!(context["data"]["readiness"]["reasons"][0]["task"], next);
 }
+
+/// The skill paths `arcl skill install` writes, relative to the project root.
+const SKILL_PATHS: [&str; 2] = [
+    ".claude/skills/arclightning/SKILL.md",
+    ".agents/skills/arclightning/SKILL.md",
+];
+
+/// The repository's skill source, which the binary embeds.
+fn skill_source() -> String {
+    fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../skills/arclightning/SKILL.md"))
+        .expect("skill source reads")
+}
+
+/// The `status` of each file in a `skill install` JSON report, keyed by path.
+fn skill_statuses(report: &Value) -> Vec<(String, String)> {
+    report["data"]["files"]
+        .as_array()
+        .expect("files")
+        .iter()
+        .map(|file| {
+            (
+                file["path"].as_str().expect("path").to_owned(),
+                file["status"].as_str().expect("status").to_owned(),
+            )
+        })
+        .collect()
+}
+
+/// Run `skill install --check` under `--json` and return the exit code, the
+/// stdout report and the stderr envelope.
+fn skill_check(dir: &Path) -> (Option<i32>, Value, String) {
+    let output = arcl_in(dir)
+        .args(["--json", "skill", "install", "--check"])
+        .output()
+        .expect("skill check runs");
+    (
+        output.status.code(),
+        json(&output.stdout),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn skill_install_writes_both_agent_directories() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let report = run_json(dir, ["--json", "skill", "install"].as_ref());
+    assert_eq!(report["format_version"], 1);
+    assert_eq!(report["data"]["action"], "installed");
+    let expected = SKILL_PATHS.map(|path| (path.to_owned(), "created".to_owned()));
+    assert_eq!(skill_statuses(&report), expected);
+    for path in SKILL_PATHS {
+        assert_eq!(
+            fs::read_to_string(dir.join(path)).expect("skill file written"),
+            skill_source()
+        );
+    }
+}
+
+#[test]
+fn skill_install_again_leaves_identical_files_unchanged() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    run_json(dir, ["--json", "skill", "install"].as_ref());
+    let modified = SKILL_PATHS.map(|path| {
+        fs::metadata(dir.join(path))
+            .and_then(|meta| meta.modified())
+            .expect("mtime")
+    });
+    let report = run_json(dir, ["--json", "skill", "install"].as_ref());
+    let expected = SKILL_PATHS.map(|path| (path.to_owned(), "unchanged".to_owned()));
+    assert_eq!(skill_statuses(&report), expected);
+    let after = SKILL_PATHS.map(|path| {
+        fs::metadata(dir.join(path))
+            .and_then(|meta| meta.modified())
+            .expect("mtime")
+    });
+    assert_eq!(modified, after, "a repeat install rewrote identical files");
+
+    let plain = arcl_in(dir)
+        .args(["--plain", "skill", "install"])
+        .output()
+        .expect("plain runs");
+    assert!(plain.status.success());
+    let lines = SKILL_PATHS.map(|path| format!("unchanged\t{path}")).join("\n") + "\n";
+    assert_eq!(String::from_utf8_lossy(&plain.stdout), lines);
+
+    let quiet = arcl_in(dir)
+        .args(["--quiet", "skill", "install"])
+        .output()
+        .expect("quiet runs");
+    assert!(quiet.status.success());
+    assert!(quiet.stdout.is_empty());
+}
+
+#[test]
+fn skill_install_overwrites_an_edited_file() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    run_json(dir, ["--json", "skill", "install"].as_ref());
+    fs::write(dir.join(SKILL_PATHS[1]), "edited\n").expect("edit writes");
+    let report = run_json(dir, ["--json", "skill", "install"].as_ref());
+    let statuses = skill_statuses(&report);
+    assert_eq!(statuses[0].1, "unchanged");
+    assert_eq!(statuses[1].1, "updated");
+    assert_eq!(
+        fs::read_to_string(dir.join(SKILL_PATHS[1])).expect("skill reads"),
+        skill_source()
+    );
+}
+
+#[test]
+fn skill_check_passes_after_install() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    run_json(dir, ["--json", "skill", "install"].as_ref());
+    let (code, report, stderr) = skill_check(dir);
+    assert_eq!(code, Some(0), "stderr: {stderr}");
+    assert!(stderr.is_empty());
+    assert_eq!(report["data"]["action"], "checked");
+    let expected = SKILL_PATHS.map(|path| (path.to_owned(), "unchanged".to_owned()));
+    assert_eq!(skill_statuses(&report), expected);
+}
+
+#[test]
+fn skill_check_reports_an_edited_file_and_writes_nothing() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    run_json(dir, ["--json", "skill", "install"].as_ref());
+    fs::write(dir.join(SKILL_PATHS[0]), "edited\n").expect("edit writes");
+    let (code, report, stderr) = skill_check(dir);
+    assert_eq!(code, Some(4));
+    let statuses = skill_statuses(&report);
+    assert_eq!(statuses[0], (SKILL_PATHS[0].to_owned(), "changed".to_owned()));
+    assert_eq!(statuses[1].1, "unchanged");
+    let error = json(stderr.as_bytes());
+    assert_eq!(error["error"]["code"], "conflict");
+    assert_eq!(
+        fs::read_to_string(dir.join(SKILL_PATHS[0])).expect("skill reads"),
+        "edited\n"
+    );
+
+    let human = arcl_in(dir)
+        .args(["--color", "never", "skill", "install", "--check"])
+        .output()
+        .expect("human check runs");
+    assert_eq!(human.status.code(), Some(4));
+    let stdout = String::from_utf8_lossy(&human.stdout);
+    assert!(
+        stdout.contains(&format!("changed {}", SKILL_PATHS[0])),
+        "stdout: {stdout}"
+    );
+    assert!(!stdout.contains(SKILL_PATHS[1]), "stdout: {stdout}");
+}
+
+#[test]
+fn skill_check_reports_missing_files_and_writes_nothing() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let (code, report, _) = skill_check(dir);
+    assert_eq!(code, Some(4));
+    let expected = SKILL_PATHS.map(|path| (path.to_owned(), "missing".to_owned()));
+    assert_eq!(skill_statuses(&report), expected);
+    assert!(!dir.join(".claude").exists());
+    assert!(!dir.join(".agents").exists());
+}
+
+#[test]
+fn skill_install_requires_an_initialized_project() {
+    let directory = tempdir().expect("temporary directory can be created");
+    let output = arcl_in(directory.path())
+        .args(["skill", "install"])
+        .output()
+        .expect("skill install runs");
+    assert_eq!(output.status.code(), Some(3));
+    assert!(!directory.path().join(".claude").exists());
+}

@@ -27,6 +27,7 @@ mod commands;
 mod error;
 mod init;
 mod query;
+mod skill;
 mod support;
 mod workspace;
 
@@ -37,6 +38,7 @@ pub use error::ApplicationError;
 use error::{CResult, CommandError};
 use init::initialize;
 use query::{connected_tree, list_connected, resolve_ready_filter, show_record};
+use skill::exec_skill;
 use support::{open_database, parse_task_id, write_output};
 use workspace::exec_workspace;
 
@@ -182,6 +184,7 @@ fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Wa
         Some(Command::Task { command }) => exec_task(command, renderer),
         Some(Command::Dependency { command }) => exec_dependency(command, renderer),
         Some(Command::Note { command }) => exec_note(command, renderer),
+        Some(Command::Skill { command }) => exec_skill(command, renderer),
         Some(Command::Show { id }) => {
             let database = open_database().map_err(ApplicationError::from_command)?;
             let message = show_record(&database, &id, renderer).map_err(ApplicationError::from_command)?;
