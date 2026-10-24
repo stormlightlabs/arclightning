@@ -524,6 +524,7 @@ pub(super) fn validate_task_graph_candidates(
         ensure_project_task(candidate, project_id)?;
         data.tasks.insert(candidate.id, candidate.clone());
     }
+    data.children = index_children(&data.tasks);
 
     // Validate every candidate reference before evaluating effective ancestry. In
     // particular, this preserves a cross-project error instead of turning it into
@@ -563,6 +564,17 @@ pub(super) fn validate_task_graph_candidates(
     Ok(())
 }
 
+/// Map each parent to its child task IDs, in no particular order.
+fn index_children(tasks: &HashMap<TaskId, PlanningTask>) -> HashMap<TaskId, Vec<TaskId>> {
+    let mut children: HashMap<TaskId, Vec<TaskId>> = HashMap::new();
+    for task in tasks.values() {
+        if let Some(parent_id) = task.parent_id {
+            children.entry(parent_id).or_default().push(task.id);
+        }
+    }
+    children
+}
+
 fn load_data(connection: &Connection, project_id: ProjectId) -> Result<PlanningData> {
     let tasks: HashMap<TaskId, PlanningTask> = planning_tasks(connection, project_id)?
         .into_iter()
@@ -574,12 +586,7 @@ fn load_data(connection: &Connection, project_id: ProjectId) -> Result<PlanningD
         .filter_map(|task| Some((task.id, task.parent_id?)))
         .collect();
     let violations = validate_blocker_edges(&parents, &dependencies);
-    let mut children: HashMap<TaskId, Vec<TaskId>> = HashMap::new();
-    for task in tasks.values() {
-        if let Some(parent_id) = task.parent_id {
-            children.entry(parent_id).or_default().push(task.id);
-        }
-    }
+    let children = index_children(&tasks);
     let mut violations_by_task: HashMap<TaskId, Vec<usize>> = HashMap::new();
     for (index, violation) in violations.iter().enumerate() {
         // A cycle visits each of its tasks once, and each step is an edge

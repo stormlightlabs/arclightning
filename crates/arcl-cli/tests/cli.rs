@@ -1865,6 +1865,36 @@ fn unblocked_lists_a_dependent_of_a_subtask_completed_with_subtasks() {
 }
 
 #[test]
+fn unblocked_leaves_out_started_and_parked_dependents() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let blocker = create_task(dir, "Blocker", None);
+    let started = create_task(dir, "Started early", None);
+    let parked = create_task(dir, "Parked", None);
+    block_start_task(dir, &started, &blocker);
+    block_start_task(dir, &parked, &blocker);
+    run_json(dir, ["--json", "task", "start", &started, "--force"].as_ref());
+    run_json(dir, ["--json", "task", "park", &parked].as_ref());
+
+    assert_eq!(unblocked_by(dir, &blocker, &[]), serde_json::json!([]));
+}
+
+#[test]
+fn unblocked_lists_a_dependent_of_a_task_completed_with_open_children() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let parent = create_task(dir, "Parent", None);
+    create_task(dir, "Open child", Some(&parent));
+    let dependent = create_task(dir, "Dependent", None);
+    block_start_task(dir, &dependent, &parent);
+
+    assert_eq!(
+        unblocked_by(dir, &parent, &["--allow-open-children"]),
+        serde_json::json!([dependent])
+    );
+}
+
+#[test]
 fn unblocked_is_empty_when_nothing_was_waiting() {
     let directory = initialized_directory();
     let dir = directory.path();
