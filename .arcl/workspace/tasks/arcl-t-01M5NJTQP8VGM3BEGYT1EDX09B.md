@@ -2,9 +2,10 @@
 id = "arcl-t-01M5NJTQP8VGM3BEGYT1EDX09B"
 parent = "arcl-t-01M5NE5P1WQ0MBKBRYTRJJR162"
 title = "T16.3: Add a shared blocker edge validator for dependency add and task create"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 3
+evidence = "Added validate_blocker_edges in arcl-core (crates/arcl-core/src/domain/dependency.rs): it takes the whole parent map and edge list and returns every EdgeViolation (Cycle with its closed path, Ancestry with the edge, ancestor/descendant kinship and parent chain), with new DomainError::BlockerCycle and BlockerAncestry. add_planning_dependency and create_planning_task_with_dependencies drop their recursive SQL queries, write the edge in the transaction, run the validator over the project, and roll back on the first violation that involves a new edge; violations elsewhere are ignored. Tests: dependency::tests (valid graph, cycle, ancestor, descendant, every violation), connected_dependencies_* in arcl-store, and dependency_edge_* CLI tests including dependency_edge_existing_violation_does_not_block_unrelated_add. Gates run: cargo fmt --all --check, cargo clippy --workspace --all-targets -D warnings, cargo test --workspace, pnpm check, pnpm test, all passing. Branch claude/t16-3-edge-validator."
 +++
 
 Add one blocker edge validator and use it for `dependency add` and

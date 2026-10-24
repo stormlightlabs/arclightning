@@ -1,4 +1,7 @@
-use std::{collections::HashSet, str::FromStr};
+use std::{
+    collections::{HashMap, HashSet},
+    str::FromStr,
+};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -706,32 +709,10 @@ pub fn create_planning_task_with_dependencies(
     validate_task_ancestry(&tx, &task)?;
     insert_task(&tx, &task)?;
 
+    let mut new_edges = Vec::with_capacity(blockers.len());
     for blocker_id in blockers {
         let dependency = TaskDependency::new(task.id, *blocker_id).map_err(StorageError::InvalidPlanningDependency)?;
         ensure_task(&tx, create.project_id, *blocker_id)?;
-        let cycle: bool = tx.query_row(
-            "WITH RECURSIVE reachable(id) AS (
-                 SELECT ?3
-                 UNION
-                 SELECT dependency.blocker_id
-                 FROM planning_task_dependencies dependency
-                 JOIN reachable ON dependency.task_id = reachable.id
-                 WHERE dependency.project_id = ?1
-             )
-             SELECT EXISTS (SELECT 1 FROM reachable WHERE id = ?2)",
-            params![
-                create.project_id.to_string(),
-                task.id.to_string(),
-                blocker_id.to_string()
-            ],
-            |row| row.get(0),
-        )?;
-        if cycle {
-            return Err(StorageError::InvalidPlanningDependency(DomainError::DependencyCycle {
-                task: task.id.to_string(),
-                blocker: blocker_id.to_string(),
-            }));
-        }
         tx.execute(
             "INSERT INTO planning_task_dependencies (project_id, task_id, blocker_id) VALUES (?1, ?2, ?3)",
             params![
@@ -740,7 +721,9 @@ pub fn create_planning_task_with_dependencies(
                 dependency.blocker_id.to_string()
             ],
         )?;
+        new_edges.push(dependency);
     }
+    ensure_blocker_edges_valid(&tx, create.project_id, &new_edges)?;
     tx.commit()?;
     Ok(task)
 }
@@ -835,29 +818,11 @@ pub fn add_planning_dependency(
             DomainError::DuplicateDependency { task: task_id.to_string(), blocker: blocker_id.to_string() },
         ));
     }
-    let cycle: bool = tx.query_row(
-        "WITH RECURSIVE reachable(id) AS (
-             SELECT ?3
-             UNION
-             SELECT dependency.blocker_id
-             FROM planning_task_dependencies dependency
-             JOIN reachable ON dependency.task_id = reachable.id
-             WHERE dependency.project_id = ?1
-         )
-         SELECT EXISTS (SELECT 1 FROM reachable WHERE id = ?2)",
-        params![project_id.to_string(), task_id.to_string(), blocker_id.to_string()],
-        |row| row.get(0),
-    )?;
-    if cycle {
-        return Err(StorageError::InvalidPlanningDependency(DomainError::DependencyCycle {
-            task: task_id.to_string(),
-            blocker: blocker_id.to_string(),
-        }));
-    }
     tx.execute(
         "INSERT INTO planning_task_dependencies (project_id, task_id, blocker_id) VALUES (?1, ?2, ?3)",
         params![project_id.to_string(), task_id.to_string(), blocker_id.to_string()],
     )?;
+    ensure_blocker_edges_valid(&tx, project_id, &[dependency])?;
     tx.commit()?;
     Ok(dependency)
 }
@@ -1397,6 +1362,39 @@ fn ensure_phase(c: &Connection, p: ProjectId, id: PhaseId) -> Result<()> {
         &id.to_string(),
         StorageError::PhaseNotFound { id: id.to_string() },
     )
+}
+/// Refuse the first blocker rule violation that involves one of `new_edges`.
+///
+/// The edges must already be written in `c`, so the validator sees the whole
+/// graph. A violation that involves none of them is left for reporting.
+fn ensure_blocker_edges_valid(c: &Connection, project_id: ProjectId, new_edges: &[TaskDependency]) -> Result<()> {
+    let mut statement =
+        c.prepare("SELECT id, parent_id FROM planning_tasks WHERE project_id = ?1 AND parent_id IS NOT NULL")?;
+    let parents = statement
+        .query_map([project_id.to_string()], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .map(|row| {
+            let (task, parent) = row?;
+            let parse = |id: &str| {
+                TaskId::parse(id)
+                    .map_err(DomainError::from)
+                    .map_err(StorageError::InvalidPlanningTask)
+            };
+            Ok((parse(&task)?, parse(&parent)?))
+        })
+        .collect::<Result<HashMap<_, _>>>()?;
+    let edges = planning_dependencies(c, project_id)?;
+    let violation = validate_blocker_edges(&parents, &edges)
+        .into_iter()
+        .find_map(|violation| {
+            let edge = new_edges.iter().find(|edge| violation.involves(edge))?;
+            Some(violation.starting_at(edge))
+        });
+    match violation {
+        Some(violation) => Err(StorageError::InvalidPlanningDependency(violation.to_error())),
+        None => Ok(()),
+    }
 }
 fn ensure_task(c: &Connection, p: ProjectId, id: TaskId) -> Result<()> {
     ensure_record(
@@ -2150,9 +2148,56 @@ mod tests {
         let error = database
             .add_planning_dependency(second.id, first.id)
             .expect_err("dependency cycle rejects");
+        let StorageError::InvalidPlanningDependency(DomainError::BlockerCycle { path }) = error else {
+            panic!("expected a blocker cycle, got {error:?}");
+        };
+        assert_eq!(path, [second.id, first.id, second.id].map(|id| id.to_string()));
+        assert_eq!(database.planning_dependencies().expect("dependencies read").len(), 1);
+    }
+
+    #[test]
+    fn connected_dependencies_reject_ancestor_and_descendant_blockers() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let create = |parent_id, title: &str| PlanningTaskCreate {
+            project_id: project.id,
+            spec_id: None,
+            plan_id: None,
+            phase_id: None,
+            parent_id,
+            title: title.to_owned(),
+            body: String::new(),
+            priority: TaskPriority::Normal,
+            position: 0,
+        };
+        let root = database
+            .create_planning_task(create(None, "Root"))
+            .expect("root creates");
+        let child = database
+            .create_planning_task(create(Some(root.id), "Child"))
+            .expect("child creates");
+
+        for (task, blocker, kinship) in [(child.id, root.id, "ancestor"), (root.id, child.id, "descendant")] {
+            let error = database
+                .add_planning_dependency(task, blocker)
+                .expect_err("ancestry edge rejects");
+            let StorageError::InvalidPlanningDependency(DomainError::BlockerAncestry { kinship: found, chain, .. }) =
+                error
+            else {
+                panic!("expected an ancestry violation, got {error:?}");
+            };
+            assert_eq!(found, kinship);
+            assert_eq!(chain, [child.id, root.id].map(|id| id.to_string()));
+        }
+
+        let error = database
+            .create_planning_task_with_dependencies(create(Some(child.id), "Grandchild"), &[root.id])
+            .expect_err("ancestor blocker rejects on create");
         assert!(matches!(
             error,
-            StorageError::InvalidPlanningDependency(DomainError::DependencyCycle { .. })
+            StorageError::InvalidPlanningDependency(DomainError::BlockerAncestry { kinship: "ancestor", .. })
         ));
+        assert!(database.planning_dependencies().expect("dependencies read").is_empty());
+        assert_eq!(database.planning_tasks().expect("tasks read").len(), 2);
     }
 }
