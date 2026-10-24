@@ -14,6 +14,7 @@ after Linear's issue list (Decision: Web app stack and look).
 Scope:
 
 - `apps/web/src/routes/` for the Work route
+- `apps/web/src/lib/data/`, the one module views read records through
 - list, group header and row components in `packages/ui/src/lib/components/`,
   reusing `Readiness.svelte`, `StatusBadge.svelte` and `PriorityBadge.svelte`
 - unit tests beside the components and in `apps/web`
@@ -28,6 +29,8 @@ Acceptance criteria:
 - [ ] Filters narrow the list by status, readiness, priority and milestone,
       and the URL keeps them
 - [ ] An empty or filtered-out list says so with `EmptyState`
+- [ ] Views read records only through the data module, whose `arcl serve`
+      backend can be swapped for the artifact backend in T20
 
 Verification:
 
