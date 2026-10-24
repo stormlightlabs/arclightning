@@ -13,7 +13,7 @@ mod release;
 mod spec;
 
 pub use capture::{Capture, CaptureAction, CaptureStatus};
-pub use dependency::TaskDependency;
+pub use dependency::{EdgeViolation, Kinship, TaskDependency, validate_blocker_edges};
 pub use error::{DomainError, validate_position, validate_title};
 pub use id::{
     CaptureId, EpicId, IdError, IdeaId, MilestoneId, NoteId, PhaseId, PlanId, ProjectId, ReleaseId, SpecId, TaskId,

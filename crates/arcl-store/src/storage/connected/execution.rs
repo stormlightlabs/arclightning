@@ -843,9 +843,14 @@ mod tests {
         let project = database.project().expect("project exists");
         let parent = task(&mut database, project.id, "parent");
         let leaf = child(&mut database, project.id, parent.id, "leaf");
+        // `add_planning_dependency` refuses this edge, so insert it as an older project would hold it.
         database
-            .add_planning_dependency(parent.id, leaf.id)
-            .expect("dependency creates");
+            .connection()
+            .execute(
+                "INSERT INTO planning_task_dependencies (project_id, task_id, blocker_id) VALUES (?1, ?2, ?3)",
+                rusqlite::params![project.id.to_string(), parent.id.to_string(), leaf.id.to_string()],
+            )
+            .expect("dependency inserts");
 
         let view = database.planning_task_view(leaf.id).expect("leaf view reads");
         assert!(view.readiness.ready, "{:?}", view.readiness.reasons);
