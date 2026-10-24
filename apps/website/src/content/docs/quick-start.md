@@ -31,6 +31,18 @@ For development, keep the checkout and run the CLI with Cargo instead:
 cargo run -- --help
 ```
 
+## Install a tagged pre-release
+
+To pin a known build without a checkout, as a cloud session or CI job would,
+install a tag from Git:
+
+```sh
+cargo install --git https://github.com/stormlightlabs/arclightning --tag v0.1.0-alpha.1 arcl-cli
+```
+
+This installs the `arcl` binary. Pre-release tags can change JSON shapes, and
+each envelope's `format_version` names the shape it carries.
+
 ## Initialize a project
 
 From the Git worktree you want to track:
