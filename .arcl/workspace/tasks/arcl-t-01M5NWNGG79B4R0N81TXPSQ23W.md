@@ -2,10 +2,11 @@
 id = "arcl-t-01M5NWNGG79B4R0N81TXPSQ23W"
 parent = "arcl-t-01M5NE5P1WQ0MBKBRYTRJJR162"
 title = "T16.4: Run the blocker edge validator in plan application, import, and reparenting"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 4
 blocked-by = ["arcl-t-01M5NJTQP8VGM3BEGYT1EDX09B"]
+evidence = "Plan application, workspace import, and task update --parent now refuse blocker edge cycles and ancestor or descendant edges through the shared validator, and a reparent checks the whole moved subtree. The old cycle checks and DomainError::DependencyCycle are removed."
 +++
 
 Run the T16.3 blocker edge validator in plan application, workspace import,
@@ -25,19 +26,19 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] Plan application refuses a cycle, an ancestor edge, or a descendant edge
+- [x] Plan application refuses a cycle, an ancestor edge, or a descendant edge
       with the same error as `dependency add`, and writes nothing
-- [ ] Plan application and reparenting refuse only violations that involve an
+- [x] Plan application and reparenting refuse only violations that involve an
       edge the write adds or a task in the moved subtree. A violation already
       elsewhere in the graph does not block them; T16.5 reports it
-- [ ] Workspace import refuses any violation in the workspace, naming the
+- [x] Workspace import refuses any violation in the workspace, naming the
       record path and the task path
-- [ ] A reparent, through `task update --parent` or plan application, runs the
+- [x] A reparent, through `task update --parent` or plan application, runs the
       validator on the whole graph after the move, so it covers every task in
       the moved subtree, not only the moved task
-- [ ] Moving task A under P is refused when A's child C is blocked by P, and
+- [x] Moving task A under P is refused when A's child C is blocked by P, and
       the error names the chain P → A → C
-- [ ] `dependency_reaches`, the recursive SQL query in
+- [x] `dependency_reaches`, the recursive SQL query in
       `insert_plan_dependency`, and `validate_dependency_cycles` are gone
 
 Verification:

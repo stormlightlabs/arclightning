@@ -492,7 +492,7 @@ pub(super) fn validate_candidate(
     let dependencies = validate_tasks(&records, &index)?;
     let memberships = validate_releases(&records, &index, project.id)?;
     let links = validate_links(&records, &index, project.id)?;
-    validate_dependency_cycles(&dependencies, &index)?;
+    validate_blocker_rules(&dependencies, &index)?;
 
     let mut captures = values(&index.captures);
     let mut specs = values(&index.specs);
@@ -858,41 +858,26 @@ fn validate_links(
     Ok(links)
 }
 
-fn validate_dependency_cycles(dependencies: &[TaskDependency], index: &RecordIndex) -> Result<()> {
-    fn visit(
-        current: TaskId, start: TaskId, graph: &HashMap<TaskId, Vec<TaskId>>, active: &mut HashSet<TaskId>,
-        visited: &mut HashSet<TaskId>,
-    ) -> bool {
-        if !active.insert(current) {
-            return current == start;
-        }
-        if !visited.insert(current) {
-            active.remove(&current);
-            return false;
-        }
-        let cycle = graph
-            .get(&current)
-            .into_iter()
-            .flatten()
-            .copied()
-            .any(|next| visit(next, start, graph, active, visited));
-        active.remove(&current);
-        cycle
-    }
-    let mut graph = HashMap::<TaskId, Vec<TaskId>>::new();
-    for dependency in dependencies {
-        graph.entry(dependency.task_id).or_default().push(dependency.blocker_id);
-    }
-    for id in index.tasks.keys().copied() {
-        if visit(id, id, &graph, &mut HashSet::new(), &mut HashSet::new()) {
-            return Err(relationship_error(
-                index.task_path(id),
-                "blocked-by",
-                format!("dependency cycle includes task `{id}`"),
-            ));
-        }
-    }
-    Ok(())
+/// Refuse the first blocker rule violation anywhere in the workspace, naming
+/// the blocked task's record and the tasks along the cycle or parent chain.
+fn validate_blocker_rules(dependencies: &[TaskDependency], index: &RecordIndex) -> Result<()> {
+    let parents = index
+        .tasks
+        .values()
+        .filter_map(|(task, _)| task.parent_id.map(|parent| (task.id, parent)))
+        .collect::<HashMap<_, _>>();
+    let Some(violation) = validate_blocker_edges(&parents, dependencies).into_iter().next() else {
+        return Ok(());
+    };
+    let task = match &violation {
+        EdgeViolation::Cycle { path } => path[0],
+        EdgeViolation::Ancestry { edge, .. } => edge.task_id,
+    };
+    Err(relationship_error(
+        index.task_path(task),
+        "blocked-by",
+        violation.to_error().to_string(),
+    ))
 }
 
 fn capture_from_record(record: &CaptureRecord, project_id: ProjectId) -> Capture {
@@ -1118,6 +1103,74 @@ mod tests {
         let error = import_graph(root.path(), root.path(), &mut database, None).expect_err("missing spec rejects");
         assert!(error.to_string().contains("spec"));
         assert!(database.spec(existing.id).expect("spec reads").is_some());
+    }
+
+    /// Export a root task with a child and an unrelated task, plus the blocker
+    /// edges `edges` builds from their IDs, and try to import the workspace.
+    fn import_with_edges(
+        edges: impl Fn(TaskId, TaskId, TaskId) -> Vec<TaskDependency>,
+    ) -> (TaskId, TaskId, TaskId, String) {
+        let mut source = Database::open_in_memory().expect("database opens");
+        let project = source.project().expect("project exists");
+        let create = |parent_id, title: &str| PlanningTaskCreate {
+            project_id: project.id,
+            spec_id: None,
+            plan_id: None,
+            phase_id: None,
+            parent_id,
+            title: title.to_owned(),
+            body: String::new(),
+            priority: TaskPriority::Normal,
+            position: 0,
+        };
+        let root = source.create_planning_task(create(None, "Root")).expect("root creates");
+        let child = source
+            .create_planning_task(create(Some(root.id), "Child"))
+            .expect("child creates");
+        let other = source
+            .create_planning_task(create(None, "Other"))
+            .expect("other creates");
+        let mut graph = source.connected_graph().expect("graph loads");
+        graph.dependencies = edges(root.id, child.id, other.id);
+        let workspace = tempfile::tempdir().expect("workspace creates");
+        export_graph(workspace.path(), &graph).expect("export succeeds");
+
+        let mut destination = Database::open_in_memory().expect("database opens");
+        let error = import_graph(workspace.path(), workspace.path(), &mut destination, None)
+            .expect_err("bad edge refuses the import");
+        assert!(destination.connected_graph().expect("graph loads").tasks.is_empty());
+        (root.id, child.id, other.id, error.to_string())
+    }
+
+    #[test]
+    fn import_refuses_a_descendant_blocker() {
+        let (root, child, _, message) =
+            import_with_edges(|root, child, _| vec![TaskDependency::new(root, child).expect("edge")]);
+        assert_eq!(
+            message,
+            format!(
+                "workspace file `tasks/{root}.md`: relationship `blocked-by`: task `{root}` cannot be blocked by \
+                 `{child}`, its descendant; parent chain: {child} -> {root}"
+            )
+        );
+    }
+
+    #[test]
+    fn import_refuses_a_blocker_cycle() {
+        let (_, child, other, message) = import_with_edges(|_, child, other| {
+            vec![
+                TaskDependency::new(child, other).expect("edge"),
+                TaskDependency::new(other, child).expect("edge"),
+            ]
+        });
+        let (first, second) = if child < other { (child, other) } else { (other, child) };
+        assert_eq!(
+            message,
+            format!(
+                "workspace file `tasks/{first}.md`: relationship `blocked-by`: blocker edges would form a cycle: \
+                 {first} -> {second} -> {first}; each task is blocked by the next"
+            )
+        );
     }
 
     /// Export one capture whose body is `body`, and return the workspace

@@ -89,8 +89,8 @@ pub fn diff_plan(connection: &Connection, plan_id: PlanId, document: &PlanDocume
 
 /// Apply structured plan input atomically and return its persistent records.
 pub fn apply_plan(connection: &mut Connection, plan_id: PlanId, document: &PlanDocument) -> Result<PlanApplyResult> {
-    let prepared = prepare_plan(connection, plan_id, document)?;
     let tx = connection.transaction()?;
+    let prepared = prepare_plan(&tx, plan_id, document)?;
     apply_prepared_plan(&tx, &prepared)?;
     tx.commit()?;
     finish_plan_apply(connection, prepared)
@@ -315,23 +315,15 @@ fn prepare_plan(connection: &Connection, plan_id: PlanId, document: &PlanDocumen
         .into_iter()
         .map(|dependency| (dependency.task_id, dependency.blocker_id))
         .collect::<HashSet<_>>();
-    let mut dependency_graph = existing_dependencies.clone();
-    for (task_id, blocker_id, _, _) in &dependencies {
-        if task_id == blocker_id {
-            return Err(StorageError::InvalidPlanningDependency(DomainError::SelfDependency {
-                task: task_id.to_string(),
-            }));
-        }
-        if !dependency_graph.contains(&(*task_id, *blocker_id)) {
-            if dependency_reaches(&dependency_graph, *blocker_id, *task_id) {
-                return Err(StorageError::InvalidPlanningDependency(DomainError::DependencyCycle {
-                    task: task_id.to_string(),
-                    blocker: blocker_id.to_string(),
-                }));
-            }
-            dependency_graph.insert((*task_id, *blocker_id));
-        }
-    }
+    validate_plan_edges(
+        connection,
+        project_id,
+        &entries,
+        &task_ids,
+        &tasks_by_path,
+        &dependencies,
+        &existing_dependencies,
+    )?;
     let phases_diff = entries
         .phases
         .iter()
@@ -386,6 +378,48 @@ fn prepare_plan(connection: &Connection, plan_id: PlanId, document: &PlanDocumen
         existing_dependencies,
         diff,
     })
+}
+
+/// Refuse the first blocker rule violation applying the plan would cause.
+///
+/// Builds the graph as it will stand after the plan's parent links and
+/// dependencies are written, so `plan check` and `plan diff` refuse the same
+/// edges as `plan apply`.
+fn validate_plan_edges(
+    connection: &Connection, project_id: ProjectId, entries: &PlanEntries, task_ids: &HashMap<String, TaskId>,
+    tasks_by_path: &HashMap<String, PlanningTask>, dependencies: &[(TaskId, TaskId, String, String)],
+    existing_dependencies: &HashSet<(TaskId, TaskId)>,
+) -> Result<()> {
+    let mut parents = task_parents(connection, project_id)?;
+    let mut new_parents = Vec::new();
+    for entry in &entries.tasks {
+        let task_id = task_ids[&entry.path];
+        let previous = tasks_by_path.get(&entry.path).and_then(|task| task.parent_id);
+        match entry.parent_path.as_ref().map(|path| task_ids[path]) {
+            Some(parent) => {
+                parents.insert(task_id, parent);
+                if previous != Some(parent) {
+                    new_parents.push((task_id, parent));
+                }
+            }
+            None => {
+                parents.remove(&task_id);
+            }
+        }
+    }
+    let mut edges = planning_dependencies(connection, project_id)?;
+    let mut new_edges = Vec::new();
+    for (task_id, blocker_id, _, _) in dependencies {
+        let dependency = TaskDependency::new(*task_id, *blocker_id).map_err(StorageError::InvalidPlanningDependency)?;
+        if !existing_dependencies.contains(&(*task_id, *blocker_id)) {
+            edges.push(dependency);
+            new_edges.push(dependency);
+        }
+    }
+    match caused_violation(&parents, &edges, &new_edges, &new_parents) {
+        Some(violation) => Err(StorageError::InvalidPlanningDependency(violation.to_error())),
+        None => Ok(()),
+    }
 }
 
 fn task_needs_update(
@@ -462,51 +496,150 @@ fn resolve_plan_task_reference(
     ))
 }
 
-fn dependency_reaches(dependencies: &HashSet<(TaskId, TaskId)>, start: TaskId, target: TaskId) -> bool {
-    let mut pending = vec![start];
-    let mut seen = HashSet::new();
-    while let Some(current) = pending.pop() {
-        if current == target {
-            return true;
-        }
-        if !seen.insert(current) {
-            continue;
-        }
-        pending.extend(
-            dependencies
-                .iter()
-                .filter(|(task, _)| *task == current)
-                .map(|(_, blocker)| *blocker),
-        );
-    }
-    false
-}
-
 fn insert_plan_dependency(
     connection: &Connection, project_id: ProjectId, task_id: TaskId, blocker_id: TaskId,
 ) -> Result<()> {
-    let cycle: bool = connection.query_row(
-        "WITH RECURSIVE reachable(id) AS (
-             SELECT ?3
-             UNION
-             SELECT dependency.blocker_id
-             FROM planning_task_dependencies dependency
-             JOIN reachable ON dependency.task_id = reachable.id
-             WHERE dependency.project_id = ?1
-         )
-         SELECT EXISTS (SELECT 1 FROM reachable WHERE id = ?2)",
-        params![project_id.to_string(), task_id.to_string(), blocker_id.to_string()],
-        |row| row.get(0),
-    )?;
-    if cycle {
-        return Err(StorageError::InvalidPlanningDependency(DomainError::DependencyCycle {
-            task: task_id.to_string(),
-            blocker: blocker_id.to_string(),
-        }));
-    }
     connection.execute(
         "INSERT INTO planning_task_dependencies (project_id, task_id, blocker_id) VALUES (?1, ?2, ?3)",
         params![project_id.to_string(), task_id.to_string(), blocker_id.to_string()],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::storage::{Database, PlanningTaskUpdate, StorageError};
+    use arcl_core::domain::{DomainError, PlanId, TaskId};
+    use arcl_core::plan::{PlanDocument, parse};
+
+    /// A database with one open plan, and that plan's ID.
+    fn database_with_plan() -> (Database, PlanId) {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let spec = database
+            .create_spec("Spec".to_owned(), String::new(), String::new())
+            .expect("spec creates");
+        let plan = database
+            .create_plan(spec.id, "Plan".to_owned(), String::new())
+            .expect("plan creates");
+        (database, plan.id)
+    }
+
+    /// A plan with phase `work`, whose tasks follow in TOML.
+    fn document(tasks: &str) -> PlanDocument {
+        parse(&format!(
+            "format-version = 1\n\n[[phases]]\nkey = \"work\"\ntitle = \"Work\"\nposition = 0\n{tasks}"
+        ))
+        .expect("plan parses")
+    }
+
+    /// The ID of the task at `path` among the plan's tasks.
+    fn task_id(database: &Database, path: &str) -> TaskId {
+        database
+            .planning_tasks()
+            .expect("tasks read")
+            .into_iter()
+            .find(|task| task.plan_key.as_deref() == Some(path))
+            .expect("task exists")
+            .id
+    }
+
+    /// P holds A, and A holds C.
+    const NESTED: &str = "\n[[phases.tasks]]\nkey = \"p\"\ntitle = \"P\"\nposition = 0\n\n[[phases.tasks.subtasks]]\nkey = \"a\"\ntitle = \"A\"\nposition = 0\n\n[[phases.tasks.subtasks.subtasks]]\nkey = \"c\"\ntitle = \"C\"\nposition = 0\n";
+
+    #[test]
+    fn plan_edge_violations_are_refused_and_write_nothing() {
+        let cycle = "\n[[phases.tasks]]\nkey = \"a\"\ntitle = \"A\"\nposition = 0\nblocked-by = [\"work/b\"]\n\n[[phases.tasks]]\nkey = \"b\"\ntitle = \"B\"\nposition = 1\nblocked-by = [\"work/a\"]\n";
+        let ancestor = "\n[[phases.tasks]]\nkey = \"p\"\ntitle = \"P\"\nposition = 0\n\n[[phases.tasks.subtasks]]\nkey = \"a\"\ntitle = \"A\"\nposition = 0\nblocked-by = [\"work/p\"]\n";
+        let descendant = "\n[[phases.tasks]]\nkey = \"p\"\ntitle = \"P\"\nposition = 0\nblocked-by = [\"work/p/a\"]\n\n[[phases.tasks.subtasks]]\nkey = \"a\"\ntitle = \"A\"\nposition = 0\n";
+        for (tasks, expected) in [
+            (cycle, "cycle: "),
+            (ancestor, "its ancestor;"),
+            (descendant, "its descendant;"),
+        ] {
+            let (mut database, plan_id) = database_with_plan();
+            let document = document(tasks);
+            for error in [
+                database.check_plan(plan_id, &document).expect_err("check refuses"),
+                database.apply_plan(plan_id, &document).expect_err("apply refuses"),
+            ] {
+                assert!(
+                    matches!(
+                        &error,
+                        StorageError::InvalidPlanningDependency(
+                            DomainError::BlockerCycle { .. } | DomainError::BlockerAncestry { .. }
+                        )
+                    ),
+                    "{error:?}"
+                );
+                assert!(error.to_string().contains(expected), "{error}");
+            }
+            assert!(database.planning_tasks().expect("tasks read").is_empty());
+            assert!(database.phases().expect("phases read").is_empty());
+            assert!(database.planning_dependencies().expect("dependencies read").is_empty());
+        }
+    }
+
+    #[test]
+    fn reparent_refuses_a_chain_through_the_moved_task() {
+        let (mut database, plan_id) = database_with_plan();
+        let document = document(NESTED);
+        database.apply_plan(plan_id, &document).expect("plan applies");
+        let (p, a, c) = (
+            task_id(&database, "work/p"),
+            task_id(&database, "work/p/a"),
+            task_id(&database, "work/p/a/c"),
+        );
+        let detach = PlanningTaskUpdate { parent_id: Some(None), ..PlanningTaskUpdate::default() };
+        database.update_planning_task(a, detach).expect("A detaches");
+        database.add_planning_dependency(c, p).expect("C is blocked by P");
+
+        let expected = DomainError::BlockerAncestry {
+            task: c.to_string(),
+            blocker: p.to_string(),
+            kinship: "ancestor",
+            chain: [c, a, p].map(|id| id.to_string()).to_vec(),
+        };
+        let attach = PlanningTaskUpdate { parent_id: Some(Some(p)), ..PlanningTaskUpdate::default() };
+        let error = database.update_planning_task(a, attach).expect_err("update refuses");
+        assert!(
+            matches!(&error, StorageError::InvalidPlanningDependency(found) if *found == expected),
+            "{error:?}"
+        );
+        let error = database.apply_plan(plan_id, &document).expect_err("plan refuses");
+        assert!(
+            matches!(&error, StorageError::InvalidPlanningDependency(found) if *found == expected),
+            "{error:?}"
+        );
+        let moved = database.planning_task(a).expect("task reads").expect("task exists");
+        assert_eq!(moved.parent_id, None);
+    }
+
+    #[test]
+    fn writes_ignore_violations_already_elsewhere() {
+        let (mut database, plan_id) = database_with_plan();
+        database.apply_plan(plan_id, &document(NESTED)).expect("plan applies");
+        let (a, c) = (task_id(&database, "work/p/a"), task_id(&database, "work/p/a/c"));
+        // C blocked by its parent A, inside the subtree the reparent below moves.
+        database
+            .connection
+            .execute(
+                "INSERT INTO planning_task_dependencies (project_id, task_id, blocker_id)
+                 SELECT project_id, ?1, ?2 FROM planning_tasks WHERE id = ?1",
+                [c.to_string(), a.to_string()],
+            )
+            .expect("bad edge inserts");
+
+        let other = "\n[[phases.tasks]]\nkey = \"q\"\ntitle = \"Q\"\nposition = 1\nblocked-by = [\"work/p\"]\n";
+        let mut tasks = NESTED.to_owned();
+        tasks.push_str(other);
+        database
+            .apply_plan(plan_id, &document(&tasks))
+            .expect("unrelated plan applies");
+        let q = task_id(&database, "work/q");
+        let attach = PlanningTaskUpdate { parent_id: Some(Some(q)), ..PlanningTaskUpdate::default() };
+        database
+            .update_planning_task(a, attach)
+            .expect("unrelated reparent succeeds");
+        assert_eq!(database.planning_dependencies().expect("dependencies read").len(), 2);
+    }
 }

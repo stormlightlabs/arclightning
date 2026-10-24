@@ -56,6 +56,17 @@ impl EdgeViolation {
         }
     }
 
+    /// Whether the parent chain of an ancestry violation steps from `child` up
+    /// to `parent`. A reparent that sets that link causes every violation that
+    /// crosses it; a violation that does not cross it existed before the move.
+    /// A cycle never crosses a parent link.
+    pub fn crosses_parent_link(&self, child: TaskId, parent: TaskId) -> bool {
+        match self {
+            Self::Cycle { .. } => false,
+            Self::Ancestry { chain, .. } => chain.windows(2).any(|pair| pair[0] == child && pair[1] == parent),
+        }
+    }
+
     /// Rotate a cycle so its path starts with `edge`. Ancestry violations, and
     /// cycles that do not contain `edge`, are returned unchanged.
     pub fn starting_at(self, edge: &TaskDependency) -> Self {
@@ -242,6 +253,9 @@ mod tests {
                 "task `{leaf}` cannot be blocked by `{root}`, its ancestor; parent chain: {leaf} -> {middle} -> {root}"
             )
         );
+        assert!(violations[0].crosses_parent_link(middle, root));
+        assert!(violations[0].crosses_parent_link(leaf, middle));
+        assert!(!violations[0].crosses_parent_link(root, middle));
     }
 
     #[test]

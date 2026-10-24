@@ -1527,3 +1527,273 @@ fn dependency_edge_existing_violation_does_not_block_unrelated_add() {
     );
     assert_eq!(dependency_pairs(path).len(), 5);
 }
+
+/// Create a spec and a plan under it, and return the plan ID.
+fn create_plan(directory: &Path) -> String {
+    let spec = run_json(directory, ["--json", "spec", "create", "Feature"].as_ref());
+    let spec_id = spec["data"]["spec"]["id"].as_str().expect("spec ID");
+    let plan = run_json(
+        directory,
+        ["--json", "plan", "create", "Build feature", "--spec", spec_id].as_ref(),
+    );
+    plan["data"]["plan"]["id"].as_str().expect("plan ID").to_owned()
+}
+
+/// Plan TOML for phase `work`, where task P holds A, A holds C, and B stands
+/// alone. `blocked_by` pairs a task key with the path of a blocker.
+fn nested_plan(blocked_by: &[(&str, &str)]) -> String {
+    let blockers = |key: &str| {
+        let paths: Vec<String> = blocked_by
+            .iter()
+            .filter(|(task, _)| *task == key)
+            .map(|(_, blocker)| format!("\"{blocker}\""))
+            .collect();
+        format!("blocked-by = [{}]\n", paths.join(", "))
+    };
+    format!(
+        "format-version = 1\n\n[[phases]]\nkey = \"work\"\ntitle = \"Work\"\nposition = 0\n\n\
+         [[phases.tasks]]\nkey = \"p\"\ntitle = \"P\"\nposition = 0\n{}\n\
+         [[phases.tasks.subtasks]]\nkey = \"a\"\ntitle = \"A\"\nposition = 0\n{}\n\
+         [[phases.tasks.subtasks.subtasks]]\nkey = \"c\"\ntitle = \"C\"\nposition = 0\n{}\n\
+         [[phases.tasks]]\nkey = \"b\"\ntitle = \"B\"\nposition = 1\n{}",
+        blockers("p"),
+        blockers("a"),
+        blockers("c"),
+        blockers("b")
+    )
+}
+
+/// The arguments that run `plan <verb>` with `input` written to a file.
+fn plan_args(directory: &Path, verb: &str, plan_id: &str, input: &str) -> Vec<String> {
+    let path = directory.join("plan.toml");
+    fs::write(&path, input).expect("plan input writes");
+    [
+        "--json",
+        "plan",
+        verb,
+        plan_id,
+        "--file",
+        path.to_str().expect("plan path is UTF-8"),
+    ]
+    .map(str::to_owned)
+    .to_vec()
+}
+
+/// Apply `input` to the plan and map each task key to its task ID.
+fn apply_nested_plan(directory: &Path, plan_id: &str, input: &str) -> std::collections::HashMap<String, String> {
+    let args = plan_args(directory, "apply", plan_id, input);
+    let applied = run_json(directory, &args.iter().map(String::as_str).collect::<Vec<_>>());
+    applied["data"]["tasks"]
+        .as_array()
+        .expect("task array")
+        .iter()
+        .map(|task| {
+            let path = task["plan_key"].as_str().expect("plan key");
+            let key = path.rsplit('/').next().expect("task key");
+            (key.to_owned(), task["id"].as_str().expect("task ID").to_owned())
+        })
+        .collect()
+}
+
+/// Run a plan command that must be refused and return its error message.
+fn refused_plan(directory: &Path, verb: &str, plan_id: &str, input: &str) -> String {
+    let args = plan_args(directory, verb, plan_id, input);
+    refused_message(directory, &args.iter().map(String::as_str).collect::<Vec<_>>())
+}
+
+/// Add `blocker` to the workspace record of `task`, then return the message
+/// `workspace import` refuses it with.
+fn refused_import(directory: &Path, task: &str, blocker: &str) -> String {
+    let record = directory.join(format!(".arcl/workspace/tasks/{task}.md"));
+    let content = fs::read_to_string(&record).expect("record reads");
+    assert!(!content.contains("blocked-by"), "record: {content}");
+    let edited = content.replacen("\nstatus = ", &format!("\nblocked-by = [\"{blocker}\"]\nstatus = "), 1);
+    fs::write(&record, edited).expect("record writes");
+    refused_message(directory, ["--json", "workspace", "import"].as_ref())
+}
+
+/// The parent ID of `task`, or `None` for a top-level task.
+fn parent_of(directory: &Path, task: &str) -> Option<String> {
+    let shown = run_json(directory, ["--json", "task", "show", task].as_ref());
+    shown["data"]["task"]["parent_id"].as_str().map(str::to_owned)
+}
+
+#[test]
+fn dependency_edge_plan_cycle_is_refused() {
+    let directory = initialized_directory();
+    let path = directory.path();
+    let plan_id = create_plan(path);
+    let input = nested_plan(&[("p", "work/b"), ("b", "work/p")]);
+
+    for verb in ["check", "apply"] {
+        let message = refused_plan(path, verb, &plan_id, &input);
+        assert!(
+            message.contains("blocker edges would form a cycle: "),
+            "message: {message}"
+        );
+    }
+    let tasks = run_json(path, ["--json", "task", "list"].as_ref());
+    assert!(tasks["data"]["tasks"].as_array().expect("task array").is_empty());
+    assert!(dependency_pairs(path).is_empty());
+}
+
+#[test]
+fn dependency_edge_plan_ancestor_is_refused() {
+    let directory = initialized_directory();
+    let path = directory.path();
+    let plan_id = create_plan(path);
+    let ids = apply_nested_plan(path, &plan_id, &nested_plan(&[]));
+
+    let message = refused_plan(path, "apply", &plan_id, &nested_plan(&[("c", "work/p")]));
+    assert!(
+        message.ends_with(&format!(
+            "task `{}` cannot be blocked by `{}`, its ancestor; parent chain: {} -> {} -> {}",
+            ids["c"], ids["p"], ids["c"], ids["a"], ids["p"]
+        )),
+        "message: {message}"
+    );
+    assert!(dependency_pairs(path).is_empty());
+}
+
+#[test]
+fn dependency_edge_import_descendant_is_refused() {
+    let directory = tempdir().expect("temporary directory can be created");
+    let path = directory.path();
+    run_json(path, ["--json", "init", "--workspace"].as_ref());
+    let root = create_task(path, "Root", None);
+    let child = create_task(path, "Child", Some(&root));
+
+    let message = refused_import(path, &root, &child);
+    assert!(
+        message.ends_with(&format!(
+            "workspace file `tasks/{root}.md`: relationship `blocked-by`: task `{root}` cannot be blocked by \
+             `{child}`, its descendant; parent chain: {child} -> {root}"
+        )),
+        "message: {message}"
+    );
+}
+
+#[test]
+fn dependency_edge_reparent_through_task_update_names_the_chain() {
+    let directory = initialized_directory();
+    let path = directory.path();
+    let p = create_task(path, "P", None);
+    let a = create_task(path, "A", None);
+    let c = create_task(path, "C", Some(&a));
+    run_json(path, ["--json", "dependency", "add", &c, "--blocked-by", &p].as_ref());
+
+    let message = refused_message(path, ["--json", "task", "update", &a, "--parent", &p].as_ref());
+    assert!(
+        message.ends_with(&format!("its ancestor; parent chain: {c} -> {a} -> {p}")),
+        "message: {message}"
+    );
+    assert_eq!(parent_of(path, &a), None);
+}
+
+#[test]
+fn dependency_edge_reparent_through_plan_apply_names_the_chain() {
+    let directory = initialized_directory();
+    let path = directory.path();
+    let plan_id = create_plan(path);
+    let input = nested_plan(&[]);
+    let ids = apply_nested_plan(path, &plan_id, &input);
+    let (p, a, c) = (&ids["p"], &ids["a"], &ids["c"]);
+    run_json(path, ["--json", "task", "update", a, "--no-parent"].as_ref());
+    run_json(path, ["--json", "dependency", "add", c, "--blocked-by", p].as_ref());
+
+    let message = refused_plan(path, "apply", &plan_id, &input);
+    assert!(
+        message.ends_with(&format!("its ancestor; parent chain: {c} -> {a} -> {p}")),
+        "message: {message}"
+    );
+    assert_eq!(parent_of(path, a), None);
+}
+
+#[test]
+fn dependency_edge_existing_violation_does_not_block_plan_apply_or_reparent() {
+    let directory = initialized_directory();
+    let path = directory.path();
+    let plan_id = create_plan(path);
+    let ids = apply_nested_plan(path, &plan_id, &nested_plan(&[]));
+    let (p, a, b, c) = (&ids["p"], &ids["a"], &ids["b"], &ids["c"]);
+    let database = rusqlite::Connection::open(path.join(".arcl/arcl.db")).expect("database opens");
+    for (task, blocker) in [(c, a), (p, b), (b, p)] {
+        database
+            .execute(
+                "INSERT INTO planning_task_dependencies (project_id, task_id, blocker_id)
+                 SELECT project_id, ?1, ?2 FROM planning_tasks WHERE id = ?1",
+                [task, blocker],
+            )
+            .expect("bad edge inserts");
+    }
+    drop(database);
+
+    let mut input = nested_plan(&[("p", "work/b"), ("b", "work/p")]);
+    input.push_str("\n[[phases.tasks]]\nkey = \"q\"\ntitle = \"Q\"\nposition = 2\nblocked-by = [\"work/p\"]\n");
+    let ids = apply_nested_plan(path, &plan_id, &input);
+    run_json(path, ["--json", "task", "update", a, "--parent", &ids["q"]].as_ref());
+    assert_eq!(parent_of(path, a).as_deref(), Some(ids["q"].as_str()));
+    assert_eq!(dependency_pairs(path).len(), 4);
+}
+
+#[test]
+fn dependency_edge_same_refusal_from_every_write_path() {
+    // Each case names the blocked task and its blocker, and a valid edge the
+    // graph already holds. An empty edge means none. "low" and "high" are
+    // P and B ordered by ID, so every path reports the cycle from the same task.
+    let cases = [
+        ("cycle", ("low", "high"), ("high", "low")),
+        ("ancestor", ("c", "p"), ("", "")),
+        ("descendant", ("p", "a"), ("", "")),
+    ];
+    for (name, (task, blocker), (held_task, held_blocker)) in cases {
+        let directory = tempdir().expect("temporary directory can be created");
+        let path = directory.path();
+        run_json(path, ["--json", "init", "--workspace"].as_ref());
+        let plan_id = create_plan(path);
+        let mut ids = apply_nested_plan(path, &plan_id, &nested_plan(&[]));
+        let (low, high) = if ids["p"] < ids["b"] { ("p", "b") } else { ("b", "p") };
+        let key = |name: &'static str| -> &'static str {
+            match name {
+                "low" => low,
+                "high" => high,
+                other => other,
+            }
+        };
+        let task_path = |key: &str| match key {
+            "p" | "b" => format!("work/{key}"),
+            "a" => "work/p/a".to_owned(),
+            _ => "work/p/a/c".to_owned(),
+        };
+        let (task, blocker) = (key(task), key(blocker));
+        let mut held = Vec::new();
+        if !held_task.is_empty() {
+            held.push((key(held_task), task_path(key(held_blocker))));
+        }
+        let held_refs: Vec<(&str, &str)> = held.iter().map(|(task, path)| (*task, path.as_str())).collect();
+        ids = apply_nested_plan(path, &plan_id, &nested_plan(&held_refs));
+        let before = dependency_pairs(path);
+
+        let cli = refused_message(
+            path,
+            ["--json", "dependency", "add", &ids[task], "--blocked-by", &ids[blocker]].as_ref(),
+        );
+        let (_, refusal) = cli.split_once(" is invalid: ").expect("refusal follows the prefix");
+
+        let mut planned = held_refs.clone();
+        let blocker_path = task_path(blocker);
+        planned.push((task, &blocker_path));
+        let plan = refused_plan(path, "apply", &plan_id, &nested_plan(&planned));
+        assert_eq!(plan, cli, "case {name}");
+        assert_eq!(dependency_pairs(path), before, "case {name}");
+
+        let import = refused_import(path, &ids[task], &ids[blocker]);
+        assert!(
+            import.ends_with(&format!(
+                "workspace file `tasks/{}.md`: relationship `blocked-by`: {refusal}",
+                ids[task]
+            )),
+            "case {name}: {import}"
+        );
+    }
+}

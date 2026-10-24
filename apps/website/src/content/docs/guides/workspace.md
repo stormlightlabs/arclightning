@@ -119,8 +119,11 @@ arcl workspace import
 ```
 
 Import reads every record and validates IDs, references, task ancestry, parent
-cycles, dependency cycles, and the complete relationship graph. Arc Lightning
-replaces the database only after the whole workspace passes validation.
+cycles, and the complete relationship graph. It refuses a blocker edge anywhere
+in the workspace that closes a cycle or joins a task to its own ancestor or
+descendant, and names the blocked task's record and the tasks involved. Arc
+Lightning replaces the database only after the whole workspace passes
+validation.
 
 For a fresh clone, initialize the local database first, then import the
 committed workspace:
