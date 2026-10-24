@@ -2,10 +2,11 @@
 id = "arcl-t-01M5NJTQR1PZ1QHC309R63EY1J"
 parent = "arcl-t-01M5NE5P1WQ0MBKBRYTRJJR162"
 title = "T16.5: Report existing invalid blocker edges with their path"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 5
 blocked-by = ["arcl-t-01M5NJTQJRC8CNJFBF5T4RVRZS", "arcl-t-01M5NJTQP8VGM3BEGYT1EDX09B"]
+evidence = "check and readiness now use the shared blocker edge validator: check reports each stored cycle once with its task path and each ancestor or descendant edge with its parent chain, and a task whose own edge is invalid is not ready, with the same text as its reason. has_dependency_cycle is gone; store and CLI invalid_edge_ tests insert the bad edges with raw SQL."
 +++
 
 Report invalid blocker edges that already exist in the database, through
@@ -24,12 +25,12 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] `arcl check` reports each cycle once with its task path, and each
+- [x] `arcl check` reports each cycle once with its task path, and each
       ancestor or descendant edge with the parent chain that joins the tasks,
       and exits non-zero
-- [ ] Readiness for a task on an invalid edge is false, with a reason that
+- [x] Readiness for a task on an invalid edge is false, with a reason that
       gives the same path
-- [ ] `has_dependency_cycle` is replaced by the shared validator
+- [x] `has_dependency_cycle` is replaced by the shared validator
 
 Verification:
 

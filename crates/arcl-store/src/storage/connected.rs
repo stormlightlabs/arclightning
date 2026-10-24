@@ -209,10 +209,17 @@ pub fn check(connection: &Connection) -> Result<CheckReport> {
         if has_parent_cycle(&graph.tasks, task.id) {
             errors.push(format!("parent cycle includes `{}`", task.id));
         }
-        if has_dependency_cycle(&graph.dependencies, task.id) {
-            errors.push(format!("dependency cycle includes `{}`", task.id));
-        }
     }
+    let parents = graph
+        .tasks
+        .iter()
+        .filter_map(|task| Some((task.id, task.parent_id?)))
+        .collect();
+    errors.extend(
+        validate_blocker_edges(&parents, &graph.dependencies)
+            .iter()
+            .map(ToString::to_string),
+    );
     Ok(CheckReport { valid: errors.is_empty(), errors })
 }
 
@@ -781,7 +788,8 @@ pub fn update_planning_task(
     Ok(next)
 }
 
-/// Read all connected-model dependency edges.
+/// Read all connected-model dependency edges, including any that break the
+/// blocker rules, such as a task blocked by itself.
 pub fn planning_dependencies(connection: &Connection, project_id: ProjectId) -> Result<Vec<TaskDependency>> {
     let mut statement = connection.prepare(
         "SELECT task_id, blocker_id FROM planning_task_dependencies
@@ -798,7 +806,9 @@ pub fn planning_dependencies(connection: &Connection, project_id: ProjectId) -> 
         let blocker_id = TaskId::parse(&blocker)
             .map_err(DomainError::from)
             .map_err(StorageError::InvalidPlanningDependency)?;
-        TaskDependency::new(task_id, blocker_id).map_err(StorageError::InvalidPlanningDependency)
+        // A hand-edited database can hold a task blocked by itself. Read it as
+        // stored so `check` and readiness report it as a one-task cycle.
+        Ok(TaskDependency { task_id, blocker_id })
     })
     .collect()
 }
@@ -831,11 +841,12 @@ pub fn add_planning_dependency(
     Ok(dependency)
 }
 
-/// Remove a connected-model dependency.
+/// Remove a connected-model dependency. A stored self-dependency can be
+/// removed too, since removing never breaks the blocker rules.
 pub fn remove_planning_dependency(
     connection: &mut Connection, project_id: ProjectId, task_id: TaskId, blocker_id: TaskId,
 ) -> Result<TaskDependency> {
-    let dependency = TaskDependency::new(task_id, blocker_id).map_err(StorageError::InvalidPlanningDependency)?;
+    let dependency = TaskDependency { task_id, blocker_id };
     let tx = connection.transaction()?;
     ensure_task(&tx, project_id, task_id)?;
     ensure_task(&tx, project_id, blocker_id)?;
@@ -1584,28 +1595,6 @@ fn has_parent_cycle(tasks: &[PlanningTask], start: TaskId) -> bool {
     false
 }
 
-fn has_dependency_cycle(dependencies: &[TaskDependency], start: TaskId) -> bool {
-    fn visit(
-        dependencies: &[TaskDependency], current: TaskId, visited: &mut HashSet<TaskId>, active: &mut HashSet<TaskId>,
-    ) -> bool {
-        if active.contains(&current) {
-            return true;
-        }
-        if !visited.insert(current) {
-            return false;
-        }
-        active.insert(current);
-        let cycle = dependencies
-            .iter()
-            .filter(|edge| edge.task_id == current)
-            .any(|edge| visit(dependencies, edge.blocker_id, visited, active));
-        active.remove(&current);
-        cycle
-    }
-
-    visit(dependencies, start, &mut HashSet::new(), &mut HashSet::new())
-}
-
 #[cfg(test)]
 mod tests {
 
@@ -1613,7 +1602,7 @@ mod tests {
         CapturePromotionInput, CapturePromotionRecord, CaptureTaskPromotion, Database, PlanningTaskCreate, StorageError,
     };
     use arcl_core::domain::{
-        ContainerAction, DomainError, LinkedRecordKind, ProjectId, ReleaseMemberKind, TaskPriority,
+        ContainerAction, DomainError, LinkedRecordKind, ProjectId, ReleaseMemberKind, TaskId, TaskPriority,
     };
     use arcl_core::plan::{PlanDocument, PlanPhase, PlanTask};
 
@@ -2157,6 +2146,47 @@ mod tests {
         };
         assert_eq!(path, [second.id, first.id, second.id].map(|id| id.to_string()));
         assert_eq!(database.planning_dependencies().expect("dependencies read").len(), 1);
+    }
+
+    #[test]
+    fn refused_edge_names_the_shortest_cycle_through_it() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let mut ids: Vec<TaskId> = (0..4)
+            .map(|position| {
+                database
+                    .create_planning_task(PlanningTaskCreate {
+                        project_id: project.id,
+                        spec_id: None,
+                        plan_id: None,
+                        phase_id: None,
+                        parent_id: None,
+                        title: format!("Task {position}"),
+                        body: String::new(),
+                        priority: TaskPriority::Normal,
+                        position,
+                    })
+                    .expect("task creates")
+                    .id
+            })
+            .collect();
+        ids.sort();
+        let (p, q, x, y) = (ids[0], ids[1], ids[2], ids[3]);
+        for (task, blocker) in [(p, q), (q, x), (y, p), (y, x)] {
+            database
+                .add_planning_dependency(task, blocker)
+                .expect("dependency creates");
+        }
+        // `x -> y` closes `x -> y -> x` and `p -> q -> x -> y -> p`. The
+        // stored edge `p -> q` comes first in ID order and its shortest cycle
+        // holds `x -> y`, but the refusal names the shortest one through it.
+        let error = database
+            .add_planning_dependency(x, y)
+            .expect_err("dependency cycle rejects");
+        let StorageError::InvalidPlanningDependency(DomainError::BlockerCycle { path }) = error else {
+            panic!("expected a blocker cycle, got {error:?}");
+        };
+        assert_eq!(path, [x, y, x].map(|id| id.to_string()));
     }
 
     #[test]

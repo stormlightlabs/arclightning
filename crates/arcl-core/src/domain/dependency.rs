@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt;
 
 use serde::Serialize;
 
@@ -31,7 +32,9 @@ pub enum EdgeViolation {
     /// Blocker edges form a cycle.
     Cycle {
         /// The tasks along the cycle, closed by repeating the first task.
-        /// Each task is blocked by the next.
+        /// Each task is blocked by the next. [`validate_blocker_edges`]
+        /// starts it at the smallest task ID, so the same cycle always reads
+        /// the same; [`EdgeViolation::starting_at`] rotates it to an edge.
         path: Vec<TaskId>,
     },
     /// A task is blocked by its own ancestor or descendant.
@@ -105,10 +108,31 @@ impl EdgeViolation {
     }
 }
 
+/// Describes a violation that already exists in the graph, with the same
+/// path or chain [`EdgeViolation::to_error`] reports when refusing an edge.
+impl fmt::Display for EdgeViolation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let join = |ids: &[TaskId]| ids.iter().map(ToString::to_string).collect::<Vec<_>>().join(" -> ");
+        match self {
+            Self::Cycle { path } => write!(f, "blocker cycle: {}; each task is blocked by the next", join(path)),
+            Self::Ancestry { edge, kinship, chain } => write!(
+                f,
+                "task `{}` is blocked by `{}`, its {}; parent chain: {}",
+                edge.task_id,
+                edge.blocker_id,
+                kinship.as_str(),
+                join(chain)
+            ),
+        }
+    }
+}
+
 /// A directed blocking relationship between two tasks.
 ///
 /// `task_id` is the task that cannot proceed, and `blocker_id` is the task
-/// whose completion satisfies the relationship.
+/// whose completion satisfies the relationship. [`TaskDependency::new`]
+/// refuses a task that blocks itself, but an edge read from a hand-edited
+/// database is built as stored and can be one.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize)]
 pub struct TaskDependency {
     /// The task whose readiness is gated.
@@ -131,28 +155,48 @@ impl TaskDependency {
 /// violation in it.
 ///
 /// `parents` maps each task that has a parent to that parent, and `edges`
-/// holds every blocker edge. The result follows edge order. It holds one
-/// [`EdgeViolation::Cycle`] for each distinct cycle found from an edge, so
-/// every edge on a cycle appears in at least one, and one
-/// [`EdgeViolation::Ancestry`] for each edge that joins a task to its own
-/// ancestor or descendant. An empty result means the graph is valid.
+/// holds every blocker edge. The result follows edge order. Each edge on a
+/// cycle that no earlier reported cycle holds adds an
+/// [`EdgeViolation::Cycle`] for the shortest cycle through it, starting at
+/// the cycle's smallest task ID whatever the edge order. So every edge on a
+/// cycle appears in at least one, and the first edge on a cycle gets the
+/// shortest one through it; a caller refusing new edges lists them first.
+/// Each edge that joins a task to its own ancestor or descendant adds one
+/// [`EdgeViolation::Ancestry`]. An empty result means the graph is valid.
 pub fn validate_blocker_edges(parents: &HashMap<TaskId, TaskId>, edges: &[TaskDependency]) -> Vec<EdgeViolation> {
     let mut blockers: HashMap<TaskId, Vec<TaskId>> = HashMap::new();
     for edge in edges {
         blockers.entry(edge.task_id).or_default().push(edge.blocker_id);
     }
+    // An edge lies on a cycle exactly when both its ends share a strongly
+    // connected component, and every path from its blocker back to its task
+    // stays inside that component. One linear pass finds the components, so
+    // the shortest-path search runs only for edges on a cycle. Searching from
+    // every edge would cost O(E * (V + E)) on each read, which a long acyclic
+    // blocker chain makes quadratic.
+    let component = strong_components(&blockers);
     let mut violations = Vec::new();
-    let mut seen_cycles = HashSet::new();
+    // Edges on a cycle reported so far. An edge already on one needs no
+    // search of its own, so one long stored cycle costs a single search.
+    let mut covered: HashSet<(TaskId, TaskId)> = HashSet::new();
     for edge in edges {
-        if let Some(path) = blocker_path(&blockers, edge.blocker_id, edge.task_id) {
+        let on_cycle = component
+            .get(&edge.task_id)
+            .is_some_and(|own| component.get(&edge.blocker_id) == Some(own))
+            && !covered.contains(&(edge.task_id, edge.blocker_id));
+        if let Some(path) = on_cycle
+            .then(|| blocker_path(&blockers, edge.blocker_id, edge.task_id))
+            .flatten()
+        {
+            // The cycle holds `edge`, which no reported cycle holds, so it is
+            // new.
             let mut cycle = vec![edge.task_id];
-            cycle.extend(path);
-            let mut key = cycle[..cycle.len() - 1].to_vec();
-            let lowest = (0..key.len()).min_by_key(|&index| key[index]).unwrap_or(0);
-            key.rotate_left(lowest);
-            if seen_cycles.insert(key) {
-                violations.push(EdgeViolation::Cycle { path: cycle });
-            }
+            cycle.extend(&path[..path.len() - 1]);
+            let lowest = (0..cycle.len()).min_by_key(|&index| cycle[index]).unwrap_or(0);
+            cycle.rotate_left(lowest);
+            cycle.push(cycle[0]);
+            covered.extend(cycle.windows(2).map(|pair| (pair[0], pair[1])));
+            violations.push(EdgeViolation::Cycle { path: cycle });
         }
         if let Some(chain) = parent_chain(parents, edge.task_id, edge.blocker_id) {
             violations.push(EdgeViolation::Ancestry { edge: *edge, kinship: Kinship::Ancestor, chain });
@@ -168,13 +212,14 @@ pub fn validate_blocker_edges(parents: &HashMap<TaskId, TaskId>, edges: &[TaskDe
 /// `parents` and `edges` describe the graph after the change. The change
 /// causes a violation that involves one of `new_edges`, or whose parent chain
 /// crosses one of `new_parents`, the `(child, parent)` links the change sets.
-/// A cycle is rotated to start at the new edge. Any other violation was
-/// already in the graph and is left for reporting.
+/// A cycle is rotated to start at the new edge, and is the shortest cycle
+/// through it. Any other violation was already in the graph and is left for
+/// reporting.
 pub fn caused_violation(
     parents: &HashMap<TaskId, TaskId>, edges: &[TaskDependency], new_edges: &[TaskDependency],
     new_parents: &[(TaskId, TaskId)],
 ) -> Option<EdgeViolation> {
-    validate_blocker_edges(parents, edges)
+    validate_blocker_edges(parents, &new_edges_first(edges, new_edges))
         .into_iter()
         .find_map(|violation| caused_by(violation, new_edges, new_parents))
 }
@@ -184,14 +229,15 @@ pub fn caused_violation(
 ///
 /// The arguments are as for [`caused_violation`]. The first list holds each
 /// caused violation, cycles rotated to start at their new edge; the second
-/// holds the rest, in the order [`validate_blocker_edges`] reports them.
+/// holds the rest, in the order [`validate_blocker_edges`] reports them with
+/// the new edges listed first.
 pub fn partition_violations(
     parents: &HashMap<TaskId, TaskId>, edges: &[TaskDependency], new_edges: &[TaskDependency],
     new_parents: &[(TaskId, TaskId)],
 ) -> (Vec<EdgeViolation>, Vec<EdgeViolation>) {
     let mut caused = Vec::new();
     let mut existing = Vec::new();
-    for violation in validate_blocker_edges(parents, edges) {
+    for violation in validate_blocker_edges(parents, &new_edges_first(edges, new_edges)) {
         match caused_by(violation.clone(), new_edges, new_parents) {
             Some(violation) => caused.push(violation),
             None => existing.push(violation),
@@ -211,6 +257,91 @@ fn caused_by(
         .iter()
         .any(|(child, parent)| violation.crosses_parent_link(*child, *parent))
         .then_some(violation)
+}
+
+/// `edges` with `new_edges` moved to the front.
+///
+/// [`validate_blocker_edges`] gives the first edge on a cycle the shortest
+/// cycle through it, and skips an edge that an earlier reported cycle holds.
+/// Listing the new edges first means each one on a cycle lands in a reported
+/// cycle that involves a new edge, so no cycle the change closes is filed as
+/// an existing violation, and a refusal names the shortest cycle through the
+/// new edge. The result holds the same edges as `edges`.
+fn new_edges_first(edges: &[TaskDependency], new_edges: &[TaskDependency]) -> Vec<TaskDependency> {
+    let present: HashSet<TaskDependency> = edges.iter().copied().collect();
+    let mut fresh: HashSet<TaskDependency> = HashSet::new();
+    let mut ordered: Vec<TaskDependency> = Vec::with_capacity(edges.len());
+    for edge in new_edges {
+        if present.contains(edge) && fresh.insert(*edge) {
+            ordered.push(*edge);
+        }
+    }
+    ordered.extend(edges.iter().filter(|edge| !fresh.contains(edge)).copied());
+    ordered
+}
+
+/// Map each task in `blockers` to the index of its strongly connected
+/// component, using Tarjan's algorithm.
+///
+/// The depth-first search keeps its own stack of frames instead of
+/// recursing, so a blocker chain thousands of tasks deep cannot overflow the
+/// thread's stack.
+fn strong_components(blockers: &HashMap<TaskId, Vec<TaskId>>) -> HashMap<TaskId, usize> {
+    let mut order: HashMap<TaskId, usize> = HashMap::new();
+    let mut low: Vec<usize> = Vec::new();
+    let mut on_stack: Vec<bool> = Vec::new();
+    let mut stack: Vec<TaskId> = Vec::new();
+    let mut component: HashMap<TaskId, usize> = HashMap::new();
+    let mut count = 0;
+    let none: &[TaskId] = &[];
+    for &root in blockers.keys() {
+        if order.contains_key(&root) {
+            continue;
+        }
+        // Each frame holds a task and how many of its blockers it has visited.
+        let mut frames: Vec<(TaskId, usize)> = Vec::new();
+        let mut arrive = Some(root);
+        loop {
+            if let Some(task) = arrive.take() {
+                order.insert(task, low.len());
+                low.push(low.len());
+                on_stack.push(true);
+                stack.push(task);
+                frames.push((task, 0));
+            }
+            let Some(frame) = frames.last_mut() else {
+                break;
+            };
+            let (task, next) = *frame;
+            let at = order[&task];
+            let next_blockers = blockers.get(&task).map_or(none, Vec::as_slice);
+            if let Some(&blocker) = next_blockers.get(next) {
+                frame.1 += 1;
+                match order.get(&blocker) {
+                    None => arrive = Some(blocker),
+                    Some(&seen) if on_stack[seen] => low[at] = low[at].min(seen),
+                    Some(_) => {}
+                }
+                continue;
+            }
+            frames.pop();
+            if let Some(&(parent, _)) = frames.last() {
+                let parent_at = order[&parent];
+                low[parent_at] = low[parent_at].min(low[at]);
+            }
+            if low[at] == at {
+                while let Some(member) = stack.pop() {
+                    on_stack[order[&member]] = false;
+                    component.insert(member, count);
+                    if member == task {
+                        break;
+                    }
+                }
+                count += 1;
+            }
+        }
+    }
+    component
 }
 
 /// The shortest path of blocker edges from `from` to `to`, both included.
@@ -279,7 +410,19 @@ mod tests {
         let (a, b, c) = (TaskId::new(), TaskId::new(), TaskId::new());
         let edges = [edge(a, b), edge(b, c), edge(c, a)];
         let violations = validate_blocker_edges(&HashMap::new(), &edges);
-        assert_eq!(violations, vec![EdgeViolation::Cycle { path: vec![a, b, c, a] }]);
+        let EdgeViolation::Cycle { path } = &violations[0] else {
+            panic!("expected a cycle, got {violations:?}");
+        };
+        let start = [a, b, c].into_iter().min().expect("three tasks");
+        let expected = if start == a {
+            vec![a, b, c, a]
+        } else if start == b {
+            vec![b, c, a, b]
+        } else {
+            vec![c, a, b, c]
+        };
+        assert_eq!(violations.len(), 1);
+        assert_eq!(path, &expected);
 
         let closing = edge(c, a);
         assert!(violations[0].involves(&closing));
@@ -289,6 +432,27 @@ mod tests {
             rotated.to_error().to_string(),
             format!("blocker edges would form a cycle: {c} -> {a} -> {b} -> {c}; each task is blocked by the next")
         );
+        assert_eq!(
+            rotated.to_string(),
+            format!("blocker cycle: {c} -> {a} -> {b} -> {c}; each task is blocked by the next")
+        );
+    }
+
+    #[test]
+    fn cycle_starts_at_its_smallest_task_whatever_the_edge_order() {
+        let mut ids = [TaskId::new(), TaskId::new(), TaskId::new()];
+        ids.sort();
+        let [low, mid, high] = ids;
+        let expected = format!("blocker cycle: {low} -> {high} -> {mid} -> {low}; each task is blocked by the next");
+        let (first, second, third) = (edge(low, high), edge(high, mid), edge(mid, low));
+        for edges in [[first, second, third], [second, third, first], [third, first, second]] {
+            let violations = validate_blocker_edges(&HashMap::new(), &edges);
+            assert_eq!(
+                violations,
+                vec![EdgeViolation::Cycle { path: vec![low, high, mid, low] }]
+            );
+            assert_eq!(violations[0].to_string(), expected);
+        }
     }
 
     #[test]
@@ -309,6 +473,10 @@ mod tests {
             format!(
                 "task `{leaf}` cannot be blocked by `{root}`, its ancestor; parent chain: {leaf} -> {middle} -> {root}"
             )
+        );
+        assert_eq!(
+            violations[0].to_string(),
+            format!("task `{leaf}` is blocked by `{root}`, its ancestor; parent chain: {leaf} -> {middle} -> {root}")
         );
         assert!(violations[0].crosses_parent_link(middle, root));
         assert!(violations[0].crosses_parent_link(leaf, middle));
@@ -331,6 +499,25 @@ mod tests {
     }
 
     #[test]
+    fn long_acyclic_chain_is_valid() {
+        let tasks: Vec<TaskId> = (0..5_000).map(|_| TaskId::new()).collect();
+        let edges: Vec<TaskDependency> = tasks.windows(2).map(|pair| edge(pair[0], pair[1])).collect();
+        assert!(validate_blocker_edges(&HashMap::new(), &edges).is_empty());
+    }
+
+    #[test]
+    fn chain_closed_into_a_cycle_reports_it_once() {
+        let mut tasks: Vec<TaskId> = (0..300).map(|_| TaskId::new()).collect();
+        tasks.sort();
+        let mut edges: Vec<TaskDependency> = tasks.windows(2).map(|pair| edge(pair[0], pair[1])).collect();
+        edges.push(edge(tasks[tasks.len() - 1], tasks[0]));
+        let violations = validate_blocker_edges(&HashMap::new(), &edges);
+        let mut path = tasks.clone();
+        path.push(tasks[0]);
+        assert_eq!(violations, vec![EdgeViolation::Cycle { path }]);
+    }
+
+    #[test]
     fn every_violation_in_the_graph_is_reported() {
         let (a, b, c, d) = (TaskId::new(), TaskId::new(), TaskId::new(), TaskId::new());
         let (parent, child) = (TaskId::new(), TaskId::new());
@@ -342,5 +529,125 @@ mod tests {
         assert!(violations[1].involves(&edge(c, d)) && violations[1].involves(&edge(d, c)));
         assert!(violations[2].involves(&edge(child, parent)));
         assert!(!violations[2].involves(&edge(a, b)));
+    }
+
+    #[test]
+    fn caused_cycle_is_the_shortest_through_the_new_edge_wherever_it_is_listed() {
+        let (x, y, z) = (TaskId::new(), TaskId::new(), TaskId::new());
+        let new = edge(x, y);
+        // Searched first, `z -> x` would cover `x -> y` with the longer
+        // cycle through `z`, and the refusal would name that cycle.
+        let edges = [edge(z, x), edge(y, z), edge(y, x), new];
+        let shortest = EdgeViolation::Cycle { path: vec![x, y, x] };
+        assert_eq!(
+            caused_violation(&HashMap::new(), &edges, &[new], &[]),
+            Some(shortest.clone())
+        );
+        let (caused, existing) = partition_violations(&HashMap::new(), &edges, &[new], &[]);
+        assert_eq!(caused.first(), Some(&shortest));
+        assert!(caused.iter().all(|cycle| cycle.involves(&new)));
+        assert!(existing.is_empty(), "{existing:?}");
+    }
+
+    /// The validator before it skipped covered edges: a shortest-cycle search
+    /// from every edge, keeping each distinct cycle once.
+    fn reference(parents: &HashMap<TaskId, TaskId>, edges: &[TaskDependency]) -> Vec<EdgeViolation> {
+        let mut blockers: HashMap<TaskId, Vec<TaskId>> = HashMap::new();
+        for edge in edges {
+            blockers.entry(edge.task_id).or_default().push(edge.blocker_id);
+        }
+        let mut violations = Vec::new();
+        let mut seen = HashSet::new();
+        for edge in edges {
+            if let Some(path) = blocker_path(&blockers, edge.blocker_id, edge.task_id) {
+                let mut cycle = vec![edge.task_id];
+                cycle.extend(&path[..path.len() - 1]);
+                let lowest = (0..cycle.len()).min_by_key(|&index| cycle[index]).unwrap_or(0);
+                cycle.rotate_left(lowest);
+                if seen.insert(cycle.clone()) {
+                    cycle.push(cycle[0]);
+                    violations.push(EdgeViolation::Cycle { path: cycle });
+                }
+            }
+            if let Some(chain) = parent_chain(parents, edge.task_id, edge.blocker_id) {
+                violations.push(EdgeViolation::Ancestry { edge: *edge, kinship: Kinship::Ancestor, chain });
+            } else if let Some(chain) = parent_chain(parents, edge.blocker_id, edge.task_id) {
+                violations.push(EdgeViolation::Ancestry { edge: *edge, kinship: Kinship::Descendant, chain });
+            }
+        }
+        violations
+    }
+
+    /// A seeded xorshift generator, so a failing round can be replayed.
+    struct Rng(u64);
+
+    impl Rng {
+        fn below(&mut self, n: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 % n as u64) as usize
+        }
+    }
+
+    #[test]
+    fn random_graphs_agree_with_the_search_from_every_edge() {
+        let is_cycle = |violation: &&EdgeViolation| matches!(violation, EdgeViolation::Cycle { .. });
+        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+        for round in 0..20_000 {
+            let n = 1 + rng.below(12);
+            let ids: Vec<TaskId> = (0..n).map(|_| TaskId::new()).collect();
+            // Parents point at earlier tasks, with an occasional parent cycle.
+            let mut parents = HashMap::new();
+            for child in 1..n {
+                if rng.below(3) == 0 {
+                    let parent = if rng.below(20) == 0 { rng.below(n) } else { rng.below(child) };
+                    if parent != child {
+                        parents.insert(ids[child], ids[parent]);
+                    }
+                }
+            }
+            // Random edges, with duplicates and an occasional self-loop, as a
+            // hand-edited database can hold.
+            let mut edges = Vec::new();
+            for _ in 0..rng.below(n * 3 + 1) {
+                let (task, blocker) = (rng.below(n), rng.below(n));
+                if task != blocker || rng.below(15) == 0 {
+                    edges.push(TaskDependency { task_id: ids[task], blocker_id: ids[blocker] });
+                    if rng.below(10) == 0 {
+                        edges.push(TaskDependency { task_id: ids[task], blocker_id: ids[blocker] });
+                    }
+                }
+            }
+            let expected = reference(&parents, &edges);
+            let actual = validate_blocker_edges(&parents, &edges);
+            let context = format!("round {round}: edges {edges:?} parents {parents:?}");
+
+            let ancestry = |violations: &[EdgeViolation]| -> Vec<EdgeViolation> {
+                violations.iter().filter(|v| !is_cycle(v)).cloned().collect()
+            };
+            assert_eq!(ancestry(&actual), ancestry(&expected), "{context}");
+            let cycles: Vec<&EdgeViolation> = actual.iter().filter(is_cycle).collect();
+            for (index, cycle) in cycles.iter().enumerate() {
+                assert!(expected.contains(cycle), "{context}: {cycle:?} is not a shortest cycle");
+                assert!(!cycles[..index].contains(cycle), "{context}: {cycle:?} repeats");
+            }
+            for edge in &edges {
+                if expected.iter().filter(is_cycle).any(|cycle| cycle.involves(edge)) {
+                    assert!(
+                        cycles.iter().any(|cycle| cycle.involves(edge)),
+                        "{context}: {edge:?} unreported"
+                    );
+                }
+            }
+            // The first edge, as a refused new edge is, gets the shortest
+            // cycle through it.
+            if let Some(first) = edges.first()
+                && let Some(cycle) = expected.iter().find(is_cycle)
+                && cycle.involves(first)
+            {
+                assert_eq!(cycles.first(), Some(&cycle), "{context}");
+            }
+        }
     }
 }

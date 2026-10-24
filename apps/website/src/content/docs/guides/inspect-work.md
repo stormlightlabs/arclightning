@@ -47,8 +47,9 @@ arcl explain arcl-t-01J...
 ```
 
 Reasons include incomplete blockers, blockers inherited from ancestor tasks,
-cancelled blockers to remove or replace, open children, parked or terminal
-ancestors, closed containers, and the task's own lifecycle state.
+cancelled blockers to remove or replace, invalid blocker edges, open children,
+parked or terminal ancestors, closed containers, and the task's own lifecycle
+state.
 
 ## Gather task context
 
@@ -87,3 +88,17 @@ arcl check
 
 `check` validates database and graph invariants and reports duplicate sibling
 positions as warnings. It exits successfully when no errors are found.
+
+A database can hold blocker edges that `dependency add` refuses, for example
+ones edited in by hand. `check` reports each one as an error:
+
+- A cycle, once, with the tasks along it, starting at the smallest task ID:
+  `blocker cycle: <a> -> <b> -> <a>; each task is blocked by the next`. A
+  task blocked by itself is a cycle of one task: `<a> -> <a>`.
+- An edge to the task's own ancestor or descendant, with the parent chain from
+  the descendant up to the ancestor:
+  ``task `<a>` is blocked by `<b>`, its ancestor; parent chain: <a> -> <b>``.
+
+A task whose own blocker edge is part of one is not ready, and `explain` gives
+the same text as a reason. Remove the edge with `dependency remove` to clear
+it.

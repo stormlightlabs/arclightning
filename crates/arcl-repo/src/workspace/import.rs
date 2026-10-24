@@ -768,10 +768,10 @@ fn validate_tasks(records: &BTreeMap<PathBuf, WorkspaceRecord>, index: &RecordIn
                     format!("dependency to `{blocker_id}` is duplicated"),
                 ));
             }
-            dependencies.push(
-                TaskDependency::new(record.id, *blocker_id)
-                    .map_err(|error| relationship_error(path.clone(), "blocked-by", error.to_string()))?,
-            );
+            // A self-loop is built as stored rather than refused here, so
+            // the blocker rules treat it as a one-task cycle: a new one is
+            // refused and one the database already holds warns.
+            dependencies.push(TaskDependency { task_id: record.id, blocker_id: *blocker_id });
         }
     }
     Ok(dependencies)
@@ -1313,6 +1313,52 @@ mod tests {
         );
 
         // The second import finds the edge already in the database.
+        let outcome = import_graph(path, path, &mut destination, None).expect("repeat import loads");
+        assert_eq!(
+            outcome.warnings,
+            vec![format!("{violation}; it was already in the database, so it loads")]
+        );
+    }
+
+    #[test]
+    fn import_refuses_a_self_loop_the_workspace_adds() {
+        let fixture = EdgeFixture::new(|_, _, other| vec![TaskDependency { task_id: other, blocker_id: other }]);
+        let other = fixture.other;
+        assert_eq!(
+            fixture.refused(),
+            format!(
+                "workspace file `tasks/{other}.md`: relationship `blocked-by`: blocker edges would form a cycle: \
+                 {other} -> {other}; each task is blocked by the next"
+            )
+        );
+    }
+
+    #[test]
+    fn import_loads_a_stored_self_loop_with_a_warning() {
+        let self_loop = |other| TaskDependency { task_id: other, blocker_id: other };
+        let fixture = EdgeFixture::new(|_, _, other| vec![self_loop(other)]);
+        let other = fixture.other;
+        let violation = format!(
+            "workspace file `tasks/{other}.md`: relationship `blocked-by`: blocker edges would form a cycle: \
+             {other} -> {other}; each task is blocked by the next"
+        );
+
+        // An empty database has nothing to compare against, so the loop loads.
+        let mut destination = Database::open_in_memory().expect("database opens");
+        let path = fixture.workspace.path();
+        let outcome = import_graph(path, path, &mut destination, None).expect("fresh import loads");
+        assert_eq!(
+            outcome.warnings,
+            vec![format!(
+                "{violation}; there is no earlier graph to compare against, so it loads"
+            )]
+        );
+        assert_eq!(
+            destination.connected_graph().expect("graph loads").dependencies,
+            vec![self_loop(other)]
+        );
+
+        // The second import finds the stored loop and warns again.
         let outcome = import_graph(path, path, &mut destination, None).expect("repeat import loads");
         assert_eq!(
             outcome.warnings,

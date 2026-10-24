@@ -1537,7 +1537,7 @@ fn start_starts_a_child_its_parent_is_blocked_by_without_force() {
     let directory = initialized_directory();
     let parent = create_task(directory.path(), "Parent", None);
     let child = create_task(directory.path(), "Child", Some(&parent));
-    // `dependency add` refuses this edge, so insert it as an older project would hold it.
+    // `dependency add` refuses this edge, so insert it directly.
     let database = rusqlite::Connection::open(directory.path().join(".arcl/arcl.db")).expect("database opens");
     database
         .execute(
@@ -1763,7 +1763,7 @@ fn a_parent_blocked_by_its_own_child_leaves_the_child_ready() {
     let directory = initialized_directory();
     let parent = create_task(directory.path(), "Parent", None);
     let leaf = create_task(directory.path(), "Leaf", Some(&parent));
-    // `dependency add` refuses this edge, so insert it as an older project would hold it.
+    // `dependency add` refuses this edge, so insert it directly.
     let database = rusqlite::Connection::open(directory.path().join(".arcl/arcl.db")).expect("database opens");
     database
         .execute(
@@ -1894,6 +1894,118 @@ fn dependency_edge_descendant_is_refused() {
         "message: {message}"
     );
     assert!(dependency_pairs(path).is_empty());
+}
+
+/// Store blocker edges without the validator, as a database edited by hand
+/// can hold edges that `dependency add` refuses.
+fn insert_raw_edges(directory: &Path, edges: &[(&str, &str)]) {
+    let database = rusqlite::Connection::open(directory.join(".arcl/arcl.db")).expect("database opens");
+    for (task, blocker) in edges {
+        database
+            .execute(
+                "INSERT INTO planning_task_dependencies (project_id, task_id, blocker_id)
+                 SELECT project_id, ?1, ?2 FROM planning_tasks WHERE id = ?1",
+                [task, blocker],
+            )
+            .expect("bad edge inserts");
+    }
+}
+
+/// Run `arcl check`, which must fail, and return its JSON errors.
+fn failed_check_errors(directory: &Path) -> Vec<String> {
+    let output = arcl_in(directory)
+        .args(["--json", "check"])
+        .output()
+        .expect("command runs");
+    assert!(
+        !output.status.success(),
+        "check passed: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let report = json(&output.stdout);
+    assert_eq!(report["data"]["valid"], false);
+    report["data"]["errors"]
+        .as_array()
+        .expect("error array")
+        .iter()
+        .map(|error| error.as_str().expect("error text").to_owned())
+        .collect()
+}
+
+#[test]
+fn invalid_edge_cycle_is_reported_by_check_and_explain() {
+    let directory = initialized_directory();
+    let path = directory.path();
+    let (a, b) = (create_task(path, "A", None), create_task(path, "B", None));
+    insert_raw_edges(path, &[(&a, &b), (&b, &a)]);
+    // The report starts at the smallest task ID, whatever the edge order.
+    let (low, high) = if a < b { (&a, &b) } else { (&b, &a) };
+    let cycle = format!("blocker cycle: {low} -> {high} -> {low}; each task is blocked by the next");
+
+    assert_eq!(failed_check_errors(path), vec![cycle.clone()]);
+    for task in [&a, &b] {
+        let readiness = run_json(path, ["--json", "task", "explain", task].as_ref())["data"]["readiness"].clone();
+        assert_eq!(readiness["ready"], false);
+        assert!(
+            readiness["reasons"]
+                .as_array()
+                .expect("reason array")
+                .contains(&Value::from(cycle.as_str())),
+            "{readiness}"
+        );
+    }
+}
+
+#[test]
+fn invalid_self_loop_is_reported_by_check_and_explain_and_removes() {
+    let directory = initialized_directory();
+    let path = directory.path();
+    let (a, other) = (create_task(path, "A", None), create_task(path, "Other", None));
+    insert_raw_edges(path, &[(&a, &a)]);
+    let cycle = format!("blocker cycle: {a} -> {a}; each task is blocked by the next");
+
+    assert_eq!(failed_check_errors(path), vec![cycle.clone()]);
+    let explained = readiness(path, &a);
+    assert_eq!(explained["ready"], false);
+    assert!(
+        explained["reasons"]
+            .as_array()
+            .expect("reason array")
+            .contains(&Value::from(cycle.as_str())),
+        "{explained}"
+    );
+    assert_eq!(ready_ids(path), vec![other]);
+    assert_eq!(dependency_pairs(path), vec![(a.clone(), a.clone())]);
+
+    run_json(
+        path,
+        ["--json", "dependency", "remove", &a, "--blocked-by", &a].as_ref(),
+    );
+    assert!(dependency_pairs(path).is_empty());
+    assert_eq!(readiness(path, &a)["ready"], true);
+}
+
+#[test]
+fn invalid_edge_to_an_ancestor_is_reported_by_check_and_explain() {
+    let directory = initialized_directory();
+    let path = directory.path();
+    let root = create_task(path, "Root", None);
+    let child = create_task(path, "Child", Some(&root));
+    insert_raw_edges(path, &[(&child, &root)]);
+    let ancestry = format!("task `{child}` is blocked by `{root}`, its ancestor; parent chain: {child} -> {root}");
+
+    assert_eq!(failed_check_errors(path), vec![ancestry.clone()]);
+    let readiness = run_json(path, ["--json", "task", "explain", &child].as_ref())["data"]["readiness"].clone();
+    assert_eq!(readiness["ready"], false);
+    assert!(
+        readiness["reasons"]
+            .as_array()
+            .expect("reason array")
+            .contains(&Value::from(ancestry.as_str())),
+        "{readiness}"
+    );
+    let human = stdout_of(path, &["--color", "never", "task", "explain", &child]);
+    assert!(human.contains(&ancestry), "{human}");
 }
 
 #[test]

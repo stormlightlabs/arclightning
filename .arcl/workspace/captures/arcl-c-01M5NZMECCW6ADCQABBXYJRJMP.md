@@ -1,7 +1,7 @@
 +++
 id = "arcl-c-01M5NZMECCW6ADCQABBXYJRJMP"
 title = "Validate only the new blocker edges on each write"
-status = "captured"
+status = "discarded"
 created-at = "2026-10-24T03:35:23.276Z"
 +++
 
