@@ -3,7 +3,7 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
-  import { dataSource, type WorkList } from "$lib/data";
+  import { dataSource, latestRead, type WorkList } from "$lib/data";
   import {
     NO_MILESTONE,
     PRIORITIES,
@@ -15,6 +15,8 @@
     parseFilters,
     selectedOf,
     taskHref,
+    visibleSelection,
+    withKnownMilestone,
     workKeyAction,
     writeFilters,
     type WorkFilters,
@@ -30,6 +32,8 @@
   let filters = $derived(parseFilters(page.url.searchParams));
   let groups = $derived(list ? groupWork(list, filters) : []);
   let order = $derived(rowOrder(groups));
+  // A selected task the filters hide is not selected.
+  let selected = $derived(visibleSelection(order, selectedId));
 
   const capitalize = (value: string) => value[0].toUpperCase() + value.slice(1);
   const any: SelectOption = { value: "", label: "Any" };
@@ -44,15 +48,28 @@
     ],
   });
 
-  onMount(load);
+  const read = latestRead((signal) => dataSource().work(signal), {
+    loaded: (loaded) => (list = loaded),
+    failed: (error) => (failure = error instanceof Error ? error.message : String(error)),
+  });
+
+  onMount(() => {
+    load();
+    return read.stop;
+  });
+
+  // Once the list loads, and the router with it, keep the URL to the filters
+  // the menus show: one value each, and no milestone the list does not have.
+  $effect(() => {
+    if (list === null) return;
+    const shown = withKnownMilestone(filters, list.milestones.map((milestone) => milestone.id));
+    if (writeFilters(shown, page.url.searchParams).toString() !== page.url.searchParams.toString()) showFilters(shown);
+  });
 
   function load() {
     failure = null;
     list = null;
-    dataSource()
-      .work()
-      .then((loaded) => (list = loaded))
-      .catch((error: unknown) => (failure = error instanceof Error ? error.message : String(error)));
+    read.start();
   }
 
   function setFilter(name: FilterName, value: string) {
@@ -70,10 +87,10 @@
     const action = workKeyAction(event);
     if (action === null) return;
     if (action === "open") {
-      if (selectedId === null) return;
-      goto(taskHref(selectedId));
+      if (selected === null) return;
+      goto(taskHref(selected));
     } else {
-      selectedId = moveSelection(order, selectedId, action === "next" ? 1 : -1);
+      selectedId = moveSelection(order, selected, action === "next" ? 1 : -1);
     }
     event.preventDefault();
   }
@@ -108,7 +125,7 @@
     {/snippet}
   </EmptyState>
 {:else}
-  <TaskList {groups} href={taskHref} {selectedId} onselect={(id) => (selectedId = id)} label="Work" />
+  <TaskList {groups} href={taskHref} selectedId={selected} onselect={(id) => (selectedId = id)} label="Work" />
 {/if}
 
 <style>

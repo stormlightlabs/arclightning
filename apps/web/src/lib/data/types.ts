@@ -120,10 +120,10 @@ export interface TaskDetail {
  * backend, such as a claude.ai artifact's database, can stand in for it.
  */
 export interface DataSource {
-  /** Every task, with its readiness and milestone. */
-  work(): Promise<WorkList>;
-  /** One task with its readiness, relations, handoff and evidence. */
-  task(id: string): Promise<TaskDetail>;
+  /** Every task, with its readiness and milestone. Aborting `signal` stops the read. */
+  work(signal?: AbortSignal): Promise<WorkList>;
+  /** One task with its readiness, relations, handoff and evidence. Aborting `signal` stops the read. */
+  task(id: string, signal?: AbortSignal): Promise<TaskDetail>;
 }
 
 /** A failed read, with the CLI's error code and message. */

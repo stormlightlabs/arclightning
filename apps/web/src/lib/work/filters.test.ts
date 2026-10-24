@@ -1,19 +1,35 @@
 import { describe, expect, it } from "vitest";
-import { isFiltered, matches, parseFilters, readinessOf, writeFilters } from "./filters";
+import { isFiltered, matches, parseFilters, readinessOf, withKnownMilestone, writeFilters } from "./filters";
 import { agents, blocked, closed, ready } from "./fixtures";
 
 describe("parseFilters", () => {
-  it("reads repeated values and drops unknown ones", () => {
-    const filters = parseFilters(new URLSearchParams("status=pending&status=bogus&readiness=ready&priority=high&milestone=ph-5&milestone="));
+  it("takes the first value of each parameter", () => {
+    const filters = parseFilters(new URLSearchParams("status=pending&status=completed&readiness=ready&priority=high&priority=low&milestone=ph-5&milestone=ph-6"));
     expect(filters).toEqual({ status: ["pending"], readiness: ["ready"], priority: ["high"], milestone: ["ph-5"] });
+  });
+
+  it("drops an unknown or empty first value", () => {
+    const filters = parseFilters(new URLSearchParams("status=bogus&status=pending&readiness=&priority=urgent&milestone="));
+    expect(filters).toEqual({ status: [], readiness: [], priority: [], milestone: [] });
+  });
+});
+
+describe("withKnownMilestone", () => {
+  it("drops a milestone the list does not have and keeps the rest", () => {
+    const bogus = parseFilters(new URLSearchParams("status=pending&milestone=bogus"));
+    expect(withKnownMilestone(bogus, ["ph-5"])).toEqual({ status: ["pending"], readiness: [], priority: [], milestone: [] });
+    const known = parseFilters(new URLSearchParams("milestone=ph-5"));
+    expect(withKnownMilestone(known, ["ph-5"])).toBe(known);
+    const none = parseFilters(new URLSearchParams("milestone=none"));
+    expect(withKnownMilestone(none, [])).toBe(none);
   });
 });
 
 describe("writeFilters", () => {
   it("round-trips through the URL and keeps other parameters", () => {
-    const filters = { status: ["parked" as const], readiness: [], priority: ["low" as const, "high" as const], milestone: ["none"] };
+    const filters = { status: ["parked" as const], readiness: [], priority: ["low" as const], milestone: ["none"] };
     const search = writeFilters(filters, new URLSearchParams("status=pending&view=all"));
-    expect(search.toString()).toBe("view=all&status=parked&priority=low&priority=high&milestone=none");
+    expect(search.toString()).toBe("view=all&status=parked&priority=low&milestone=none");
     expect(parseFilters(search)).toEqual(filters);
   });
 

@@ -213,9 +213,14 @@ headers. The server runs until interrupted.
 | `GET /api/ready`              | `arcl ready`             |
 | `GET /api/tasks/<id>/explain` | `arcl explain <task-id>` |
 | `GET /api/tasks/<id>/context` | `arcl context <task-id>` |
+| `GET /api/work`               | none (see below)         |
 
 `/api/records` and `/api/ready` take the command's flags as query parameters,
-such as `?kind=task&status=pending&status=parked`. A failure returns the CLI's
+such as `?kind=task&status=pending&status=parked`. `/api/work` takes none and
+returns the Work list in one request: every task with the readiness
+`arcl explain` reports and its phase ID, inherited from an ancestor where the
+task has none, and every phase. Its envelope is
+`{"format_version": 2, "data": {"tasks": [{"task", "readiness", "phase_id"}], "phases": [...]}}`. A failure returns the CLI's
 error envelope with status 400 for exit codes 2 and 3, 404 for 5, 409 for 4,
 and 500 otherwise. The server reads the database without syncing the
 workspace, and a read never changes records; opening the database can still
