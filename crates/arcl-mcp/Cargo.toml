@@ -20,6 +20,7 @@ tokio.workspace = true
 tokio-util.workspace = true
 
 [dev-dependencies]
+arcl-cli = { path = "../arcl-cli" }
 jsonschema = { version = "0.60", default-features = false }
 tempfile = "3.23"
 tokio = { workspace = true, features = ["time"] }

@@ -12,13 +12,16 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
-use arcl_core::domain::{TaskId, TaskPriority, TaskStatus};
+use arcl_core::prelude::*;
 use arcl_mcp::{error::ToolError, server::ArclServer, tools::*};
+// The MCP input enum, which the store prelude's `OpenSubtasks` would otherwise make ambiguous.
+use arcl_mcp::tools::OpenSubtasks;
 use arcl_repo::workspace::{ProjectConfig, WorkspaceManifest, encode_manifest};
-use arcl_store::{Database, PlanningTaskUpdate};
+use arcl_store::prelude::*;
 
 const TOOLS: &[(&str, u64)] = &[
     ("capture_create", 1),
+    ("capture_promote", 1),
     ("context", 2),
     ("explain", 2),
     ("list", 1),
@@ -876,7 +879,7 @@ fn arguments(value: Value) -> Option<rmcp::model::JsonObject> {
     value.as_object().cloned()
 }
 
-fn ids(tasks: &[arcl_core::domain::PlanningTask]) -> Vec<String> {
+fn ids(tasks: &[PlanningTask]) -> Vec<String> {
     tasks.iter().map(|task| task.id.to_string()).collect()
 }
 
