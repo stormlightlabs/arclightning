@@ -82,6 +82,18 @@ are open. A refusal exits with status `3` and writes a version 1 failure with
 `code: "invalid_request"`. Its `message` lists the reasons as text. Read the
 typed reasons from `explain` instead. `--force` starts the task anyway.
 
+## Give an agent the skill
+
+The Arc Lightning skill teaches a coding agent the loop above with `--json`.
+Install it into a project with the [skills CLI](https://skills.sh):
+
+```sh
+npx skills add stormlightlabs/arclightning --skill arclightning
+```
+
+`--skill arclightning` picks it out of the other skills this repository keeps
+for its own development.
+
 ## Use plain or quiet output
 
 `--plain` emits one stable, unstyled record per line:
