@@ -580,7 +580,12 @@ pub enum TaskCommand {
         /// Complete only this task even when descendants are open.
         #[arg(long)]
         allow_open_children: bool,
-        /// Store Markdown completion evidence.
+        /// Also complete every pending and in-progress descendant, in one
+        /// write. Refused while a descendant is parked or a blocker outside
+        /// the subtree is unfinished.
+        #[arg(long, conflicts_with = "allow_open_children")]
+        with_subtasks: bool,
+        /// Store Markdown completion evidence on this task only.
         #[arg(long, conflicts_with = "evidence_file", allow_hyphen_values = true)]
         evidence: Option<String>,
         /// Read Markdown completion evidence from a file, or `-` for standard input.

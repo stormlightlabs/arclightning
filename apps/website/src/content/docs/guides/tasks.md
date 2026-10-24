@@ -89,6 +89,25 @@ arcl task complete arcl-t-01J... --allow-open-children
 
 The override never cascades to child tasks.
 
+Pass `--with-subtasks` to complete the task and every pending or in-progress
+descendant in one write:
+
+```sh
+arcl task complete arcl-t-01J... --with-subtasks --evidence "Shipped in #42."
+```
+
+Completed and cancelled descendants keep their status and evidence, and the
+evidence goes on the selected task only. The command writes nothing and lists
+the tasks involved when a descendant is parked, or when the task or an open
+descendant has an unfinished blocker outside the subtree, held directly or by an
+ancestor. Blockers inside the subtree do not count, even cancelled ones. There
+is no `--force` for this. `--with-subtasks` and `--allow-open-children` cannot
+be combined.
+
+Human and plain output name each subtask the command completed. JSON adds a
+`completed_subtasks` list of their IDs in tree order, empty for a plain
+`complete`.
+
 ## Handoff
 
 An in-progress task can keep one current Markdown resume note:

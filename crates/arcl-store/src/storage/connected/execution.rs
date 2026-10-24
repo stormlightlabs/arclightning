@@ -9,6 +9,18 @@ use arcl_core::domain::{
     TaskAction, TaskDependency, TaskId, TaskPriority, TaskStatus, validate_blocker_edges,
 };
 
+/// What completing or cancelling a task does with its open descendants.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum OpenSubtasks {
+    /// Refuse while any descendant is pending, in progress or parked.
+    #[default]
+    Refuse,
+    /// Change only the task and leave its descendants as they are.
+    Leave,
+    /// Complete the task and its pending and in-progress descendants.
+    Complete,
+}
+
 /// Optional filters for connected-model ready work.
 #[derive(Clone, Debug, Default)]
 pub struct PlanningReadyFilter {
@@ -105,6 +117,16 @@ pub struct PlanningContext {
     /// Completed direct and inherited blockers that supplied evidence, one
     /// entry per blocker task. A direct entry wins over an inherited one.
     pub completion_evidence: Vec<PlanningBlockerView>,
+}
+
+/// The result of completing a connected-model task.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct PlanningCompletion {
+    /// The completed task.
+    pub task: PlanningTask,
+    /// The descendants this completion completed, in tree order. Empty unless
+    /// the completion used [`OpenSubtasks::Complete`].
+    pub completed_subtasks: Vec<PlanningTask>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -233,7 +255,8 @@ pub fn context(connection: &Connection, id: TaskId) -> Result<PlanningContext> {
 pub fn transition_planning_task(
     connection: &mut Connection, project_id: ProjectId, id: TaskId, action: TaskAction, allow_open_children: bool,
 ) -> Result<PlanningTask> {
-    transition(connection, project_id, id, action, allow_open_children, false, None)
+    let open_subtasks = if allow_open_children { OpenSubtasks::Leave } else { OpenSubtasks::Refuse };
+    transition(connection, project_id, id, action, open_subtasks, false, None).map(|completion| completion.task)
 }
 
 /// Start a connected-model task atomically.
@@ -243,19 +266,36 @@ pub fn transition_planning_task(
 pub fn start_planning_task(
     connection: &mut Connection, project_id: ProjectId, id: TaskId, force: bool,
 ) -> Result<PlanningTask> {
-    transition(connection, project_id, id, TaskAction::Start, false, force, None)
+    transition(
+        connection,
+        project_id,
+        id,
+        TaskAction::Start,
+        OpenSubtasks::Refuse,
+        force,
+        None,
+    )
+    .map(|completion| completion.task)
 }
 
 /// Complete a connected-model task and optionally store Markdown evidence atomically.
+///
+/// `open_subtasks` chooses what happens to open descendants. With
+/// [`OpenSubtasks::Complete`], the task and its pending and in-progress
+/// descendants complete in one transaction, and the evidence goes on the task
+/// only. That is refused, writing nothing, while a descendant is parked or the
+/// task or an open descendant has an unfinished blocker from outside the
+/// subtree, held directly or by an ancestor.
 pub fn complete_planning_task(
-    connection: &mut Connection, project_id: ProjectId, id: TaskId, allow_open_children: bool, evidence: Option<String>,
-) -> Result<PlanningTask> {
+    connection: &mut Connection, project_id: ProjectId, id: TaskId, open_subtasks: OpenSubtasks,
+    evidence: Option<String>,
+) -> Result<PlanningCompletion> {
     transition(
         connection,
         project_id,
         id,
         TaskAction::Complete,
-        allow_open_children,
+        open_subtasks,
         false,
         evidence,
     )
@@ -285,9 +325,9 @@ pub fn handoff_planning_task(
 }
 
 fn transition(
-    connection: &mut Connection, project_id: ProjectId, id: TaskId, action: TaskAction, allow_open_children: bool,
+    connection: &mut Connection, project_id: ProjectId, id: TaskId, action: TaskAction, open_subtasks: OpenSubtasks,
     force: bool, evidence: Option<String>,
-) -> Result<PlanningTask> {
+) -> Result<PlanningCompletion> {
     let tx = connection.transaction()?;
     let current = planning_task(&tx, id)?.ok_or_else(|| StorageError::PlanningTaskNotFound { id: id.to_string() })?;
     ensure_project_task(&current, project_id)?;
@@ -296,8 +336,14 @@ fn transition(
         .status
         .apply(action)
         .map_err(StorageError::InvalidPlanningTask)?;
-    if next_status == current.status && evidence.is_none() {
-        return Ok(current);
+    let completed_subtasks = if open_subtasks == OpenSubtasks::Complete {
+        let data = load_data(&tx, project_id)?;
+        open_subtasks_to_complete(&data, &current)?
+    } else {
+        Vec::new()
+    };
+    if next_status == current.status && evidence.is_none() && completed_subtasks.is_empty() {
+        return Ok(PlanningCompletion { task: current, completed_subtasks });
     }
     if matches!(action, TaskAction::Start) && current.status == TaskStatus::Pending && !force {
         let data = load_data(&tx, project_id)?;
@@ -310,7 +356,7 @@ fn transition(
             }));
         }
     }
-    if matches!(action, TaskAction::Complete | TaskAction::Cancel) && !allow_open_children {
+    if matches!(action, TaskAction::Complete | TaskAction::Cancel) && open_subtasks == OpenSubtasks::Refuse {
         let has_open_descendants: bool = tx.query_row(
             "WITH RECURSIVE descendants(id, status) AS (
                  SELECT id, status FROM planning_tasks WHERE parent_id = ?1
@@ -341,8 +387,93 @@ fn transition(
             params![next_status.as_str(), evidence, id.to_string()],
         )?;
     }
+    for subtask in &completed_subtasks {
+        tx.execute(
+            "UPDATE planning_tasks SET status = ?1 WHERE id = ?2",
+            params![TaskStatus::Completed.as_str(), subtask.id.to_string()],
+        )?;
+    }
     tx.commit()?;
-    Ok(PlanningTask { status: next_status, evidence: evidence.unwrap_or(current.evidence), ..current })
+    Ok(PlanningCompletion {
+        task: PlanningTask { status: next_status, evidence: evidence.unwrap_or(current.evidence), ..current },
+        completed_subtasks,
+    })
+}
+
+/// List the pending and in-progress descendants of `task` in tree order, each
+/// already marked completed, or refuse when the subtree cannot complete as one
+/// unit.
+///
+/// A parked descendant refuses, and so does an unfinished or missing blocker
+/// outside the subtree held by the task, by an open descendant, or by an
+/// ancestor of either. Blockers inside the subtree do not count, whatever
+/// their status.
+fn open_subtasks_to_complete(data: &PlanningData, task: &PlanningTask) -> Result<Vec<PlanningTask>> {
+    let mut subtree = Vec::new();
+    collect_subtree(data, task.id, &mut subtree);
+    let inside: HashSet<TaskId> = std::iter::once(task.id)
+        .chain(subtree.iter().map(|descendant| descendant.id))
+        .collect();
+    let is_open = |candidate: &PlanningTask| matches!(candidate.status, TaskStatus::Pending | TaskStatus::InProgress);
+
+    let mut reasons = Vec::new();
+    for descendant in subtree
+        .iter()
+        .filter(|descendant| descendant.status == TaskStatus::Parked)
+    {
+        reasons.push(format!("subtask `{}` is parked; unpark or cancel it", descendant.id));
+    }
+
+    // Each holder is the task, an open descendant, or an ancestor of one: the
+    // task's ancestors from the root down, then the subtree in tree order.
+    let mut holders = parent_chain(data, task.id)?;
+    holders.push(task.clone());
+    let mut held = HashSet::new();
+    for descendant in subtree.iter().filter(|descendant| is_open(descendant)) {
+        let mut current = descendant.parent_id;
+        held.insert(descendant.id);
+        while let Some(parent_id) = current.filter(|parent_id| *parent_id != task.id && held.insert(*parent_id)) {
+            current = data.tasks.get(&parent_id).and_then(|parent| parent.parent_id);
+        }
+    }
+    holders.extend(
+        subtree
+            .iter()
+            .filter(|descendant| held.contains(&descendant.id))
+            .cloned(),
+    );
+    for holder in &holders {
+        for dependency in data
+            .dependencies
+            .iter()
+            .filter(|dependency| dependency.task_id == holder.id && !inside.contains(&dependency.blocker_id))
+        {
+            if let Some(reason) = blocker_reason(data, dependency, None) {
+                reasons.push(format!("`{}` is {reason}", holder.id));
+            }
+        }
+    }
+    if !reasons.is_empty() {
+        return Err(StorageError::InvalidPlanningTask(DomainError::SubtasksNotCompletable {
+            id: task.id.to_string(),
+            reasons,
+        }));
+    }
+    Ok(subtree
+        .into_iter()
+        .filter(|descendant| is_open(descendant))
+        .map(|descendant| PlanningTask { status: TaskStatus::Completed, ..descendant })
+        .collect())
+}
+
+/// Append the descendants of `id` to `subtree` in tree order: each task
+/// before its children, and siblings by position.
+fn collect_subtree(data: &PlanningData, id: TaskId, subtree: &mut Vec<PlanningTask>) {
+    for child in child_tasks(data, id) {
+        let child_id = child.id;
+        subtree.push(child);
+        collect_subtree(data, child_id, subtree);
+    }
 }
 
 /// Validate a candidate task and the complete parent graph before a write.
@@ -1121,7 +1252,7 @@ mod tests {
             .add_planning_dependency(leaf.id, blocker.id)
             .expect("direct dependency creates");
         database
-            .complete_planning_task(blocker.id, false, Some("shipped".to_owned()))
+            .complete_planning_task(blocker.id, OpenSubtasks::Refuse, Some("shipped".to_owned()))
             .expect("blocker completes");
 
         let context = database.planning_context(leaf.id).expect("context reads");
@@ -1271,7 +1402,7 @@ mod tests {
             .transition_planning_task(blocker.id, TaskAction::Complete, false)
             .expect("blocker completes");
         database
-            .complete_planning_task(task.id, false, Some("verified".to_owned()))
+            .complete_planning_task(task.id, OpenSubtasks::Refuse, Some("verified".to_owned()))
             .expect("task completes");
         let context = database.planning_context(task.id).expect("context reads");
         assert_eq!(context.task.evidence, "verified");
@@ -1548,5 +1679,264 @@ mod tests {
             task.id,
             vec![format!("plan `{}` is `cancelled`", plan.id)],
         );
+    }
+
+    fn status(database: &Database, id: TaskId) -> TaskStatus {
+        database
+            .planning_task(id)
+            .expect("task reads")
+            .expect("task exists")
+            .status
+    }
+
+    #[test]
+    fn complete_with_subtasks_completes_open_descendants_in_tree_order() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let parent = task(&mut database, project.id, "Parent");
+        let started = child(&mut database, project.id, parent.id, "Started");
+        let grandchild = child(&mut database, project.id, started.id, "Grandchild");
+        let done = child(&mut database, project.id, parent.id, "Done");
+        let dropped = child(&mut database, project.id, parent.id, "Dropped");
+        let pending = child(&mut database, project.id, parent.id, "Pending");
+        database
+            .start_planning_task(started.id, false)
+            .expect("parent of a subtask starts");
+        database
+            .complete_planning_task(done.id, OpenSubtasks::Refuse, Some("done earlier".to_owned()))
+            .expect("subtask completes");
+        database
+            .transition_planning_task(dropped.id, TaskAction::Cancel, false)
+            .expect("subtask cancels");
+
+        let completion = database
+            .complete_planning_task(parent.id, OpenSubtasks::Complete, Some("all of it".to_owned()))
+            .expect("task completes with its subtasks");
+
+        assert_eq!(completion.task.status, TaskStatus::Completed);
+        assert_eq!(completion.task.evidence, "all of it");
+        assert_eq!(
+            completion
+                .completed_subtasks
+                .iter()
+                .map(|subtask| subtask.id)
+                .collect::<Vec<_>>(),
+            vec![started.id, grandchild.id, pending.id]
+        );
+        for id in [parent.id, started.id, grandchild.id, done.id, pending.id] {
+            assert_eq!(status(&database, id), TaskStatus::Completed);
+        }
+        assert_eq!(status(&database, dropped.id), TaskStatus::Cancelled);
+        let started = database
+            .planning_task(started.id)
+            .expect("task reads")
+            .expect("task exists");
+        assert_eq!(started.evidence, "");
+        let done = database
+            .planning_task(done.id)
+            .expect("task reads")
+            .expect("task exists");
+        assert_eq!(done.evidence, "done earlier");
+    }
+
+    #[test]
+    fn complete_with_subtasks_refuses_parked_subtasks_and_outside_blockers() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let outside = task(&mut database, project.id, "Outside");
+        let dropped = task(&mut database, project.id, "Dropped outside");
+        let grandparent = task(&mut database, project.id, "Grandparent");
+        let parent = child(&mut database, project.id, grandparent.id, "Parent");
+        let parked = child(&mut database, project.id, parent.id, "Parked");
+        let blocked = child(&mut database, project.id, parent.id, "Blocked");
+        database
+            .add_planning_dependency(grandparent.id, outside.id)
+            .expect("dependency creates");
+        database
+            .add_planning_dependency(blocked.id, dropped.id)
+            .expect("dependency creates");
+        database
+            .transition_planning_task(dropped.id, TaskAction::Cancel, false)
+            .expect("outside blocker cancels");
+        database.start_planning_task(parked.id, true).expect("subtask starts");
+        database
+            .transition_planning_task(parked.id, TaskAction::Park, false)
+            .expect("subtask parks");
+
+        match database.complete_planning_task(parent.id, OpenSubtasks::Complete, Some("evidence".to_owned())) {
+            Err(StorageError::InvalidPlanningTask(DomainError::SubtasksNotCompletable { id, reasons })) => {
+                assert_eq!(id, parent.id.to_string());
+                assert_eq!(
+                    reasons,
+                    vec![
+                        format!("subtask `{}` is parked; unpark or cancel it", parked.id),
+                        format!("`{}` is blocked by `{}` (pending)", grandparent.id, outside.id),
+                        format!(
+                            "`{}` is blocked by cancelled `{}`; remove or replace the dependency",
+                            blocked.id, dropped.id
+                        ),
+                    ]
+                );
+            }
+            other => panic!("unexpected result: {other:?}"),
+        }
+        assert_eq!(status(&database, parent.id), TaskStatus::Pending);
+        assert_eq!(status(&database, parked.id), TaskStatus::Parked);
+        assert_eq!(status(&database, blocked.id), TaskStatus::Pending);
+        let parent = database
+            .planning_task(parent.id)
+            .expect("task reads")
+            .expect("task exists");
+        assert_eq!(parent.evidence, "");
+    }
+
+    #[test]
+    fn complete_with_subtasks_ignores_blockers_inside_the_subtree() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let parent = task(&mut database, project.id, "Parent");
+        let dropped = child(&mut database, project.id, parent.id, "Dropped");
+        let after_dropped = child(&mut database, project.id, parent.id, "After dropped");
+        let first = child(&mut database, project.id, parent.id, "First");
+        let second = child(&mut database, project.id, parent.id, "Second");
+        database
+            .add_planning_dependency(after_dropped.id, dropped.id)
+            .expect("dependency creates");
+        database
+            .add_planning_dependency(second.id, first.id)
+            .expect("dependency creates");
+        database
+            .transition_planning_task(dropped.id, TaskAction::Cancel, false)
+            .expect("subtask cancels");
+
+        let completion = database
+            .complete_planning_task(parent.id, OpenSubtasks::Complete, None)
+            .expect("inside blockers do not count");
+
+        assert_eq!(
+            completion
+                .completed_subtasks
+                .iter()
+                .map(|subtask| subtask.id)
+                .collect::<Vec<_>>(),
+            vec![after_dropped.id, first.id, second.id]
+        );
+        assert_eq!(status(&database, dropped.id), TaskStatus::Cancelled);
+        assert_eq!(status(&database, after_dropped.id), TaskStatus::Completed);
+        assert_eq!(status(&database, second.id), TaskStatus::Completed);
+    }
+
+    #[test]
+    fn complete_with_subtasks_refuses_blockers_held_by_completed_intermediates() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let outside = task(&mut database, project.id, "Outside");
+        let parent = task(&mut database, project.id, "Parent");
+        let intermediate = child(&mut database, project.id, parent.id, "Intermediate");
+        let grandchild = child(&mut database, project.id, intermediate.id, "Grandchild");
+        database
+            .add_planning_dependency(intermediate.id, outside.id)
+            .expect("dependency creates");
+        database
+            .complete_planning_task(intermediate.id, OpenSubtasks::Leave, None)
+            .expect("intermediate completes alone");
+
+        match database.complete_planning_task(parent.id, OpenSubtasks::Complete, Some("evidence".to_owned())) {
+            Err(StorageError::InvalidPlanningTask(DomainError::SubtasksNotCompletable { id, reasons })) => {
+                assert_eq!(id, parent.id.to_string());
+                assert_eq!(
+                    reasons,
+                    vec![format!(
+                        "`{}` is blocked by `{}` (pending)",
+                        intermediate.id, outside.id
+                    )]
+                );
+            }
+            other => panic!("unexpected result: {other:?}"),
+        }
+        assert_eq!(status(&database, parent.id), TaskStatus::Pending);
+        assert_eq!(status(&database, grandchild.id), TaskStatus::Pending);
+        let parent = database
+            .planning_task(parent.id)
+            .expect("task reads")
+            .expect("task exists");
+        assert_eq!(parent.evidence, "");
+    }
+
+    #[test]
+    fn complete_with_subtasks_ignores_blockers_held_by_cancelled_leaves() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let outside = task(&mut database, project.id, "Outside");
+        let parent = task(&mut database, project.id, "Parent");
+        let dropped = child(&mut database, project.id, parent.id, "Dropped");
+        let open = child(&mut database, project.id, parent.id, "Open");
+        database
+            .add_planning_dependency(dropped.id, outside.id)
+            .expect("dependency creates");
+        database
+            .transition_planning_task(dropped.id, TaskAction::Cancel, false)
+            .expect("subtask cancels");
+
+        let completion = database
+            .complete_planning_task(parent.id, OpenSubtasks::Complete, None)
+            .expect("a cancelled leaf holds nothing");
+
+        assert_eq!(
+            completion
+                .completed_subtasks
+                .iter()
+                .map(|subtask| subtask.id)
+                .collect::<Vec<_>>(),
+            vec![open.id]
+        );
+        assert_eq!(status(&database, parent.id), TaskStatus::Completed);
+        assert_eq!(status(&database, dropped.id), TaskStatus::Cancelled);
+    }
+
+    #[test]
+    fn complete_with_subtasks_finishes_an_already_completed_parent() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let parent = task(&mut database, project.id, "Parent");
+        let open = child(&mut database, project.id, parent.id, "Open");
+        database
+            .complete_planning_task(parent.id, OpenSubtasks::Leave, Some("first pass".to_owned()))
+            .expect("task completes alone");
+
+        let completion = database
+            .complete_planning_task(parent.id, OpenSubtasks::Complete, None)
+            .expect("completed task completes its subtasks");
+
+        assert_eq!(completion.task.status, TaskStatus::Completed);
+        assert_eq!(completion.task.evidence, "first pass");
+        assert_eq!(
+            completion
+                .completed_subtasks
+                .iter()
+                .map(|subtask| subtask.id)
+                .collect::<Vec<_>>(),
+            vec![open.id]
+        );
+        assert_eq!(status(&database, open.id), TaskStatus::Completed);
+    }
+
+    #[test]
+    fn complete_leave_and_refuse_keep_their_behaviour() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let parent = task(&mut database, project.id, "Parent");
+        let open = child(&mut database, project.id, parent.id, "Open");
+
+        match database.complete_planning_task(parent.id, OpenSubtasks::Refuse, None) {
+            Err(StorageError::InvalidPlanningTask(DomainError::OpenDescendants { .. })) => {}
+            other => panic!("unexpected result: {other:?}"),
+        }
+        let completion = database
+            .complete_planning_task(parent.id, OpenSubtasks::Leave, None)
+            .expect("task completes alone");
+        assert!(completion.completed_subtasks.is_empty());
+        assert_eq!(status(&database, parent.id), TaskStatus::Completed);
+        assert_eq!(status(&database, open.id), TaskStatus::Pending);
     }
 }

@@ -1518,7 +1518,7 @@ fn start_refuses_a_task_in_a_closed_plan_unless_forced() {
 }
 
 #[test]
-fn start_refuses_a_task_whose_ancestor_has_an_unfinished_blocker_unless_forced() {
+fn start_blocked_ancestor_refused_unless_forced() {
     let directory = initialized_directory();
     let blocker = create_task(directory.path(), "Blocker", None);
     let parent = create_task(directory.path(), "Parent", None);
@@ -1551,6 +1551,257 @@ fn start_starts_a_child_its_parent_is_blocked_by_without_force() {
     let started = run_json(directory.path(), ["--json", "task", "start", &child].as_ref());
     assert_eq!(started["data"]["action"], "started");
     assert_eq!(started["data"]["task"]["status"], "in_progress");
+}
+
+/// Run a command that fails with a request error and return its JSON error.
+fn refused(directory: &Path, args: &[&str]) -> Value {
+    let output = arcl_in(directory).args(args).output().expect("command runs");
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty());
+    json(&output.stderr)
+}
+
+fn task_field(directory: &Path, task: &str, field: &str) -> Value {
+    run_json(directory, ["--json", "task", "show", task].as_ref())["data"]["task"][field].clone()
+}
+
+#[test]
+fn complete_with_subtasks_completes_nested_open_subtasks_in_tree_order() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let parent = create_task(dir, "Parent", None);
+    let started = create_task(dir, "Started", Some(&parent));
+    let grandchild = create_task(dir, "Grandchild", Some(&started));
+    let pending = create_task(dir, "Pending", Some(&parent));
+    run_json(dir, ["--json", "task", "start", &started].as_ref());
+
+    let completed = run_json(
+        dir,
+        [
+            "--json",
+            "task",
+            "complete",
+            &parent,
+            "--with-subtasks",
+            "--evidence",
+            "All done",
+        ]
+        .as_ref(),
+    );
+    assert_eq!(completed["data"]["action"], "completed");
+    assert_eq!(completed["data"]["task"]["id"], parent.as_str());
+    assert_eq!(completed["data"]["task"]["status"], "completed");
+    assert_eq!(completed["data"]["task"]["evidence"], "All done");
+    assert_eq!(
+        completed["data"]["completed_subtasks"],
+        serde_json::json!([started, grandchild, pending])
+    );
+    for task in [&started, &grandchild, &pending] {
+        assert_eq!(task_field(dir, task, "status"), "completed");
+        assert_eq!(task_field(dir, task, "evidence"), "");
+    }
+}
+
+#[test]
+fn complete_with_subtasks_names_subtasks_in_human_and_plain_output() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let parent = create_task(dir, "Parent", None);
+    let child = create_task(dir, "Child", Some(&parent));
+    let other = create_task(dir, "Other parent", None);
+    let other_child = create_task(dir, "Other child", Some(&other));
+
+    let human = arcl_in(dir)
+        .args(["--color", "never", "task", "complete", &parent, "--with-subtasks"])
+        .output()
+        .expect("complete runs");
+    assert!(human.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&human.stdout),
+        format!("Completed task `{parent}`: Parent\nCompleted subtask `{child}`: Child\n")
+    );
+
+    let plain = arcl_in(dir)
+        .args(["--plain", "task", "complete", &other, "--with-subtasks"])
+        .output()
+        .expect("complete runs");
+    assert!(plain.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&plain.stdout),
+        format!("{other}\n{other_child}\n")
+    );
+}
+
+#[test]
+fn complete_with_subtasks_leaves_completed_and_cancelled_subtasks_alone() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let parent = create_task(dir, "Parent", None);
+    let done = create_task(dir, "Done", Some(&parent));
+    let dropped = create_task(dir, "Dropped", Some(&parent));
+    let open = create_task(dir, "Open", Some(&parent));
+    run_json(
+        dir,
+        ["--json", "task", "complete", &done, "--evidence", "Earlier"].as_ref(),
+    );
+    run_json(dir, ["--json", "task", "cancel", &dropped].as_ref());
+
+    let completed = run_json(
+        dir,
+        [
+            "--json",
+            "task",
+            "complete",
+            &parent,
+            "--with-subtasks",
+            "--evidence",
+            "Parent",
+        ]
+        .as_ref(),
+    );
+    assert_eq!(completed["data"]["completed_subtasks"], serde_json::json!([open]));
+    assert_eq!(task_field(dir, &done, "status"), "completed");
+    assert_eq!(task_field(dir, &done, "evidence"), "Earlier");
+    assert_eq!(task_field(dir, &dropped, "status"), "cancelled");
+}
+
+#[test]
+fn complete_with_subtasks_refuses_a_parked_subtask_and_writes_nothing() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let parent = create_task(dir, "Parent", None);
+    let parked = create_task(dir, "Parked", Some(&parent));
+    let open = create_task(dir, "Open", Some(&parent));
+    run_json(dir, ["--json", "task", "start", &parked].as_ref());
+    run_json(dir, ["--json", "task", "park", &parked].as_ref());
+
+    let error = refused(
+        dir,
+        [
+            "--json",
+            "task",
+            "complete",
+            &parent,
+            "--with-subtasks",
+            "--evidence",
+            "No",
+        ]
+        .as_ref(),
+    );
+    let message = error["error"]["message"].as_str().expect("error message");
+    assert!(message.contains(&format!("cannot complete task `{parent}` with its subtasks")));
+    assert!(message.contains(&format!("subtask `{parked}` is parked")), "{message}");
+    assert_eq!(task_field(dir, &parent, "status"), "pending");
+    assert_eq!(task_field(dir, &parent, "evidence"), "");
+    assert_eq!(task_field(dir, &parked, "status"), "parked");
+    assert_eq!(task_field(dir, &open, "status"), "pending");
+}
+
+#[test]
+fn complete_with_subtasks_refuses_an_outside_blocker_and_writes_nothing() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let outside = create_task(dir, "Outside", None);
+    let ancestor_blocker = create_task(dir, "Ancestor blocker", None);
+    let grandparent = create_task(dir, "Grandparent", None);
+    let parent = create_task(dir, "Parent", Some(&grandparent));
+    let child = create_task(dir, "Child", Some(&parent));
+    block_start_task(dir, &child, &outside);
+    block_start_task(dir, &grandparent, &ancestor_blocker);
+
+    let error = refused(dir, ["--json", "task", "complete", &parent, "--with-subtasks"].as_ref());
+    let message = error["error"]["message"].as_str().expect("error message");
+    assert!(
+        message.contains(&format!("`{child}` is blocked by `{outside}` (pending)")),
+        "{message}"
+    );
+    assert!(
+        message.contains(&format!("`{grandparent}` is blocked by `{ancestor_blocker}` (pending)")),
+        "{message}"
+    );
+    assert_eq!(task_field(dir, &parent, "status"), "pending");
+    assert_eq!(task_field(dir, &child, "status"), "pending");
+}
+
+#[test]
+fn complete_with_subtasks_allows_a_blocker_inside_the_subtree() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let parent = create_task(dir, "Parent", None);
+    let first = create_task(dir, "First", Some(&parent));
+    let second = create_task(dir, "Second", Some(&parent));
+    block_start_task(dir, &second, &first);
+
+    let completed = run_json(dir, ["--json", "task", "complete", &parent, "--with-subtasks"].as_ref());
+    assert_eq!(
+        completed["data"]["completed_subtasks"],
+        serde_json::json!([first, second])
+    );
+}
+
+#[test]
+fn complete_with_subtasks_allows_a_cancelled_blocker_inside_the_subtree() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let parent = create_task(dir, "Parent", None);
+    let dropped = create_task(dir, "Dropped", Some(&parent));
+    let blocked = create_task(dir, "Blocked", Some(&parent));
+    block_start_task(dir, &blocked, &dropped);
+    run_json(dir, ["--json", "task", "cancel", &dropped].as_ref());
+
+    let completed = run_json(dir, ["--json", "task", "complete", &parent, "--with-subtasks"].as_ref());
+    assert_eq!(completed["data"]["completed_subtasks"], serde_json::json!([blocked]));
+    assert_eq!(task_field(dir, &dropped, "status"), "cancelled");
+    assert_eq!(task_field(dir, &blocked, "status"), "completed");
+    assert_eq!(task_field(dir, &parent, "status"), "completed");
+}
+
+#[test]
+fn complete_with_subtasks_conflicts_with_allow_open_children() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let parent = create_task(dir, "Parent", None);
+    let child = create_task(dir, "Child", Some(&parent));
+
+    let output = arcl_in(dir)
+        .args([
+            "--json",
+            "task",
+            "complete",
+            &parent,
+            "--with-subtasks",
+            "--allow-open-children",
+        ])
+        .output()
+        .expect("complete runs");
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(task_field(dir, &parent, "status"), "pending");
+    assert_eq!(task_field(dir, &child, "status"), "pending");
+}
+
+#[test]
+fn complete_with_subtasks_leaves_allow_open_children_unchanged() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let parent = create_task(dir, "Parent", None);
+    let child = create_task(dir, "Child", Some(&parent));
+
+    let error = refused(dir, ["--json", "task", "complete", &parent].as_ref());
+    let message = error["error"]["message"].as_str().expect("error message");
+    assert!(message.contains("--allow-open-children"), "{message}");
+
+    let completed = run_json(
+        dir,
+        ["--json", "task", "complete", &parent, "--allow-open-children"].as_ref(),
+    );
+    assert_eq!(completed["data"]["task"]["status"], "completed");
+    assert_eq!(completed["data"]["completed_subtasks"], serde_json::json!([]));
+    assert_eq!(task_field(dir, &child, "status"), "pending");
 }
 
 fn ready_ids(directory: &Path) -> Vec<String> {

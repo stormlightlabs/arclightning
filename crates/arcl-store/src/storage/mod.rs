@@ -648,12 +648,14 @@ impl Database {
         connected::start_planning_task(&mut self.connection, project.id, id, force)
     }
 
-    /// Complete a connected-model task and optionally store Markdown evidence atomically.
+    /// Complete a connected-model task and optionally store Markdown evidence
+    /// atomically. `open_subtasks` chooses what happens to open descendants;
+    /// see [`connected::complete_planning_task`].
     pub fn complete_planning_task(
-        &mut self, id: TaskId, allow_open_children: bool, evidence: Option<String>,
-    ) -> Result<PlanningTask> {
+        &mut self, id: TaskId, open_subtasks: OpenSubtasks, evidence: Option<String>,
+    ) -> Result<PlanningCompletion> {
         let project = self.project()?;
-        connected::complete_planning_task(&mut self.connection, project.id, id, allow_open_children, evidence)
+        connected::complete_planning_task(&mut self.connection, project.id, id, open_subtasks, evidence)
     }
 
     /// Store a handoff note and park an in-progress connected-model task atomically.
