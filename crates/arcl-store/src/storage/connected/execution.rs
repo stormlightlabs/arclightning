@@ -29,13 +29,15 @@ pub struct PlanningReadyFilter {
 pub struct PlanningReadiness {
     /// Whether the task is an actionable pending leaf with satisfied blockers.
     pub ready: bool,
-    /// Whether at least one direct blocker is unfinished or missing.
+    /// Whether at least one blocker of the task or of an ancestor task is
+    /// unfinished or missing.
     pub blocked: bool,
     /// Stable, user-facing explanations for every condition that prevents readiness.
     pub reasons: Vec<String>,
 }
 
-/// A direct connected-model blocker and its completion evidence.
+/// A connected-model blocker of a task or of one of its ancestors, with its
+/// completion evidence.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct PlanningBlockerView {
     /// The blocking task.
@@ -44,6 +46,11 @@ pub struct PlanningBlockerView {
     pub completed: bool,
     /// Markdown evidence recorded on the blocker.
     pub evidence: String,
+    /// The ancestor task that holds the dependency when the blocker is
+    /// inherited, or `None` for a direct blocker. JSON omits it for direct
+    /// blockers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ancestor: Option<TaskId>,
 }
 
 /// An enriched connected-model task view.
@@ -55,6 +62,10 @@ pub struct PlanningTaskView {
     pub readiness: PlanningReadiness,
     /// Direct blockers of the task.
     pub blockers: Vec<PlanningBlockerView>,
+    /// Blockers held by ancestor tasks, nearest ancestor first, each naming
+    /// the ancestor that holds it. A blocker that is the task itself is left
+    /// out.
+    pub inherited_blockers: Vec<PlanningBlockerView>,
     /// Tasks that directly depend on this task.
     pub dependents: Vec<PlanningTask>,
     /// Direct child tasks.
@@ -84,11 +95,15 @@ pub struct PlanningContext {
     pub phase: Option<Phase>,
     /// Direct blockers and their evidence.
     pub blockers: Vec<PlanningBlockerView>,
+    /// Blockers held by ancestor tasks, nearest ancestor first, with their
+    /// evidence and the ancestor that holds each.
+    pub inherited_blockers: Vec<PlanningBlockerView>,
     /// Tasks that directly depend on this task.
     pub dependents: Vec<PlanningTask>,
     /// The computed readiness result.
     pub readiness: PlanningReadiness,
-    /// Completed direct blockers that supplied evidence.
+    /// Completed direct and inherited blockers that supplied evidence, one
+    /// entry per blocker task. A direct entry wins over an inherited one.
     pub completion_evidence: Vec<PlanningBlockerView>,
 }
 
@@ -153,7 +168,15 @@ pub fn planning_task_view(connection: &Connection, id: TaskId) -> Result<Plannin
     let data = load_data(connection, task.project_id)?;
     let ancestry_ids = effective_ancestry(&data, id, &mut HashSet::new())?;
     let ancestors = parent_chain(&data, id)?;
-    let blockers = blocker_views(&data, id)?;
+    let blockers = blocker_views(&data, id, None)?;
+    let mut inherited_blockers = Vec::new();
+    for ancestor in ancestors.iter().rev() {
+        inherited_blockers.extend(
+            blocker_views(&data, ancestor.id, Some(ancestor.id))?
+                .into_iter()
+                .filter(|view| view.task.id != id),
+        );
+    }
     let dependents = dependent_tasks(&data, id);
     let children = child_tasks(&data, id);
     let readiness = readiness(&data, &task, &ancestry_ids)?;
@@ -162,6 +185,7 @@ pub fn planning_task_view(connection: &Connection, id: TaskId) -> Result<Plannin
         task,
         readiness,
         blockers,
+        inherited_blockers,
         dependents,
         children,
         ancestors,
@@ -174,10 +198,13 @@ pub fn planning_task_view(connection: &Connection, id: TaskId) -> Result<Plannin
 /// Build the bounded task context packet used by agents and execution adapters.
 pub fn context(connection: &Connection, id: TaskId) -> Result<PlanningContext> {
     let view = planning_task_view(connection, id)?;
+    let mut seen = HashSet::new();
     let completion_evidence = view
         .blockers
         .iter()
+        .chain(&view.inherited_blockers)
         .filter(|blocker| blocker.completed && !blocker.evidence.is_empty())
+        .filter(|blocker| seen.insert(blocker.task.id))
         .cloned()
         .collect();
     Ok(PlanningContext {
@@ -187,6 +214,7 @@ pub fn context(connection: &Connection, id: TaskId) -> Result<PlanningContext> {
         plan: view.plan,
         phase: view.phase,
         blockers: view.blockers,
+        inherited_blockers: view.inherited_blockers,
         dependents: view.dependents,
         readiness: view.readiness,
         completion_evidence,
@@ -555,7 +583,8 @@ fn readiness_counting_children(
     if count_children && !children.is_empty() {
         reasons.push(format!("task has {} child task(s)", children.len()));
     }
-    for ancestor in parent_chain(data, task.id)? {
+    let ancestors = parent_chain(data, task.id)?;
+    for ancestor in &ancestors {
         if matches!(
             ancestor.status,
             TaskStatus::Parked | TaskStatus::Completed | TaskStatus::Cancelled
@@ -589,24 +618,47 @@ fn readiness_counting_children(
     }
 
     let mut blocked = false;
-    for dependency in data
-        .dependencies
-        .iter()
-        .filter(|dependency| dependency.task_id == task.id)
-    {
-        match data.tasks.get(&dependency.blocker_id) {
-            Some(blocker) if blocker.status == TaskStatus::Completed => {}
-            Some(blocker) => {
+    // The task's own blockers come first, then each ancestor's, nearest
+    // first. An ancestor blocked by this task cannot hold this task back.
+    for holder in std::iter::once(task).chain(ancestors.iter().rev()) {
+        let inherited = (holder.id != task.id).then_some(holder);
+        for dependency in data
+            .dependencies
+            .iter()
+            .filter(|dependency| dependency.task_id == holder.id)
+            .filter(|dependency| inherited.is_none() || dependency.blocker_id != task.id)
+        {
+            if let Some(reason) = blocker_reason(data, dependency, inherited) {
                 blocked = true;
-                reasons.push(format!("blocked by `{}` ({})", blocker.id, blocker.status.as_str()));
-            }
-            None => {
-                blocked = true;
-                reasons.push(format!("blocked by missing task `{}`", dependency.blocker_id));
+                reasons.push(reason);
             }
         }
     }
     Ok(PlanningReadiness { ready: reasons.is_empty(), blocked, reasons })
+}
+
+/// Explain why one blocker edge holds a task back, or return `None` once the
+/// blocker has completed.
+///
+/// `ancestor` names the parent task that owns the edge when the blocker is
+/// inherited. A cancelled blocker will never complete, so its reason asks for
+/// the dependency to be removed or replaced instead of waited on.
+fn blocker_reason(data: &PlanningData, dependency: &TaskDependency, ancestor: Option<&PlanningTask>) -> Option<String> {
+    let subject = ancestor.map_or_else(
+        || "blocked by".to_owned(),
+        |ancestor| format!("ancestor `{}` is blocked by", ancestor.id),
+    );
+    let Some(blocker) = data.tasks.get(&dependency.blocker_id) else {
+        return Some(format!("{subject} missing task `{}`", dependency.blocker_id));
+    };
+    match blocker.status {
+        TaskStatus::Completed => None,
+        TaskStatus::Cancelled => Some(format!(
+            "{subject} cancelled `{}`; remove or replace the dependency",
+            blocker.id
+        )),
+        status => Some(format!("{subject} `{}` ({})", blocker.id, status.as_str())),
+    }
 }
 
 fn parent_chain(data: &PlanningData, id: TaskId) -> Result<Vec<PlanningTask>> {
@@ -635,10 +687,13 @@ fn parent_chain(data: &PlanningData, id: TaskId) -> Result<Vec<PlanningTask>> {
     Ok(chain)
 }
 
-fn blocker_views(data: &PlanningData, id: TaskId) -> Result<Vec<PlanningBlockerView>> {
+/// List the blockers that `holder_id` holds directly, each tagged with
+/// `ancestor`: `None` for the inspected task's own blockers, or the holder's
+/// id when it is an ancestor of the inspected task.
+fn blocker_views(data: &PlanningData, holder_id: TaskId, ancestor: Option<TaskId>) -> Result<Vec<PlanningBlockerView>> {
     data.dependencies
         .iter()
-        .filter(|dependency| dependency.task_id == id)
+        .filter(|dependency| dependency.task_id == holder_id)
         .map(|dependency| {
             let task = data
                 .tasks
@@ -649,6 +704,7 @@ fn blocker_views(data: &PlanningData, id: TaskId) -> Result<Vec<PlanningBlockerV
                 completed: task.status == TaskStatus::Completed,
                 evidence: task.evidence.clone(),
                 task,
+                ancestor,
             })
         })
         .collect()
@@ -726,6 +782,187 @@ mod tests {
                 position: 0,
             })
             .expect("task creates")
+    }
+
+    fn child(database: &mut Database, project_id: ProjectId, parent_id: TaskId, title: &str) -> PlanningTask {
+        database
+            .create_planning_task(PlanningTaskCreate {
+                project_id,
+                spec_id: None,
+                plan_id: None,
+                phase_id: None,
+                parent_id: Some(parent_id),
+                title: title.to_owned(),
+                body: String::new(),
+                priority: TaskPriority::Normal,
+                position: 0,
+            })
+            .expect("child creates")
+    }
+
+    #[test]
+    fn readiness_inherits_ancestor_blockers_until_they_complete() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let blocker = task(&mut database, project.id, "blocker");
+        let grandparent = task(&mut database, project.id, "grandparent");
+        let parent = child(&mut database, project.id, grandparent.id, "parent");
+        let leaf = child(&mut database, project.id, parent.id, "leaf");
+        database
+            .add_planning_dependency(grandparent.id, blocker.id)
+            .expect("dependency creates");
+
+        let view = database.planning_task_view(leaf.id).expect("leaf view reads");
+        assert!(!view.readiness.ready);
+        assert!(view.readiness.blocked);
+        assert_eq!(
+            view.readiness.reasons,
+            vec![format!(
+                "ancestor `{}` is blocked by `{}` (pending)",
+                grandparent.id, blocker.id
+            )]
+        );
+        let ready = database.ready_planning_tasks().expect("ready tasks query");
+        assert!(!ready.iter().any(|value| value.id == leaf.id));
+
+        database
+            .transition_planning_task(blocker.id, TaskAction::Complete, false)
+            .expect("blocker completes");
+        let view = database.planning_task_view(leaf.id).expect("leaf view reads");
+        assert!(view.readiness.ready);
+        assert!(!view.readiness.blocked);
+        let ready = database.ready_planning_tasks().expect("ready tasks query");
+        assert!(ready.iter().any(|value| value.id == leaf.id));
+    }
+
+    #[test]
+    fn readiness_reports_cancelled_blockers_as_decisions() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let cancelled = task(&mut database, project.id, "cancelled");
+        let pending = task(&mut database, project.id, "pending");
+        let parent = task(&mut database, project.id, "parent");
+        let leaf = child(&mut database, project.id, parent.id, "leaf");
+        database
+            .add_planning_dependency(parent.id, cancelled.id)
+            .expect("inherited dependency creates");
+        database
+            .add_planning_dependency(leaf.id, cancelled.id)
+            .expect("direct cancelled dependency creates");
+        database
+            .add_planning_dependency(leaf.id, pending.id)
+            .expect("direct pending dependency creates");
+        database
+            .transition_planning_task(cancelled.id, TaskAction::Cancel, false)
+            .expect("blocker cancels");
+
+        let view = database.planning_task_view(leaf.id).expect("leaf view reads");
+        assert!(view.readiness.blocked);
+        let reasons = &view.readiness.reasons;
+        assert!(reasons.contains(&format!(
+            "ancestor `{}` is blocked by cancelled `{}`; remove or replace the dependency",
+            parent.id, cancelled.id
+        )));
+        assert!(reasons.contains(&format!(
+            "blocked by cancelled `{}`; remove or replace the dependency",
+            cancelled.id
+        )));
+        assert!(reasons.contains(&format!("blocked by `{}` (pending)", pending.id)));
+    }
+
+    #[test]
+    fn readiness_ignores_an_ancestor_blocked_by_the_task_itself() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let parent = task(&mut database, project.id, "parent");
+        let leaf = child(&mut database, project.id, parent.id, "leaf");
+        // `add_planning_dependency` refuses this edge, so insert it as an older project would hold it.
+        database
+            .connection()
+            .execute(
+                "INSERT INTO planning_task_dependencies (project_id, task_id, blocker_id) VALUES (?1, ?2, ?3)",
+                rusqlite::params![project.id.to_string(), parent.id.to_string(), leaf.id.to_string()],
+            )
+            .expect("dependency inserts");
+
+        let view = database.planning_task_view(leaf.id).expect("leaf view reads");
+        assert!(view.readiness.ready, "{:?}", view.readiness.reasons);
+        assert!(!view.readiness.blocked);
+        assert!(view.inherited_blockers.is_empty());
+        let ready = database.ready_planning_tasks().expect("ready tasks query");
+        assert!(ready.iter().any(|value| value.id == leaf.id));
+    }
+
+    #[test]
+    fn inherited_blockers_list_the_nearest_ancestor_first() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let far = task(&mut database, project.id, "far blocker");
+        let near = task(&mut database, project.id, "near blocker");
+        let own = task(&mut database, project.id, "own blocker");
+        let grandparent = task(&mut database, project.id, "grandparent");
+        let parent = child(&mut database, project.id, grandparent.id, "parent");
+        let leaf = child(&mut database, project.id, parent.id, "leaf");
+        database
+            .add_planning_dependency(grandparent.id, far.id)
+            .expect("grandparent dependency creates");
+        database
+            .add_planning_dependency(parent.id, near.id)
+            .expect("parent dependency creates");
+        database
+            .add_planning_dependency(leaf.id, own.id)
+            .expect("leaf dependency creates");
+
+        let view = database.planning_task_view(leaf.id).expect("leaf view reads");
+        assert_eq!(
+            view.readiness.reasons,
+            vec![
+                format!("blocked by `{}` (pending)", own.id),
+                format!("ancestor `{}` is blocked by `{}` (pending)", parent.id, near.id),
+                format!("ancestor `{}` is blocked by `{}` (pending)", grandparent.id, far.id),
+            ]
+        );
+        let direct: Vec<_> = view
+            .blockers
+            .iter()
+            .map(|blocker| (blocker.task.id, blocker.ancestor))
+            .collect();
+        assert_eq!(direct, vec![(own.id, None)]);
+        let inherited: Vec<_> = view
+            .inherited_blockers
+            .iter()
+            .map(|blocker| (blocker.task.id, blocker.ancestor))
+            .collect();
+        assert_eq!(
+            inherited,
+            vec![(near.id, Some(parent.id)), (far.id, Some(grandparent.id))]
+        );
+    }
+
+    #[test]
+    fn completion_evidence_lists_each_blocker_once_preferring_the_direct_edge() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let blocker = task(&mut database, project.id, "blocker");
+        let parent = task(&mut database, project.id, "parent");
+        let leaf = child(&mut database, project.id, parent.id, "leaf");
+        database
+            .add_planning_dependency(parent.id, blocker.id)
+            .expect("inherited dependency creates");
+        database
+            .add_planning_dependency(leaf.id, blocker.id)
+            .expect("direct dependency creates");
+        database
+            .complete_planning_task(blocker.id, false, Some("shipped".to_owned()))
+            .expect("blocker completes");
+
+        let context = database.planning_context(leaf.id).expect("context reads");
+        assert_eq!(context.blockers.len(), 1);
+        assert_eq!(context.inherited_blockers.len(), 1);
+        assert_eq!(context.completion_evidence.len(), 1);
+        assert_eq!(context.completion_evidence[0].task.id, blocker.id);
+        assert_eq!(context.completion_evidence[0].ancestor, None);
+        assert_eq!(context.completion_evidence[0].evidence, "shipped");
     }
 
     #[test]
