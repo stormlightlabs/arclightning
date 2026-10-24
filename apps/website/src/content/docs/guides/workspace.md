@@ -46,10 +46,12 @@ arcl workspace sync
 
 Sync compares each file with the version stored at the last sync. A change made
 only in the database is written to the workspace. A change made only in the
-workspace is validated with the complete graph and imported. Two changes that
-are each valid can meet in a merge and form a blocker cycle or tie a task to its
-own ancestor; sync then stops with status code `3` and names the record and
-field, and editing that record clears it. A file that both
+workspace is validated with the complete graph and imported. Sync compares
+blocker edges and parent links with the database. When a workspace change adds
+one that closes a blocker cycle or ties a task to its own ancestor or
+descendant, sync stops with status code `3` and names the record and field.
+Two changes that are each valid can meet this way in a merge; edit that record
+to clear it. A bad edge the database already holds loads with a warning. A file that both
 sides changed differently stops the sync with status code `4` and the paths
 involved, and nothing is written. A record written by another `arcl` command
 while sync runs also stops it with status code `4`; run sync again.
@@ -122,9 +124,11 @@ arcl workspace import
 ```
 
 Import reads every record and validates IDs, references, task ancestry, parent
-cycles, and the complete relationship graph. It refuses a blocker edge anywhere
-in the workspace that closes a cycle or joins a task to its own ancestor or
-descendant, and names the blocked task's record and the tasks involved. Arc
+cycles, and the complete relationship graph. Like sync, it refuses a blocker
+edge or parent link new to the database that closes a cycle or joins a task to
+its own ancestor or descendant, and names the blocked task's record and the
+tasks involved. Bad edges the database already holds load with a warning, and
+so do all of them when the database has no tasks, as in a fresh clone. Arc
 Lightning replaces the database only after the whole workspace passes
 validation.
 

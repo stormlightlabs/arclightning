@@ -1400,29 +1400,6 @@ fn task_parents(c: &Connection, project_id: ProjectId) -> Result<HashMap<TaskId,
         })
         .collect()
 }
-/// The first violation in a whole graph that a write causes.
-///
-/// `parents` and `edges` describe the graph after the write. The write causes
-/// a violation that involves one of `new_edges`, or whose parent chain crosses
-/// one of `new_parents`, the `(child, parent)` links the write sets. A cycle is
-/// rotated to start at the new edge. Any other violation was already in the
-/// graph and is left for reporting.
-fn caused_violation(
-    parents: &HashMap<TaskId, TaskId>, edges: &[TaskDependency], new_edges: &[TaskDependency],
-    new_parents: &[(TaskId, TaskId)],
-) -> Option<EdgeViolation> {
-    validate_blocker_edges(parents, edges)
-        .into_iter()
-        .find_map(|violation| {
-            if let Some(edge) = new_edges.iter().find(|edge| violation.involves(edge)) {
-                return Some(violation.starting_at(edge));
-            }
-            new_parents
-                .iter()
-                .any(|(child, parent)| violation.crosses_parent_link(*child, *parent))
-                .then_some(violation)
-        })
-}
 fn ensure_task(c: &Connection, p: ProjectId, id: TaskId) -> Result<()> {
     ensure_record(
         c,

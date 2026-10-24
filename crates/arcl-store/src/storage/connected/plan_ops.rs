@@ -381,6 +381,7 @@ fn prepare_plan(connection: &Connection, plan_id: PlanId, document: &PlanDocumen
 }
 
 /// Refuse the first blocker rule violation applying the plan would cause.
+/// The refusal names tasks the plan creates by their plan path.
 ///
 /// Builds the graph as it will stand after the plan's parent links and
 /// dependencies are written, so `plan check` and `plan diff` refuse the same
@@ -416,10 +417,23 @@ fn validate_plan_edges(
             new_edges.push(dependency);
         }
     }
-    match caused_violation(&parents, &edges, &new_edges, &new_parents) {
-        Some(violation) => Err(StorageError::InvalidPlanningDependency(violation.to_error())),
-        None => Ok(()),
-    }
+    let Some(violation) = caused_violation(&parents, &edges, &new_edges, &new_parents) else {
+        return Ok(());
+    };
+    // Tasks the plan would create have IDs made up for this check, so they
+    // are named by plan path.
+    let planned = entries
+        .tasks
+        .iter()
+        .filter(|entry| !tasks_by_path.contains_key(&entry.path))
+        .map(|entry| (task_ids[&entry.path], entry.path.as_str()))
+        .collect::<HashMap<_, _>>();
+    let name = |id: TaskId| {
+        planned
+            .get(&id)
+            .map_or_else(|| id.to_string(), |path| (*path).to_owned())
+    };
+    Err(StorageError::InvalidPlanningDependency(violation.to_error_with(name)))
 }
 
 fn task_needs_update(

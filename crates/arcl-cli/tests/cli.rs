@@ -1857,14 +1857,37 @@ fn dependency_edge_plan_cycle_is_refused() {
 
     for verb in ["check", "apply"] {
         let message = refused_plan(path, verb, &plan_id, &input);
+        let named = ["work/p -> work/b -> work/p", "work/b -> work/p -> work/b"];
         assert!(
-            message.contains("blocker edges would form a cycle: "),
+            named
+                .iter()
+                .any(|path| message.contains(&format!("blocker edges would form a cycle: {path};"))),
             "message: {message}"
         );
+        assert!(!message.contains("arcl-t-"), "message: {message}");
     }
     let tasks = run_json(path, ["--json", "task", "list"].as_ref());
     assert!(tasks["data"]["tasks"].as_array().expect("task array").is_empty());
     assert!(dependency_pairs(path).is_empty());
+}
+
+#[test]
+fn dependency_edge_plan_names_tasks_it_creates_by_plan_path() {
+    let directory = initialized_directory();
+    let path = directory.path();
+    let plan_id = create_plan(path);
+    let input = nested_plan(&[("c", "work/p")]);
+
+    for verb in ["check", "apply"] {
+        let message = refused_plan(path, verb, &plan_id, &input);
+        assert!(
+            message.ends_with(
+                "task `work/p/a/c` cannot be blocked by `work/p`, its ancestor; \
+                 parent chain: work/p/a/c -> work/p/a -> work/p"
+            ),
+            "message: {message}"
+        );
+    }
 }
 
 #[test]
@@ -2026,4 +2049,134 @@ fn dependency_edge_same_refusal_from_every_write_path() {
             "case {name}: {import}"
         );
     }
+}
+
+/// Store the edge `task` blocked by `blocker` straight into SQLite, the way
+/// an edge saved before the blocker rules existed would be.
+fn store_raw_edge(directory: &Path, task: &str, blocker: &str) {
+    let database = rusqlite::Connection::open(directory.join(".arcl/arcl.db")).expect("database opens");
+    database
+        .execute(
+            "INSERT INTO planning_task_dependencies (project_id, task_id, blocker_id)
+             SELECT project_id, ?1, ?2 FROM planning_tasks WHERE id = ?1",
+            [task, blocker],
+        )
+        .expect("bad edge inserts");
+}
+
+/// Replace `from` with `to` in the workspace record of `task`.
+fn edit_task_record(directory: &Path, task: &str, from: &str, to: &str) {
+    let record = directory.join(format!(".arcl/workspace/tasks/{task}.md"));
+    let content = fs::read_to_string(&record).expect("record reads");
+    assert!(content.contains(from), "record: {content}");
+    fs::write(&record, content.replacen(from, to, 1)).expect("record writes");
+}
+
+/// The message of the one JSON warning a successful command wrote to stderr.
+fn json_warning(output: &std::process::Output) -> String {
+    assert_success(output);
+    let warning = json(&output.stderr);
+    assert_eq!(warning["warning"]["code"], "workspace_sync");
+    warning["warning"]["message"]
+        .as_str()
+        .expect("warning message")
+        .to_owned()
+}
+
+#[test]
+fn dependency_edge_already_stored_loads_with_a_warning_on_sync_and_fresh_import() {
+    let directory = git_project();
+    let path = directory.path();
+    let root = create_task(path, "Root", None);
+    let child = create_task(path, "Child", Some(&root));
+    let other = create_task(path, "Other", None);
+    store_raw_edge(path, &root, &child);
+    assert_success(
+        &arcl_in(path)
+            .args(["workspace", "sync"])
+            .output()
+            .expect("command runs"),
+    );
+    commit_all(path, "base");
+    let violation = format!(
+        "workspace file `tasks/{root}.md`: relationship `blocked-by`: task `{root}` cannot be blocked by \
+         `{child}`, its descendant; parent chain: {child} -> {root}"
+    );
+
+    // An unrelated workspace edit makes the next command import.
+    edit_task_record(path, &other, "title = \"Other\"", "title = \"Other edited\"");
+    let output = arcl_in(path)
+        .args(["--json", "task", "create", "New"])
+        .output()
+        .expect("command runs");
+    assert_eq!(
+        json_warning(&output),
+        format!("{violation}; it was already in the database, so it loads")
+    );
+    let output = arcl_in(path)
+        .args(["--json", "dependency", "remove", &root, "--blocked-by", &child])
+        .output()
+        .expect("command runs");
+    assert_success(&output);
+    assert!(dependency_pairs(path).is_empty());
+
+    // A fresh clone has no database graph to compare against.
+    let source = tempdir().expect("temporary directory can be created");
+    let source = source.path();
+    git(path, &["checkout", "-q", "--", "."]);
+    git(path, &["clean", "-q", "-f", "--", ".arcl/workspace"]);
+    let clone = source.join("clone");
+    git(source, &["clone", "-q", path.to_str().expect("path is UTF-8"), "clone"]);
+    run_json(&clone, ["--json", "init"].as_ref());
+    let output = arcl_in(&clone)
+        .args(["--json", "workspace", "import"])
+        .output()
+        .expect("command runs");
+    assert_eq!(
+        json_warning(&output),
+        format!("{violation}; there is no earlier graph to compare against, so it loads")
+    );
+    assert_eq!(dependency_pairs(&clone), vec![(root, child)]);
+}
+
+#[test]
+fn dependency_edge_a_workspace_change_adds_is_refused_by_sync() {
+    let directory = git_project();
+    let path = directory.path();
+    let root = create_task(path, "Root", None);
+    let child = create_task(path, "Child", Some(&root));
+    let other = create_task(path, "Other", None);
+    run_json(
+        path,
+        ["--json", "dependency", "add", &other, "--blocked-by", &root].as_ref(),
+    );
+
+    // A new edge from Root to its own child.
+    edit_task_record(
+        path,
+        &root,
+        "\nstatus = ",
+        &format!("\nblocked-by = [\"{child}\"]\nstatus = "),
+    );
+    let message = refused_message(path, ["--json", "task", "create", "New"].as_ref());
+    assert!(
+        message.contains(&format!(
+            "workspace file `tasks/{root}.md`: relationship `blocked-by`: task `{root}` cannot be blocked by \
+             `{child}`, its descendant; parent chain: {child} -> {root}\n"
+        )),
+        "message: {message}"
+    );
+    let edge = format!("\nblocked-by = [\"{child}\"]\nstatus = ");
+    edit_task_record(path, &root, &edge, "\nstatus = ");
+
+    // A new parent link that puts the stored edge Other <- Root inside one chain.
+    edit_task_record(path, &root, "\ntitle = ", &format!("\nparent = \"{other}\"\ntitle = "));
+    let message = refused_message(path, ["--json", "task", "create", "New"].as_ref());
+    assert!(
+        message.contains(&format!(
+            "task `{other}` cannot be blocked by `{root}`, its descendant; parent chain: {root} -> {other}\n"
+        )),
+        "message: {message}"
+    );
+    assert_eq!(with_workspace_off(path, || parent_of(path, &root)), None);
 }

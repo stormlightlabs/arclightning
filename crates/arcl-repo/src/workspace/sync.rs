@@ -131,6 +131,10 @@ pub struct SyncOutcome {
     /// `manifest.toml` is listed here too, after its canonical form is
     /// written back over the workspace copy.
     pub converged: Vec<PathBuf>,
+    /// One message for each blocker rule violation the merged graph holds
+    /// that the workspace changes did not introduce. Sync loads these and
+    /// refuses only the violations a workspace change causes.
+    pub warnings: Vec<String>,
 }
 
 impl SyncOutcome {
@@ -228,7 +232,8 @@ fn run_sync(
     reject_unmerged(root, vcs)?;
     let read = database.data_version()?;
     let base = database.workspace_base()?;
-    let database_files = project_graph(&database.connected_graph()?)?;
+    let before = database.connected_graph()?;
+    let database_files = project_graph(&before)?;
     let candidate = read_candidate(root)?;
     let comparison = compare(&base, &database_files, &candidate.files);
 
@@ -319,7 +324,9 @@ fn run_sync(
                 .map_err(|source| WorkspaceImportError::Record { path: path.clone(), source })?;
             records.insert(path.clone(), record);
         }
-        Some(validate_candidate(records, database.project()?, worktree_root)?)
+        let (graph, warnings) = validate_candidate(records, database.project()?, worktree_root, Some(&before))?;
+        outcome.warnings = warnings;
+        Some(graph)
     };
     let files = match &graph {
         Some(graph) => project_graph(graph)?,
@@ -864,10 +871,12 @@ mod tests {
         // Run a sync's steps up to its file writes, then stop before the
         // database commits the merged graph and the new base.
         let candidate = read_candidate(project.root.path()).expect("workspace reads");
-        let graph = validate_candidate(
+        let before = project.database.connected_graph().expect("graph loads");
+        let (graph, _) = validate_candidate(
             candidate.records,
             project.database.project().expect("project loads"),
             project.root.path(),
+            Some(&before),
         )
         .expect("merged graph validates");
         let files = project_graph(&graph).expect("projection succeeds");

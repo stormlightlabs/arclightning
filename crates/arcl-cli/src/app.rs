@@ -58,7 +58,7 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
     let access = command_access(cli.command.as_ref());
     // The lock is held from the first sync until `run` returns.
     let (roots, synced, _lock) = match access {
-        Access::Untracked => (None, Ok(()), None),
+        Access::Untracked => (None, Ok(Vec::new()), None),
         _ => match workspace_roots() {
             Ok(Some(roots)) => match roots.lock() {
                 Ok(lock) => {
@@ -67,14 +67,15 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
                 }
                 Err(error) => (None, Err(error), None),
             },
-            Ok(None) => (None, Ok(()), None),
+            Ok(None) => (None, Ok(Vec::new()), None),
             Err(error) => (None, Err(error), None),
         },
     };
-    let mut warning = None;
+    let mut warnings = Vec::new();
     match synced {
+        Ok(found) => warnings.extend(found),
         // A missing database is the command's own error to report, once.
-        Ok(()) | Err(CommandError::NotInitialized { .. }) => {}
+        Err(CommandError::NotInitialized { .. }) => {}
         Err(error) if access == Access::Write => {
             let error = match error {
                 CommandError::WorkspaceSync(error)
@@ -86,54 +87,59 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
             };
             return Err(ApplicationError::from_command(error).into());
         }
-        Err(error) => {
-            warning = Some(format!(
-                "the workspace did not sync, so this shows the database as it is: {error}"
-            ));
-            // Under `--json` the warning waits for the command to succeed, so
-            // stderr holds at most one JSON value.
-            if mode != OutputMode::Json {
-                write_warning(mode, warning.take());
-            }
-        }
+        Err(error) => warnings.push(format!(
+            "the workspace did not sync, so this shows the database as it is: {error}"
+        )),
+    }
+    // Under `--json` warnings wait for the command to succeed, so stderr
+    // holds at most one JSON value.
+    if mode != OutputMode::Json {
+        write_warnings(mode, std::mem::take(&mut warnings));
     }
 
-    dispatch(cli.command, &renderer)?;
-    write_warning(mode, warning);
+    dispatch(cli.command, &renderer, &mut warnings)?;
 
     if access == Access::Write
         && let Some(roots) = &roots
-        && let Err(error) = auto_sync(roots)
     {
-        write_warning(
-            mode,
-            Some(format!(
+        match auto_sync(roots) {
+            Ok(found) => warnings.extend(found),
+            Err(error) => warnings.push(format!(
                 "the change is saved, but the workspace was not updated: {error}; the next command updates it"
             )),
-        );
+        }
     }
+    write_warnings(mode, warnings);
     Ok(())
 }
 
-/// Write a warning to stderr: plain text, a one-line JSON envelope under
-/// `--json`, or nothing under `--quiet`.
-fn write_warning(mode: OutputMode, warning: Option<String>) {
-    let Some(message) = warning else { return };
+/// Write warnings to stderr: one plain line each, a single one-line JSON
+/// envelope under `--json` that joins them with `; `, or nothing under
+/// `--quiet`.
+fn write_warnings(mode: OutputMode, warnings: Vec<String>) {
+    if warnings.is_empty() {
+        return;
+    }
     match mode {
         OutputMode::Quiet => {}
         OutputMode::Json => eprintln!(
             "{}",
             serde_json::json!({
                 "format_version": 1,
-                "warning": { "code": "workspace_sync", "message": message },
+                "warning": { "code": "workspace_sync", "message": warnings.join("; ") },
             })
         ),
-        OutputMode::Human | OutputMode::Plain => eprintln!("warning: {message}"),
+        OutputMode::Human | OutputMode::Plain => {
+            for message in warnings {
+                eprintln!("warning: {message}");
+            }
+        }
     }
 }
 
-/// Run one command with no workspace sync around it.
-fn dispatch(command: Option<Command>, renderer: &Renderer) -> anyhow::Result<()> {
+/// Run one command with no workspace sync around it. A workspace command
+/// adds its warnings to `warnings`.
+fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<String>) -> anyhow::Result<()> {
     match command {
         Some(Command::Init { workspace }) => {
             let start = std::env::current_dir().context("could not determine the current directory")?;
@@ -198,7 +204,9 @@ fn dispatch(command: Option<Command>, renderer: &Renderer) -> anyhow::Result<()>
             }
         }
         Some(Command::Workspace { command }) => {
-            match exec_workspace(command).map_err(ApplicationError::from_command)? {
+            let (status, found) = exec_workspace(command).map_err(ApplicationError::from_command)?;
+            warnings.extend(found);
+            match status {
                 Some(status) => write_output(renderer.render_workspace_status(&status)?),
                 None => write_output(None),
             }
