@@ -226,11 +226,15 @@ impl Renderer {
         self.render_named_mutation(action, "task", &task.id.to_string(), &task.title, task)
     }
 
-    /// Render a task completion with the subtasks it completed, in tree order.
-    /// JSON lists their IDs as `completed_subtasks`.
+    /// Render a task completion with the subtasks it completed, in tree order,
+    /// and the tasks it made ready. JSON lists their IDs as
+    /// `completed_subtasks` and `unblocked`. Plain output prints the task ID,
+    /// then a `subtask\t<id>` line for each subtask and an `unblocked\t<id>`
+    /// line for each ready task.
     pub fn render_planning_completion(&self, completion: &PlanningCompletion) -> Result<Option<String>, OutputError> {
         let task = &completion.task;
         let subtasks = &completion.completed_subtasks;
+        let unblocked = &completion.unblocked;
         let message = match self.mode {
             OutputMode::Human => std::iter::once(format!("Completed task `{}`: {}", task.id, task.title))
                 .chain(
@@ -238,10 +242,16 @@ impl Renderer {
                         .iter()
                         .map(|subtask| format!("Completed subtask `{}`: {}", subtask.id, subtask.title)),
                 )
+                .chain(
+                    unblocked
+                        .iter()
+                        .map(|ready| format!("Unblocked task `{}`: {}", ready.id, ready.title)),
+                )
                 .collect::<Vec<_>>()
                 .join("\n"),
             OutputMode::Plain => std::iter::once(task.id.to_string())
-                .chain(subtasks.iter().map(|subtask| subtask.id.to_string()))
+                .chain(subtasks.iter().map(|subtask| format!("subtask\t{}", subtask.id)))
+                .chain(unblocked.iter().map(|ready| format!("unblocked\t{}", ready.id)))
                 .collect::<Vec<_>>()
                 .join("\n"),
             OutputMode::Json => serde_json::to_string(&Envelope {
@@ -250,6 +260,7 @@ impl Renderer {
                     action: "completed",
                     task,
                     completed_subtasks: subtasks.iter().map(|subtask| subtask.id.to_string()).collect(),
+                    unblocked: unblocked.iter().map(|ready| ready.id.to_string()).collect(),
                 },
             })?,
             OutputMode::Quiet => return Ok(None),
@@ -817,6 +828,7 @@ struct CompletionData<'a> {
     action: &'static str,
     task: &'a PlanningTask,
     completed_subtasks: Vec<String>,
+    unblocked: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
