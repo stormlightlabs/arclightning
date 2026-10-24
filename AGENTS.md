@@ -6,6 +6,8 @@
   the user's voice. Describe the current product directly instead of framing it
   against earlier versions.
 - Linting must clear even if warnings are unrelated.
+- Disk is limited. After you address review changes, run `cargo clean` (or delete
+  your own `CARGO_TARGET_DIR`) so build output doesn't fill it.
 
 <!-- fabrial:begin -->
 ## Branches and pull requests
