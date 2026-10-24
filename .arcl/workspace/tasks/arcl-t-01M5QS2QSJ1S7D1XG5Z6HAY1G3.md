@@ -1,0 +1,42 @@
++++
+id = "arcl-t-01M5QS2QSJ1S7D1XG5Z6HAY1G3"
+parent = "arcl-t-01M5NE5P6XHRR4Q84820YACQ07"
+title = "T18.6: Build the Inbox and Planning views"
+status = "pending"
+priority = "normal"
+position = 6
+blocked-by = ["arcl-t-01M5QS2QP9TNCV3A88EHX375D9"]
++++
+
+Build the Inbox and Planning views, so captures become planned work in the
+browser.
+
+Scope:
+
+- `apps/web/src/routes/` for the Inbox and Planning routes
+- endpoints in `crates/arcl-serve` to promote a capture, create specs and
+  plans, and apply a plan
+- `PlanningTree.svelte` for the hierarchy
+
+Acceptance criteria:
+
+- [ ] Inbox lists open captures and promotes one to a task, a spec, or a note
+- [ ] A capture becomes a spec, the spec a plan, and the applied plan tasks,
+      all from the browser
+- [ ] Planning shows each milestone with its phase, progress and ready count,
+      and opens the planning tree below it
+- [ ] The views follow the Work view's keyboard model
+
+Verification:
+
+- `cargo test --workspace --all-features serve`: promote, spec and plan
+  create, and plan apply
+- `pnpm --filter @arclightning/web check`
+- `pnpm --filter @arclightning/web test`
+- Complete capture -> task and capture -> spec -> plan -> task in the browser
+  and confirm the results with `arcl show` and `arcl tree`
+- `just check`
+
+Out of scope:
+
+- Browser test coverage (T18.7)

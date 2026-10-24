@@ -141,6 +141,20 @@ pub(super) enum CommandError {
     InvalidFilter { message: String },
     #[error("database or graph integrity check failed: {message}")]
     Integrity { message: String },
+    #[error("could not read skill file `{path}`: {source}")]
+    ReadSkill { path: PathBuf, source: io::Error },
+    #[error("could not write skill file `{path}`: {source}")]
+    WriteSkill { path: PathBuf, source: io::Error },
+    #[error("skill file `{path}` is a symbolic link; replace it with a regular file or remove it")]
+    SkillSymlink { path: PathBuf },
+    #[error("skill file `{path}` is not a regular file")]
+    SkillNotFile { path: PathBuf },
+    #[error("skill path `{path}` is not a directory")]
+    SkillNotDirectory { path: PathBuf },
+    #[error("skill file `{path}` resolves outside the project root `{root}`")]
+    SkillOutsideProject { path: PathBuf, root: PathBuf },
+    #[error("{count} skill file(s) are missing or differ from this arcl; run `arcl skill install`")]
+    SkillDrift { count: usize },
 }
 
 impl From<WorkspaceExportError> for CommandError {
@@ -188,14 +202,21 @@ impl CommandError {
             | Self::ReadStdin { .. }
             | Self::OpenDatabase { source: StorageError::Sqlite(_), .. }
             | Self::CurrentDirectory { .. }
-            | Self::SyncLock { .. } => 1,
+            | Self::SyncLock { .. }
+            | Self::ReadSkill { .. }
+            | Self::WriteSkill { .. } => 1,
+            Self::SkillDrift { .. } => 4,
             Self::OpenDatabase { source, .. } => source.exit_code(),
             Self::Storage(error) => error.exit_code(),
             Self::InvalidMarkdown { .. }
             | Self::InvalidStdin
             | Self::InvalidFilter { .. }
             | Self::Integrity { .. }
-            | Self::StdinIsTerminal => 3,
+            | Self::StdinIsTerminal
+            | Self::SkillSymlink { .. }
+            | Self::SkillNotFile { .. }
+            | Self::SkillNotDirectory { .. }
+            | Self::SkillOutsideProject { .. } => 3,
         }
     }
 }
