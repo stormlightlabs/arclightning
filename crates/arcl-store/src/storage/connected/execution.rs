@@ -17,8 +17,7 @@ pub enum OpenSubtasks {
     Refuse,
     /// Change only the task and leave its descendants as they are.
     Leave,
-    /// Complete the task and its pending and in-progress descendants. Only
-    /// completion accepts it; a cancel treats it as [`OpenSubtasks::Refuse`].
+    /// Complete the task and its pending and in-progress descendants.
     Complete,
 }
 
@@ -337,11 +336,6 @@ fn transition(
         .status
         .apply(action)
         .map_err(StorageError::InvalidPlanningTask)?;
-    let open_subtasks = match (action, open_subtasks) {
-        (TaskAction::Complete, OpenSubtasks::Complete) => OpenSubtasks::Complete,
-        (_, OpenSubtasks::Complete) => OpenSubtasks::Refuse,
-        (_, other) => other,
-    };
     let completed_subtasks = if open_subtasks == OpenSubtasks::Complete {
         let data = load_data(&tx, project_id)?;
         open_subtasks_to_complete(&data, &current)?
@@ -1830,6 +1824,98 @@ mod tests {
         assert_eq!(status(&database, dropped.id), TaskStatus::Cancelled);
         assert_eq!(status(&database, after_dropped.id), TaskStatus::Completed);
         assert_eq!(status(&database, second.id), TaskStatus::Completed);
+    }
+
+    #[test]
+    fn complete_with_subtasks_refuses_blockers_held_by_completed_intermediates() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let outside = task(&mut database, project.id, "Outside");
+        let parent = task(&mut database, project.id, "Parent");
+        let intermediate = child(&mut database, project.id, parent.id, "Intermediate");
+        let grandchild = child(&mut database, project.id, intermediate.id, "Grandchild");
+        database
+            .add_planning_dependency(intermediate.id, outside.id)
+            .expect("dependency creates");
+        database
+            .complete_planning_task(intermediate.id, OpenSubtasks::Leave, None)
+            .expect("intermediate completes alone");
+
+        match database.complete_planning_task(parent.id, OpenSubtasks::Complete, Some("evidence".to_owned())) {
+            Err(StorageError::InvalidPlanningTask(DomainError::SubtasksNotCompletable { id, reasons })) => {
+                assert_eq!(id, parent.id.to_string());
+                assert_eq!(
+                    reasons,
+                    vec![format!("`{}` is blocked by `{}` (pending)", intermediate.id, outside.id)]
+                );
+            }
+            other => panic!("unexpected result: {other:?}"),
+        }
+        assert_eq!(status(&database, parent.id), TaskStatus::Pending);
+        assert_eq!(status(&database, grandchild.id), TaskStatus::Pending);
+        let parent = database
+            .planning_task(parent.id)
+            .expect("task reads")
+            .expect("task exists");
+        assert_eq!(parent.evidence, "");
+    }
+
+    #[test]
+    fn complete_with_subtasks_ignores_blockers_held_by_cancelled_leaves() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let outside = task(&mut database, project.id, "Outside");
+        let parent = task(&mut database, project.id, "Parent");
+        let dropped = child(&mut database, project.id, parent.id, "Dropped");
+        let open = child(&mut database, project.id, parent.id, "Open");
+        database
+            .add_planning_dependency(dropped.id, outside.id)
+            .expect("dependency creates");
+        database
+            .transition_planning_task(dropped.id, TaskAction::Cancel, false)
+            .expect("subtask cancels");
+
+        let completion = database
+            .complete_planning_task(parent.id, OpenSubtasks::Complete, None)
+            .expect("a cancelled leaf holds nothing");
+
+        assert_eq!(
+            completion
+                .completed_subtasks
+                .iter()
+                .map(|subtask| subtask.id)
+                .collect::<Vec<_>>(),
+            vec![open.id]
+        );
+        assert_eq!(status(&database, parent.id), TaskStatus::Completed);
+        assert_eq!(status(&database, dropped.id), TaskStatus::Cancelled);
+    }
+
+    #[test]
+    fn complete_with_subtasks_finishes_an_already_completed_parent() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let parent = task(&mut database, project.id, "Parent");
+        let open = child(&mut database, project.id, parent.id, "Open");
+        database
+            .complete_planning_task(parent.id, OpenSubtasks::Leave, Some("first pass".to_owned()))
+            .expect("task completes alone");
+
+        let completion = database
+            .complete_planning_task(parent.id, OpenSubtasks::Complete, None)
+            .expect("completed task completes its subtasks");
+
+        assert_eq!(completion.task.status, TaskStatus::Completed);
+        assert_eq!(completion.task.evidence, "first pass");
+        assert_eq!(
+            completion
+                .completed_subtasks
+                .iter()
+                .map(|subtask| subtask.id)
+                .collect::<Vec<_>>(),
+            vec![open.id]
+        );
+        assert_eq!(status(&database, open.id), TaskStatus::Completed);
     }
 
     #[test]
