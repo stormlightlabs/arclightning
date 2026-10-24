@@ -1374,6 +1374,177 @@ fn create_task(directory: &Path, title: &str, parent: Option<&str>) -> String {
         .to_owned()
 }
 
+/// Make `task` wait on `blocker`.
+fn block_start_task(directory: &Path, task: &str, blocker: &str) {
+    run_json(
+        directory,
+        ["--json", "dependency", "add", task, "--blocked-by", blocker].as_ref(),
+    );
+}
+
+/// Run `task start` and return the JSON error it fails with.
+fn refused_start(directory: &Path, task: &str) -> Value {
+    let output = arcl_in(directory)
+        .args(["--json", "task", "start", task])
+        .output()
+        .expect("start runs");
+    assert_eq!(output.status.code(), Some(3));
+    assert!(output.stdout.is_empty());
+    json(&output.stderr)
+}
+
+#[test]
+fn start_refuses_a_blocked_task_with_its_reasons_and_writes_nothing() {
+    let directory = initialized_directory();
+    let blocker = create_task(directory.path(), "Blocker", None);
+    let task = create_task(directory.path(), "Blocked", None);
+    block_start_task(directory.path(), &task, &blocker);
+    let before = run_json(directory.path(), ["--json", "task", "show", &task].as_ref());
+
+    let error = refused_start(directory.path(), &task);
+    assert_eq!(error["error"]["code"], "invalid_request");
+    let message = error["error"]["message"].as_str().expect("error message");
+    assert!(message.contains(&format!("cannot start task `{task}` while it is not ready")));
+    assert!(message.contains(&format!("blocked by `{blocker}` (pending)")));
+    assert!(message.contains("--force"));
+
+    let after = run_json(directory.path(), ["--json", "task", "show", &task].as_ref());
+    assert_eq!(after, before);
+    assert_eq!(after["data"]["task"]["status"], "pending");
+}
+
+#[test]
+fn start_force_starts_a_blocked_task() {
+    let directory = initialized_directory();
+    let blocker = create_task(directory.path(), "Blocker", None);
+    let task = create_task(directory.path(), "Blocked", None);
+    block_start_task(directory.path(), &task, &blocker);
+
+    let started = run_json(directory.path(), ["--json", "task", "start", &task, "--force"].as_ref());
+    assert_eq!(started["data"]["action"], "started");
+    assert_eq!(started["data"]["task"]["status"], "in_progress");
+}
+
+#[test]
+fn start_repeats_on_an_in_progress_task_with_or_without_force() {
+    let directory = initialized_directory();
+    let blocker = create_task(directory.path(), "Blocker", None);
+    let task = create_task(directory.path(), "Blocked", None);
+    block_start_task(directory.path(), &task, &blocker);
+    run_json(directory.path(), ["--json", "task", "start", &task, "--force"].as_ref());
+
+    for args in [
+        ["--json", "task", "start", &task].as_ref(),
+        ["--json", "task", "start", &task, "--force"].as_ref(),
+    ] {
+        let repeated = run_json(directory.path(), args);
+        assert_eq!(repeated["data"]["task"]["status"], "in_progress");
+    }
+}
+
+#[test]
+fn start_starts_a_parent_with_children_without_force() {
+    let directory = initialized_directory();
+    let parent = create_task(directory.path(), "Parent", None);
+    create_task(directory.path(), "Child", Some(&parent));
+
+    let started = run_json(directory.path(), ["--json", "task", "start", &parent].as_ref());
+    assert_eq!(started["data"]["task"]["status"], "in_progress");
+}
+
+#[test]
+fn start_refuses_a_blocked_parent() {
+    let directory = initialized_directory();
+    let blocker = create_task(directory.path(), "Blocker", None);
+    let parent = create_task(directory.path(), "Parent", None);
+    create_task(directory.path(), "Child", Some(&parent));
+    block_start_task(directory.path(), &parent, &blocker);
+
+    let error = refused_start(directory.path(), &parent);
+    let message = error["error"]["message"].as_str().expect("error message");
+    assert!(message.contains(&format!("blocked by `{blocker}` (pending)")));
+    assert!(!message.contains("child task"));
+}
+
+/// Assert that `task start` refuses `task` with `reason` and leaves it
+/// pending, then that `--force` starts it.
+fn assert_start_needs_force(directory: &Path, task: &str, reason: &str) {
+    let error = refused_start(directory, task);
+    let message = error["error"]["message"].as_str().expect("error message");
+    assert!(message.contains(reason), "{message}");
+    let shown = run_json(directory, ["--json", "task", "show", task].as_ref());
+    assert_eq!(shown["data"]["task"]["status"], "pending");
+
+    let started = run_json(directory, ["--json", "task", "start", task, "--force"].as_ref());
+    assert_eq!(started["data"]["task"]["status"], "in_progress");
+}
+
+#[test]
+fn start_refuses_a_task_under_a_parked_ancestor_unless_forced() {
+    let directory = initialized_directory();
+    let parent = create_task(directory.path(), "Parent", None);
+    let child = create_task(directory.path(), "Child", Some(&parent));
+    run_json(directory.path(), ["--json", "task", "park", &parent].as_ref());
+
+    assert_start_needs_force(directory.path(), &child, &format!("ancestor `{parent}` is `parked`"));
+}
+
+#[test]
+fn start_refuses_a_task_in_a_closed_plan_unless_forced() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let spec = run_json(dir, ["--json", "spec", "create", "Feature"].as_ref());
+    let spec_id = spec["data"]["spec"]["id"].as_str().expect("spec ID");
+    let plan = run_json(dir, ["--json", "plan", "create", "Build", "--spec", spec_id].as_ref());
+    let plan_id = plan["data"]["plan"]["id"].as_str().expect("plan ID").to_owned();
+    let task = run_json(dir, ["--json", "task", "create", "Task", "--plan", &plan_id].as_ref())["data"]["task"]["id"]
+        .as_str()
+        .expect("task ID")
+        .to_owned();
+    run_json(
+        dir,
+        ["--json", "plan", "cancel", &plan_id, "--allow-open-children"].as_ref(),
+    );
+
+    assert_start_needs_force(dir, &task, &format!("plan `{plan_id}` is `cancelled`"));
+}
+
+#[test]
+fn start_refuses_a_task_whose_ancestor_has_an_unfinished_blocker_unless_forced() {
+    let directory = initialized_directory();
+    let blocker = create_task(directory.path(), "Blocker", None);
+    let parent = create_task(directory.path(), "Parent", None);
+    let child = create_task(directory.path(), "Child", Some(&parent));
+    block_start_task(directory.path(), &parent, &blocker);
+
+    assert_start_needs_force(
+        directory.path(),
+        &child,
+        &format!("ancestor `{parent}` is blocked by `{blocker}` (pending)"),
+    );
+}
+
+#[test]
+fn start_starts_a_child_its_parent_is_blocked_by_without_force() {
+    let directory = initialized_directory();
+    let parent = create_task(directory.path(), "Parent", None);
+    let child = create_task(directory.path(), "Child", Some(&parent));
+    // `dependency add` refuses this edge, so insert it as an older project would hold it.
+    let database = rusqlite::Connection::open(directory.path().join(".arcl/arcl.db")).expect("database opens");
+    database
+        .execute(
+            "INSERT INTO planning_task_dependencies (project_id, task_id, blocker_id)
+             SELECT project_id, ?1, ?2 FROM planning_tasks WHERE id = ?1",
+            [&parent, &child],
+        )
+        .expect("bad edge inserts");
+    drop(database);
+
+    let started = run_json(directory.path(), ["--json", "task", "start", &child].as_ref());
+    assert_eq!(started["data"]["action"], "started");
+    assert_eq!(started["data"]["task"]["status"], "in_progress");
+}
+
 fn ready_ids(directory: &Path) -> Vec<String> {
     run_json(directory, ["--json", "ready"].as_ref())["data"]["tasks"]
         .as_array()

@@ -480,7 +480,18 @@ pub(super) fn exec_task(command: TaskCommand, renderer: &Renderer) -> anyhow::Re
                 ),
             )
         }
-        TaskCommand::Start { id } => transition_task(id, TaskAction::Start, false, renderer),
+        TaskCommand::Start { id, force } => {
+            let id = parse_task_id(&id).map_err(ApplicationError::from_command)?;
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            render_output(
+                renderer.render_planning_task(
+                    "started",
+                    &database
+                        .start_planning_task(id, force)
+                        .map_err(ApplicationError::from_command)?,
+                ),
+            )
+        }
         TaskCommand::Park { id } => transition_task(id, TaskAction::Park, false, renderer),
         TaskCommand::Unpark { id } => transition_task(id, TaskAction::Unpark, false, renderer),
         TaskCommand::Handoff { id, note, note_file } => {

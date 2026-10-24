@@ -114,7 +114,7 @@ is `0`; negative positions are invalid. Terminal commands accept
 | ------------------------------------------- | ------------------------------------------------------- |
 | `arcl task create <title> --milestone <ID>` | Create a pending task or subtask.                       |
 | `arcl task update <id>`                     | Replace metadata, move a subtree, or change its parent. |
-| `arcl task start <id>`                      | Move pending work to `in_progress`.                     |
+| `arcl task start <id>`                      | Move ready pending work to `in_progress`.               |
 | `arcl task park <id>`                       | Move pending or in-progress work to `parked`.           |
 | `arcl task unpark <id>`                     | Return parked work to `pending`.                        |
 | `arcl task handoff <id>`                    | Store a resume note and park in-progress work.          |
@@ -129,6 +129,9 @@ Task creation accepts `--parent <ID>`, `--priority <critical|high|normal|low>`
 Moving a task between milestones moves its entire descendant subtree. Parent and
 child rows must belong to the same milestone, and cyclic reparenting is rejected
 before storage changes.
+
+`start` refuses a pending task that is not ready and lists the reasons. Having
+child tasks is the one reason it skips. `--force` starts the task anyway.
 
 `handoff` requires either `--note <MARKDOWN>` or `--note-file <PATH|->`.
 

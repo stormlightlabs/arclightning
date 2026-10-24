@@ -70,9 +70,13 @@ The allowed task statuses are:
 | `completed`   | Terminal success state.                               |
 | `cancelled`   | Terminal state for work that will not continue.       |
 
-`start` moves pending work to `in_progress`. `park` accepts pending or in-progress
-work. `unpark` always returns parked work to `pending`. `complete` accepts
-pending or in-progress work, and `cancel` accepts any non-terminal task.
+`start` moves pending work to `in_progress` when it is ready, apart from having
+child tasks. Any other reason that `arcl task explain` reports, such as an
+unfinished blocker, refuses the start and lists the reasons; `--force` starts the
+task anyway. Starting a task that is already in progress does nothing. `park`
+accepts pending or in-progress work. `unpark` always returns parked work to
+`pending`. `complete` accepts pending or in-progress work, and `cancel` accepts
+any non-terminal task.
 
 ## Close parent tasks
 
@@ -96,7 +100,9 @@ arcl task handoff arcl-t-01J... --note-file handoff.md
 
 `handoff` stores the note and parks the task in one transaction. Unparking and
 starting the task preserve the note until another handoff replaces it. Use
-`--note-file -` to read UTF-8 Markdown from standard input.
+`--note-file -` to read UTF-8 Markdown from standard input. After `unpark`,
+`start` refuses a task that became not ready while parked; resolve the blocker
+or pass `--force`.
 
 ## Record Completion
 
