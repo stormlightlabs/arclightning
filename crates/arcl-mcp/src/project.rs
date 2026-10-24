@@ -7,7 +7,7 @@
 //! exports it, and a failure there is a warning, since the change is saved.
 //! The lock file is the CLI's, so the server and `arcl` commands in one
 //! project run one at a time. A call waits at most [`LOCK_WAIT`] for it, then
-//! fails with `conflict`.
+//! fails with `application_error`, the code the CLI gives a lock failure.
 //!
 //! A cancelled call stops while it waits for the lock, and checks once more
 //! before its operation starts. Once the operation starts it runs to the end:
@@ -29,7 +29,7 @@ use arcl_store::{Database, StorageError};
 use crate::error::ToolError;
 
 /// How long a call waits for the sync lock an `arcl` command holds before it
-/// fails with `conflict`.
+/// fails with `application_error`.
 pub const LOCK_WAIT: Duration = Duration::from_secs(10);
 
 /// How often a waiting call tries the lock again and checks for cancellation.
@@ -232,7 +232,7 @@ fn workspace_root(root: &Path, config: &ProjectConfig) -> Result<Option<PathBuf>
 }
 
 /// Take an exclusive lock on the project's sync lock file. Tries again every
-/// [`LOCK_POLL`] while another process holds it, and fails with `conflict`
+/// [`LOCK_POLL`] while another process holds it, and fails with `application_error`
 /// once `wait` runs out, or stops once `cancelled` fires. The lock lasts until
 /// the file drops.
 fn lock_project(root: &Path, wait: Duration, cancelled: &CancellationToken) -> Result<File, SyncFailure> {
@@ -255,7 +255,7 @@ fn lock_project(root: &Path, wait: Duration, cancelled: &CancellationToken) -> R
             Err(TryLockError::Error(source)) => return Err(lock_error(source).into()),
             Err(TryLockError::WouldBlock) if Instant::now() >= deadline => {
                 return Err(SyncFailure::Stopped(ToolError::new(
-                    4,
+                    1,
                     format!(
                         "another `arcl` command held the sync lock `{}` for more than {} s; try again when it finishes",
                         path.display(),

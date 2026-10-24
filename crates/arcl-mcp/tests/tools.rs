@@ -654,7 +654,7 @@ async fn a_divergent_sync_names_workspace_resolve() {
 }
 
 #[tokio::test]
-async fn a_held_sync_lock_fails_with_conflict_after_the_wait() {
+async fn a_held_sync_lock_fails_after_the_wait() {
     let project = project(true);
     let server = ArclServer::new(project.path().to_owned()).with_lock_wait(Duration::from_millis(200));
     let lock = hold_sync_lock(project.path());
@@ -667,7 +667,7 @@ async fn a_held_sync_lock_fails_with_conflict_after_the_wait() {
         .await
         .err()
         .expect("the write gives up on the lock");
-    assert_eq!((refused.code(), refused.exit_code()), ("conflict", 4));
+    assert_eq!((refused.code(), refused.exit_code()), ("application_error", 1));
     assert!(refused.to_string().contains("arcl.db-sync.lock"), "{refused}");
 
     let read = server
@@ -675,7 +675,7 @@ async fn a_held_sync_lock_fails_with_conflict_after_the_wait() {
         .await
         .err()
         .expect("the read gives up on the lock");
-    assert_eq!(read.code(), "conflict");
+    assert_eq!(read.code(), "application_error");
 
     drop(lock);
     let database = Database::open(project.path().join(".arcl/arcl.db")).expect("open database");
