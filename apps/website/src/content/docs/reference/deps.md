@@ -5,7 +5,11 @@ description: Model task blockers and find deterministic actionable work.
 
 Tasks can wait on other tasks without storing a separate ready status. Only a
 completed blocker satisfies a dependency. Cancelled and parked blockers keep
-dependent work blocked.
+dependent work blocked. A blocker on a parent task also blocks every task under
+it.
+
+A cancelled blocker will never complete, so `explain` asks you to remove or
+replace that dependency rather than wait on it.
 
 ```sh
 arcl dependency add <task-id> --blocked-by <blocker-id>

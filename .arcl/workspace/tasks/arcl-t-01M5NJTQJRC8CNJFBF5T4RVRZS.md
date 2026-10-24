@@ -2,9 +2,10 @@
 id = "arcl-t-01M5NJTQJRC8CNJFBF5T4RVRZS"
 parent = "arcl-t-01M5NE5P1WQ0MBKBRYTRJJR162"
 title = "T16.1: Inherit ancestor blockers and report cancelled ones"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 1
+evidence = """Readiness now walks the task's parent chain: a blocker on any ancestor blocks the task, sets readiness.blocked, and gives the reason "ancestor `<id>` is blocked by `<id>` (<status>)". A cancelled blocker, direct or inherited, gets "... blocked by cancelled `<id>`; remove or replace the dependency" instead of the wait reason. Completing the ancestor's blocker makes the descendant ready again. Store tests readiness_inherits_ancestor_blockers_until_they_complete and readiness_reports_cancelled_blockers_as_decisions in execution.rs; CLI tests readiness_inherits_a_blocker_through_two_levels_of_parents, readiness_asks_to_replace_a_cancelled_direct_blocker, readiness_asks_to_replace_a_cancelled_inherited_blocker and readiness_returns_when_the_ancestor_blocker_completes. Updated the deps reference and the inspect-work guide. Gates run (just check recipe): cargo fmt --check, clippy -D warnings, cargo test --workspace, pnpm check, pnpm test, all passing. Branch claude/t16-1-inherited-blockers."""
 +++
 
 Make readiness count blockers inherited from ancestor tasks and report a

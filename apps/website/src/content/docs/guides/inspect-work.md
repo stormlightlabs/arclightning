@@ -46,7 +46,8 @@ arcl next --priority critical high
 arcl explain arcl-t-01J...
 ```
 
-Reasons include incomplete blockers, open children, parked or terminal
+Reasons include incomplete blockers, blockers inherited from ancestor tasks,
+cancelled blockers to remove or replace, open children, parked or terminal
 ancestors, closed containers, and the task's own lifecycle state.
 
 ## Gather task context

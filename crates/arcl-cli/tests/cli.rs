@@ -1361,3 +1361,124 @@ fn the_next_command_restores_workspace_files_a_write_left_behind() {
     assert_eq!(fs::read_to_string(&record_path).expect("record reads"), content);
     assert_eq!(GitState::read(path), before);
 }
+
+/// Create a task, under `parent` when given, and return its ID.
+fn create_task_id(directory: &Path, title: &str, parent: Option<&str>) -> String {
+    let mut args = vec!["--json", "task", "create", title];
+    if let Some(parent) = parent {
+        args.extend(["--parent", parent]);
+    }
+    run_json(directory, &args)["data"]["task"]["id"]
+        .as_str()
+        .expect("task ID")
+        .to_owned()
+}
+
+fn ready_ids(directory: &Path) -> Vec<String> {
+    run_json(directory, ["--json", "ready"].as_ref())["data"]["tasks"]
+        .as_array()
+        .expect("ready tasks")
+        .iter()
+        .map(|task| task["id"].as_str().expect("ready task ID").to_owned())
+        .collect()
+}
+
+fn readiness(directory: &Path, task_id: &str) -> Value {
+    run_json(directory, ["--json", "explain", task_id].as_ref())["data"]["readiness"].clone()
+}
+
+#[test]
+fn readiness_inherits_a_blocker_through_two_levels_of_parents() {
+    let directory = initialized_directory();
+    let blocker = create_task_id(directory.path(), "Blocker", None);
+    let grandparent = create_task_id(directory.path(), "Grandparent", None);
+    let parent = create_task_id(directory.path(), "Parent", Some(&grandparent));
+    let leaf = create_task_id(directory.path(), "Leaf", Some(&parent));
+    run_json(
+        directory.path(),
+        ["--json", "dependency", "add", &grandparent, "--blocked-by", &blocker].as_ref(),
+    );
+
+    let readiness = readiness(directory.path(), &leaf);
+    assert_eq!(readiness["ready"], false);
+    assert_eq!(readiness["blocked"], true);
+    assert_eq!(
+        readiness["reasons"],
+        serde_json::json!([format!("ancestor `{grandparent}` is blocked by `{blocker}` (pending)")])
+    );
+    assert_eq!(ready_ids(directory.path()), vec![blocker]);
+
+    let explained = arcl_in(directory.path())
+        .args(["--color", "never", "explain", &leaf])
+        .output()
+        .expect("explain runs");
+    assert!(explained.status.success());
+    assert!(
+        String::from_utf8_lossy(&explained.stdout).contains(&format!("Reason: ancestor `{grandparent}` is blocked by"))
+    );
+}
+
+#[test]
+fn readiness_asks_to_replace_a_cancelled_direct_blocker() {
+    let directory = initialized_directory();
+    let blocker = create_task_id(directory.path(), "Blocker", None);
+    let task = create_task_id(directory.path(), "Task", None);
+    run_json(
+        directory.path(),
+        ["--json", "dependency", "add", &task, "--blocked-by", &blocker].as_ref(),
+    );
+    run_json(directory.path(), ["--json", "task", "cancel", &blocker].as_ref());
+
+    let readiness = readiness(directory.path(), &task);
+    assert_eq!(readiness["blocked"], true);
+    assert_eq!(
+        readiness["reasons"],
+        serde_json::json!([format!(
+            "blocked by cancelled `{blocker}`; remove or replace the dependency"
+        )])
+    );
+    assert!(ready_ids(directory.path()).is_empty());
+}
+
+#[test]
+fn readiness_asks_to_replace_a_cancelled_inherited_blocker() {
+    let directory = initialized_directory();
+    let blocker = create_task_id(directory.path(), "Blocker", None);
+    let parent = create_task_id(directory.path(), "Parent", None);
+    let leaf = create_task_id(directory.path(), "Leaf", Some(&parent));
+    run_json(
+        directory.path(),
+        ["--json", "dependency", "add", &parent, "--blocked-by", &blocker].as_ref(),
+    );
+    run_json(directory.path(), ["--json", "task", "cancel", &blocker].as_ref());
+
+    let readiness = readiness(directory.path(), &leaf);
+    assert_eq!(readiness["blocked"], true);
+    assert_eq!(
+        readiness["reasons"],
+        serde_json::json!([format!(
+            "ancestor `{parent}` is blocked by cancelled `{blocker}`; remove or replace the dependency"
+        )])
+    );
+    assert!(ready_ids(directory.path()).is_empty());
+}
+
+#[test]
+fn readiness_returns_when_the_ancestor_blocker_completes() {
+    let directory = initialized_directory();
+    let blocker = create_task_id(directory.path(), "Blocker", None);
+    let parent = create_task_id(directory.path(), "Parent", None);
+    let leaf = create_task_id(directory.path(), "Leaf", Some(&parent));
+    run_json(
+        directory.path(),
+        ["--json", "dependency", "add", &parent, "--blocked-by", &blocker].as_ref(),
+    );
+    assert!(!ready_ids(directory.path()).contains(&leaf));
+
+    run_json(directory.path(), ["--json", "task", "complete", &blocker].as_ref());
+
+    let readiness = readiness(directory.path(), &leaf);
+    assert_eq!(readiness["ready"], true);
+    assert_eq!(readiness["blocked"], false);
+    assert_eq!(ready_ids(directory.path()), vec![leaf]);
+}
