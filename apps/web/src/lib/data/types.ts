@@ -115,18 +115,74 @@ export interface TaskDetail {
   phase: Milestone | null;
 }
 
+/** The options of `arcl task create`. `priority` defaults to `normal`. */
+export interface NewTask {
+  title: string;
+  body?: string;
+  priority?: TaskPriority;
+  /** The parent task's ID. */
+  parent?: string;
+  spec?: string;
+  plan?: string;
+  phase?: string;
+}
+
+/** The options of `arcl task update`. A field left out keeps its value. */
+export interface TaskEdit {
+  title?: string;
+  body?: string;
+  priority?: TaskPriority;
+}
+
+/** The options of `arcl task complete`. */
+export interface CompleteOptions {
+  /** Markdown completion evidence. */
+  evidence?: string;
+  /** Complete only this task even when subtasks are open. */
+  allow_open_children?: boolean;
+  /** Also complete every pending and in-progress subtask. */
+  with_subtasks?: boolean;
+}
+
+/** What `arcl task complete --json` returns. */
+export interface TaskCompletion {
+  task: Task;
+  /** The subtasks completed with the task, by ID. */
+  completed_subtasks: string[];
+  /** The tasks the completion made ready, by ID. */
+  unblocked: string[];
+}
+
 /**
- * Where views read records from. `arcl serve` backs it locally; another
+ * Where views read and change records. `arcl serve` backs it locally; another
  * backend, such as a claude.ai artifact's database, can stand in for it.
+ *
+ * Each change runs the `arcl task` command of the same name, with its
+ * validation, and fails with a {@link DataError} carrying the CLI's error
+ * code and message.
  */
 export interface DataSource {
   /** Every task, with its readiness and milestone. */
   work(): Promise<WorkList>;
   /** One task with its readiness, relations, handoff and evidence. */
   task(id: string): Promise<TaskDetail>;
+  /** `arcl task create`. */
+  createTask(input: NewTask): Promise<Task>;
+  /** `arcl task update <id>`. */
+  updateTask(id: string, edit: TaskEdit): Promise<Task>;
+  /** `arcl task start <id>`, with `--force` when `force` is set. */
+  startTask(id: string, options?: { force?: boolean }): Promise<Task>;
+  /** `arcl task park <id>`. */
+  parkTask(id: string): Promise<Task>;
+  /** `arcl task unpark <id>`. */
+  unparkTask(id: string): Promise<Task>;
+  /** `arcl task handoff <id> --note <note>`: record a resume note and park the task. */
+  handOffTask(id: string, note: string): Promise<Task>;
+  /** `arcl task complete <id>`. */
+  completeTask(id: string, options?: CompleteOptions): Promise<TaskCompletion>;
 }
 
-/** A failed read, with the CLI's error code and message. */
+/** A failed read or change, with the CLI's error code and message. */
 export class DataError extends Error {
   /** The CLI's error code, such as `not_found`. */
   readonly code: string;

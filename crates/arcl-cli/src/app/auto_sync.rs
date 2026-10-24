@@ -107,6 +107,55 @@ pub(super) fn auto_sync(roots: &WorkspaceRoots) -> CResult<Vec<String>> {
     Ok(outcome.warnings)
 }
 
+/// Run `write` as `arcl` runs a write command: under the sync lock, after a
+/// sync that must succeed, and followed by a sync that exports the change.
+/// Returns what `write` returned with the warnings both syncs gave.
+pub(super) fn synced_write<T>(
+    write: impl FnOnce() -> Result<T, ApplicationError>,
+) -> Result<(T, Vec<Warning>), ApplicationError> {
+    let roots = match workspace_roots() {
+        Ok(Some(roots)) => roots,
+        // A missing database is the write's own error to report.
+        Ok(None) | Err(CommandError::NotInitialized { .. }) => return write().map(|value| (value, Vec::new())),
+        Err(error) => return Err(refuse_write(error)),
+    };
+    let _lock = roots.lock().map_err(refuse_write)?;
+    let mut warnings = match auto_sync(&roots) {
+        Ok(found) => Warning::blocker_edges(found).collect(),
+        Err(CommandError::NotInitialized { .. }) => Vec::new(),
+        Err(error) => return Err(refuse_write(error)),
+    };
+    let value = write()?;
+    export_after_write(&roots, &mut warnings);
+    Ok((value, warnings))
+}
+
+/// The error a write returns when the sync before it fails. A sync that
+/// stopped says the write did not run, except when the database changed
+/// while it read, which keeps its own error.
+pub(super) fn refuse_write(error: CommandError) -> ApplicationError {
+    let error = match error {
+        CommandError::WorkspaceSync(error)
+            if !matches!(*error, WorkspaceSyncError::Storage(StorageError::ChangedSinceRead)) =>
+        {
+            CommandError::AutoSync(error)
+        }
+        other => other,
+    };
+    ApplicationError::from_command(error)
+}
+
+/// Sync after a committed write to export it, adding a warning when the
+/// export fails, since the change is saved either way.
+pub(super) fn export_after_write(roots: &WorkspaceRoots, warnings: &mut Vec<Warning>) {
+    match auto_sync(roots) {
+        Ok(found) => warnings.extend(Warning::blocker_edges(found)),
+        Err(error) => warnings.push(Warning::workspace_sync(format!(
+            "the change is saved, but the workspace was not updated: {error}; the next command updates it"
+        ))),
+    }
+}
+
 /// Take an exclusive lock on `.arcl/arcl.db-sync.lock` under `project_root`,
 /// creating the file if it is missing. Blocks until no other arcl process
 /// holds it. The lock is held until the returned file drops, so a caller

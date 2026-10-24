@@ -1,5 +1,14 @@
 import { tokenHeaders } from "$lib/token";
-import { DataError, type DataSource, type Milestone, type Readiness, type Task, type TaskDetail, type WorkItem } from "./types";
+import {
+  DataError,
+  type DataSource,
+  type Milestone,
+  type Readiness,
+  type Task,
+  type TaskCompletion,
+  type TaskDetail,
+  type WorkItem,
+} from "./types";
 
 /** How many explain requests the Work list keeps in flight at once. */
 const EXPLAIN_CONCURRENCY = 4;
@@ -36,17 +45,37 @@ interface Explanation {
 }
 
 /**
- * A data source that reads from the `arcl serve` that served the page.
+ * A data source over the `arcl serve` that served the page.
  *
  * A task or phase deleted between the list and the read that follows it is
- * left out; any other failed read fails the whole list.
+ * left out; any other failed read fails the whole list. Changes go out as
+ * POSTs with a JSON body; the browser adds the `Origin` header the server
+ * checks.
  */
 export function serveSource(options: ServeOptions = {}): DataSource {
   const request = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
   const headers = options.headers ?? (() => tokenHeaders(window.sessionStorage));
 
   async function get<T>(path: string): Promise<T> {
-    const response = await request(path, { headers: headers() });
+    return send<T>(path, { headers: headers() });
+  }
+
+  async function post<T>(path: string, body: object): Promise<T> {
+    return send<T>(path, {
+      method: "POST",
+      headers: { ...headers(), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** `post` to one task's action, answering with the task it changed. */
+  async function change(id: string, action: string, body: object = {}): Promise<Task> {
+    const data = await post<{ task: Task }>(`${taskPath(id)}/${action}`, body);
+    return data.task;
+  }
+
+  async function send<T>(path: string, init: RequestInit): Promise<T> {
+    const response = await request(path, init);
     const envelope = await response.json().catch(() => null);
     if (!response.ok || envelope === null || !("data" in envelope)) {
       const error = envelope?.error;
@@ -103,7 +132,25 @@ export function serveSource(options: ServeOptions = {}): DataSource {
       if (!("readiness" in detail)) throw new DataError("not_a_task", `\`${id}\` is not a task`);
       return detail as TaskDetail;
     },
+
+    async createTask(input) {
+      return (await post<{ task: Task }>("/api/tasks", input)).task;
+    },
+    updateTask: (id, edit) => change(id, "update", edit),
+    startTask: (id, options = {}) => change(id, "start", options),
+    parkTask: (id) => change(id, "park"),
+    unparkTask: (id) => change(id, "unpark"),
+    handOffTask: (id, note) => change(id, "handoff", { note }),
+    async completeTask(id, options = {}) {
+      const { task, completed_subtasks, unblocked } = await post<TaskCompletion>(`${taskPath(id)}/complete`, options);
+      return { task, completed_subtasks, unblocked };
+    },
   };
+}
+
+/** The API path of one task, with its ID escaped. */
+function taskPath(id: string): string {
+  return `/api/tasks/${encodeURIComponent(id)}`;
 }
 
 function milestoneOf({ id, plan_id, title, status, position }: Phase): Milestone {

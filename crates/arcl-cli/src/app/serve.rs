@@ -1,21 +1,39 @@
-//! `arcl serve`: the web app and its read endpoints over the read commands.
+//! `arcl serve`: the web app and its endpoints over the CLI's commands.
 //!
-//! Each request opens the database and runs the same read as the CLI, with
-//! no workspace sync. A read never changes records, though opening the
-//! database can run its migrations. The server holds no sync lock, so other
-//! arcl commands run while it serves.
+//! Each read opens the database and runs the same read as the CLI, with no
+//! workspace sync. A read never changes records, though opening the database
+//! can run its migrations. Each mutation runs the same `arcl task` command
+//! as the CLI, with the same sync around it: it takes the sync lock, syncs,
+//! changes the record and syncs again to export it. The server holds the lock
+//! only during a mutation, so other arcl commands run while it serves.
 
-use arcl_serve::{Reads, Reply, Server};
+use arcl_serve::{Completion, Handoff, Mutations, NewTask, Reads, Reply, Server, TaskEdit, TaskStart};
 
 use super::reads::*;
 use super::*;
 
-/// The read endpoints, answering with the CLI's `--json` envelopes.
-struct ServeReads {
+/// The endpoints, answering with the CLI's `--json` envelopes.
+struct ServeApp {
     renderer: Renderer,
+    /// How `arcl serve` prints a mutation's sync warnings to stderr.
+    mode: OutputMode,
 }
 
-impl Reads for ServeReads {
+impl ServeApp {
+    /// Run a task command as the CLI runs a write, and print the warnings
+    /// its syncs give to the server's stderr.
+    fn write(&self, command: TaskCommand) -> Reply {
+        match synced_write(|| run_task(command, &self.renderer)) {
+            Ok((body, warnings)) => {
+                write_warnings(self.mode, warnings);
+                Reply::success(body.unwrap_or_default())
+            }
+            Err(error) => Reply::failure(error.exit_code(), error.json()),
+        }
+    }
+}
+
+impl Reads for ServeApp {
     fn list(&self, query: &[(String, String)]) -> Reply {
         match list_args(query) {
             Ok(filters) => reply(read_list(filters, &self.renderer)),
@@ -43,6 +61,69 @@ impl Reads for ServeReads {
     }
 }
 
+impl Mutations for ServeApp {
+    fn create_task(&self, input: NewTask) -> Reply {
+        self.write(TaskCommand::Create {
+            title: input.title,
+            spec: input.spec,
+            plan: input.plan,
+            phase: input.phase,
+            parent: input.parent,
+            priority: input.priority.unwrap_or_else(|| "normal".to_owned()),
+            position: 0,
+            blocked_by: Vec::new(),
+            body: MarkdownArgs { body: input.body, body_file: None },
+        })
+    }
+
+    fn update_task(&self, id: &str, input: TaskEdit) -> Reply {
+        self.write(TaskCommand::Update {
+            id: id.to_owned(),
+            title: input.title,
+            body: MarkdownArgs { body: input.body, body_file: None },
+            priority: input.priority,
+            position: None,
+            spec: None,
+            no_spec: false,
+            plan: None,
+            no_plan: false,
+            phase: None,
+            no_phase: false,
+            parent: None,
+            no_parent: false,
+        })
+    }
+
+    fn start_task(&self, id: &str, input: TaskStart) -> Reply {
+        self.write(TaskCommand::Start { id: id.to_owned(), force: input.force })
+    }
+
+    fn park_task(&self, id: &str) -> Reply {
+        self.write(TaskCommand::Park { id: id.to_owned() })
+    }
+
+    fn unpark_task(&self, id: &str) -> Reply {
+        self.write(TaskCommand::Unpark { id: id.to_owned() })
+    }
+
+    fn hand_off_task(&self, id: &str, input: Handoff) -> Reply {
+        self.write(TaskCommand::Handoff { id: id.to_owned(), note: input.note, note_file: None })
+    }
+
+    fn complete_task(&self, id: &str, input: Completion) -> Reply {
+        if input.allow_open_children && input.with_subtasks {
+            return Reply::invalid_request("`allow_open_children` and `with_subtasks` cannot be used together");
+        }
+        self.write(TaskCommand::Complete {
+            id: id.to_owned(),
+            allow_open_children: input.allow_open_children,
+            with_subtasks: input.with_subtasks,
+            evidence: input.evidence,
+            evidence_file: None,
+        })
+    }
+}
+
 /// Bind the server, print its URL and serve until interrupted. The database
 /// opens first, so outside a project `serve` fails like other commands
 /// instead of serving endpoints that all fail.
@@ -50,8 +131,8 @@ pub(super) fn exec_serve(port: Option<u16>, renderer: &Renderer) -> anyhow::Resu
     drop(open_database().map_err(ApplicationError::from_command)?);
     let server = Server::bind(port).context("could not start the web app server")?;
     write_output(renderer.render_serve(&server.url())?)?;
-    let reads = ServeReads { renderer: Renderer::new(OutputMode::Json, ColorChoice::Never) };
-    server.run(&reads).context("the web app server stopped")?;
+    let app = ServeApp { renderer: Renderer::new(OutputMode::Json, ColorChoice::Never), mode: renderer.mode() };
+    server.run(&app, &app).context("the web app server stopped")?;
     Ok(())
 }
 

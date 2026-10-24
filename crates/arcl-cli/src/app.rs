@@ -34,7 +34,7 @@ mod support;
 mod workspace;
 
 use commands::{
-    CaptureResult, exec_capture, exec_dependency, exec_note, exec_plan, exec_release, exec_spec, exec_task,
+    CaptureResult, exec_capture, exec_dependency, exec_note, exec_plan, exec_release, exec_spec, exec_task, run_task,
 };
 pub use error::ApplicationError;
 use error::{CResult, CommandError};
@@ -46,7 +46,7 @@ use skill::exec_skill;
 use support::{open_database, write_output};
 use workspace::exec_workspace;
 
-use auto_sync::{Access, auto_sync, command_access, workspace_roots};
+use auto_sync::{Access, auto_sync, command_access, export_after_write, refuse_write, synced_write, workspace_roots};
 
 /// One warning for stderr. `code` names its kind under `--json`.
 struct Warning {
@@ -103,17 +103,7 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
         Ok(found) => warnings.extend(Warning::blocker_edges(found)),
         // A missing database is the command's own error to report, once.
         Err(CommandError::NotInitialized { .. }) => {}
-        Err(error) if access == Access::Write => {
-            let error = match error {
-                CommandError::WorkspaceSync(error)
-                    if !matches!(*error, WorkspaceSyncError::Storage(StorageError::ChangedSinceRead)) =>
-                {
-                    CommandError::AutoSync(error)
-                }
-                other => other,
-            };
-            return Err(ApplicationError::from_command(error).into());
-        }
+        Err(error) if access == Access::Write => return Err(refuse_write(error).into()),
         Err(error) => warnings.push(Warning::workspace_sync(format!(
             "the workspace did not sync, so this shows the database as it is: {error}"
         ))),
@@ -129,12 +119,7 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
     if access == Access::Write
         && let Some(roots) = &roots
     {
-        match auto_sync(roots) {
-            Ok(found) => warnings.extend(Warning::blocker_edges(found)),
-            Err(error) => warnings.push(Warning::workspace_sync(format!(
-                "the change is saved, but the workspace was not updated: {error}; the next command updates it"
-            ))),
-        }
+        export_after_write(roots, &mut warnings);
     }
     write_warnings(mode, warnings);
     Ok(())

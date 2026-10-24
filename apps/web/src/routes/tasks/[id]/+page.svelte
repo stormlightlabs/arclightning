@@ -33,6 +33,13 @@
       });
   });
 
+  /** Reload the task in place after a change, keeping the view's state. */
+  async function refresh() {
+    const current = id;
+    const loaded = await dataSource().task(current);
+    if (current === id) detail = loaded;
+  }
+
   function onkeydown(event: KeyboardEvent) {
     const action = taskKeyAction(event);
     if (action === null) return;
@@ -50,7 +57,7 @@
 {:else if detail === null}
   <p class="loading" role="status">Loading task…</p>
 {:else}
-  <TaskDetailView {detail} workHref={workHref(id, from)} bind:panelOpen />
+  <TaskDetailView {detail} workHref={workHref(id, from)} bind:panelOpen onchanged={refresh} />
 {/if}
 
 <style>

@@ -8,24 +8,102 @@
     workHref: string;
     /** Whether the properties panel is expanded. */
     panelOpen?: boolean;
+    /** Reload `detail` after a change; the view waits for it before it shows the result. */
+    onchanged?: () => Promise<void>;
   }
 </script>
 
 <script lang="ts">
-  import { Markdown, MarkdownEditor, PropertiesPanel, StatusBadge } from "@arclightning/ui";
-  import type { Task } from "$lib/data";
-  import { taskHref } from "$lib/work";
+  import { Button, Feedback, Field, Markdown, MarkdownEditor, PropertiesPanel, SelectMenu, StatusBadge } from "@arclightning/ui";
+  import { dataSource, type Task } from "$lib/data";
+  import { PRIORITIES, taskHref } from "$lib/work";
+  import {
+    ACTION_LABELS,
+    ACTION_TEXT,
+    actionsFor,
+    draftOf,
+    editOf,
+    failureOf,
+    runAction,
+    unblockedTasks,
+    type ActionFailure,
+    type TaskAction,
+    type TaskDraft,
+  } from "./actions";
   import { inheritedGroups, propertiesOf, reasonSegments, titlesOf } from "./view";
 
-  let { detail, workHref, panelOpen = $bindable(true) }: TaskDetailProps = $props();
+  let { detail, workHref, panelOpen = $bindable(true), onchanged }: TaskDetailProps = $props();
   let showSource = $state(false);
+
+  /** The action running now, or `"edit"` while an edit saves. */
+  let busy = $state<TaskAction | "edit" | null>(null);
+  /** The action whose Markdown form is open. */
+  let asking = $state<TaskAction | null>(null);
+  let text = $state("");
+  /** The last failed action and how it failed, shown next to that action. */
+  let failure = $state<{ action: TaskAction | "edit"; failure: ActionFailure } | null>(null);
+  /** The tasks the last completion unblocked, by ID. */
+  let unblocked = $state<string[] | null>(null);
+  let draft = $state<TaskDraft | null>(null);
+  /** Why the task did not reload after a saved change. */
+  let stale = $state<ActionFailure | null>(null);
+
+  const priorities = PRIORITIES.map((priority) => ({ value: priority, label: priority[0].toUpperCase() + priority.slice(1) }));
 
   let task = $derived(detail.task);
   let titles = $derived(titlesOf(detail));
   let inherited = $derived(inheritedGroups(detail));
   let reasons = $derived(detail.readiness.reasons);
   let reasonCount = $derived(reasons.length === 1 ? "1 reason" : `${reasons.length} reasons`);
+  let actions = $derived(actionsFor(task.status));
+  let edit = $derived(draft === null ? {} : editOf(task, draft));
+
+  /** Run `action`, or open its Markdown form first when it takes text. */
+  function choose(action: TaskAction) {
+    failure = null;
+    unblocked = null;
+    if (ACTION_TEXT[action] !== undefined && asking !== action) {
+      asking = action;
+      text = "";
+      return;
+    }
+    void perform(action, () => runAction(dataSource(), task.id, action, text), (result) => {
+      asking = null;
+      if (action === "complete") unblocked = result.unblocked;
+    });
+  }
+
+  function saveEdit(event: SubmitEvent) {
+    event.preventDefault();
+    failure = null;
+    unblocked = null;
+    void perform("edit", () => dataSource().updateTask(task.id, edit), () => (draft = null));
+  }
+
+  /**
+   * Run `change`, reload the task, then call `done`. A failed change stays
+   * next to `action`; a failed reload after a saved change says so.
+   */
+  async function perform<T>(action: TaskAction | "edit", change: () => Promise<T>, done: (result: T) => void) {
+    busy = action;
+    stale = null;
+    try {
+      const result = await change();
+      await onchanged?.().catch((error: unknown) => (stale = failureOf(error)));
+      done(result);
+    } catch (error) {
+      failure = { action, failure: failureOf(error) };
+    } finally {
+      busy = null;
+    }
+  }
 </script>
+
+{#snippet failed(action: TaskAction | "edit", what: string)}
+  {#if failure?.action === action}
+    <Feedback tone="danger" title={`Could not ${what}`} message={`${failure.failure.message} (${failure.failure.code})`} />
+  {/if}
+{/snippet}
 
 {#snippet relation(related: Task)}
   <li>
@@ -50,7 +128,50 @@
     <header>
       <code class="id">{task.id}</code>
       <h1 id="task-title">{task.title}</h1>
-      <!-- T18.4 adds the start, complete and handoff actions here. -->
+      <div class="actions" role="group" aria-label="Task actions">
+        {#each actions as action, index (action)}
+          <Button
+            label={ACTION_LABELS[action]}
+            variant={index === 0 ? "primary" : "secondary"}
+            busy={busy === action}
+            disabled={busy !== null}
+            aria-expanded={ACTION_TEXT[action] === undefined ? undefined : asking === action}
+            onclick={() => choose(action)}
+          />
+        {/each}
+        {#if draft === null}
+          <Button label="Edit" variant="ghost" disabled={busy !== null} onclick={() => ((draft = draftOf(task)), (failure = null), (unblocked = null))} />
+        {/if}
+      </div>
+      {#if asking !== null}
+        {@const label = ACTION_TEXT[asking] ?? ""}
+        <form class="ask" aria-label={ACTION_LABELS[asking]} onsubmit={(event) => (event.preventDefault(), choose(asking!))}>
+          <MarkdownEditor value={text} label={`${label} Markdown`} readonly={false} onchange={(value) => (text = value)} />
+          <div class="buttons">
+            <Button type="submit" variant="primary" label={ACTION_LABELS[asking]} busy={busy === asking} disabled={busy !== null} />
+            <Button label="Cancel" variant="ghost" disabled={busy !== null} onclick={() => ((asking = null), (failure = null))} />
+          </div>
+        </form>
+      {/if}
+      {#if stale !== null}
+        <Feedback tone="warning" title="The change is saved, but this view did not reload" message={`${stale.message} (${stale.code})`} />
+      {/if}
+      {#each actions as action (action)}{@render failed(action, `${ACTION_LABELS[action].toLowerCase()} this task`)}{/each}
+      {#if unblocked !== null}
+        <div class="notice" role="status" aria-label="Completed">
+          <strong>Completed.</strong>
+          {#if unblocked.length}
+            Unblocked:
+            <ul>
+              {#each unblockedTasks(unblocked, detail) as ready (ready.id)}
+                <li><a href={taskHref(ready.id)}>{ready.title}</a> <code>{ready.id}</code></li>
+              {/each}
+            </ul>
+          {:else}
+            No task was waiting on this one.
+          {/if}
+        </div>
+      {/if}
     </header>
 
     <section class="readiness" data-ready={detail.readiness.ready} aria-label="Readiness">
@@ -72,23 +193,38 @@
       {/if}
     </section>
 
-    <section aria-labelledby="task-description">
-      <div class="section-head">
-        <h2 id="task-description">Description</h2>
-        {#if task.body}
-          <button type="button" class="link-button" aria-pressed={showSource} onclick={() => (showSource = !showSource)}>
-            {showSource ? "Show rendered" : "View Markdown"}
-          </button>
+    {#if draft !== null}
+      <form class="edit" aria-labelledby="task-edit" onsubmit={saveEdit}>
+        <h2 id="task-edit">Edit task</h2>
+        <Field label="Title" bind:value={draft.title} required />
+        <SelectMenu label="Priority" options={priorities} value={draft.priority} onchange={(value) => draft && (draft.priority = value as TaskDraft["priority"])} />
+        <span class="label">Description</span>
+        <MarkdownEditor value={draft.body} label="Description Markdown" readonly={false} onchange={(value) => draft && (draft.body = value)} />
+        <div class="buttons">
+          <Button type="submit" variant="primary" label="Save" busy={busy === "edit"} disabled={busy !== null || Object.keys(edit).length === 0} />
+          <Button label="Cancel" variant="ghost" disabled={busy !== null} onclick={() => ((draft = null), (failure = null))} />
+        </div>
+        {@render failed("edit", "save the task")}
+      </form>
+    {:else}
+      <section aria-labelledby="task-description">
+        <div class="section-head">
+          <h2 id="task-description">Description</h2>
+          {#if task.body}
+            <button type="button" class="link-button" aria-pressed={showSource} onclick={() => (showSource = !showSource)}>
+              {showSource ? "Show rendered" : "View Markdown"}
+            </button>
+          {/if}
+        </div>
+        {#if !task.body}
+          <p class="muted">No description.</p>
+        {:else if showSource}
+          <MarkdownEditor value={task.body} label="Description Markdown" />
+        {:else}
+          <Markdown source={task.body} label="Description" />
         {/if}
-      </div>
-      {#if !task.body}
-        <p class="muted">No description.</p>
-      {:else if showSource}
-        <MarkdownEditor value={task.body} label="Description Markdown" />
-      {:else}
-        <Markdown source={task.body} label="Description" />
-      {/if}
-    </section>
+      </section>
+    {/if}
 
     {#if detail.blockers.length || inherited.length}
       <section aria-labelledby="task-blockers">
@@ -179,6 +315,14 @@
   .relations a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .relations code { color: var(--arcl-text-muted); font: var(--arcl-type-xs) var(--arcl-font-code); }
   .entry + .entry { margin-top: var(--arcl-space-2); }
+  .actions, .buttons { display: flex; flex-wrap: wrap; gap: var(--arcl-space-2); margin-top: var(--arcl-space-2); }
+  .ask, .edit { display: grid; gap: var(--arcl-space-3); margin-top: var(--arcl-space-2); }
+  .edit .buttons { margin-top: 0; }
+  .label { color: var(--arcl-text-muted); font: 600 var(--arcl-type-sm) / 1.3 var(--arcl-font-ui); }
+  .notice { margin-top: var(--arcl-space-2); padding: var(--arcl-space-3) var(--arcl-space-4); border-inline-start: 4px solid var(--arcl-success); border-radius: var(--arcl-radius-sm); background: var(--arcl-success-surface); font-size: var(--arcl-type-sm); }
+  .notice ul { margin: var(--arcl-space-1) 0 0; padding-inline-start: 1.25rem; }
+  .notice a { color: var(--arcl-link); }
+  .notice code { color: var(--arcl-text-muted); font: var(--arcl-type-xs) var(--arcl-font-code); }
   @media (max-width: 60rem) {
     .layout, .layout[data-panel="closed"] { grid-template-columns: minmax(0, 1fr); }
     .panel { position: static; grid-row: 1; }

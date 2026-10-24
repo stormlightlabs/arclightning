@@ -198,29 +198,56 @@ See [Inspecting Work](/guides/inspect-work/) for the query workflow and context 
 
 ## Web app
 
-`arcl serve` serves the web app and its read endpoints on `127.0.0.1`, on an
+`arcl serve` serves the web app and its endpoints on `127.0.0.1`, on an
 ephemeral port unless `--port` pins one. It prints the URL to open, which
 carries a per-run token for the first page load. The app moves the token out
 of the URL and sends it in the `X-Arcl-Token` header on every later request.
-The server refuses a request without the token, with a `Host` header that does
-not name the server, or with a method other than GET. Responses carry no CORS
+The server refuses a request without the token or with a `Host` header that
+does not name the server. Reads take GET and changes take POST; the server
+refuses any other method, so a GET never changes records. A change also needs
+an `Origin` header naming the server, which stops other pages, including
+those on other `127.0.0.1` ports, from sending one. Responses carry no CORS
 headers. The server runs until interrupted.
 
-| Endpoint                      | Same JSON as             |
-| ----------------------------- | ------------------------ |
-| `GET /api/records`            | `arcl list`              |
-| `GET /api/records/<id>`       | `arcl show <id>`         |
-| `GET /api/ready`              | `arcl ready`             |
-| `GET /api/tasks/<id>/explain` | `arcl explain <task-id>` |
-| `GET /api/tasks/<id>/context` | `arcl context <task-id>` |
+| Endpoint                        | Same JSON as             |
+| ------------------------------- | ------------------------ |
+| `GET /api/records`              | `arcl list`              |
+| `GET /api/records/<id>`         | `arcl show <id>`         |
+| `GET /api/ready`                | `arcl ready`             |
+| `GET /api/tasks/<id>/explain`   | `arcl explain <task-id>` |
+| `GET /api/tasks/<id>/context`   | `arcl context <task-id>` |
+| `POST /api/tasks`               | `arcl task create`       |
+| `POST /api/tasks/<id>/update`   | `arcl task update`       |
+| `POST /api/tasks/<id>/start`    | `arcl task start`        |
+| `POST /api/tasks/<id>/park`     | `arcl task park`         |
+| `POST /api/tasks/<id>/unpark`   | `arcl task unpark`       |
+| `POST /api/tasks/<id>/handoff`  | `arcl task handoff`      |
+| `POST /api/tasks/<id>/complete` | `arcl task complete`     |
 
 `/api/records` and `/api/ready` take the command's flags as query parameters,
-such as `?kind=task&status=pending&status=parked`. A failure returns the CLI's
-error envelope with status 400 for exit codes 2 and 3, 404 for 5, 409 for 4,
-and 500 otherwise. The server reads the database without syncing the
-workspace, and a read never changes records; opening the database can still
-run its migrations. Any other `arcl` command syncs the workspace. Outside a
-project, `arcl serve` exits with code 3 before it binds.
+such as `?kind=task&status=pending&status=parked`. A POST takes a JSON object
+of the command's options, named like its flags with `_` for `-`:
+
+| Endpoint   | Options                                                                   |
+| ---------- | ------------------------------------------------------------------------- |
+| `tasks`    | `title` (required), `body`, `priority`, `parent`, `spec`, `plan`, `phase` |
+| `update`   | `title`, `body`, `priority`                                               |
+| `start`    | `force`                                                                   |
+| `handoff`  | `note`                                                                    |
+| `complete` | `evidence`, `allow_open_children`, `with_subtasks`                        |
+
+`park` and `unpark` take an empty body or `{}`. An unknown option, a body that
+is not JSON, or a body over 1 MiB is refused. A failure returns the CLI's error
+envelope with status 400 for exit codes 2 and 3, 404 for 5, 409 for 4, and 500
+otherwise.
+
+A read opens the database without syncing the workspace and never changes
+records; opening the database can still run its migrations. A change runs as
+the CLI runs it: under the project's sync lock, after a sync that must
+succeed, followed by a sync that exports it. The server prints their
+warnings to stderr. Other `arcl` commands run while it serves, and wait only
+while a change holds the lock. Outside a project, `arcl serve` exits with code
+3 before it binds.
 
 The Work view lists every task by milestone, then by status, in the order
 `arcl tree` gives: milestones by plan and position, and tasks by position,
@@ -230,7 +257,8 @@ opens the task. Filters narrow the list by status, priority, milestone and
 readiness: ready, blocked by an incomplete task, or waiting for another
 reason, such as open subtasks. The page URL keeps the filters. A task deleted
 while the list loads is left out; any other failed read shows an error with a
-Retry button.
+Retry button. **New task** opens a form for the title, priority and
+description, creates the task with `arcl task create`, and opens it.
 
 The Task view shows what `arcl show <task-id>` returns: why the task is not
 ready, its direct blockers, the blockers it inherits from each ancestor, its
@@ -239,7 +267,17 @@ task it names links to that task's view. The description renders as Markdown,
 and **View Markdown** opens the source in a read-only editor. The properties
 panel lists status, readiness, priority, parent, spec, plan and phase; `]`
 collapses and expands it. `Escape` returns to the Work list with its filters
-and the task selected. The view only reads records.
+and the task selected.
+
+Buttons under the title change the task. A pending task offers Start and
+Park, an in-progress task Complete, Hand off and Park, and a parked task
+Unpark. Complete asks for optional Markdown evidence and Hand off for a
+Markdown note, which parks the task. **Edit** opens the title, priority and
+description in a writable editor; Save sends only the fields that changed.
+Each change runs the `arcl task` command of the same name, so the CLI's
+validation applies. A refused change shows the CLI's message and error code
+next to its button. After a change the view reloads the task, and after a
+completion it lists the tasks the completion made ready.
 
 `arcl` embeds the web app from `apps/web/build` when it compiles. That build is
 not committed, so `cargo install --git` produces an `arcl` whose `serve` shows

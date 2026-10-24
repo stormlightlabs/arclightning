@@ -64,6 +64,28 @@ describe("TaskDetail", () => {
     expect(slice(body, 'id="task-unblocks"', "</section>")).toContain('href="/tasks/t-10.5"');
   });
 
+  it("offers the actions the task's status allows, with Edit", () => {
+    const buttons = (status: "pending" | "in_progress" | "parked" | "completed") => {
+      const detail = blockedDetail();
+      detail.task.status = status;
+      return [...slice(show({}, detail), 'aria-label="Task actions"', "</div>").matchAll(/<button[^>]*>\s*<span>([^<]*)<\/span>/g)].map((match) => match[1].trim());
+    };
+    expect(buttons("pending")).toEqual(["Start", "Park", "Edit"]);
+    expect(buttons("in_progress")).toEqual(["Complete", "Hand off", "Park", "Edit"]);
+    expect(buttons("parked")).toEqual(["Unpark", "Edit"]);
+    expect(buttons("completed")).toEqual(["Edit"]);
+  });
+
+  it("marks Complete and Hand off as opening a Markdown form", () => {
+    const detail = blockedDetail();
+    detail.task.status = "in_progress";
+    const actions = slice(show({}, detail), 'aria-label="Task actions"', "</div>");
+    for (const label of ["Complete", "Hand off"]) {
+      expect(actions).toMatch(new RegExp(`<button[^>]*aria-expanded="false"[^>]*>\\s*<span>${label}<`));
+    }
+    expect(actions).not.toMatch(/<button[^>]*aria-expanded[^>]*>\s*<span>Park</);
+  });
+
   it("expands or collapses the properties panel with its state", () => {
     const open = show({ panelOpen: true });
     expect(open).toContain('aria-expanded="true"');
