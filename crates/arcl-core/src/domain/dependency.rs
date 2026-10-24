@@ -531,6 +531,24 @@ mod tests {
         assert!(!violations[2].involves(&edge(a, b)));
     }
 
+    #[test]
+    fn caused_cycle_is_the_shortest_through_the_new_edge_wherever_it_is_listed() {
+        let (x, y, z) = (TaskId::new(), TaskId::new(), TaskId::new());
+        let new = edge(x, y);
+        // Searched first, `z -> x` would cover `x -> y` with the longer
+        // cycle through `z`, and the refusal would name that cycle.
+        let edges = [edge(z, x), edge(y, z), edge(y, x), new];
+        let shortest = EdgeViolation::Cycle { path: vec![x, y, x] };
+        assert_eq!(
+            caused_violation(&HashMap::new(), &edges, &[new], &[]),
+            Some(shortest.clone())
+        );
+        let (caused, existing) = partition_violations(&HashMap::new(), &edges, &[new], &[]);
+        assert_eq!(caused.first(), Some(&shortest));
+        assert!(caused.iter().all(|cycle| cycle.involves(&new)));
+        assert!(existing.is_empty(), "{existing:?}");
+    }
+
     /// The validator before it skipped covered edges: a shortest-cycle search
     /// from every edge, keeping each distinct cycle once.
     fn reference(parents: &HashMap<TaskId, TaskId>, edges: &[TaskDependency]) -> Vec<EdgeViolation> {
