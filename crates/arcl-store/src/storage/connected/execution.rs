@@ -5,8 +5,8 @@ use serde::Serialize;
 
 use super::{Result, StorageError, phases, planning_dependencies, planning_task, planning_tasks, specs};
 use arcl_core::domain::{
-    ContainerStatus, DomainError, Phase, PhaseId, Plan, PlanId, PlanningTask, ProjectId, Spec, SpecId, TaskAction,
-    TaskDependency, TaskId, TaskPriority, TaskStatus,
+    ContainerStatus, DomainError, EdgeViolation, Phase, PhaseId, Plan, PlanId, PlanningTask, ProjectId, Spec, SpecId,
+    TaskAction, TaskDependency, TaskId, TaskPriority, TaskStatus, validate_blocker_edges,
 };
 
 /// Optional filters for connected-model ready work.
@@ -120,6 +120,8 @@ struct PlanningData {
     plans: HashMap<PlanId, Plan>,
     phases: HashMap<PhaseId, Phase>,
     dependencies: Vec<TaskDependency>,
+    /// Every blocker rule violation already stored in the project.
+    violations: Vec<EdgeViolation>,
 }
 
 /// Compute ready leaf tasks without requiring a plan, phase, or milestone.
@@ -379,11 +381,18 @@ pub(super) fn validate_task_graph_candidates(
 }
 
 fn load_data(connection: &Connection, project_id: ProjectId) -> Result<PlanningData> {
+    let tasks: HashMap<TaskId, PlanningTask> = planning_tasks(connection, project_id)?
+        .into_iter()
+        .map(|task| (task.id, task))
+        .collect();
+    let dependencies = planning_dependencies(connection, project_id)?;
+    let parents = tasks
+        .values()
+        .filter_map(|task| Some((task.id, task.parent_id?)))
+        .collect();
+    let violations = validate_blocker_edges(&parents, &dependencies);
     Ok(PlanningData {
-        tasks: planning_tasks(connection, project_id)?
-            .into_iter()
-            .map(|task| (task.id, task))
-            .collect(),
+        tasks,
         specs: specs(connection, project_id)?
             .into_iter()
             .map(|spec| (spec.id, spec))
@@ -396,7 +405,8 @@ fn load_data(connection: &Connection, project_id: ProjectId) -> Result<PlanningD
             .into_iter()
             .map(|phase| (phase.id, phase))
             .collect(),
-        dependencies: planning_dependencies(connection, project_id)?,
+        dependencies,
+        violations,
     })
 }
 
@@ -601,7 +611,23 @@ fn readiness(data: &PlanningData, task: &PlanningTask, ancestry: &Ancestry) -> R
             }
         }
     }
+    reasons.extend(invalid_edge_reasons(data, task.id));
     Ok(PlanningReadiness { ready: reasons.is_empty(), blocked, reasons })
+}
+
+/// Describe each stored blocker rule violation that involves one of the
+/// task's own blocker edges, once per violation, in the same words `check`
+/// uses for it.
+fn invalid_edge_reasons(data: &PlanningData, task_id: TaskId) -> Vec<String> {
+    data.violations
+        .iter()
+        .filter(|violation| {
+            data.dependencies
+                .iter()
+                .any(|dependency| dependency.task_id == task_id && violation.involves(dependency))
+        })
+        .map(ToString::to_string)
+        .collect()
 }
 
 /// Explain why one blocker edge holds a task back, or return `None` once the
@@ -765,6 +791,80 @@ mod tests {
                 position: 0,
             })
             .expect("child creates")
+    }
+
+    /// Store a blocker edge the way an older or hand-edited database holds it,
+    /// bypassing the validator that refuses it today.
+    fn insert_raw_edge(database: &Database, project_id: ProjectId, task_id: TaskId, blocker_id: TaskId) {
+        database
+            .connection()
+            .execute(
+                "INSERT INTO planning_task_dependencies (project_id, task_id, blocker_id) VALUES (?1, ?2, ?3)",
+                params![project_id.to_string(), task_id.to_string(), blocker_id.to_string()],
+            )
+            .expect("dependency inserts");
+    }
+
+    #[test]
+    fn invalid_edge_cycle_is_reported_once_by_check_and_by_readiness() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let a = task(&mut database, project.id, "a");
+        let b = task(&mut database, project.id, "b");
+        let c = task(&mut database, project.id, "c");
+        insert_raw_edge(&database, project.id, a.id, b.id);
+        insert_raw_edge(&database, project.id, b.id, c.id);
+        insert_raw_edge(&database, project.id, c.id, a.id);
+        // With its blocker completed, `c` would be ready but for the cycle.
+        database
+            .connection()
+            .execute(
+                "UPDATE planning_tasks SET status = 'completed' WHERE id = ?1",
+                [a.id.to_string()],
+            )
+            .expect("status updates");
+        let cycle = format!(
+            "blocker cycle: {} -> {} -> {} -> {}; each task is blocked by the next",
+            a.id, b.id, c.id, a.id
+        );
+
+        let report = database.check().expect("check runs");
+        assert!(!report.valid);
+        assert_eq!(report.errors, vec![cycle.clone()]);
+
+        let view = database.planning_task_view(c.id).expect("view reads");
+        assert!(!view.readiness.ready);
+        assert_eq!(view.readiness.reasons, vec![cycle.clone()]);
+        let view = database.planning_task_view(b.id).expect("view reads");
+        assert!(view.readiness.reasons.contains(&cycle));
+        let ready = database.ready_planning_tasks().expect("ready tasks query");
+        assert!(!ready.iter().any(|value| value.id == c.id));
+    }
+
+    #[test]
+    fn invalid_edge_to_an_ancestor_is_reported_by_check_and_by_readiness() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let root = task(&mut database, project.id, "root");
+        let middle = child(&mut database, project.id, root.id, "middle");
+        let leaf = child(&mut database, project.id, middle.id, "leaf");
+        insert_raw_edge(&database, project.id, leaf.id, root.id);
+        let ancestry = format!(
+            "task `{}` is blocked by `{}`, its ancestor; parent chain: {} -> {} -> {}",
+            leaf.id, root.id, leaf.id, middle.id, root.id
+        );
+
+        let report = database.check().expect("check runs");
+        assert!(!report.valid);
+        assert_eq!(report.errors, vec![ancestry.clone()]);
+
+        let view = database.planning_task_view(leaf.id).expect("view reads");
+        assert!(!view.readiness.ready);
+        assert!(
+            view.readiness.reasons.contains(&ancestry),
+            "{:?}",
+            view.readiness.reasons
+        );
     }
 
     #[test]

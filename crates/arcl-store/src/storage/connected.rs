@@ -209,10 +209,17 @@ pub fn check(connection: &Connection) -> Result<CheckReport> {
         if has_parent_cycle(&graph.tasks, task.id) {
             errors.push(format!("parent cycle includes `{}`", task.id));
         }
-        if has_dependency_cycle(&graph.dependencies, task.id) {
-            errors.push(format!("dependency cycle includes `{}`", task.id));
-        }
     }
+    let parents = graph
+        .tasks
+        .iter()
+        .filter_map(|task| Some((task.id, task.parent_id?)))
+        .collect();
+    errors.extend(
+        validate_blocker_edges(&parents, &graph.dependencies)
+            .iter()
+            .map(ToString::to_string),
+    );
     Ok(CheckReport { valid: errors.is_empty(), errors })
 }
 
@@ -1578,28 +1585,6 @@ fn has_parent_cycle(tasks: &[PlanningTask], start: TaskId) -> bool {
         current = tasks.iter().find(|task| task.id == id).and_then(|task| task.parent_id);
     }
     false
-}
-
-fn has_dependency_cycle(dependencies: &[TaskDependency], start: TaskId) -> bool {
-    fn visit(
-        dependencies: &[TaskDependency], current: TaskId, visited: &mut HashSet<TaskId>, active: &mut HashSet<TaskId>,
-    ) -> bool {
-        if active.contains(&current) {
-            return true;
-        }
-        if !visited.insert(current) {
-            return false;
-        }
-        active.insert(current);
-        let cycle = dependencies
-            .iter()
-            .filter(|edge| edge.task_id == current)
-            .any(|edge| visit(dependencies, edge.blocker_id, visited, active));
-        active.remove(&current);
-        cycle
-    }
-
-    visit(dependencies, start, &mut HashSet::new(), &mut HashSet::new())
 }
 
 #[cfg(test)]

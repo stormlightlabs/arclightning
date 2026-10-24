@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt;
 
 use serde::Serialize;
 
@@ -83,6 +84,25 @@ impl EdgeViolation {
                 kinship: kinship.as_str(),
                 chain: chain.iter().map(ToString::to_string).collect(),
             },
+        }
+    }
+}
+
+/// Describes a violation that already exists in the graph, with the same
+/// path or chain [`EdgeViolation::to_error`] reports when refusing an edge.
+impl fmt::Display for EdgeViolation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let join = |ids: &[TaskId]| ids.iter().map(ToString::to_string).collect::<Vec<_>>().join(" -> ");
+        match self {
+            Self::Cycle { path } => write!(f, "blocker cycle: {}; each task is blocked by the next", join(path)),
+            Self::Ancestry { edge, kinship, chain } => write!(
+                f,
+                "task `{}` is blocked by `{}`, its {}; parent chain: {}",
+                edge.task_id,
+                edge.blocker_id,
+                kinship.as_str(),
+                join(chain)
+            ),
         }
     }
 }
@@ -221,6 +241,10 @@ mod tests {
             rotated.to_error().to_string(),
             format!("blocker edges would form a cycle: {c} -> {a} -> {b} -> {c}; each task is blocked by the next")
         );
+        assert_eq!(
+            rotated.to_string(),
+            format!("blocker cycle: {c} -> {a} -> {b} -> {c}; each task is blocked by the next")
+        );
     }
 
     #[test]
@@ -241,6 +265,10 @@ mod tests {
             format!(
                 "task `{leaf}` cannot be blocked by `{root}`, its ancestor; parent chain: {leaf} -> {middle} -> {root}"
             )
+        );
+        assert_eq!(
+            violations[0].to_string(),
+            format!("task `{leaf}` is blocked by `{root}`, its ancestor; parent chain: {leaf} -> {middle} -> {root}")
         );
     }
 
