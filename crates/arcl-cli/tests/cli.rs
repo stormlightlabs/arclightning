@@ -1374,6 +1374,236 @@ fn create_task(directory: &Path, title: &str, parent: Option<&str>) -> String {
         .to_owned()
 }
 
+fn ready_ids(directory: &Path) -> Vec<String> {
+    run_json(directory, ["--json", "ready"].as_ref())["data"]["tasks"]
+        .as_array()
+        .expect("ready tasks")
+        .iter()
+        .map(|task| task["id"].as_str().expect("ready task ID").to_owned())
+        .collect()
+}
+
+fn readiness(directory: &Path, task_id: &str) -> Value {
+    run_json(directory, ["--json", "explain", task_id].as_ref())["data"]["readiness"].clone()
+}
+
+#[test]
+fn readiness_inherits_a_blocker_through_two_levels_of_parents() {
+    let directory = initialized_directory();
+    let blocker = create_task(directory.path(), "Blocker", None);
+    let grandparent = create_task(directory.path(), "Grandparent", None);
+    let parent = create_task(directory.path(), "Parent", Some(&grandparent));
+    let leaf = create_task(directory.path(), "Leaf", Some(&parent));
+    run_json(
+        directory.path(),
+        ["--json", "dependency", "add", &grandparent, "--blocked-by", &blocker].as_ref(),
+    );
+
+    let readiness = readiness(directory.path(), &leaf);
+    assert_eq!(readiness["ready"], false);
+    assert_eq!(readiness["blocked"], true);
+    assert_eq!(
+        readiness["reasons"],
+        serde_json::json!([format!("ancestor `{grandparent}` is blocked by `{blocker}` (pending)")])
+    );
+    assert_eq!(ready_ids(directory.path()), vec![blocker]);
+
+    let explained = arcl_in(directory.path())
+        .args(["--color", "never", "explain", &leaf])
+        .output()
+        .expect("explain runs");
+    assert!(explained.status.success());
+    assert!(
+        String::from_utf8_lossy(&explained.stdout).contains(&format!("Reason: ancestor `{grandparent}` is blocked by"))
+    );
+}
+
+#[test]
+fn readiness_asks_to_replace_a_cancelled_direct_blocker() {
+    let directory = initialized_directory();
+    let blocker = create_task(directory.path(), "Blocker", None);
+    let task = create_task(directory.path(), "Task", None);
+    run_json(
+        directory.path(),
+        ["--json", "dependency", "add", &task, "--blocked-by", &blocker].as_ref(),
+    );
+    run_json(directory.path(), ["--json", "task", "cancel", &blocker].as_ref());
+
+    let readiness = readiness(directory.path(), &task);
+    assert_eq!(readiness["blocked"], true);
+    assert_eq!(
+        readiness["reasons"],
+        serde_json::json!([format!(
+            "blocked by cancelled `{blocker}`; remove or replace the dependency"
+        )])
+    );
+    assert!(ready_ids(directory.path()).is_empty());
+}
+
+#[test]
+fn readiness_asks_to_replace_a_cancelled_inherited_blocker() {
+    let directory = initialized_directory();
+    let blocker = create_task(directory.path(), "Blocker", None);
+    let parent = create_task(directory.path(), "Parent", None);
+    let leaf = create_task(directory.path(), "Leaf", Some(&parent));
+    run_json(
+        directory.path(),
+        ["--json", "dependency", "add", &parent, "--blocked-by", &blocker].as_ref(),
+    );
+    run_json(directory.path(), ["--json", "task", "cancel", &blocker].as_ref());
+
+    let readiness = readiness(directory.path(), &leaf);
+    assert_eq!(readiness["blocked"], true);
+    assert_eq!(
+        readiness["reasons"],
+        serde_json::json!([format!(
+            "ancestor `{parent}` is blocked by cancelled `{blocker}`; remove or replace the dependency"
+        )])
+    );
+    assert!(ready_ids(directory.path()).is_empty());
+}
+
+#[test]
+fn readiness_returns_when_the_ancestor_blocker_completes() {
+    let directory = initialized_directory();
+    let blocker = create_task(directory.path(), "Blocker", None);
+    let parent = create_task(directory.path(), "Parent", None);
+    let leaf = create_task(directory.path(), "Leaf", Some(&parent));
+    run_json(
+        directory.path(),
+        ["--json", "dependency", "add", &parent, "--blocked-by", &blocker].as_ref(),
+    );
+    assert!(!ready_ids(directory.path()).contains(&leaf));
+
+    run_json(directory.path(), ["--json", "task", "complete", &blocker].as_ref());
+
+    let readiness = readiness(directory.path(), &leaf);
+    assert_eq!(readiness["ready"], true);
+    assert_eq!(readiness["blocked"], false);
+    assert_eq!(ready_ids(directory.path()), vec![leaf]);
+}
+
+fn stdout_of(directory: &Path, args: &[&str]) -> String {
+    let output = arcl_in(directory).args(args).output().expect("arcl runs");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    String::from_utf8(output.stdout).expect("stdout is UTF-8")
+}
+
+#[test]
+fn explain_and_context_list_a_blocker_inherited_through_a_grandparent() {
+    let directory = initialized_directory();
+    let blocker = create_task(directory.path(), "Blocker", None);
+    let grandparent = create_task(directory.path(), "Grandparent", None);
+    let parent = create_task(directory.path(), "Parent", Some(&grandparent));
+    let leaf = create_task(directory.path(), "Leaf", Some(&parent));
+    run_json(
+        directory.path(),
+        ["--json", "dependency", "add", &grandparent, "--blocked-by", &blocker].as_ref(),
+    );
+
+    let explained = run_json(directory.path(), ["--json", "explain", &leaf].as_ref());
+    assert_eq!(explained["data"]["blockers"], serde_json::json!([]));
+    assert_eq!(
+        explained["data"]["inherited_blockers"][0]["task"]["id"],
+        blocker.as_str()
+    );
+    assert_eq!(
+        explained["data"]["inherited_blockers"][0]["ancestor"],
+        grandparent.as_str()
+    );
+    assert_eq!(
+        explained["data"]["readiness"]["reasons"],
+        serde_json::json!([format!("ancestor `{grandparent}` is blocked by `{blocker}` (pending)")])
+    );
+
+    let human = stdout_of(directory.path(), &["--color", "never", "explain", &leaf]);
+    assert!(
+        human.contains(&format!("Blockers: {blocker} (via `{grandparent}`)")),
+        "{human}"
+    );
+    let plain = stdout_of(directory.path(), &["--plain", "explain", &leaf]);
+    assert!(plain.contains("blockers\t\n"), "{plain}");
+    assert!(
+        plain.contains(&format!("inherited\t{blocker}\t{grandparent}")),
+        "{plain}"
+    );
+
+    run_json(
+        directory.path(),
+        ["--json", "task", "complete", &blocker, "--evidence", "Shipped"].as_ref(),
+    );
+    let plain = stdout_of(directory.path(), &["--plain", "context", &leaf]);
+    assert!(!plain.contains("\nblocker\t"), "{plain}");
+    assert!(
+        plain.contains(&format!("inherited_blocker\t{blocker}\tcompleted\t{grandparent}")),
+        "{plain}"
+    );
+    let human = stdout_of(directory.path(), &["--color", "never", "context", &leaf]);
+    assert!(
+        human.contains(&format!("Blocker: {blocker} [completed] via `{grandparent}`")),
+        "{human}"
+    );
+
+    let context = run_json(directory.path(), ["--json", "context", &leaf].as_ref());
+    assert_eq!(context["data"]["blockers"], serde_json::json!([]));
+    assert_eq!(
+        context["data"]["completion_evidence"][0]["task"]["id"],
+        blocker.as_str()
+    );
+    assert_eq!(context["data"]["completion_evidence"][0]["evidence"], "Shipped");
+    assert_eq!(
+        context["data"]["completion_evidence"][0]["ancestor"],
+        grandparent.as_str()
+    );
+}
+
+#[test]
+fn explain_json_omits_the_ancestor_of_a_direct_blocker() {
+    let directory = initialized_directory();
+    let blocker = create_task(directory.path(), "Blocker", None);
+    let task = create_task(directory.path(), "Task", None);
+    run_json(
+        directory.path(),
+        ["--json", "dependency", "add", &task, "--blocked-by", &blocker].as_ref(),
+    );
+
+    let explained = run_json(directory.path(), ["--json", "explain", &task].as_ref());
+    assert_eq!(explained["data"]["blockers"][0]["task"]["id"], blocker.as_str());
+    assert!(explained["data"]["blockers"][0].get("ancestor").is_none());
+    assert_eq!(explained["data"]["inherited_blockers"], serde_json::json!([]));
+
+    let plain = stdout_of(directory.path(), &["--plain", "explain", &task]);
+    assert!(plain.contains(&format!("blockers\t{blocker}\n")), "{plain}");
+    assert!(!plain.contains("inherited\t"), "{plain}");
+    let plain = stdout_of(directory.path(), &["--plain", "context", &task]);
+    assert!(plain.contains(&format!("\nblocker\t{blocker}\tpending\n")), "{plain}");
+}
+
+#[test]
+fn a_parent_blocked_by_its_own_child_leaves_the_child_ready() {
+    let directory = initialized_directory();
+    let parent = create_task(directory.path(), "Parent", None);
+    let leaf = create_task(directory.path(), "Leaf", Some(&parent));
+    // `dependency add` refuses this edge, so insert it as an older project would hold it.
+    let database = rusqlite::Connection::open(directory.path().join(".arcl/arcl.db")).expect("database opens");
+    database
+        .execute(
+            "INSERT INTO planning_task_dependencies (project_id, task_id, blocker_id)
+             SELECT project_id, ?1, ?2 FROM planning_tasks WHERE id = ?1",
+            [&parent, &leaf],
+        )
+        .expect("bad edge inserts");
+    drop(database);
+
+    assert_eq!(ready_ids(directory.path()), vec![leaf.clone()]);
+    let explained = run_json(directory.path(), ["--json", "explain", &leaf].as_ref());
+    assert_eq!(explained["data"]["readiness"]["ready"], true);
+    assert_eq!(explained["data"]["readiness"]["reasons"], serde_json::json!([]));
+    assert_eq!(explained["data"]["inherited_blockers"], serde_json::json!([]));
+    let human = stdout_of(directory.path(), &["--color", "never", "explain", &leaf]);
+    assert!(human.contains("Blockers: \n"), "{human}");
+}
+
 /// Run a command that must fail with exit code 3 and return its error message.
 fn refused_message(directory: &Path, args: &[&str]) -> String {
     let output = arcl_in(directory).args(args).output().expect("command runs");
