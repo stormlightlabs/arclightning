@@ -8,7 +8,7 @@ use std::{
 use thiserror::Error;
 
 use arcl_core::domain::*;
-use arcl_store::{ConnectedGraph, Database, StorageError, WorkspaceBaseFile};
+use arcl_store::{ConnectedGraph, DataVersion, Database, StorageError, WorkspaceBaseFile};
 
 use super::{
     CaptureRecord, NoteRecord, PhaseRecord, PlanRecord, ReleaseRecord, SpecRecord, TaskRecord, WorkspaceError,
@@ -322,15 +322,20 @@ type Result<T> = std::result::Result<T, WorkspaceImportError>;
 /// Blocker rules are checked against the database graph the import replaces.
 /// The import refuses a violation that a workspace edge or parent link new to
 /// the database causes. Violations already in the database load and come back
-/// as warnings. A database with no tasks has nothing to compare against, so
-/// every violation loads with a warning.
+/// as warnings. A project that has never synced, or whose database holds no
+/// records, has nothing to compare against, so every violation loads with a
+/// warning.
 pub fn import_graph(
     root: &Path, worktree_root: &Path, database: &mut Database, vcs: Option<&dyn Vcs>,
 ) -> Result<ImportOutcome> {
+    // Taken before any read, so a commit from another connection after this
+    // point refuses the replacement instead of being overwritten.
+    let read = database.data_version()?;
     let project = database.project()?;
+    let base = database.workspace_base()?;
     let before = database.connected_graph()?;
-    let prepared = prepare_import(root, worktree_root, project, vcs, Some(&before))?;
-    apply_prepared(root, prepared, database)
+    let prepared = prepare_import(root, worktree_root, project, vcs, comparison_graph(&before, &base))?;
+    apply_prepared(root, prepared, database, read)
 }
 
 /// Import a workspace while opening the database only after validation.
@@ -353,7 +358,24 @@ pub fn import_workspace(
     })?;
     let prepared = prepare_import(root, worktree_root, project, vcs, None)?;
     let mut database = Database::open(database_path)?;
-    apply_prepared(root, prepared, &mut database)
+    let read = database.data_version()?;
+    apply_prepared(root, prepared, &mut database, read)
+}
+
+/// The database graph that blocker rule violations are classified against,
+/// or `None` when there is nothing to compare: the project has never synced
+/// (`base` is empty) or the database holds no records.
+pub(super) fn comparison_graph<'a>(
+    before: &'a ConnectedGraph, base: &[WorkspaceBaseFile],
+) -> Option<&'a ConnectedGraph> {
+    let empty = before.captures.is_empty()
+        && before.specs.is_empty()
+        && before.plans.is_empty()
+        && before.phases.is_empty()
+        && before.tasks.is_empty()
+        && before.notes.is_empty()
+        && before.releases.is_empty();
+    (!base.is_empty() && !empty).then_some(before)
 }
 
 fn prepare_import(
@@ -370,10 +392,11 @@ fn prepare_import(
     Ok(PreparedImport { graph, files, observed: candidate.files, warnings })
 }
 
-fn apply_prepared(root: &Path, prepared: PreparedImport, database: &mut Database) -> Result<ImportOutcome> {
-    // Taken before any read, so a commit from another connection after this
-    // point refuses the replacement instead of being overwritten.
-    let read = database.data_version()?;
+/// Replace the database graph and base with `prepared`. `read` is the data
+/// version taken before the caller's first read of the database.
+fn apply_prepared(
+    root: &Path, prepared: PreparedImport, database: &mut Database, read: DataVersion,
+) -> Result<ImportOutcome> {
     let base = database.workspace_base()?;
     reject_removed_base_records(&base, &prepared.files)?;
     let current_files = project_graph(&database.connected_graph()?).map_err(|source| WorkspaceImportError::Field {
@@ -494,8 +517,8 @@ fn read_record_directory(
 ///
 /// `before` is the database graph the candidate replaces. Only blocker rule
 /// violations that candidate edges or parent links new to `before` cause are
-/// refused; the rest come back as warnings. With no `before`, or one with no
-/// tasks, every violation is a warning.
+/// refused; the rest come back as warnings. With no `before`, every violation
+/// is a warning; see [`comparison_graph`].
 pub(super) fn validate_candidate(
     records: BTreeMap<PathBuf, WorkspaceRecord>, project: Project, _worktree_root: &Path,
     before: Option<&ConnectedGraph>,
@@ -890,7 +913,7 @@ fn validate_links(
 ///
 /// A violation is introduced when it involves an edge, or crosses a parent
 /// link, that `before` does not hold. Every other violation is returned as a
-/// warning. With no `before`, or one with no tasks, nothing is introduced.
+/// warning. With no `before`, nothing is introduced.
 fn validate_blocker_rules(
     dependencies: &[TaskDependency], index: &RecordIndex, before: Option<&ConnectedGraph>,
 ) -> Result<Vec<String>> {
@@ -899,7 +922,6 @@ fn validate_blocker_rules(
         .values()
         .filter_map(|(task, _)| task.parent_id.map(|parent| (task.id, parent)))
         .collect::<HashMap<_, _>>();
-    let before = before.filter(|graph| !graph.tasks.is_empty());
     let (caused, existing) = match before {
         Some(before) => {
             let old_edges = before.dependencies.iter().collect::<HashSet<_>>();
@@ -1171,8 +1193,8 @@ mod tests {
     }
 
     /// Tasks Root, Child under Root, and an unrelated Other in `database`,
-    /// and a workspace exported from them plus the blocker edges `edges`
-    /// builds from their IDs. `database` holds no edges.
+    /// synced once, and a workspace exported from them plus the blocker
+    /// edges `edges` builds from their IDs. `database` holds no edges.
     struct EdgeFixture {
         root: TaskId,
         child: TaskId,
@@ -1206,9 +1228,14 @@ mod tests {
                 .create_planning_task(create(None, "Other"))
                 .expect("other creates");
             let mut graph = database.connected_graph().expect("graph loads");
-            graph.dependencies = edges(root.id, child.id, other.id);
             let workspace = tempfile::tempdir().expect("workspace creates");
+            // Import the graph without edges first, so the project has synced.
             export_graph(workspace.path(), &graph).expect("export succeeds");
+            import_graph(workspace.path(), workspace.path(), &mut database, None).expect("first import succeeds");
+            graph.dependencies = edges(root.id, child.id, other.id);
+            for file in project_graph(&graph).expect("projection succeeds") {
+                fs::write(workspace.path().join(&file.path), &file.content).expect("record writes");
+            }
             Self { root: root.id, child: child.id, other: other.id, database, workspace }
         }
 

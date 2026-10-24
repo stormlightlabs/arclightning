@@ -42,6 +42,27 @@ use workspace::exec_workspace;
 
 use auto_sync::{Access, auto_sync, command_access, workspace_roots};
 
+/// One warning for stderr. `code` names its kind under `--json`.
+struct Warning {
+    code: &'static str,
+    message: String,
+}
+
+impl Warning {
+    /// A sync or export that did not run, while the command went on.
+    fn workspace_sync(message: String) -> Self {
+        Self { code: "workspace_sync", message }
+    }
+
+    /// A blocker rule violation a workspace import loaded because it did not
+    /// introduce it.
+    fn blocker_edges(messages: Vec<String>) -> impl Iterator<Item = Self> {
+        messages
+            .into_iter()
+            .map(|message| Self { code: "blocker_edge", message })
+    }
+}
+
 /// Run one parsed CLI invocation at the application boundary.
 pub fn run(cli: Cli) -> anyhow::Result<()> {
     let mode = if cli.json {
@@ -73,7 +94,7 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
     };
     let mut warnings = Vec::new();
     match synced {
-        Ok(found) => warnings.extend(found),
+        Ok(found) => warnings.extend(Warning::blocker_edges(found)),
         // A missing database is the command's own error to report, once.
         Err(CommandError::NotInitialized { .. }) => {}
         Err(error) if access == Access::Write => {
@@ -87,9 +108,9 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
             };
             return Err(ApplicationError::from_command(error).into());
         }
-        Err(error) => warnings.push(format!(
+        Err(error) => warnings.push(Warning::workspace_sync(format!(
             "the workspace did not sync, so this shows the database as it is: {error}"
-        )),
+        ))),
     }
     // Under `--json` warnings wait for the command to succeed, so stderr
     // holds at most one JSON value.
@@ -103,10 +124,10 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
         && let Some(roots) = &roots
     {
         match auto_sync(roots) {
-            Ok(found) => warnings.extend(found),
-            Err(error) => warnings.push(format!(
+            Ok(found) => warnings.extend(Warning::blocker_edges(found)),
+            Err(error) => warnings.push(Warning::workspace_sync(format!(
                 "the change is saved, but the workspace was not updated: {error}; the next command updates it"
-            )),
+            ))),
         }
     }
     write_warnings(mode, warnings);
@@ -114,24 +135,24 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
 }
 
 /// Write warnings to stderr: one plain line each, a single one-line JSON
-/// envelope under `--json` that joins them with `; `, or nothing under
-/// `--quiet`.
-fn write_warnings(mode: OutputMode, warnings: Vec<String>) {
+/// envelope under `--json` with a `warnings` array of `code` and `message`
+/// objects, or nothing under `--quiet`.
+fn write_warnings(mode: OutputMode, warnings: Vec<Warning>) {
     if warnings.is_empty() {
         return;
     }
     match mode {
         OutputMode::Quiet => {}
-        OutputMode::Json => eprintln!(
-            "{}",
-            serde_json::json!({
-                "format_version": 1,
-                "warning": { "code": "workspace_sync", "message": warnings.join("; ") },
-            })
-        ),
+        OutputMode::Json => {
+            let warnings = warnings
+                .iter()
+                .map(|warning| serde_json::json!({ "code": warning.code, "message": warning.message }))
+                .collect::<Vec<_>>();
+            eprintln!("{}", serde_json::json!({ "format_version": 1, "warnings": warnings }));
+        }
         OutputMode::Human | OutputMode::Plain => {
-            for message in warnings {
-                eprintln!("warning: {message}");
+            for warning in warnings {
+                eprintln!("warning: {}", warning.message);
             }
         }
     }
@@ -139,7 +160,7 @@ fn write_warnings(mode: OutputMode, warnings: Vec<String>) {
 
 /// Run one command with no workspace sync around it. A workspace command
 /// adds its warnings to `warnings`.
-fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<String>) -> anyhow::Result<()> {
+fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Warning>) -> anyhow::Result<()> {
     match command {
         Some(Command::Init { workspace }) => {
             let start = std::env::current_dir().context("could not determine the current directory")?;
@@ -205,7 +226,7 @@ fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<St
         }
         Some(Command::Workspace { command }) => {
             let (status, found) = exec_workspace(command).map_err(ApplicationError::from_command)?;
-            warnings.extend(found);
+            warnings.extend(Warning::blocker_edges(found));
             match status {
                 Some(status) => write_output(renderer.render_workspace_status(&status)?),
                 None => write_output(None),

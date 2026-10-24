@@ -625,7 +625,15 @@ fn commands_treat_a_symlinked_workspace_as_a_failed_sync() {
     assert_eq!(json(&read.stdout)["data"]["captures"], Value::Array(Vec::new()));
     let warning: Value = serde_json::from_slice(&read.stderr).expect("stderr is one JSON value");
     assert_eq!(warning["format_version"], 1);
-    assert_eq!(warning["warning"]["code"], "workspace_sync");
+    let warnings = warning["warnings"].as_array().expect("warnings array");
+    assert_eq!(warnings.len(), 1, "warnings: {warnings:?}");
+    assert_eq!(warnings[0]["code"], "workspace_sync");
+    assert!(
+        warnings[0]["message"]
+            .as_str()
+            .expect("message")
+            .contains("symbolic link")
+    );
 
     let quiet = arcl_in(directory.path())
         .args(["--quiet", "capture", "list"])
@@ -2072,15 +2080,21 @@ fn edit_task_record(directory: &Path, task: &str, from: &str, to: &str) {
     fs::write(&record, content.replacen(from, to, 1)).expect("record writes");
 }
 
-/// The message of the one JSON warning a successful command wrote to stderr.
-fn json_warning(output: &std::process::Output) -> String {
+/// The code and message of each warning in the one JSON value a successful
+/// command wrote to stderr.
+fn json_warnings(output: &std::process::Output) -> Vec<(String, String)> {
     assert_success(output);
-    let warning = json(&output.stderr);
-    assert_eq!(warning["warning"]["code"], "workspace_sync");
-    warning["warning"]["message"]
-        .as_str()
-        .expect("warning message")
-        .to_owned()
+    let envelope = json(&output.stderr);
+    assert_eq!(envelope["format_version"], 1);
+    envelope["warnings"]
+        .as_array()
+        .expect("warnings array")
+        .iter()
+        .map(|warning| {
+            let field = |name: &str| warning[name].as_str().expect("warning field").to_owned();
+            (field("code"), field("message"))
+        })
+        .collect()
 }
 
 #[test]
@@ -2110,8 +2124,11 @@ fn dependency_edge_already_stored_loads_with_a_warning_on_sync_and_fresh_import(
         .output()
         .expect("command runs");
     assert_eq!(
-        json_warning(&output),
-        format!("{violation}; it was already in the database, so it loads")
+        json_warnings(&output),
+        vec![(
+            "blocker_edge".to_owned(),
+            format!("{violation}; it was already in the database, so it loads")
+        )]
     );
     let output = arcl_in(path)
         .args(["--json", "dependency", "remove", &root, "--blocked-by", &child])
@@ -2133,8 +2150,11 @@ fn dependency_edge_already_stored_loads_with_a_warning_on_sync_and_fresh_import(
         .output()
         .expect("command runs");
     assert_eq!(
-        json_warning(&output),
-        format!("{violation}; there is no earlier graph to compare against, so it loads")
+        json_warnings(&output),
+        vec![(
+            "blocker_edge".to_owned(),
+            format!("{violation}; there is no earlier graph to compare against, so it loads")
+        )]
     );
     assert_eq!(dependency_pairs(&clone), vec![(root, child)]);
 }
