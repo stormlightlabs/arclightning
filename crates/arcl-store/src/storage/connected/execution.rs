@@ -1846,7 +1846,10 @@ mod tests {
                 assert_eq!(id, parent.id.to_string());
                 assert_eq!(
                     reasons,
-                    vec![format!("`{}` is blocked by `{}` (pending)", intermediate.id, outside.id)]
+                    vec![format!(
+                        "`{}` is blocked by `{}` (pending)",
+                        intermediate.id, outside.id
+                    )]
                 );
             }
             other => panic!("unexpected result: {other:?}"),
