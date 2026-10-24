@@ -108,9 +108,49 @@ describe("latestRead", () => {
   });
 });
 
+describe("serveSource.task", () => {
+  it("reads the task's show envelope, escaping the ID, with the token", async () => {
+    const { task, readiness } = item("t 1", null);
+    const detail = {
+      task,
+      readiness,
+      phase: null,
+      blockers: [],
+      inherited_blockers: [],
+      dependents: [],
+      children: [],
+      ancestors: [],
+      spec: null,
+      plan: null,
+    };
+    const { fetch, calls } = fakeFetch({ "/api/records/t%201": { body: { format_version: 2, data: detail } } });
+    const signal = new AbortController().signal;
+    const loaded = await serveSource({ fetch, headers: () => ({ "X-Arcl-Token": "abc" }) }).task("t 1", signal);
+    expect(loaded).toEqual(detail);
+    expect(calls).toEqual([{ path: "/api/records/t%201", headers: { "X-Arcl-Token": "abc" }, signal }]);
+  });
+
+  it("refuses a record that is not a task", async () => {
+    const { fetch } = fakeFetch({ "/api/records/ph-7": { body: { format_version: 1, data: { phase } } } });
+    const failure = await serveSource({ fetch, headers: () => ({}) }).task("ph-7").catch((error: unknown) => error);
+    expect(failure).toMatchObject({ code: "not_a_task", message: "`ph-7` is not a task" });
+  });
+
+  it("raises not_found for a missing task", async () => {
+    const { fetch } = fakeFetch({
+      "/api/records/t-9": { status: 404, body: { format_version: 1, error: { code: "not_found", message: "task `t-9` was not found" } } },
+    });
+    const failure = await serveSource({ fetch, headers: () => ({}) }).task("t-9").catch((error: unknown) => error);
+    expect(failure).toMatchObject({ code: "not_found" });
+  });
+});
+
 describe("dataSource", () => {
   it("returns the source a build set in place of arcl serve", async () => {
-    const artifact: DataSource = { work: async () => ({ milestones: [], items: [] }) };
+    const artifact: DataSource = {
+      work: async () => ({ milestones: [], items: [] }),
+      task: async (id) => Promise.reject(new DataError("not_found", id)),
+    };
     setDataSource(artifact);
     expect(dataSource()).toBe(artifact);
     await expect(dataSource().work()).resolves.toEqual({ milestones: [], items: [] });

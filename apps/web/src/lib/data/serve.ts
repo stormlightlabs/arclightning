@@ -1,5 +1,5 @@
 import { tokenHeaders } from "$lib/token";
-import { DataError, type DataSource, type Milestone, type Readiness, type Task, type WorkItem } from "./types";
+import { DataError, type DataSource, type Milestone, type Readiness, type Task, type TaskDetail, type WorkItem } from "./types";
 
 /** Options for {@link serveSource}; tests pass their own. */
 export interface ServeOptions {
@@ -51,6 +51,13 @@ export function serveSource(options: ServeOptions = {}): DataSource {
         }),
       );
       return { milestones, items };
+    },
+
+    async task(id, signal) {
+      const detail = await get<Partial<TaskDetail>>(`/api/records/${encodeURIComponent(id)}`, signal);
+      // `arcl show` answers for any record kind; only a task has readiness.
+      if (!("readiness" in detail)) throw new DataError("not_a_task", `\`${id}\` is not a task`);
+      return detail as TaskDetail;
     },
   };
 }

@@ -13,6 +13,7 @@
     moveSelection,
     orderMilestones,
     parseFilters,
+    selectedOf,
     taskHref,
     visibleSelection,
     withKnownMilestone,
@@ -25,7 +26,8 @@
 
   let list = $state<WorkList | null>(null);
   let failure = $state<string | null>(null);
-  let selectedId = $state<string | null>(null);
+  // The Task view's Escape comes back here with its task selected.
+  let selectedId = $state<string | null>(selectedOf(page.url.searchParams));
 
   let filters = $derived(parseFilters(page.url.searchParams));
   let groups = $derived(list ? groupWork(list, filters) : []);

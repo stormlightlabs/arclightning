@@ -20,7 +20,7 @@ export interface WorkKey {
 export function workKeyAction(event: WorkKey): WorkKeyAction | null {
   if (event.altKey || event.ctrlKey || event.metaKey) return null;
   const element = closestOf(event.target);
-  if (element?.closest("input, textarea, select, [role=combobox], [role=listbox], [contenteditable]:not([contenteditable='false'])")) return null;
+  if (inField(event.target)) return null;
   switch (event.key) {
     case "j":
     case "ArrowDown":
@@ -45,6 +45,11 @@ export function moveSelection(order: string[], current: string | null, step: 1 |
   const index = current === null ? -1 : order.indexOf(current);
   if (index === -1) return step === 1 ? order[0] : order[order.length - 1];
   return order[Math.min(order.length - 1, Math.max(0, index + step))];
+}
+
+/** Whether `target` is in a form field or editable text, where keys type. */
+export function inField(target: EventTarget | null): boolean {
+  return Boolean(closestOf(target)?.closest("input, textarea, select, [role=combobox], [role=listbox], [contenteditable]:not([contenteditable='false'])"));
 }
 
 /** `selected` when the list shows it in `order`, otherwise `null`. */

@@ -204,7 +204,9 @@ carries a per-run token for the first page load. The app moves the token out
 of the URL and sends it in the `X-Arcl-Token` header on every later request.
 The server refuses a request without the token, with a `Host` header that does
 not name the server, or with a method other than GET. Responses carry no CORS
-headers. The server runs until interrupted.
+headers. The page's Content-Security-Policy runs only the app's own script and
+loads images only from the server or `data:` URLs, so Markdown cannot pull
+images from other hosts. The server runs until interrupted.
 
 | Endpoint                      | Same JSON as             |
 | ----------------------------- | ------------------------ |
@@ -236,6 +238,17 @@ readiness: ready, blocked by an incomplete task, or waiting for another
 reason, such as open subtasks. The page URL keeps the filters. A task deleted
 while the list loads is left out; any other failed read shows an error with a
 Retry button.
+
+The Task view shows what `arcl show <task-id>` returns: why the task is not
+ready, its direct blockers, the blockers it inherits from each ancestor, its
+subtasks, the tasks it unblocks, the latest handoff and the evidence. Each
+task it names links to that task's view. The description renders as Markdown,
+and **View Markdown** opens the source in a read-only editor. The properties
+panel lists status, readiness, priority, parent, spec, plan and phase; `]`
+collapses and expands it, also from inside the read-only source. `Escape`
+returns to the Work list with its filters and the task selected; inside the
+source, the first `Escape` moves focus out of the editor. A failed read shows
+an error with a Retry button. The view only reads records.
 
 `arcl` embeds the web app from `apps/web/build` when it compiles. That build is
 not committed, so `cargo install --git` produces an `arcl` whose `serve` shows

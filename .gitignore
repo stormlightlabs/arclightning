@@ -3,3 +3,8 @@
 node_modules/
 .svelte-kit/
 dist/
+# Vitest browser mode writes these when a test fails.
+packages/ui/.vitest-attachments/
+packages/ui/src/lib/__tests__/__screenshots__/
+apps/web/.vitest-attachments/
+apps/web/src/lib/__tests__/__screenshots__/

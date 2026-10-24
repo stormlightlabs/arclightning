@@ -39,6 +39,13 @@ export interface Milestone {
   position: number;
 }
 
+/** A spec or plan a task falls under, directly or through an ancestor. */
+export interface Container {
+  id: string;
+  title: string;
+  status: string;
+}
+
 /** One reason a task is not ready, with the records it names. */
 export interface ReadinessReason {
   /** A stable name for the reason, such as `direct_blocker`. */
@@ -77,6 +84,37 @@ export interface WorkList {
   items: WorkItem[];
 }
 
+/** A task that must complete before another can start. */
+export interface Blocker {
+  task: Task;
+  completed: boolean;
+  /** The evidence recorded when the blocker completed. */
+  evidence: string;
+}
+
+/** A blocker held by an ancestor, which every descendant waits on too. */
+export interface InheritedBlocker extends Blocker {
+  /** The ancestor task that holds the blocker. */
+  ancestor: string;
+}
+
+/** What the Task view shows, as `arcl show <task-id> --json` returns it. */
+export interface TaskDetail {
+  task: Task;
+  readiness: Readiness;
+  blockers: Blocker[];
+  inherited_blockers: InheritedBlocker[];
+  /** The tasks this task blocks. */
+  dependents: Task[];
+  children: Task[];
+  /** The task's ancestors, the root first. */
+  ancestors: Task[];
+  /** The task's effective spec, plan and phase, its own or its nearest ancestor's. */
+  spec: Container | null;
+  plan: Container | null;
+  phase: Milestone | null;
+}
+
 /**
  * Where views read records from. `arcl serve` backs it locally; another
  * backend, such as a claude.ai artifact's database, can stand in for it.
@@ -84,6 +122,8 @@ export interface WorkList {
 export interface DataSource {
   /** Every task, with its readiness and milestone. Aborting `signal` stops the read. */
   work(signal?: AbortSignal): Promise<WorkList>;
+  /** One task with its readiness, relations, handoff and evidence. Aborting `signal` stops the read. */
+  task(id: string, signal?: AbortSignal): Promise<TaskDetail>;
 }
 
 /** A failed read, with the CLI's error code and message. */
