@@ -1413,7 +1413,7 @@ mod tests {
             .expect("blocker cancels");
 
         let view = database.planning_task_view(leaf.id).expect("leaf view reads");
-        let mut reasons = kinds_and_ids(&view.readiness);
+        let reasons = kinds_and_ids(&view.readiness);
         let mut expected = vec![
             (ReadinessReasonKind::DirectBlocker, None, Some(pending.id)),
             (
@@ -1424,9 +1424,9 @@ mod tests {
             (ReadinessReasonKind::InheritedBlocker, Some(parent.id), Some(pending.id)),
         ];
         // The parent's two blockers come in ID order, and IDs made in the same
-        // millisecond are not ordered by creation, so compare them as a set.
-        reasons[1..].sort_by_key(|reason| format!("{reason:?}"));
-        expected[1..].sort_by_key(|reason| format!("{reason:?}"));
+        // millisecond are not ordered by creation, so order the expected
+        // reasons by blocker ID too.
+        expected[1..].sort_by_key(|reason| reason.2);
         assert_eq!(reasons, expected);
 
         database
