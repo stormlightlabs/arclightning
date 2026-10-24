@@ -93,11 +93,7 @@ impl From<WorkspaceSyncError> for ToolError {
 
 impl From<VcsError> for ToolError {
     fn from(error: VcsError) -> Self {
-        let exit_code = match error {
-            VcsError::Discovery { .. } | VcsError::BareRepository { .. } | VcsError::MissingWorktree { .. } => 3,
-            VcsError::PathOutsideWorktree { .. } | VcsError::Operation { .. } => 1,
-        };
-        Self::new(exit_code, error)
+        Self::new(error.exit_code(), error)
     }
 }
 

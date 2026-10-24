@@ -6,14 +6,14 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 
-use rmcp::handler::server::wrapper::Parameters;
+use arcl_mcp::params::Parameters;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
-use arcl_core::domain::{TaskPriority, TaskStatus};
+use arcl_core::domain::{TaskId, TaskPriority, TaskStatus};
 use arcl_mcp::{error::ToolError, server::ArclServer, tools::*};
 use arcl_repo::workspace::{ProjectConfig, WorkspaceManifest, encode_manifest};
-use arcl_store::Database;
+use arcl_store::{Database, PlanningTaskUpdate};
 
 const TOOLS: &[(&str, u64)] = &[
     ("capture_create", 1),
@@ -84,19 +84,23 @@ async fn an_agent_claims_hands_off_and_completes_work() {
     let first = create_task(&server, "First", &[]).await;
     let second = create_task(&server, "Second", &[&first]).await;
 
-    let ready = server.ready(Parameters(ReadyInput::default())).await.expect("ready").0;
+    let ready = server
+        .ready(Parameters::from(ReadyInput::default()))
+        .await
+        .expect("ready")
+        .0;
     assert_eq!(ready.format_version, 1);
     assert_eq!(ids(&ready.data.tasks), vec![first.clone()]);
 
     let refused = server
-        .task_start(Parameters(TaskInput { task_id: second.clone() }))
+        .task_start(Parameters::from(TaskInput { task_id: second.clone() }))
         .await
         .err()
         .expect("a blocked task does not start");
     assert_eq!((refused.code(), refused.exit_code()), ("invalid_request", 3));
 
     let explained = server
-        .explain(Parameters(TaskInput { task_id: second.clone() }))
+        .explain(Parameters::from(TaskInput { task_id: second.clone() }))
         .await
         .expect("explain")
         .0;
@@ -108,7 +112,7 @@ async fn an_agent_claims_hands_off_and_completes_work() {
     );
 
     let started = server
-        .task_start(Parameters(TaskInput { task_id: first.clone() }))
+        .task_start(Parameters::from(TaskInput { task_id: first.clone() }))
         .await
         .expect("start")
         .0;
@@ -118,7 +122,7 @@ async fn an_agent_claims_hands_off_and_completes_work() {
     );
 
     let handed_off = server
-        .task_handoff(Parameters(TaskHandoffInput {
+        .task_handoff(Parameters::from(TaskHandoffInput {
             task_id: first.clone(),
             note: "Half done.".to_owned(),
         }))
@@ -128,15 +132,15 @@ async fn an_agent_claims_hands_off_and_completes_work() {
     assert_eq!(handed_off.data.task.status, TaskStatus::Parked);
 
     server
-        .task_unpark(Parameters(TaskInput { task_id: first.clone() }))
+        .task_unpark(Parameters::from(TaskInput { task_id: first.clone() }))
         .await
         .expect("unpark");
     server
-        .task_start(Parameters(TaskInput { task_id: first.clone() }))
+        .task_start(Parameters::from(TaskInput { task_id: first.clone() }))
         .await
         .expect("start again");
     let context = server
-        .context(Parameters(TaskInput { task_id: first.clone() }))
+        .context(Parameters::from(TaskInput { task_id: first.clone() }))
         .await
         .expect("context")
         .0;
@@ -146,7 +150,7 @@ async fn an_agent_claims_hands_off_and_completes_work() {
     );
 
     let completed = server
-        .task_complete(Parameters(TaskCompleteInput {
+        .task_complete(Parameters::from(TaskCompleteInput {
             task_id: first.clone(),
             evidence: Some("Tests pass.".to_owned()),
             open_subtasks: OpenSubtasks::Refuse,
@@ -160,13 +164,13 @@ async fn an_agent_claims_hands_off_and_completes_work() {
     assert_eq!(data["unblocked"], json!([second]));
 
     let shown = server
-        .show(Parameters(RecordInput { id: second.clone() }))
+        .show(Parameters::from(RecordInput { id: second.clone() }))
         .await
         .expect("show task")
         .0;
     assert_eq!(shown.format_version, 2);
     let captured = server
-        .capture_create(Parameters(CaptureCreateInput {
+        .capture_create(Parameters::from(CaptureCreateInput {
             title: "Later".to_owned(),
             body: String::new(),
         }))
@@ -174,7 +178,9 @@ async fn an_agent_claims_hands_off_and_completes_work() {
         .expect("capture")
         .0;
     let shown = server
-        .show(Parameters(RecordInput { id: captured.data.capture.id.to_string() }))
+        .show(Parameters::from(RecordInput {
+            id: captured.data.capture.id.to_string(),
+        }))
         .await
         .expect("show capture")
         .0;
@@ -198,7 +204,7 @@ async fn lists_page_with_bounded_limits() {
     let mut cursor = None;
     loop {
         let page = server
-            .list(Parameters(ListInput {
+            .list(Parameters::from(ListInput {
                 kind: Some(RecordKind::Task),
                 limit: Some(2),
                 cursor,
@@ -218,12 +224,12 @@ async fn lists_page_with_bounded_limits() {
     assert_eq!(listed, created);
 
     let first = server
-        .ready(Parameters(ReadyInput { limit: Some(3), ..ReadyInput::default() }))
+        .ready(Parameters::from(ReadyInput { limit: Some(3), ..ReadyInput::default() }))
         .await
         .expect("ready")
         .0;
     let rest = server
-        .ready(Parameters(ReadyInput {
+        .ready(Parameters::from(ReadyInput {
             limit: Some(3),
             cursor: first.data.next_cursor,
             ..ReadyInput::default()
@@ -238,14 +244,17 @@ async fn lists_page_with_bounded_limits() {
 
     for limit in [0, MAX_LIMIT + 1] {
         let error = server
-            .list(Parameters(ListInput { limit: Some(limit), ..ListInput::default() }))
+            .list(Parameters::from(ListInput {
+                limit: Some(limit),
+                ..ListInput::default()
+            }))
             .await
             .err()
             .expect("limit out of range");
         assert_eq!(error.code(), "invalid_request");
     }
     let error = server
-        .list(Parameters(ListInput {
+        .list(Parameters::from(ListInput {
             kind: Some(RecordKind::Capture),
             status: vec![RecordStatus::Pending],
             ..ListInput::default()
@@ -262,7 +271,7 @@ async fn failures_use_the_cli_error_envelope() {
     let server = ArclServer::new(project.path().to_owned());
 
     let missing = server
-        .context(Parameters(TaskInput {
+        .context(Parameters::from(TaskInput {
             task_id: "arcl-t-01M5QPZZKW6X9JPSGZ4VWRAMCY".to_owned(),
         }))
         .await
@@ -281,7 +290,7 @@ async fn failures_use_the_cli_error_envelope() {
     );
 
     let invalid = server
-        .show(Parameters(RecordInput { id: "arcl-t-nope".to_owned() }))
+        .show(Parameters::from(RecordInput { id: "arcl-t-nope".to_owned() }))
         .await
         .err()
         .expect("invalid ID");
@@ -289,7 +298,7 @@ async fn failures_use_the_cli_error_envelope() {
 
     let empty = TempDir::new().expect("temp dir");
     let uninitialized = ArclServer::new(empty.path().to_owned())
-        .ready(Parameters(ReadyInput::default()))
+        .ready(Parameters::from(ReadyInput::default()))
         .await
         .err()
         .expect("no project");
@@ -309,7 +318,7 @@ async fn writes_sync_the_workspace() {
     assert!(content.contains("title = \"Synced\""));
 
     let updated = server
-        .task_update(Parameters(TaskUpdateInput {
+        .task_update(Parameters::from(TaskUpdateInput {
             task_id: id.clone(),
             title: None,
             body: None,
@@ -322,6 +331,258 @@ async fn writes_sync_the_workspace() {
     assert!(updated.warnings.is_empty());
     let content = fs::read_to_string(&file).expect("the update is exported");
     assert!(content.contains("priority = \"high\""));
+}
+
+#[tokio::test]
+async fn bad_arguments_fail_with_the_failure_envelope() {
+    let project = project(false);
+    let server = ArclServer::new(project.path().to_owned());
+
+    let unknown = server
+        .task_start(Parameters::from_arguments(arguments(json!({"force": true}))))
+        .await
+        .err()
+        .expect("an unknown field fails");
+    assert_eq!((unknown.code(), unknown.exit_code()), ("invalid_request", 3));
+    assert!(unknown.to_string().contains("unknown field `force`"), "{unknown}");
+
+    let wrong_type = server
+        .list(Parameters::from_arguments(arguments(json!({"limit": "5"}))))
+        .await
+        .err()
+        .expect("a string limit fails");
+    assert_eq!(wrong_type.code(), "invalid_request");
+
+    let missing = server
+        .explain(Parameters::from_arguments(None))
+        .await
+        .err()
+        .expect("a missing field fails");
+    assert_eq!(missing.envelope()["error"]["exit_code"], json!(3));
+}
+
+#[tokio::test]
+async fn ready_pages_by_ready_order_key() {
+    let project = project(false);
+    let server = ArclServer::new(project.path().to_owned());
+    let mut created = Vec::new();
+    for title in ["A", "B", "C"] {
+        created.push(create_task(&server, title, &[]).await);
+    }
+    created.sort();
+
+    let first = server
+        .ready(Parameters::from(ReadyInput { limit: Some(1), ..ReadyInput::default() }))
+        .await
+        .expect("ready")
+        .0;
+    assert_eq!(ids(&first.data.tasks), vec![created[0].clone()]);
+    server
+        .task_start(Parameters::from(TaskInput { task_id: created[0].clone() }))
+        .await
+        .expect("start A");
+
+    let second = server
+        .ready(Parameters::from(ReadyInput {
+            limit: Some(1),
+            cursor: first.data.next_cursor,
+            ..ReadyInput::default()
+        }))
+        .await
+        .expect("ready page two")
+        .0;
+    assert_eq!(ids(&second.data.tasks), vec![created[1].clone()]);
+}
+
+#[tokio::test]
+async fn malformed_cursors_are_rejected() {
+    let project = project(false);
+    let server = ArclServer::new(project.path().to_owned());
+    let task = create_task(&server, "A", &[]).await;
+
+    for cursor in [
+        "nocolon".to_owned(),
+        "zzz:x".to_owned(),
+        "task:".to_owned(),
+        "task:arcl-t-nope".to_owned(),
+        format!("note:{task}"),
+    ] {
+        let error = server
+            .list(Parameters::from(ListInput {
+                cursor: Some(cursor.clone()),
+                ..ListInput::default()
+            }))
+            .await
+            .err()
+            .unwrap_or_else(|| panic!("list cursor `{cursor}` is rejected"));
+        assert_eq!(error.code(), "invalid_request", "{cursor}");
+    }
+    let accepted = server
+        .list(Parameters::from(ListInput {
+            cursor: Some(format!("task:{task}")),
+            ..ListInput::default()
+        }))
+        .await
+        .expect("a cursor `list` returns is accepted")
+        .0;
+    assert!(accepted.data.records.is_empty());
+
+    for cursor in [
+        "1".to_owned(),
+        format!("urgent:0:{task}"),
+        format!("normal:x:{task}"),
+        "normal:0:arcl-t-nope".to_owned(),
+    ] {
+        let error = server
+            .ready(Parameters::from(ReadyInput {
+                cursor: Some(cursor.clone()),
+                ..ReadyInput::default()
+            }))
+            .await
+            .err()
+            .unwrap_or_else(|| panic!("ready cursor `{cursor}` is rejected"));
+        assert_eq!(error.code(), "invalid_request", "{cursor}");
+    }
+}
+
+#[tokio::test]
+async fn outputs_match_their_output_schemas() {
+    let project = project(false);
+    let server = ArclServer::new(project.path().to_owned());
+    let tools = server.tools();
+    let check = |name: &str, output: Value| {
+        let tool = tools.iter().find(|tool| tool.name == name).expect("tool is listed");
+        let schema = Value::Object((**tool.output_schema.as_ref().expect("output schema")).clone());
+        let validator = jsonschema::validator_for(&schema).expect("output schema compiles");
+        let errors = validator
+            .iter_errors(&output)
+            .map(|error| error.to_string())
+            .collect::<Vec<_>>();
+        assert!(errors.is_empty(), "{name}: {errors:?}\n{output}");
+    };
+
+    let first = create_task(&server, "First", &[]).await;
+    let second = create_task(&server, "Second", &[&first]).await;
+
+    let ready = server
+        .ready(Parameters::from(ReadyInput { limit: Some(1), ..ReadyInput::default() }))
+        .await
+        .expect("ready")
+        .0;
+    check("ready", to_json(&ready));
+    let list = server
+        .list(Parameters::from(ListInput::default()))
+        .await
+        .expect("list")
+        .0;
+    check("list", to_json(&list));
+    let explain = server
+        .explain(Parameters::from(TaskInput { task_id: second.clone() }))
+        .await
+        .expect("explain")
+        .0;
+    check("explain", to_json(&explain));
+    let started = server
+        .task_start(Parameters::from(TaskInput { task_id: first.clone() }))
+        .await
+        .expect("start")
+        .0;
+    check("task_start", to_json(&started));
+    let context = server
+        .context(Parameters::from(TaskInput { task_id: first.clone() }))
+        .await
+        .expect("context")
+        .0;
+    check("context", to_json(&context));
+    let completed = server
+        .task_complete(Parameters::from(TaskCompleteInput {
+            task_id: first,
+            evidence: Some("Done.".to_owned()),
+            open_subtasks: OpenSubtasks::Refuse,
+        }))
+        .await
+        .expect("complete")
+        .0;
+    check("task_complete", to_json(&completed));
+    let shown = server
+        .show(Parameters::from(RecordInput { id: second }))
+        .await
+        .expect("show")
+        .0;
+    check("show", to_json(&shown));
+}
+
+#[tokio::test]
+async fn a_failed_sync_warns_reads_and_refuses_writes() {
+    let project = project(true);
+    let server = ArclServer::new(project.path().to_owned());
+    let id = create_task(&server, "Synced", &[]).await;
+    fs::write(project.path().join(".arcl/workspace/manifest.toml"), "not = [valid").expect("break the manifest");
+
+    let ready = server
+        .ready(Parameters::from(ReadyInput::default()))
+        .await
+        .expect("ready")
+        .0;
+    assert_eq!(ids(&ready.data.tasks), vec![id]);
+    assert_eq!(ready.warnings.len(), 1);
+    let warning = serde_json::to_value(&ready.warnings[0]).expect("warning serializes");
+    assert_eq!(warning["code"], json!("workspace_sync"));
+    assert!(
+        warning["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("shows the database as it is")),
+        "{warning}"
+    );
+
+    let refused = server
+        .capture_create(Parameters::from(CaptureCreateInput {
+            title: "Refused".to_owned(),
+            body: String::new(),
+        }))
+        .await
+        .err()
+        .expect("a write does not run without a sync");
+    assert!(
+        refused
+            .to_string()
+            .contains("the workspace must sync before this change"),
+        "{refused}"
+    );
+    assert!(!refused.to_string().contains("workspace resolve"), "{refused}");
+    let database = Database::open(project.path().join(".arcl/arcl.db")).expect("open database");
+    assert!(database.captures().expect("captures").is_empty());
+}
+
+#[tokio::test]
+async fn a_divergent_sync_names_workspace_resolve() {
+    let project = project(true);
+    let server = ArclServer::new(project.path().to_owned());
+    let id = create_task(&server, "Synced", &[]).await;
+
+    let file = project.path().join(".arcl/workspace/tasks").join(format!("{id}.md"));
+    let content = fs::read_to_string(&file).expect("read task file");
+    fs::write(
+        &file,
+        content.replace("title = \"Synced\"", "title = \"From the workspace\""),
+    )
+    .expect("edit the workspace");
+    let mut database = Database::open(project.path().join(".arcl/arcl.db")).expect("open database");
+    database
+        .update_planning_task(
+            TaskId::parse(&id).expect("task ID"),
+            PlanningTaskUpdate { title: Some("From the database".to_owned()), ..PlanningTaskUpdate::default() },
+        )
+        .expect("edit the database");
+    drop(database);
+
+    let refused = server
+        .task_start(Parameters::from(TaskInput { task_id: id }))
+        .await
+        .err()
+        .expect("a divergent sync stops the write");
+    assert_eq!((refused.code(), refused.exit_code()), ("conflict", 4));
+    assert!(refused.to_string().contains("arcl workspace resolve"), "{refused}");
 }
 
 #[test]
@@ -363,6 +624,15 @@ fn stdio_serves_tool_calls() {
         json!("not_found")
     );
 
+    request(json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {
+        "name": "task_start", "arguments": {"task_id": "arcl-t-01M5QPZZKW6X9JPSGZ4VWRAMCY", "force": true}}}));
+    let rejected = response(&mut stdout, 4);
+    assert_eq!(rejected["result"]["isError"], json!(true));
+    assert_eq!(
+        rejected["result"]["structuredContent"]["error"]["code"],
+        json!("invalid_request")
+    );
+
     drop(stdin);
     assert!(child.wait().expect("the server exits").success());
 }
@@ -389,7 +659,7 @@ fn project(workspace: bool) -> TempDir {
 
 async fn create_task(server: &ArclServer, title: &str, blocked_by: &[&str]) -> String {
     let created = server
-        .task_create(Parameters(TaskCreateInput {
+        .task_create(Parameters::from(TaskCreateInput {
             title: title.to_owned(),
             body: String::new(),
             spec: None,
@@ -405,6 +675,14 @@ async fn create_task(server: &ArclServer, title: &str, blocked_by: &[&str]) -> S
         .0;
     assert_eq!((created.format_version, created.data.action.as_str()), (1, "created"));
     created.data.task.id.to_string()
+}
+
+fn to_json(value: &impl serde::Serialize) -> Value {
+    serde_json::to_value(value).expect("serializes")
+}
+
+fn arguments(value: Value) -> Option<rmcp::model::JsonObject> {
+    value.as_object().cloned()
 }
 
 fn ids(tasks: &[arcl_core::domain::PlanningTask]) -> Vec<String> {

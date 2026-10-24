@@ -56,6 +56,57 @@ impl Warning {
     }
 }
 
+/// A sync, or the setup before it, that did not run.
+struct SyncFailure {
+    message: String,
+    exit_code: u8,
+    /// A database written by another connection since the sync read it. A
+    /// write reports it as it is, since running again settles it.
+    changed_since_read: bool,
+    /// The recovery hint for a write this failure stops, from
+    /// [`WorkspaceSyncError::resolve_hint`].
+    resolve_hint: &'static str,
+}
+
+impl SyncFailure {
+    /// The error for a write that cannot run because the sync stopped.
+    fn before_write(self) -> ToolError {
+        if self.changed_since_read {
+            return ToolError::new(self.exit_code, self.message);
+        }
+        ToolError::new(
+            self.exit_code,
+            format!(
+                "the workspace must sync before this change, and the sync stopped: {}; run `arcl workspace status` to see why{}",
+                self.message, self.resolve_hint
+            ),
+        )
+    }
+}
+
+impl From<ToolError> for SyncFailure {
+    fn from(error: ToolError) -> Self {
+        Self {
+            message: error.to_string(),
+            exit_code: error.exit_code(),
+            changed_since_read: false,
+            resolve_hint: "",
+        }
+    }
+}
+
+impl From<WorkspaceSyncError> for SyncFailure {
+    fn from(error: WorkspaceSyncError) -> Self {
+        let changed_since_read = matches!(error, WorkspaceSyncError::Storage(StorageError::ChangedSinceRead));
+        Self {
+            message: error.to_string(),
+            exit_code: error.exit_code(),
+            changed_since_read,
+            resolve_hint: error.resolve_hint(),
+        }
+    }
+}
+
 /// Run `operation` against the project that holds `start`, syncing the
 /// workspace around it as the CLI does. Returns the operation's value and the
 /// warnings the call collected.
@@ -103,44 +154,6 @@ pub fn run<T>(
         }
     }
     Ok((value, warnings))
-}
-
-/// A sync, or the setup before it, that did not run.
-struct SyncFailure {
-    message: String,
-    exit_code: u8,
-    /// A database written by another connection since the sync read it. A
-    /// write reports it as it is, since running again settles it.
-    changed_since_read: bool,
-}
-
-impl SyncFailure {
-    /// The error for a write that cannot run because the sync stopped.
-    fn before_write(self) -> ToolError {
-        if self.changed_since_read {
-            return ToolError::new(self.exit_code, self.message);
-        }
-        ToolError::new(
-            self.exit_code,
-            format!(
-                "the workspace must sync before this change, and the sync stopped: {}; run `arcl workspace status` to see why",
-                self.message
-            ),
-        )
-    }
-}
-
-impl From<ToolError> for SyncFailure {
-    fn from(error: ToolError) -> Self {
-        Self { message: error.to_string(), exit_code: error.exit_code(), changed_since_read: false }
-    }
-}
-
-impl From<WorkspaceSyncError> for SyncFailure {
-    fn from(error: WorkspaceSyncError) -> Self {
-        let changed_since_read = matches!(error, WorkspaceSyncError::Storage(StorageError::ChangedSinceRead));
-        Self { message: error.to_string(), exit_code: error.exit_code(), changed_since_read }
-    }
 }
 
 /// The nearest ancestor of `start`, or `start` itself, that holds

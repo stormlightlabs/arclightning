@@ -83,10 +83,8 @@ pub(super) enum InitError {
 impl InitError {
     fn exit_code(&self) -> u8 {
         match self {
-            Self::Vcs(
-                VcsError::Discovery { .. } | VcsError::BareRepository { .. } | VcsError::MissingWorktree { .. },
-            )
-            | Self::InvalidConfig { .. } => 3,
+            Self::Vcs(error) => error.exit_code(),
+            Self::InvalidConfig { .. } => 3,
             _ => 1,
         }
     }
@@ -118,7 +116,7 @@ pub(super) enum CommandError {
     WorkspaceStatus(Box<WorkspaceStatusError>),
     #[error(
         "the workspace must sync before this change, and the sync stopped: {0}\nRun `arcl workspace status` to see why{hint}",
-        hint = resolve_hint(.0)
+        hint = .0.resolve_hint()
     )]
     AutoSync(Box<WorkspaceSyncError>),
     #[error("could not lock `{path}`: {source}")]
@@ -184,10 +182,7 @@ impl From<WorkspaceSyncError> for CommandError {
 impl CommandError {
     fn exit_code(&self) -> u8 {
         match self {
-            Self::Vcs(error) => match error {
-                VcsError::Discovery { .. } | VcsError::BareRepository { .. } | VcsError::MissingWorktree { .. } => 3,
-                VcsError::PathOutsideWorktree { .. } | VcsError::Operation { .. } => 1,
-            },
+            Self::Vcs(error) => error.exit_code(),
             Self::NotInitialized { .. } | Self::InvalidConfig { .. } | Self::WorkspaceDisabled | Self::Domain(_) => 3,
             Self::WorkspaceExport(error) => match error.as_ref() {
                 WorkspaceExportError::Conflict { .. } => 4,
@@ -218,15 +213,5 @@ impl CommandError {
             | Self::SkillNotDirectory { .. }
             | Self::SkillOutsideProject { .. } => 3,
         }
-    }
-}
-
-/// Name `arcl workspace resolve` only for a sync failure it settles: files the
-/// database and the workspace changed differently. A file removed from the
-/// workspace carries its own `resolve --keep database` hint.
-fn resolve_hint(error: &WorkspaceSyncError) -> &'static str {
-    match error {
-        WorkspaceSyncError::Divergent { .. } => "; `arcl workspace resolve` settles files both sides changed",
-        _ => "",
     }
 }

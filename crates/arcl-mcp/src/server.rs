@@ -10,17 +10,21 @@ use std::path::PathBuf;
 
 use rmcp::{
     Json, ServerHandler,
-    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
+    handler::server::router::tool::ToolRouter,
     model::{Implementation, MetaObject, ServerCapabilities, ServerConfig},
     tool, tool_handler, tool_router,
 };
 
-use arcl_core::domain::{CaptureId, NoteId, PhaseId, PlanId, ReleaseId, SpecId, TaskAction, TaskId, validate_title};
+use arcl_core::domain::{
+    CaptureId, NoteId, PhaseId, PlanId, PlanningTask, ReleaseId, SpecId, TaskAction, TaskId, TaskPriority,
+    validate_title,
+};
 use arcl_store::{
     Database, PlanningContext, PlanningReadyFilter, PlanningTaskCreate, PlanningTaskUpdate, StorageError,
 };
 
 use crate::error::ToolError;
+use crate::params::Parameters;
 use crate::project::{self, Access};
 use crate::tools::*;
 
@@ -87,6 +91,7 @@ impl ArclServer {
     pub async fn show(
         &self, Parameters(input): Parameters<RecordInput>,
     ) -> Result<Json<Envelope<ShowData>>, ToolError> {
+        let input = input?;
         let ((format_version, data), warnings) = self
             .run(Access::Read, move |database| show_record(database, &input.id))
             .await?;
@@ -101,6 +106,7 @@ impl ArclServer {
         meta = version_meta(FORMAT_VERSION)
     )]
     pub async fn list(&self, Parameters(input): Parameters<ListInput>) -> Result<Json<Envelope<ListData>>, ToolError> {
+        let input = input?;
         self.call(Access::Read, FORMAT_VERSION, move |database| {
             list_records(database, input)
         })
@@ -117,6 +123,7 @@ impl ArclServer {
     pub async fn ready(
         &self, Parameters(input): Parameters<ReadyInput>,
     ) -> Result<Json<Envelope<ReadyData>>, ToolError> {
+        let input = input?;
         self.call(Access::Read, FORMAT_VERSION, move |database| {
             ready_tasks(database, input)
         })
@@ -133,6 +140,7 @@ impl ArclServer {
     pub async fn explain(
         &self, Parameters(input): Parameters<TaskInput>,
     ) -> Result<Json<Envelope<arcl_store::PlanningTaskView>>, ToolError> {
+        let input = input?;
         self.call(Access::Read, READINESS_FORMAT_VERSION, move |database| {
             Ok(database.planning_task_view(TaskId::parse(&input.task_id)?)?)
         })
@@ -149,6 +157,7 @@ impl ArclServer {
     pub async fn context(
         &self, Parameters(input): Parameters<TaskInput>,
     ) -> Result<Json<Envelope<PlanningContext>>, ToolError> {
+        let input = input?;
         self.call(Access::Read, READINESS_FORMAT_VERSION, move |database| {
             Ok(database.planning_context(TaskId::parse(&input.task_id)?)?)
         })
@@ -164,6 +173,7 @@ impl ArclServer {
     pub async fn capture_create(
         &self, Parameters(input): Parameters<CaptureCreateInput>,
     ) -> Result<Json<Envelope<CaptureData>>, ToolError> {
+        let input = input?;
         self.call(Access::Write, FORMAT_VERSION, move |database| {
             validate_title(&input.title)?;
             let capture = database.create_capture(input.title, input.body)?;
@@ -181,6 +191,7 @@ impl ArclServer {
     pub async fn spec_create(
         &self, Parameters(input): Parameters<SpecCreateInput>,
     ) -> Result<Json<Envelope<SpecData>>, ToolError> {
+        let input = input?;
         self.call(Access::Write, FORMAT_VERSION, move |database| {
             validate_title(&input.title)?;
             let spec = database.create_spec(input.title, input.body, input.acceptance_criteria)?;
@@ -198,6 +209,7 @@ impl ArclServer {
     pub async fn plan_create(
         &self, Parameters(input): Parameters<PlanCreateInput>,
     ) -> Result<Json<Envelope<PlanData>>, ToolError> {
+        let input = input?;
         self.call(Access::Write, FORMAT_VERSION, move |database| {
             validate_title(&input.title)?;
             let spec_id = SpecId::parse(&input.spec)?;
@@ -217,6 +229,7 @@ impl ArclServer {
     pub async fn task_create(
         &self, Parameters(input): Parameters<TaskCreateInput>,
     ) -> Result<Json<Envelope<TaskData>>, ToolError> {
+        let input = input?;
         self.call(Access::Write, FORMAT_VERSION, move |database| {
             validate_title(&input.title)?;
             let create = PlanningTaskCreate {
@@ -251,6 +264,7 @@ impl ArclServer {
     pub async fn task_update(
         &self, Parameters(input): Parameters<TaskUpdateInput>,
     ) -> Result<Json<Envelope<TaskData>>, ToolError> {
+        let input = input?;
         self.call(Access::Write, FORMAT_VERSION, move |database| {
             let id = TaskId::parse(&input.task_id)?;
             if let Some(title) = &input.title {
@@ -278,6 +292,7 @@ impl ArclServer {
     pub async fn note_create(
         &self, Parameters(input): Parameters<NoteCreateInput>,
     ) -> Result<Json<Envelope<NoteData>>, ToolError> {
+        let input = input?;
         self.call(Access::Write, FORMAT_VERSION, move |database| {
             validate_title(&input.title)?;
             let note = database.create_note(input.title, input.body)?;
@@ -296,6 +311,7 @@ impl ArclServer {
     pub async fn task_start(
         &self, Parameters(input): Parameters<TaskInput>,
     ) -> Result<Json<Envelope<TaskData>>, ToolError> {
+        let input = input?;
         self.call(Access::Write, FORMAT_VERSION, move |database| {
             let task = database.start_planning_task(TaskId::parse(&input.task_id)?, false)?;
             Ok(TaskData { action: "started".to_owned(), task })
@@ -313,6 +329,7 @@ impl ArclServer {
     pub async fn task_handoff(
         &self, Parameters(input): Parameters<TaskHandoffInput>,
     ) -> Result<Json<Envelope<TaskData>>, ToolError> {
+        let input = input?;
         self.call(Access::Write, FORMAT_VERSION, move |database| {
             let task = database.handoff_planning_task(TaskId::parse(&input.task_id)?, input.note)?;
             Ok(TaskData { action: "handed_off".to_owned(), task })
@@ -329,6 +346,7 @@ impl ArclServer {
     pub async fn task_unpark(
         &self, Parameters(input): Parameters<TaskInput>,
     ) -> Result<Json<Envelope<TaskData>>, ToolError> {
+        let input = input?;
         self.call(Access::Write, FORMAT_VERSION, move |database| {
             let task = database.transition_planning_task(TaskId::parse(&input.task_id)?, TaskAction::Unpark, false)?;
             Ok(TaskData { action: "unparked".to_owned(), task })
@@ -346,6 +364,7 @@ impl ArclServer {
     pub async fn task_complete(
         &self, Parameters(input): Parameters<TaskCompleteInput>,
     ) -> Result<Json<Envelope<CompletionData>>, ToolError> {
+        let input = input?;
         self.call(Access::Write, READINESS_FORMAT_VERSION, move |database| {
             let open_subtasks = match input.open_subtasks {
                 OpenSubtasks::Refuse => arcl_store::OpenSubtasks::Refuse,
@@ -438,15 +457,7 @@ fn list_records(database: &mut Database, input: ListInput) -> Result<ListData, T
             kind.as_str()
         )));
     }
-    let after = input
-        .cursor
-        .as_deref()
-        .map(|cursor| {
-            cursor
-                .split_once(':')
-                .ok_or_else(|| ToolError::invalid_request(format!("cursor `{cursor}` is not one `list` returned")))
-        })
-        .transpose()?;
+    let after = input.cursor.as_deref().map(list_cursor).transpose()?;
 
     let wanted = |kind: RecordKind| input.kind.is_none_or(|wanted| wanted == kind);
     let mut records = Vec::new();
@@ -512,7 +523,7 @@ fn list_records(database: &mut Database, input: ListInput) -> Result<ListData, T
         .retain(|record| input.status.is_empty() || input.status.iter().any(|status| status.as_str() == record.status));
     records.sort_by(|left, right| left.kind.cmp(&right.kind).then_with(|| left.id.cmp(&right.id)));
     if let Some((kind, id)) = after {
-        records.retain(|record| (record.kind.as_str(), record.id.as_str()) > (kind, id));
+        records.retain(|record| (record.kind.as_str(), record.id.as_str()) > (kind.as_str(), id));
     }
     let next_cursor = (records.len() > limit).then(|| {
         let last = &records[limit - 1];
@@ -522,16 +533,31 @@ fn list_records(database: &mut Database, input: ListInput) -> Result<ListData, T
     Ok(ListData { records, next_cursor })
 }
 
-/// One page of ready tasks. The cursor is the offset of the next page in
-/// `ready` order, which changes as tasks start and complete.
+/// Read a `list` cursor, `<kind>:<id>`: a known kind and an ID of that kind.
+fn list_cursor(cursor: &str) -> Result<(RecordKind, &str), ToolError> {
+    let invalid = || ToolError::invalid_request(format!("cursor `{cursor}` is not one `list` returned"));
+    let (kind, id) = cursor.split_once(':').ok_or_else(invalid)?;
+    let kind = RecordKind::parse(kind).ok_or_else(invalid)?;
+    let parsed = match kind {
+        RecordKind::Capture => CaptureId::parse(id).map(drop),
+        RecordKind::Release => ReleaseId::parse(id).map(drop),
+        RecordKind::Spec => SpecId::parse(id).map(drop),
+        RecordKind::Plan => PlanId::parse(id).map(drop),
+        RecordKind::Phase => PhaseId::parse(id).map(drop),
+        RecordKind::Task => TaskId::parse(id).map(drop),
+        RecordKind::Note => NoteId::parse(id).map(drop),
+    };
+    parsed.map_err(|_| invalid())?;
+    Ok((kind, id))
+}
+
+/// One page of ready tasks. The cursor is the ready-order key of the last
+/// task on the previous page, `<priority>:<position>:<id>`, and the page
+/// holds the tasks after it. A task that starts or completes between pages
+/// leaves the order without shifting the tasks after it.
 fn ready_tasks(database: &mut Database, input: ReadyInput) -> Result<ReadyData, ToolError> {
     let limit = page_limit(input.limit)?;
-    let offset = match input.cursor.as_deref() {
-        Some(cursor) => cursor
-            .parse::<usize>()
-            .map_err(|_| ToolError::invalid_request(format!("cursor `{cursor}` is not one `ready` returned")))?,
-        None => 0,
-    };
+    let after = input.cursor.as_deref().map(ready_cursor).transpose()?;
     let filter = PlanningReadyFilter {
         priorities: input.priority,
         spec_id: input.spec.as_deref().map(SpecId::parse).transpose()?,
@@ -539,10 +565,34 @@ fn ready_tasks(database: &mut Database, input: ReadyInput) -> Result<ReadyData, 
         phase_id: input.phase.as_deref().map(PhaseId::parse).transpose()?,
         parent_id: input.parent.as_deref().map(TaskId::parse).transpose()?,
     };
-    let ready = database.ready_planning_tasks_filtered(&filter)?;
-    let next_cursor = (ready.len() > offset.saturating_add(limit)).then(|| (offset + limit).to_string());
-    let tasks = ready.into_iter().skip(offset).take(limit).collect();
+    let mut tasks = database.ready_planning_tasks_filtered(&filter)?;
+    if let Some(after) = after {
+        tasks.retain(|task| ready_key(task) > after);
+    }
+    let next_cursor = (tasks.len() > limit).then(|| {
+        let (priority, position, id) = ready_key(&tasks[limit - 1]);
+        format!("{}:{position}:{id}", priority.as_str())
+    });
+    tasks.truncate(limit);
     Ok(ReadyData { tasks, next_cursor })
+}
+
+/// A task's place in the ready order, as `ready` sorts it.
+fn ready_key(task: &PlanningTask) -> (TaskPriority, i64, TaskId) {
+    (task.priority, task.position, task.id)
+}
+
+/// Read a `ready` cursor, `<priority>:<position>:<id>`.
+fn ready_cursor(cursor: &str) -> Result<(TaskPriority, i64, TaskId), ToolError> {
+    let invalid = || ToolError::invalid_request(format!("cursor `{cursor}` is not one `ready` returned"));
+    let mut parts = cursor.splitn(3, ':');
+    let (Some(priority), Some(position), Some(id)) = (parts.next(), parts.next(), parts.next()) else {
+        return Err(invalid());
+    };
+    let priority = TaskPriority::parse(priority).map_err(|_| invalid())?;
+    let position = position.parse::<i64>().map_err(|_| invalid())?;
+    let id = TaskId::parse(id).map_err(|_| invalid())?;
+    Ok((priority, position, id))
 }
 
 /// The page size for `limit`: [`DEFAULT_LIMIT`] when absent, and an error

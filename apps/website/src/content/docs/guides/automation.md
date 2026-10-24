@@ -139,13 +139,15 @@ A tool's structured content is the command's envelope: `format_version`,
 went on despite a problem, such as a workspace sync that did not run. Each
 tool lists an input and an output JSON Schema, and its `_meta` names its
 version as `arcl/format_version`. A change to either schema comes with a new
-version. A failure is an error result whose structured content is the version
-1 failure object above.
+version. A failure, including arguments the input schema rejects, is an error
+result whose structured content is the version 1 failure object above.
 
 `list` and `ready` return at most `limit` records, from 1 to 200 and 50 by
 default. While more remain, `data.next_cursor` holds the `cursor` for the next
 page. `list` pages by kind, then ID, so new records do not shift later pages.
-`ready` pages by position in the ready order, which changes as tasks start.
+`ready` pages by each task's place in the ready order (priority, position,
+then ID), so a task that starts between pages does not hide the next one. A
+malformed `cursor` fails with `invalid_request`.
 
 `task_start` has no force option. A task that is not ready fails with
 `invalid_request`, and `explain` gives the typed reasons.

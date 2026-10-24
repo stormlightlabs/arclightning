@@ -39,6 +39,22 @@ pub enum RecordKind {
 }
 
 impl RecordKind {
+    /// Every kind, in the order `list` returns them.
+    pub const ALL: [Self; 7] = [
+        Self::Capture,
+        Self::Note,
+        Self::Phase,
+        Self::Plan,
+        Self::Release,
+        Self::Spec,
+        Self::Task,
+    ];
+
+    /// The kind named `name`, as record summaries spell it.
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.as_str() == name)
+    }
+
     /// The kind's name in record summaries.
     pub const fn as_str(self) -> &'static str {
         match self {

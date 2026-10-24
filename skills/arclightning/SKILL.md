@@ -12,8 +12,8 @@ instead of working that out yourself.
 
 When the `arcl-mcp` server is connected, call its tools instead of the
 commands. Each step below names the tool in brackets. A tool returns the same
-envelope as its command, as structured content, and takes the command's
-arguments as named fields.
+envelope as its command, as structured content. Its input schema lists the
+fields it takes, which do not always match the command's options.
 
 ## Read the envelope
 

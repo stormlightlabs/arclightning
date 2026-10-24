@@ -114,6 +114,7 @@ pub struct ReadinessReason {
     /// For an `invalid_edge`, the cycle closed by repeating its first task,
     /// or the parent chain from the descendant up to the ancestor.
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "schema", schemars(default))]
     pub path: Vec<TaskId>,
 }
 
