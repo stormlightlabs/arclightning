@@ -29,6 +29,7 @@ mod init;
 mod query;
 mod reads;
 mod serve;
+mod skill;
 mod support;
 mod workspace;
 
@@ -41,6 +42,7 @@ use init::initialize;
 use query::{connected_tree, resolve_ready_filter};
 use reads::{read_context, read_explain, read_list, read_ready, read_show};
 use serve::exec_serve;
+use skill::exec_skill;
 use support::{open_database, write_output};
 use workspace::exec_workspace;
 
@@ -186,6 +188,7 @@ fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Wa
         Some(Command::Task { command }) => exec_task(command, renderer),
         Some(Command::Dependency { command }) => exec_dependency(command, renderer),
         Some(Command::Note { command }) => exec_note(command, renderer),
+        Some(Command::Skill { command }) => exec_skill(command, renderer),
         Some(Command::Show { id }) => write_output(read_show(&id, renderer)?),
         Some(Command::List { filters }) => write_output(read_list(filters, renderer)?),
         Some(Command::Tree { id }) => {

@@ -47,7 +47,10 @@ pub(super) fn command_access(command: Option<&Command>) -> Access {
     let read_when = |read: bool| if read { Access::Read } else { Access::Write };
     match command {
         // `serve` runs until interrupted, so it must not hold the sync lock.
-        None | Some(Command::Init { .. } | Command::Workspace { .. } | Command::Serve { .. }) => Access::Untracked,
+        None
+        | Some(Command::Init { .. } | Command::Workspace { .. } | Command::Serve { .. } | Command::Skill { .. }) => {
+            Access::Untracked
+        }
         Some(
             Command::Show { .. }
             | Command::List { .. }
