@@ -94,14 +94,15 @@ pub struct ReadinessReason {
     /// The user-facing explanation that human and plain output print.
     pub message: String,
     /// The task the condition is on: the inspected task for `status` and
-    /// `has_children`, or the task that holds the edge for an ancestry
-    /// `invalid_edge`.
+    /// `has_children`, or the task that holds the edge for an
+    /// `invalid_edge`: the inspected task on a cycle.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub task: Option<TaskId>,
     /// The closed ancestor, or the ancestor that holds an inherited blocker.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ancestor: Option<TaskId>,
-    /// The blocker task ID.
+    /// The blocker task ID. For an `invalid_edge` cycle, the step after
+    /// `task` on `path`, which is `task` itself on a self-loop.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blocker: Option<TaskId>,
     /// The ID of the spec, plan or phase that is not open.
@@ -897,7 +898,8 @@ fn readiness_counting_children(
 
 /// Describe each stored blocker rule violation that involves one of the
 /// task's own blocker edges, once per violation, in the same words `check`
-/// uses for it.
+/// uses for it. `task` and `blocker` name the task's own edge in the
+/// violation.
 fn invalid_edge_reasons(data: &PlanningData, task_id: TaskId) -> Vec<ReadinessReason> {
     data.violations_by_task
         .get(&task_id)
@@ -907,7 +909,18 @@ fn invalid_edge_reasons(data: &PlanningData, task_id: TaskId) -> Vec<ReadinessRe
             let violation = &data.violations[index];
             let reason = ReadinessReason::new(ReadinessReasonKind::InvalidEdge, violation.to_string());
             match violation {
-                EdgeViolation::Cycle { path } => ReadinessReason { path: path.clone(), ..reason },
+                // `task` holds the edge to the next step on the cycle, so
+                // removing `task` -> `blocker` breaks it. A self-loop names
+                // the task twice.
+                EdgeViolation::Cycle { path } => ReadinessReason {
+                    task: Some(task_id),
+                    blocker: path
+                        .iter()
+                        .position(|&id| id == task_id)
+                        .and_then(|index| path.get(index + 1).copied()),
+                    path: path.clone(),
+                    ..reason
+                },
                 EdgeViolation::Ancestry { edge, chain, .. } => ReadinessReason {
                     task: Some(edge.task_id),
                     blocker: Some(edge.blocker_id),
@@ -1146,8 +1159,17 @@ mod tests {
         assert_eq!(reason.kind, ReadinessReasonKind::InvalidEdge);
         let ids: Vec<String> = reason.path.iter().map(ToString::to_string).collect();
         assert_eq!(ids, path);
+        // Each task on the cycle names its own edge to the next step.
+        assert_eq!((reason.task, reason.blocker), (Some(c.id), Some(a.id)));
         let view = database.planning_task_view(b.id).expect("view reads");
         assert!(view.readiness.messages().contains(&cycle));
+        let reason = view
+            .readiness
+            .reasons
+            .iter()
+            .find(|reason| reason.kind == ReadinessReasonKind::InvalidEdge)
+            .expect("invalid edge reason");
+        assert_eq!((reason.task, reason.blocker), (Some(b.id), Some(c.id)));
         let ready = database.ready_planning_tasks().expect("ready tasks query");
         assert!(!ready.iter().any(|value| value.id == c.id));
     }
@@ -1171,6 +1193,14 @@ mod tests {
             "{:?}",
             view.readiness.messages()
         );
+        let reason = view
+            .readiness
+            .reasons
+            .iter()
+            .find(|reason| reason.kind == ReadinessReasonKind::InvalidEdge)
+            .expect("invalid edge reason");
+        assert_eq!((reason.task, reason.blocker), (Some(a.id), Some(a.id)));
+        assert_eq!(reason.path, vec![a.id, a.id]);
         let ready = database.ready_planning_tasks().expect("ready tasks query");
         assert_eq!(ready.iter().map(|value| value.id).collect::<Vec<_>>(), vec![other.id]);
 
@@ -1405,6 +1435,35 @@ mod tests {
         assert_eq!(
             readiness.messages(),
             vec![format!("blocked by missing task `{}`", blocker.id)]
+        );
+    }
+
+    #[test]
+    fn readiness_names_the_ancestor_holding_a_missing_blocker() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let blocker = task(&mut database, project.id, "blocker");
+        let parent = task(&mut database, project.id, "parent");
+        let leaf = child(&mut database, project.id, parent.id, "leaf");
+        database
+            .add_planning_dependency(parent.id, blocker.id)
+            .expect("dependency creates");
+        let mut data = load_data(database.connection(), project.id).expect("data loads");
+        data.tasks.remove(&blocker.id);
+        let leaf = data.tasks[&leaf.id].clone();
+        let ancestry = effective_ancestry(&data, leaf.id, &mut HashSet::new()).expect("ancestry resolves");
+
+        let readiness = readiness(&data, &leaf, &ancestry).expect("readiness computes");
+        assert_eq!(
+            kinds_and_ids(&readiness),
+            vec![(ReadinessReasonKind::MissingBlocker, Some(parent.id), Some(blocker.id))]
+        );
+        assert_eq!(
+            readiness.messages(),
+            vec![format!(
+                "ancestor `{}` is blocked by missing task `{}`",
+                parent.id, blocker.id
+            )]
         );
     }
 

@@ -2879,6 +2879,35 @@ fn reason_kind_invalid_edge_names_the_cycle_path() {
         .collect();
     assert_eq!(invalid.len(), 1, "{reasons}");
     assert_eq!(invalid[0]["path"], serde_json::json!([low, high, low]));
+    // `a` holds the edge to the next step on the cycle, which is `b`.
+    assert_eq!(invalid[0]["task"], serde_json::json!(a));
+    assert_eq!(invalid[0]["blocker"], serde_json::json!(b));
+}
+
+#[test]
+fn reason_kind_invalid_edge_names_a_self_loop_twice() {
+    let directory = initialized_directory();
+    let path = directory.path();
+    let a = create_task(path, "A", None);
+    insert_raw_edges(path, &[(&a, &a)]);
+
+    let reasons = explained_reasons(path, &a);
+    let invalid = reasons
+        .as_array()
+        .expect("reason array")
+        .iter()
+        .find(|reason| reason["kind"] == "invalid_edge")
+        .expect("invalid edge reason");
+    assert_eq!(
+        *invalid,
+        serde_json::json!({
+            "kind": "invalid_edge",
+            "message": format!("blocker cycle: {a} -> {a}; each task is blocked by the next"),
+            "task": a,
+            "blocker": a,
+            "path": [a, a],
+        })
+    );
 }
 
 #[test]
