@@ -46,7 +46,10 @@ arcl workspace sync
 
 Sync compares each file with the version stored at the last sync. A change made
 only in the database is written to the workspace. A change made only in the
-workspace is validated with the complete graph and imported. A file that both
+workspace is validated with the complete graph and imported. Two changes that
+are each valid can meet in a merge and form a blocker cycle or tie a task to its
+own ancestor; sync then stops with status code `3` and names the record and
+field, and editing that record clears it. A file that both
 sides changed differently stops the sync with status code `4` and the paths
 involved, and nothing is written. A record written by another `arcl` command
 while sync runs also stops it with status code `4`; run sync again.

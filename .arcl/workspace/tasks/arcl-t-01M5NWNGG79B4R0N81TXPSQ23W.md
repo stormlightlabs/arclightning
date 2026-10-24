@@ -6,7 +6,7 @@ status = "completed"
 priority = "normal"
 position = 4
 blocked-by = ["arcl-t-01M5NJTQP8VGM3BEGYT1EDX09B"]
-evidence = "Plan application, workspace import, and task update --parent now refuse blocker edge cycles and ancestor or descendant edges through the shared validator, and a reparent checks the whole moved subtree. The old cycle checks and DomainError::DependencyCycle are removed."
+evidence = "Plan application, workspace import and task update --parent refuse blocker edge cycles and ancestor or descendant edges through the shared validator. A reparent refuses only violations whose parent chain crosses the link it sets."
 +++
 
 Run the T16.3 blocker edge validator in plan application, workspace import,
