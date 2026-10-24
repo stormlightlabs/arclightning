@@ -5,7 +5,7 @@ title = "T17.2: Return the tasks a completion made ready"
 status = "pending"
 priority = "normal"
 position = 2
-blocked-by = ["arcl-t-01M5NJTQJRC8CNJFBF5T4RVRZS"]
+blocked-by = ["arcl-t-01M5NJTQJRC8CNJFBF5T4RVRZS", "arcl-t-01M5NWNVGS20D75FSEZTFGM0CB"]
 +++
 
 Return the tasks a completion made ready, so an automation can chain from one

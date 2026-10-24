@@ -21,8 +21,11 @@ Rules:
   lists them; the caller unparks or cancels them first.
 - It refuses, and writes nothing, when the task or any open descendant has an
   unfinished blocker outside the subtree, direct or inherited from an ancestor
-  of the task (T16.1). Blockers inside the subtree do not count, since they
-  complete in the same write. There is no `--force` for this.
+  of the task (T16.1). There is no `--force` for this.
+- Blockers inside the subtree do not count, because the owner's decision
+  treats the subtree as one unit. This includes a cancelled descendant that
+  blocks another descendant: it stays cancelled, and the command still
+  completes the task it blocked.
 - Evidence goes on the task only. Descendants keep their own evidence.
 - `--with-subtasks` conflicts with `--allow-open-children`, which keeps its
   current behaviour.
@@ -60,12 +63,17 @@ Verification:
   named `complete_with_subtasks_…`): nested pending and in-progress subtasks
   completed with JSON output checked; cancelled and completed subtasks left
   alone; parked subtask refused; outside blocker refused; inside blocker
-  allowed; conflict with `--allow-open-children`; `--allow-open-children`
-  unchanged
+  allowed; cancelled inside blocker allowed, with the blocker left cancelled
+  and the task it blocked completed; conflict with `--allow-open-children`;
+  `--allow-open-children` unchanged
+- `cargo test -p arcl-cli --test cli start_blocked_ancestor_refused`: `task
+  start` of a task whose ancestor has an unfinished blocker fails without
+  `--force` and succeeds with it, which checks T16.1 and T16.2 together
 - `just check`
 
 Blocked by T16.1 and T16.2 for code: the outside-blocker rule reads inherited
-blockers, and T16.2 changes the same `transition` signature. Blocked by T16.4
+blockers, T16.2 changes the same `transition` signature, and the
+blocked-ancestor start test needs both. Blocked by T16.4
 and T16.5 only so this is the last T16 subtask and its PR completes T16.
 
 Out of scope:

@@ -5,7 +5,7 @@ title = "T17.1: Add typed kinds and record IDs to readiness reasons"
 status = "pending"
 priority = "normal"
 position = 1
-blocked-by = ["arcl-t-01M5NJTQJRC8CNJFBF5T4RVRZS"]
+blocked-by = ["arcl-t-01M5NJTQJRC8CNJFBF5T4RVRZS", "arcl-t-01M5NJTQMF15EBBYPCAH5H816H", "arcl-t-01M5NJTQR1PZ1QHC309R63EY1J"]
 +++
 
 Give every readiness reason a stable `kind` and the record IDs it refers to,

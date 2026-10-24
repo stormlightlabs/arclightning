@@ -34,6 +34,9 @@ Acceptance criteria:
 - [ ] The validator is public in arcl-core, takes the whole graph of parents
       and edges, and reports every violation in it, so T16.4 and T16.5 can
       reuse it unchanged
+- [ ] `dependency add` and `task create --blocked-by` refuse only violations
+      that involve the new edge. A violation already elsewhere in the graph
+      does not block them; T16.5 reports it
 - [ ] The recursive SQL cycle queries in `add_planning_dependency` and
       `create_planning_task_with_dependencies` are gone
 
@@ -46,7 +49,9 @@ Verification:
   new error)
 - `cargo test -p arcl-cli --test cli dependency_edge_` (new tests, named
   `dependency_edge_…`): cycle, ancestor edge, and descendant edge through
-  `dependency add` and through `task create --blocked-by`
+  `dependency add` and through `task create --blocked-by`, and
+  `dependency_edge_existing_violation_does_not_block_unrelated_add`: with a
+  bad edge already in the database, an unrelated `dependency add` succeeds
 - `just check`
 
 Out of scope:

@@ -27,8 +27,11 @@ Acceptance criteria:
 
 - [ ] Plan application refuses a cycle, an ancestor edge, or a descendant edge
       with the same error as `dependency add`, and writes nothing
-- [ ] Workspace import refuses the same edges, naming the record path and the
-      task path
+- [ ] Plan application and reparenting refuse only violations that involve an
+      edge the write adds or a task in the moved subtree. A violation already
+      elsewhere in the graph does not block them; T16.5 reports it
+- [ ] Workspace import refuses any violation in the workspace, naming the
+      record path and the task path
 - [ ] A reparent, through `task update --parent` or plan application, runs the
       validator on the whole graph after the move, so it covers every task in
       the moved subtree, not only the moved task
@@ -46,8 +49,10 @@ Verification:
 - `cargo test -p arcl-cli --test cli dependency_edge_` (new tests, named
   `dependency_edge_…`): plan cycle, plan ancestor edge, import descendant
   edge, the A/C/P reparent through `task update --parent` and through plan
-  application, and one table-driven test that feeds the same graph to the CLI,
-  plan application, and import and expects the same refusal
+  application, an unrelated plan application and reparent that succeed with
+  a bad edge already in the database, and one table-driven test that feeds
+  the same graph to the CLI, plan application, and import and expects the
+  same refusal
 - `just check`
 
 Out of scope:
