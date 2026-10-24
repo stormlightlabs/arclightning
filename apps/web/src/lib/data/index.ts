@@ -6,6 +6,7 @@
 import { serveSource } from "./serve";
 import type { DataSource } from "./types";
 
+export { latestRead, type LatestRead, type ReadReport } from "./latest";
 export { serveSource, type ServeOptions } from "./serve";
 export * from "./types";
 

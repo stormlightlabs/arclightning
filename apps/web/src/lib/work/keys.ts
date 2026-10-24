@@ -47,6 +47,11 @@ export function moveSelection(order: string[], current: string | null, step: 1 |
   return order[Math.min(order.length - 1, Math.max(0, index + step))];
 }
 
+/** `selected` when the list shows it in `order`, otherwise `null`. */
+export function visibleSelection(order: string[], selected: string | null): string | null {
+  return selected !== null && order.includes(selected) ? selected : null;
+}
+
 /** `target` as something with `closest`, which every element has. */
 function closestOf(target: EventTarget | null): Pick<Element, "closest"> | null {
   const candidate = target as Partial<Pick<Element, "closest">> | null;

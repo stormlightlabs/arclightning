@@ -3246,6 +3246,48 @@ fn serve_read_endpoints_match_the_cli_json() {
 }
 
 #[test]
+fn serve_work_endpoint_matches_explain_for_every_task() {
+    let directory = initialized_directory();
+    let blocker = run_json(directory.path(), ["--json", "task", "create", "Blocker"].as_ref());
+    let blocker = blocker["data"]["task"]["id"].as_str().expect("a task ID").to_owned();
+    let task = run_json(directory.path(), ["--json", "task", "create", "Blocked"].as_ref());
+    let task = task["data"]["task"]["id"].as_str().expect("a task ID").to_owned();
+    run_json(
+        directory.path(),
+        ["--json", "dependency", "add", &task, "--blocked-by", &blocker].as_ref(),
+    );
+
+    let served = Served::start(directory.path());
+    let (status, work) = served.read("/api/work");
+    assert_eq!(status, 200);
+    assert_eq!(work["format_version"], 2);
+    assert_eq!(work["data"]["phases"], serde_json::json!([]));
+    let items = work["data"]["tasks"].as_array().expect("tasks");
+    let listed = run_json(directory.path(), ["--json", "list", "--kind", "task"].as_ref());
+    assert_eq!(
+        items.len(),
+        listed["data"]["records"].as_array().expect("records").len()
+    );
+    for item in items {
+        let id = item["task"]["id"].as_str().expect("a task ID");
+        let explained = run_json(directory.path(), ["--json", "explain", id].as_ref());
+        assert_eq!(item["task"], explained["data"]["task"], "{id}");
+        assert_eq!(item["readiness"], explained["data"]["readiness"], "{id}");
+        assert_eq!(item["phase_id"], Value::Null, "{id}");
+    }
+
+    let (status, body) = served.read("/api/work?kind=task");
+    assert_eq!(status, 400);
+    assert_eq!(body["error"]["code"], "invalid_request");
+    assert_eq!(served.get("/api/work", &[served.host()]).0, 401);
+    let token = format!("X-Arcl-Token: {}", served.token);
+    assert_eq!(
+        served.get("/api/work", &["Host: evil.example".to_owned(), token]).0,
+        403
+    );
+}
+
+#[test]
 fn serve_refuses_requests_without_the_host_and_token() {
     let directory = initialized_directory();
     let served = Served::start(directory.path());

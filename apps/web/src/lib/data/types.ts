@@ -82,8 +82,8 @@ export interface WorkList {
  * backend, such as a claude.ai artifact's database, can stand in for it.
  */
 export interface DataSource {
-  /** Every task, with its readiness and milestone. */
-  work(): Promise<WorkList>;
+  /** Every task, with its readiness and milestone. Aborting `signal` stops the read. */
+  work(signal?: AbortSignal): Promise<WorkList>;
 }
 
 /** A failed read, with the CLI's error code and message. */
