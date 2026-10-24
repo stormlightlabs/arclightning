@@ -2,10 +2,11 @@
 id = "arcl-t-01M5NJTQWCZTH6DWQ3F9VDVX4Z"
 parent = "arcl-t-01M5NE5P2N1AMT731RJBAZ66YT"
 title = "T17.2: Return the tasks a completion made ready"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 2
 blocked-by = ["arcl-t-01M5NJTQJRC8CNJFBF5T4RVRZS", "arcl-t-01M5NWNVGS20D75FSEZTFGM0CB"]
+evidence = "Delivered on branch `claude/t17-2-unblocked`: `task complete` returns an `unblocked` list of tasks that were not ready before the completion and are ready after it, computed in the same transaction. Tests: `execution::tests::completion_*` and `cli unblocked_*`."
 +++
 
 Return the tasks a completion made ready, so an automation can chain from one

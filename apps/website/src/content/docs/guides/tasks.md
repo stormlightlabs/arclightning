@@ -108,6 +108,12 @@ Human and plain output name each subtask the command completed. JSON adds a
 `completed_subtasks` list of their IDs in tree order, empty for a plain
 `complete`.
 
+Every completion also reports the tasks it made ready: tasks that were not
+ready before the command and are ready after it, including leaves under a
+parent it blocked. Human output adds an `Unblocked task` line for each, plain
+output an `unblocked<TAB><id>` line, and JSON an `unblocked` list of IDs, empty
+when nothing was waiting.
+
 ## Handoff
 
 An in-progress task can keep one current Markdown resume note:

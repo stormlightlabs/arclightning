@@ -127,6 +127,9 @@ pub struct PlanningCompletion {
     /// The descendants this completion completed, in tree order. Empty unless
     /// the completion used [`OpenSubtasks::Complete`].
     pub completed_subtasks: Vec<PlanningTask>,
+    /// Tasks that were not ready before the completion and are ready after
+    /// it, in ready-work order. Empty for any other lifecycle action.
+    pub unblocked: Vec<PlanningTask>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -343,7 +346,7 @@ fn transition(
         Vec::new()
     };
     if next_status == current.status && evidence.is_none() && completed_subtasks.is_empty() {
-        return Ok(PlanningCompletion { task: current, completed_subtasks });
+        return Ok(PlanningCompletion { task: current, completed_subtasks, unblocked: Vec::new() });
     }
     if matches!(action, TaskAction::Start) && current.status == TaskStatus::Pending && !force {
         let data = load_data(&tx, project_id)?;
@@ -376,6 +379,15 @@ fn transition(
             }));
         }
     }
+    let completes = matches!(action, TaskAction::Complete);
+    let ready_before: HashSet<TaskId> = if completes {
+        planning_ready_tasks(&tx, project_id, &PlanningReadyFilter::default())?
+            .into_iter()
+            .map(|task| task.id)
+            .collect()
+    } else {
+        HashSet::new()
+    };
     if next_status == current.status {
         tx.execute(
             "UPDATE planning_tasks SET evidence = ?1 WHERE id = ?2",
@@ -393,10 +405,19 @@ fn transition(
             params![TaskStatus::Completed.as_str(), subtask.id.to_string()],
         )?;
     }
+    let unblocked = if completes {
+        planning_ready_tasks(&tx, project_id, &PlanningReadyFilter::default())?
+            .into_iter()
+            .filter(|task| !ready_before.contains(&task.id))
+            .collect()
+    } else {
+        Vec::new()
+    };
     tx.commit()?;
     Ok(PlanningCompletion {
         task: PlanningTask { status: next_status, evidence: evidence.unwrap_or(current.evidence), ..current },
         completed_subtasks,
+        unblocked,
     })
 }
 
@@ -1938,5 +1959,80 @@ mod tests {
         assert!(completion.completed_subtasks.is_empty());
         assert_eq!(status(&database, parent.id), TaskStatus::Completed);
         assert_eq!(status(&database, open.id), TaskStatus::Pending);
+    }
+
+    fn ids(tasks: &[PlanningTask]) -> Vec<TaskId> {
+        tasks.iter().map(|task| task.id).collect()
+    }
+
+    #[test]
+    fn completion_lists_dependents_and_their_children_it_made_ready() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let blocker = task(&mut database, project.id, "Blocker");
+        let other = task(&mut database, project.id, "Other blocker");
+        let dependent = task(&mut database, project.id, "Dependent");
+        let parent = task(&mut database, project.id, "Blocked parent");
+        let leaf = child(&mut database, project.id, parent.id, "Leaf");
+        let waiting = task(&mut database, project.id, "Still waiting");
+        let unrelated = task(&mut database, project.id, "Unrelated");
+        for (holder, blocking) in [
+            (dependent.id, blocker.id),
+            (parent.id, blocker.id),
+            (waiting.id, blocker.id),
+            (waiting.id, other.id),
+        ] {
+            database
+                .add_planning_dependency(holder, blocking)
+                .expect("dependency creates");
+        }
+
+        let completion = database
+            .complete_planning_task(blocker.id, OpenSubtasks::Refuse, None)
+            .expect("blocker completes");
+
+        let mut unblocked = ids(&completion.unblocked);
+        unblocked.sort();
+        let mut expected = vec![dependent.id, leaf.id];
+        expected.sort();
+        assert_eq!(unblocked, expected);
+        assert!(!unblocked.contains(&waiting.id));
+        assert!(!unblocked.contains(&unrelated.id));
+    }
+
+    #[test]
+    fn completion_with_subtasks_lists_dependents_of_each_completed_subtask() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let parent = task(&mut database, project.id, "Parent");
+        let subtask = child(&mut database, project.id, parent.id, "Subtask");
+        let dependent = task(&mut database, project.id, "Dependent");
+        database
+            .add_planning_dependency(dependent.id, subtask.id)
+            .expect("dependency creates");
+
+        let completion = database
+            .complete_planning_task(parent.id, OpenSubtasks::Complete, None)
+            .expect("task completes with its subtasks");
+
+        assert_eq!(ids(&completion.unblocked), vec![dependent.id]);
+    }
+
+    #[test]
+    fn completion_that_unblocks_nothing_lists_nothing() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let lone = task(&mut database, project.id, "Lone");
+        task(&mut database, project.id, "Other");
+
+        let completion = database
+            .complete_planning_task(lone.id, OpenSubtasks::Refuse, None)
+            .expect("task completes");
+        assert!(completion.unblocked.is_empty());
+
+        let repeat = database
+            .complete_planning_task(lone.id, OpenSubtasks::Refuse, None)
+            .expect("repeat completion is a no-op");
+        assert!(repeat.unblocked.is_empty());
     }
 }

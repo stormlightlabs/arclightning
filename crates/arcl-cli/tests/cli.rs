@@ -1804,6 +1804,108 @@ fn complete_with_subtasks_leaves_allow_open_children_unchanged() {
     assert_eq!(task_field(dir, &child, "status"), "pending");
 }
 
+/// Run `task complete --json` on `task` with `extra` arguments and return the
+/// `unblocked` list.
+fn unblocked_by(directory: &Path, task: &str, extra: &[&str]) -> Value {
+    let mut args = vec!["--json", "task", "complete", task];
+    args.extend(extra);
+    run_json(directory, &args)["data"]["unblocked"].clone()
+}
+
+#[test]
+fn unblocked_lists_a_direct_dependent() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let blocker = create_task(dir, "Blocker", None);
+    let dependent = create_task(dir, "Dependent", None);
+    block_start_task(dir, &dependent, &blocker);
+
+    assert_eq!(unblocked_by(dir, &blocker, &[]), serde_json::json!([dependent]));
+}
+
+#[test]
+fn unblocked_lists_the_child_of_a_dependent() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let blocker = create_task(dir, "Blocker", None);
+    let parent = create_task(dir, "Blocked parent", None);
+    let child = create_task(dir, "Child", Some(&parent));
+    block_start_task(dir, &parent, &blocker);
+
+    assert_eq!(unblocked_by(dir, &blocker, &[]), serde_json::json!([child]));
+}
+
+#[test]
+fn unblocked_leaves_out_a_dependent_with_another_open_blocker() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let blocker = create_task(dir, "Blocker", None);
+    let other = create_task(dir, "Other blocker", None);
+    let dependent = create_task(dir, "Dependent", None);
+    block_start_task(dir, &dependent, &blocker);
+    block_start_task(dir, &dependent, &other);
+
+    assert_eq!(unblocked_by(dir, &blocker, &[]), serde_json::json!([]));
+    assert_eq!(unblocked_by(dir, &other, &[]), serde_json::json!([dependent]));
+}
+
+#[test]
+fn unblocked_lists_a_dependent_of_a_subtask_completed_with_subtasks() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let parent = create_task(dir, "Parent", None);
+    let subtask = create_task(dir, "Subtask", Some(&parent));
+    let dependent = create_task(dir, "Dependent", None);
+    block_start_task(dir, &dependent, &subtask);
+
+    assert_eq!(
+        unblocked_by(dir, &parent, &["--with-subtasks"]),
+        serde_json::json!([dependent])
+    );
+}
+
+#[test]
+fn unblocked_is_empty_when_nothing_was_waiting() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let lone = create_task(dir, "Lone", None);
+    create_task(dir, "Already ready", None);
+
+    assert_eq!(unblocked_by(dir, &lone, &[]), serde_json::json!([]));
+}
+
+#[test]
+fn unblocked_tasks_are_named_in_human_and_plain_output() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let first = create_task(dir, "First", None);
+    let second = create_task(dir, "Second", None);
+    let dependent = create_task(dir, "Dependent", None);
+    let last = create_task(dir, "Last", None);
+    block_start_task(dir, &dependent, &first);
+    block_start_task(dir, &last, &second);
+
+    let human = arcl_in(dir)
+        .args(["--color", "never", "task", "complete", &first])
+        .output()
+        .expect("complete runs");
+    assert!(human.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&human.stdout),
+        format!("Completed task `{first}`: First\nUnblocked task `{dependent}`: Dependent\n")
+    );
+
+    let plain = arcl_in(dir)
+        .args(["--plain", "task", "complete", &second])
+        .output()
+        .expect("complete runs");
+    assert!(plain.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&plain.stdout),
+        format!("{second}\nunblocked\t{last}\n")
+    );
+}
+
 fn ready_ids(directory: &Path) -> Vec<String> {
     run_json(directory, ["--json", "ready"].as_ref())["data"]["tasks"]
         .as_array()

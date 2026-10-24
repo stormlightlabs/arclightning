@@ -143,7 +143,8 @@ completes only the task. `--with-subtasks` also completes its pending and
 in-progress descendants in one write, and refuses, writing nothing, while a
 descendant is parked or a blocker outside the subtree is unfinished. The two
 flags conflict. JSON output from `task complete` includes `completed_subtasks`,
-the IDs it completed in tree order.
+the IDs it completed in tree order, and `unblocked`, the IDs of tasks that were
+not ready before the command and are ready after it.
 
 ## Inspection
 
