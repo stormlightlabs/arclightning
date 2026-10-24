@@ -1465,3 +1465,46 @@ fn start_refuses_a_blocked_parent() {
     assert!(message.contains(&format!("blocked by `{blocker}` (pending)")));
     assert!(!message.contains("child task"));
 }
+
+/// Assert that `task start` refuses `task` with `reason` and leaves it
+/// pending, then that `--force` starts it.
+fn assert_start_needs_force(directory: &Path, task: &str, reason: &str) {
+    let error = refused_start(directory, task);
+    let message = error["error"]["message"].as_str().expect("error message");
+    assert!(message.contains(reason), "{message}");
+    let shown = run_json(directory, ["--json", "task", "show", task].as_ref());
+    assert_eq!(shown["data"]["task"]["status"], "pending");
+
+    let started = run_json(directory, ["--json", "task", "start", task, "--force"].as_ref());
+    assert_eq!(started["data"]["task"]["status"], "in_progress");
+}
+
+#[test]
+fn start_refuses_a_task_under_a_parked_ancestor_unless_forced() {
+    let directory = initialized_directory();
+    let parent = create_start_task(directory.path(), "Parent", None);
+    let child = create_start_task(directory.path(), "Child", Some(&parent));
+    run_json(directory.path(), ["--json", "task", "park", &parent].as_ref());
+
+    assert_start_needs_force(directory.path(), &child, &format!("ancestor `{parent}` is `parked`"));
+}
+
+#[test]
+fn start_refuses_a_task_in_a_closed_plan_unless_forced() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let spec = run_json(dir, ["--json", "spec", "create", "Feature"].as_ref());
+    let spec_id = spec["data"]["spec"]["id"].as_str().expect("spec ID");
+    let plan = run_json(dir, ["--json", "plan", "create", "Build", "--spec", spec_id].as_ref());
+    let plan_id = plan["data"]["plan"]["id"].as_str().expect("plan ID").to_owned();
+    let task = run_json(dir, ["--json", "task", "create", "Task", "--plan", &plan_id].as_ref())["data"]["task"]["id"]
+        .as_str()
+        .expect("task ID")
+        .to_owned();
+    run_json(
+        dir,
+        ["--json", "plan", "cancel", &plan_id, "--allow-open-children"].as_ref(),
+    );
+
+    assert_start_needs_force(dir, &task, &format!("plan `{plan_id}` is `cancelled`"));
+}

@@ -5,7 +5,7 @@ title = "T16.2: Refuse starting unready tasks without --force"
 status = "completed"
 priority = "normal"
 position = 2
-evidence = '`arcl task start` now refuses a pending task that readiness reports as not ready and lists the reasons in a new `DomainError::NotReady`; `--force` starts it anyway, a repeat start of an in-progress task stays a no-op, and the "has child tasks" reason is the only one start skips. The store gains `start_planning_task(id, force)` with force as an explicit argument, and `transition_planning_task` never forces a start. `connected_execution_keeps_invalid_writes_atomic` now forces its start after the forced plan close. Tests added: three `start_` store tests in `execution::tests` and five `start_` CLI tests in `crates/arcl-cli/tests/cli.rs`. Website task, lifecycle and manual pages describe the gate. Gates run: cargo fmt --check, clippy -D warnings, cargo test --workspace, pnpm check, pnpm test, all passing. Branch claude/t16-2-start-gating.'
+evidence = "`arcl task start` refuses a pending task that is not ready, apart from having child tasks, and lists the reasons in `DomainError::NotReady`; `--force` starts it anyway. The store exposes `start_planning_task(id, force)`. Store and CLI `start_` tests cover a blocked task, a parked ancestor, a cancelled plan, a parent with children, a blocked parent and a repeat start. Gates: cargo fmt --check, clippy -D warnings, cargo test --workspace, pnpm check, pnpm test. Branch claude/t16-2-start-gating."
 +++
 
 Make `arcl task start` refuse a pending task that is not ready unless the
@@ -33,17 +33,17 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] `task start` on a pending task whose readiness is false fails with an
+- [x] `task start` on a pending task whose readiness is false fails with an
       error that lists the readiness reasons, and writes nothing
-- [ ] `task start --force` starts the same task
-- [ ] The "has child tasks" reason is the only one start skips: a pending
+- [x] `task start --force` starts the same task
+- [x] The "has child tasks" reason is the only one start skips: a pending
       parent with no other reason starts without `--force`, and a parent with
       an unfinished blocker is refused
-- [ ] `task start` on an in-progress task stays a no-op and succeeds, with or
+- [x] `task start` on an in-progress task stays a no-op and succeeds, with or
       without `--force`
-- [ ] The store API keeps force as an explicit argument, so the MCP start tool
+- [x] The store API keeps force as an explicit argument, so the MCP start tool
       (T10) can call start without exposing it
-- [ ] `connected_execution_keeps_invalid_writes_atomic` passes `force` for its
+- [x] `connected_execution_keeps_invalid_writes_atomic` passes `force` for its
       start after the forced plan close, changed on purpose with a comment
       saying why
 

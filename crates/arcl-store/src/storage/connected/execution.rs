@@ -1066,4 +1066,82 @@ mod tests {
             other => panic!("unexpected error: {other:?}"),
         }
     }
+
+    /// Assert that a start without force is refused with `reasons` and writes
+    /// nothing, then that a forced start succeeds.
+    fn assert_start_needs_force(database: &mut Database, id: TaskId, reasons: Vec<String>) {
+        match database.start_planning_task(id, false) {
+            Err(StorageError::InvalidPlanningTask(DomainError::NotReady { reasons: actual, .. })) => {
+                assert_eq!(actual, reasons);
+            }
+            other => panic!("unexpected result: {other:?}"),
+        }
+        let unchanged = database.planning_task(id).expect("task reads").expect("task exists");
+        assert_eq!(unchanged.status, TaskStatus::Pending);
+        let started = database.start_planning_task(id, true).expect("forced start succeeds");
+        assert_eq!(started.status, TaskStatus::InProgress);
+    }
+
+    #[test]
+    fn start_refuses_a_task_under_a_parked_ancestor_unless_forced() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let parent = task(&mut database, project.id, "Parent");
+        let child = database
+            .create_planning_task(PlanningTaskCreate {
+                project_id: project.id,
+                spec_id: None,
+                plan_id: None,
+                phase_id: None,
+                parent_id: Some(parent.id),
+                title: "Child".to_owned(),
+                body: String::new(),
+                priority: TaskPriority::Normal,
+                position: 0,
+            })
+            .expect("child creates");
+        database
+            .transition_planning_task(parent.id, TaskAction::Park, false)
+            .expect("parent parks");
+
+        assert_start_needs_force(
+            &mut database,
+            child.id,
+            vec![format!("ancestor `{}` is `parked`", parent.id)],
+        );
+    }
+
+    #[test]
+    fn start_refuses_a_task_in_a_closed_plan_unless_forced() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let spec = database
+            .create_spec("Spec".to_owned(), String::new(), String::new())
+            .expect("spec creates");
+        let plan = database
+            .create_plan(spec.id, "Plan".to_owned(), String::new())
+            .expect("plan creates");
+        let task = database
+            .create_planning_task(PlanningTaskCreate {
+                project_id: project.id,
+                spec_id: None,
+                plan_id: Some(plan.id),
+                phase_id: None,
+                parent_id: None,
+                title: "Task".to_owned(),
+                body: String::new(),
+                priority: TaskPriority::Normal,
+                position: 0,
+            })
+            .expect("task creates");
+        database
+            .transition_plan(plan.id, ContainerAction::Cancel, true)
+            .expect("plan force cancels");
+
+        assert_start_needs_force(
+            &mut database,
+            task.id,
+            vec![format!("plan `{}` is `cancelled`", plan.id)],
+        );
+    }
 }
