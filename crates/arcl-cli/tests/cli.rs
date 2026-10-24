@@ -1633,7 +1633,7 @@ fn complete_with_subtasks_names_subtasks_in_human_and_plain_output() {
     assert!(plain.status.success());
     assert_eq!(
         String::from_utf8_lossy(&plain.stdout),
-        format!("{other}\n{other_child}\n")
+        format!("{other}\nsubtask\t{other_child}\n")
     );
 }
 

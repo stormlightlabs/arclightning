@@ -228,8 +228,9 @@ impl Renderer {
 
     /// Render a task completion with the subtasks it completed, in tree order,
     /// and the tasks it made ready. JSON lists their IDs as
-    /// `completed_subtasks` and `unblocked`; plain output prefixes each
-    /// unblocked ID with `unblocked\t`.
+    /// `completed_subtasks` and `unblocked`. Plain output prints the task ID,
+    /// then a `subtask\t<id>` line for each subtask and an `unblocked\t<id>`
+    /// line for each ready task.
     pub fn render_planning_completion(&self, completion: &PlanningCompletion) -> Result<Option<String>, OutputError> {
         let task = &completion.task;
         let subtasks = &completion.completed_subtasks;
@@ -249,7 +250,7 @@ impl Renderer {
                 .collect::<Vec<_>>()
                 .join("\n"),
             OutputMode::Plain => std::iter::once(task.id.to_string())
-                .chain(subtasks.iter().map(|subtask| subtask.id.to_string()))
+                .chain(subtasks.iter().map(|subtask| format!("subtask\t{}", subtask.id)))
                 .chain(unblocked.iter().map(|ready| format!("unblocked\t{}", ready.id)))
                 .collect::<Vec<_>>()
                 .join("\n"),

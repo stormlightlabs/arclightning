@@ -141,6 +141,9 @@ struct Ancestry {
 
 struct PlanningData {
     tasks: HashMap<TaskId, PlanningTask>,
+    /// For each task with child tasks, the IDs of those children, in no
+    /// particular order. A task missing here is a leaf.
+    children: HashMap<TaskId, Vec<TaskId>>,
     specs: HashMap<SpecId, Spec>,
     plans: HashMap<PlanId, Plan>,
     phases: HashMap<PhaseId, Phase>,
@@ -167,7 +170,7 @@ pub fn planning_ready_tasks(
         {
             continue;
         }
-        if data.tasks.values().any(|child| child.parent_id == Some(task.id)) {
+        if data.children.contains_key(&task.id) {
             continue;
         }
         let ancestry = effective_ancestry(&data, task.id, &mut HashSet::new())?;
@@ -571,6 +574,12 @@ fn load_data(connection: &Connection, project_id: ProjectId) -> Result<PlanningD
         .filter_map(|task| Some((task.id, task.parent_id?)))
         .collect();
     let violations = validate_blocker_edges(&parents, &dependencies);
+    let mut children: HashMap<TaskId, Vec<TaskId>> = HashMap::new();
+    for task in tasks.values() {
+        if let Some(parent_id) = task.parent_id {
+            children.entry(parent_id).or_default().push(task.id);
+        }
+    }
     let mut violations_by_task: HashMap<TaskId, Vec<usize>> = HashMap::new();
     for (index, violation) in violations.iter().enumerate() {
         // A cycle visits each of its tasks once, and each step is an edge
@@ -586,6 +595,7 @@ fn load_data(connection: &Connection, project_id: ProjectId) -> Result<PlanningD
     }
     Ok(PlanningData {
         tasks,
+        children,
         specs: specs(connection, project_id)?
             .into_iter()
             .map(|spec| (spec.id, spec))
@@ -915,10 +925,11 @@ fn dependent_tasks(data: &PlanningData, id: TaskId) -> Vec<PlanningTask> {
 
 fn child_tasks(data: &PlanningData, id: TaskId) -> Vec<PlanningTask> {
     let mut result = data
-        .tasks
-        .values()
-        .filter(|task| task.parent_id == Some(id))
-        .cloned()
+        .children
+        .get(&id)
+        .into_iter()
+        .flatten()
+        .filter_map(|child| data.tasks.get(child).cloned())
         .collect::<Vec<_>>();
     result.sort_by(|left, right| left.position.cmp(&right.position).then_with(|| left.id.cmp(&right.id)));
     result

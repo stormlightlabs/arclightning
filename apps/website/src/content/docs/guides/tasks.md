@@ -104,15 +104,15 @@ ancestor. Blockers inside the subtree do not count, even cancelled ones. There
 is no `--force` for this. `--with-subtasks` and `--allow-open-children` cannot
 be combined.
 
-Human and plain output name each subtask the command completed. JSON adds a
-`completed_subtasks` list of their IDs in tree order, empty for a plain
-`complete`.
+Human output names each subtask the command completed, and plain output adds a
+`subtask<TAB><id>` line for each. JSON adds a `completed_subtasks` list of their
+IDs in tree order, empty for a plain `complete`.
 
 Every completion also reports the tasks it made ready: tasks that were not
 ready before the command and are ready after it, including leaves under a
 parent it blocked. Human output adds an `Unblocked task` line for each, plain
 output an `unblocked<TAB><id>` line, and JSON an `unblocked` list of IDs, empty
-when nothing was waiting.
+when no task became ready.
 
 ## Handoff
 
