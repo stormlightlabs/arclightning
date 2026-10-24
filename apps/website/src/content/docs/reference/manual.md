@@ -223,11 +223,14 @@ run its migrations. Any other `arcl` command syncs the workspace. Outside a
 project, `arcl serve` exits with code 3 before it binds.
 
 The Work view lists every task by milestone, then by status, in the order
-`arcl list` gives. A glyph leads each row; hover over it or focus the row to
-read why the task is not ready. `j` and `k` move the selection, and `Enter`
+`arcl tree` gives: milestones by plan and position, and tasks by position,
+each followed by its subtasks. A glyph leads each row; for a pending or parked
+task, hover over it or focus the row to read why the task is not ready. `j` and `k` move the selection, and `Enter`
 opens the task. Filters narrow the list by status, priority, milestone and
 readiness: ready, blocked by an incomplete task, or waiting for another
-reason, such as open subtasks. The page URL keeps the filters.
+reason, such as open subtasks. The page URL keeps the filters. A task deleted
+while the list loads is left out; any other failed read shows an error with a
+Retry button.
 
 The Task view shows what `arcl show <task-id>` returns: why the task is not
 ready, its direct blockers, the blockers it inherits from each ancestor, its

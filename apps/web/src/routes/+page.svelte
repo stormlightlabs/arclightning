@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, EmptyState, Feedback, Select, TaskList, formatStatus, rowOrder, type SelectOption } from "@arclightning/ui";
+  import { Button, EmptyState, Feedback, SelectMenu, TaskList, formatStatus, rowOrder, type SelectOption } from "@arclightning/ui";
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
@@ -11,6 +11,7 @@
     groupWork,
     isFiltered,
     moveSelection,
+    orderMilestones,
     parseFilters,
     selectedOf,
     taskHref,
@@ -38,17 +39,21 @@
     priority: [any, ...PRIORITIES.map((priority) => ({ value: priority, label: capitalize(priority) }))],
     milestone: [
       any,
-      ...(list?.milestones ?? []).map((milestone) => ({ value: milestone.id, label: milestone.title })),
+      ...(list ? orderMilestones(list) : []).map((milestone) => ({ value: milestone.id, label: milestone.title })),
       { value: NO_MILESTONE, label: "No milestone" },
     ],
   });
 
-  onMount(() => {
+  onMount(load);
+
+  function load() {
+    failure = null;
+    list = null;
     dataSource()
       .work()
       .then((loaded) => (list = loaded))
       .catch((error: unknown) => (failure = error instanceof Error ? error.message : String(error)));
-  });
+  }
 
   function setFilter(name: FilterName, value: string) {
     const next = { ...filters, [name]: value === "" ? [] : [value] };
@@ -81,13 +86,17 @@
   <h1>Work</h1>
   <form class="filters" aria-label="Filters" onsubmit={(event) => event.preventDefault()}>
     {#each [["status", "Status"], ["readiness", "Readiness"], ["priority", "Priority"], ["milestone", "Milestone"]] as const as [name, label] (name)}
-      <Select {label} options={options[name]} value={filters[name][0] ?? ""} onchange={(event) => setFilter(name, event.currentTarget.value)} />
+      <SelectMenu {label} options={options[name]} value={filters[name][0] ?? ""} onchange={(value) => setFilter(name, value)} />
     {/each}
   </form>
 </header>
 
 {#if failure !== null}
-  <Feedback tone="danger" title="Could not load tasks" message={failure} />
+  <Feedback tone="danger" title="Could not load tasks" message={failure}>
+    {#snippet actions()}
+      <Button label="Retry" onclick={load} />
+    {/snippet}
+  </Feedback>
 {:else if list === null}
   <p class="loading" role="status">Loading tasks…</p>
 {:else if list.items.length === 0}

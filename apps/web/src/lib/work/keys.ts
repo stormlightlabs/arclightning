@@ -14,8 +14,8 @@ export interface WorkKey {
  * The Work list action for a key press, or `null` when the key is not the
  * list's: `j` and `ArrowDown` select the next row, `k` and `ArrowUp` the
  * previous one, and `Enter` opens the selected task. Keys typed into a form
- * field or held with a modifier are left alone, and so is `Enter` on a link
- * or button, which opens what it names itself.
+ * field or a combobox, or held with a modifier, are left alone, and so is
+ * `Enter` on a link or button, which opens what it names itself.
  */
 export function workKeyAction(event: WorkKey): WorkKeyAction | null {
   if (event.altKey || event.ctrlKey || event.metaKey) return null;
@@ -49,7 +49,7 @@ export function moveSelection(order: string[], current: string | null, step: 1 |
 
 /** Whether `target` is in a form field or editable text, where keys type. */
 export function inField(target: EventTarget | null): boolean {
-  return Boolean(closestOf(target)?.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])"));
+  return Boolean(closestOf(target)?.closest("input, textarea, select, [role=combobox], [role=listbox], [contenteditable]:not([contenteditable='false'])"));
 }
 
 /** `target` as something with `closest`, which every element has. */

@@ -31,7 +31,7 @@ function fakeFetch(routes: Record<string, { status?: number; body: unknown }>) {
 const listing = (records: { id: string; kind: string; status: string; title: string }[]) => ({ format_version: 1, data: { records } });
 
 describe("serveSource", () => {
-  it("builds the Work list from list and explain, in the CLI's order, with the token on every request", async () => {
+  it("builds the Work list from list, explain and show, with the token on every request", async () => {
     const { fetch, calls } = fakeFetch({
       "/api/records?kind=task": {
         body: listing([
@@ -39,20 +39,29 @@ describe("serveSource", () => {
           { id: "t-1", kind: "task", status: "pending", title: "Task t-1" },
         ]),
       },
-      "/api/records?kind=phase": { body: listing([{ id: "ph-7", kind: "phase", status: "open", title: "Milestone 7" }]) },
+      "/api/records?kind=phase": {
+        body: listing([
+          { id: "ph-7", kind: "phase", status: "open", title: "Milestone 7" },
+          { id: "ph-8", kind: "phase", status: "open", title: "Milestone 8" },
+        ]),
+      },
       "/api/tasks/t-2/explain": { body: explanation("t-2", "ph-7") },
       "/api/tasks/t-1/explain": { body: explanation("t-1", null) },
+      "/api/records/ph-8": { body: { format_version: 1, data: { action: "shown", phase: { ...phase, id: "ph-8", title: "Milestone 8", position: 8 } } } },
     });
 
     const work = await serveSource({ fetch, headers: () => ({ "X-Arcl-Token": "abc" }) }).work();
 
-    expect(work.milestones).toEqual([{ id: "ph-7", title: "Milestone 7", status: "open" }]);
+    expect(work.milestones).toEqual([
+      { id: "ph-7", plan_id: "pl", title: "Milestone 7", status: "open", position: 7 },
+      { id: "ph-8", plan_id: "pl", title: "Milestone 8", status: "open", position: 8 },
+    ]);
     expect(work.items.map((item) => [item.task.id, item.milestone?.id ?? null])).toEqual([
       ["t-2", "ph-7"],
       ["t-1", null],
     ]);
-    expect(work.items[0].milestone).toEqual({ id: "ph-7", title: "Milestone 7", status: "open" });
-    expect(calls).toHaveLength(4);
+    expect(work.items[0].milestone).toEqual({ id: "ph-7", plan_id: "pl", title: "Milestone 7", status: "open", position: 7 });
+    expect(calls).toHaveLength(5);
     expect(calls.every((call) => call.headers["X-Arcl-Token"] === "abc")).toBe(true);
   });
 
@@ -64,6 +73,33 @@ describe("serveSource", () => {
     const failure = await serveSource({ fetch, headers: () => ({}) }).work().catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(DataError);
     expect(failure).toMatchObject({ code: "unauthorized", message: "the X-Arcl-Token header is missing" });
+  });
+
+  it("leaves out a task deleted between the list and its explain", async () => {
+    const gone = { format_version: 1, error: { code: "not_found", message: "planning task `t-1` was not found" } };
+    const { fetch } = fakeFetch({
+      "/api/records?kind=task": {
+        body: listing([
+          { id: "t-1", kind: "task", status: "pending", title: "Task t-1" },
+          { id: "t-2", kind: "task", status: "pending", title: "Task t-2" },
+        ]),
+      },
+      "/api/records?kind=phase": { body: listing([]) },
+      "/api/tasks/t-1/explain": { status: 404, body: gone },
+      "/api/tasks/t-2/explain": { body: explanation("t-2", null) },
+    });
+    const work = await serveSource({ fetch, headers: () => ({}) }).work();
+    expect(work.items.map((item) => item.task.id)).toEqual(["t-2"]);
+  });
+
+  it("fails the list on an explain error other than not_found", async () => {
+    const { fetch } = fakeFetch({
+      "/api/records?kind=task": { body: listing([{ id: "t-1", kind: "task", status: "pending", title: "Task t-1" }]) },
+      "/api/records?kind=phase": { body: listing([]) },
+      "/api/tasks/t-1/explain": { status: 500, body: { format_version: 1, error: { code: "storage", message: "database is locked" } } },
+    });
+    const failure = await serveSource({ fetch, headers: () => ({}) }).work().catch((error: unknown) => error);
+    expect(failure).toMatchObject({ code: "storage", message: "database is locked" });
   });
 });
 

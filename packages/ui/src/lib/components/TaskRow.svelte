@@ -20,19 +20,23 @@
 
   let { row, href, selected = false, tabbable = true, onselect }: TaskRowProps = $props();
   const reasonId = $props.id();
+  // Readiness says whether work can start, so only rows not yet started or closed explain it.
+  let explained = $derived(row.status === "pending" || row.status === "parked");
 </script>
 
 <li class="arcl-task-row" data-task-id={row.id} data-selected={selected || undefined}>
   <span class="arcl-task-row__glyph">
     <TaskGlyph kind={row.glyph} label={formatGlyph(row.glyph)} />
-    <span class="arcl-task-row__reason" id={reasonId} role="tooltip">
-      <Readiness ready={row.ready} reasons={row.reasons} />
-    </span>
+    {#if explained}
+      <span class="arcl-task-row__reason" id={reasonId} role="tooltip">
+        <Readiness ready={row.ready} reasons={row.reasons} />
+      </span>
+    {/if}
   </span>
   <a
     class="arcl-task-row__title"
     {href}
-    aria-describedby={reasonId}
+    aria-describedby={explained ? reasonId : undefined}
     aria-current={selected ? "true" : undefined}
     tabindex={tabbable ? 0 : -1}
     onfocus={() => onselect?.(row.id)}

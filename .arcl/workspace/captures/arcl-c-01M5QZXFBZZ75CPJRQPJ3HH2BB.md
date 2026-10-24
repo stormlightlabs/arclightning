@@ -1,7 +1,7 @@
 +++
 id = "arcl-c-01M5QZXFBZZ75CPJRQPJ3HH2BB"
 title = "Keep option text out of Select's accessible name"
-status = "captured"
+status = "discarded"
 created-at = "2026-10-24T22:18:48.063Z"
 +++
 

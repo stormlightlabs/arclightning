@@ -29,6 +29,8 @@ describe("workKeyAction", () => {
   it("leaves keys typed into form fields alone", () => {
     expect(workKeyAction(press("j", { target: element("select") }))).toBeNull();
     expect(workKeyAction(press("k", { target: element("input") }))).toBeNull();
+    expect(workKeyAction(press("ArrowDown", { target: element("[role=combobox]") }))).toBeNull();
+    expect(workKeyAction(press("Enter", { target: element("[role=listbox]") }))).toBeNull();
   });
 
   it("lets a focused link open itself on Enter but still moves on j", () => {

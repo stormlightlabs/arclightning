@@ -3,6 +3,8 @@ export const ICONS = {
   arrowLeft: "i-ri-arrow-left-line",
   arrowRight: "i-ri-arrow-right-line",
   capture: "i-ri-add-line",
+  check: "i-ri-check-line",
+  chevronDown: "i-ri-arrow-down-s-line",
   close: "i-ri-close-line",
   github: "i-ri-github-fill",
   inbox: "i-ph-tray",

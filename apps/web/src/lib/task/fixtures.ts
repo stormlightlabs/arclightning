@@ -31,7 +31,7 @@ export function blockedDetail(): TaskDetail {
     ancestors: [parent],
     spec: { id: "s-1", title: "First release", status: "open" },
     plan: { id: "pl-1", title: "Roadmap", status: "open" },
-    phase: { id: "ph-5", title: "Milestone 5: Agent interface", status: "completed" },
+    phase: { id: "ph-5", plan_id: "pl-1", title: "Milestone 5: Agent interface", status: "completed", position: 5 },
   };
 }
 

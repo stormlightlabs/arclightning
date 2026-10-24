@@ -31,8 +31,12 @@ export interface Task {
 /** A milestone: a phase of a plan. */
 export interface Milestone {
   id: string;
+  /** The plan the phase belongs to. */
+  plan_id: string;
   title: string;
   status: ContainerStatus;
+  /** The phase's place in its plan, which orders milestones as `arcl tree` does. */
+  position: number;
 }
 
 /** A spec or plan a task falls under, directly or through an ancestor. */
@@ -71,7 +75,10 @@ export interface WorkItem {
   milestone: Milestone | null;
 }
 
-/** What the Work view shows, each list in the CLI's deterministic order. */
+/**
+ * What the Work view shows. Lists may come in any order: the Work view sorts
+ * them as `arcl tree` does.
+ */
 export interface WorkList {
   milestones: Milestone[];
   items: WorkItem[];
