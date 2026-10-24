@@ -1,0 +1,69 @@
+# Tags a commit on main as stormlight-thunderbot. Agent sessions cannot push
+# tags, so they cut releases through this workflow:
+#
+#   gh workflow run bump.yml -f tag=v0.1.0-alpha.1 -f ref=<sha> -f message="..."
+#
+# or, through the GitHub MCP tools, actions_run_trigger with method
+# run_workflow, workflow_id bump.yml, ref main and the same inputs. Only people
+# with write access can dispatch it. It refuses a tag that is not `vX.Y.Z` with
+# an optional pre-release suffix, a tag that already exists, and a commit that
+# is not on main.
+name: Bump
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag name, such as v0.1.0 or v0.1.0-alpha.1
+        required: true
+      ref:
+        description: Commit on main to tag
+        required: true
+        default: main
+      message:
+        description: Tag message
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ secrets.THUNDERBOT_APP_ID }}
+          private-key: ${{ secrets.THUNDERBOT_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.app.outputs.token }}
+
+      - name: Create and push the tag
+        env:
+          TAG: ${{ inputs.tag }}
+          REF: ${{ inputs.ref }}
+          MESSAGE: ${{ inputs.message }}
+        run: |
+          if ! [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error title=tag::$TAG is not vX.Y.Z or vX.Y.Z-pre"
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "::error title=tag::$TAG already exists"
+            exit 1
+          fi
+          sha=$(git rev-parse --verify "$REF^{commit}")
+          if ! git merge-base --is-ancestor "$sha" origin/main; then
+            echo "::error title=tag::$REF is not on main"
+            exit 1
+          fi
+          git config user.name "stormlight-thunderbot[bot]"
+          git config user.email "stormlight-thunderbot[bot]@users.noreply.github.com"
+          git tag -a "$TAG" "$sha" -m "$MESSAGE"
+          git push origin "refs/tags/$TAG"
+          echo "Tagged $sha as $TAG" >> "$GITHUB_STEP_SUMMARY"
