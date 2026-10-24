@@ -6,7 +6,7 @@ status = "completed"
 priority = "normal"
 position = 4
 blocked-by = ["arcl-t-01M5QPZZKW6X9JPSGZ4VWRAMCY"]
-evidence = "Delivered by #PR: adds the `capture_promote` tool, which the acceptance criteria need and T10.3 left out, and `crates/arcl-mcp/tests/workflow.rs`, which drives the `arcl-mcp` binary over stdio. `a_capture_goes_to_completion_through_mcp_tools` runs capture, promote, ready, start, context, handoff, unpark, start and complete with tools alone and checks each result against its output schema. `tools_stay_inside_their_authority` covers read-only hints, the missing force option, the open-subtask refusal, task placement on a non-task promotion and an unlisted tool. `invalid_transitions_carry_the_application_error` checks that each refused transition returns the failure envelope of the store error for the same call."
+evidence = "Delivered by #38: adds the `capture_promote` tool, which the acceptance criteria need and T10.3 left out, and `crates/arcl-mcp/tests/workflow.rs`, which drives the `arcl-mcp` binary over stdio. `a_capture_goes_to_completion_through_mcp_tools` runs capture, promote, ready, start, context, handoff, unpark, start and complete with tools alone and checks each result against its output schema. `tools_stay_inside_their_authority` covers read-only hints, the missing force option, the open-subtask refusal, task placement on a non-task promotion and an unlisted tool. `invalid_transitions_carry_the_application_error` checks that each refused transition returns the failure envelope of the store error for the same call."
 +++
 
 Prove the MCP server end to end and cover its error boundaries. This completes
