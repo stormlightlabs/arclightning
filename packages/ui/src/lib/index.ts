@@ -13,6 +13,7 @@ export { default as PriorityBadge } from "./components/PriorityBadge.svelte";
 export { default as Readiness } from "./components/Readiness.svelte";
 export { default as RecordSummary } from "./components/RecordSummary.svelte";
 export { default as Select } from "./components/Select.svelte";
+export { default as SelectMenu } from "./components/SelectMenu.svelte";
 export { default as StatusBadge } from "./components/StatusBadge.svelte";
 export { default as Tabs } from "./components/Tabs.svelte";
 export { default as TaskGlyph } from "./components/TaskGlyph.svelte";
@@ -36,6 +37,7 @@ export type { Priority, PriorityBadgeProps } from "./components/PriorityBadge.sv
 export type { ReadinessProps } from "./components/Readiness.svelte";
 export type { RecordSummaryProps } from "./components/RecordSummary.svelte";
 export type { SelectOption, SelectProps } from "./components/Select.svelte";
+export type { SelectMenuProps } from "./components/SelectMenu.svelte";
 export type { RecordStatus, StatusBadgeProps } from "./components/StatusBadge.svelte";
 export type { TabItem, TabsProps } from "./components/Tabs.svelte";
 export type { TaskGlyphProps } from "./components/TaskGlyph.svelte";

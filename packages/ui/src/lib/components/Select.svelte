@@ -16,14 +16,15 @@
   let { id = generatedId, label, options, value = $bindable(""), ...rest }: SelectProps = $props();
 </script>
 
-<label class="arcl-select" for={id}>
-  <span>{label}</span>
+<!-- The label sits beside the select, not around it, so the options stay out of its accessible name. -->
+<div class="arcl-select">
+  <label for={id}>{label}</label>
   <select {...rest} {id} bind:value>
     {#each options as option (option.value)}
       <option value={option.value} disabled={option.disabled}>{option.label}</option>
     {/each}
   </select>
-</label>
+</div>
 
 <style>
   .arcl-select { display: grid; gap: var(--arcl-space-2); color: var(--arcl-text); font-family: var(--arcl-font-ui); font-weight: 650; }

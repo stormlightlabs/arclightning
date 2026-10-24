@@ -14,13 +14,13 @@ export interface WorkKey {
  * The Work list action for a key press, or `null` when the key is not the
  * list's: `j` and `ArrowDown` select the next row, `k` and `ArrowUp` the
  * previous one, and `Enter` opens the selected task. Keys typed into a form
- * field or held with a modifier are left alone, and so is `Enter` on a link
- * or button, which opens what it names itself.
+ * field or a combobox, or held with a modifier, are left alone, and so is
+ * `Enter` on a link or button, which opens what it names itself.
  */
 export function workKeyAction(event: WorkKey): WorkKeyAction | null {
   if (event.altKey || event.ctrlKey || event.metaKey) return null;
   const element = closestOf(event.target);
-  if (element?.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])")) return null;
+  if (element?.closest("input, textarea, select, [role=combobox], [role=listbox], [contenteditable]:not([contenteditable='false'])")) return null;
   switch (event.key) {
     case "j":
     case "ArrowDown":

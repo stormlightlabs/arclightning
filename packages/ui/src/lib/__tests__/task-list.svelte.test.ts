@@ -30,6 +30,22 @@ describe("TaskList", () => {
     expect(getComputedStyle(first.element()).outlineStyle).toBe("solid");
   });
 
+  it("shows the readiness card only for pending and parked rows", async () => {
+    const closed = (id: string, status: TaskRowItem["status"]): TaskRowItem => ({
+      ...row(id, `${status} task`),
+      status,
+      reasons: [`task status is ${status}`],
+    });
+    const rows = [closed("t-1", "completed"), closed("t-2", "in_progress"), closed("t-3", "cancelled"), closed("t-4", "parked")];
+    await render(TaskListHarness, { groups: [{ id: "m", title: "Milestone", sections: [{ id: "m/all", title: "All", rows }] }] });
+    for (const status of ["completed", "in_progress", "cancelled"]) {
+      await expect.element(page.getByText(`task status is ${status}`)).not.toBeInTheDocument();
+      expect(page.getByRole("link", { name: `${status} task` }).element().hasAttribute("aria-describedby")).toBe(false);
+    }
+    page.getByRole("link", { name: "parked task" }).element().focus();
+    await expect.element(page.getByText("task status is parked")).toBeVisible();
+  });
+
   it("reaches only one row with Tab", async () => {
     await render(TaskListHarness, { groups });
     page.getByRole("button", { name: "Select second" }).element().focus();

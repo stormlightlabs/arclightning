@@ -6,7 +6,7 @@ status = "completed"
 priority = "normal"
 position = 2
 blocked-by = ["arcl-t-01M5QS2Q9VBVA27RW5M3V30HKF"]
-evidence = "Delivered by #39: the Work list in apps/web, the data module in apps/web/src/lib/data, and TaskList, TaskGroupHeader, TaskRow and TaskGlyph in packages/ui. Verified with pnpm --filter @arclightning/web check and test, a headless Chromium run against arcl serve on this repository, and the just check steps."
+evidence = "Delivered by #39: the Work list in apps/web, ordered like arcl tree; the data module in apps/web/src/lib/data; and TaskList, TaskGroupHeader, TaskRow, TaskGlyph and the SelectMenu filter control in packages/ui. Verified with pnpm --filter @arclightning/web check and test, the packages/ui unit and browser tests, a headless Chromium run against arcl serve on this repository, and the just check steps."
 +++
 
 Build the Work view: the list a person opens to pick the next task, laid out
