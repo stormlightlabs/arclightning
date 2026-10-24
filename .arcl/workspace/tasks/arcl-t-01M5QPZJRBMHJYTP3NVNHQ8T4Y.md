@@ -5,7 +5,7 @@ title = "T10.1: Add the Arc Lightning skill"
 status = "completed"
 priority = "normal"
 position = 1
-evidence = "Delivered on branch `claude/t10-1-skill`: `skills/arclightning/SKILL.md` teaches the ready, start, context, handoff and complete loop through `arcl --json` and links the automation guide for envelope fields and reason kinds. README and the automation guide give `npx skills add stormlightlabs/arclightning --skill arclightning`. `npx -y skills add <checkout> --list` names `arclightning`, and `--skill arclightning -a claude-code -y --copy` installed it into `.claude/skills/arclightning/`. The loop was run with `--json` against a scratch project."
+evidence = "Delivered by #30: `skills/arclightning/SKILL.md` teaches the ready, start, context, handoff and complete loop through `arcl --json` and links the automation guide for envelope fields and reason kinds. README and the automation guide give `npx skills add stormlightlabs/arclightning --skill arclightning`. `npx -y skills add <checkout> --list` names `arclightning`, and `--skill arclightning -a claude-code -y --copy` installed it into `.claude/skills/arclightning/`. The loop was run with `--json` against a scratch project."
 +++
 
 Add an Arc Lightning skill that teaches a coding agent the task loop through
@@ -22,14 +22,14 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] `SKILL.md` has `name: arclightning` and a `description` that says when to
+- [x] `SKILL.md` has `name: arclightning` and a `description` that says when to
       use it
-- [ ] It teaches the ready, start, context, handoff, and complete loop with
+- [x] It teaches the ready, start, context, handoff, and complete loop with
       `arcl` commands and `--json`, and points to the automation guide for
       envelope fields and reason kinds
-- [ ] It refers to product commands without restating domain rules such as
+- [x] It refers to product commands without restating domain rules such as
       readiness conditions or allowed transitions
-- [ ] `npx skills add stormlightlabs/arclightning --skill arclightning` lists
+- [x] `npx skills add stormlightlabs/arclightning --skill arclightning` lists
       and installs it
 
 Verification:

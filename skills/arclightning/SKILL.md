@@ -15,10 +15,10 @@ instead of working that out yourself.
 Every `--json` command writes one object to standard output:
 
 ```json
-{ "format_version": 2, "data": { "...": "..." } }
+{ "format_version": <n>, "data": { "...": "..." } }
 ```
 
-Check `format_version` before reading `data`. A failure goes to standard error
+The version depends on the command. Check it before reading `data`. A failure goes to standard error
 as `{"format_version": 1, "error": {"code", "exit_code", "message"}}`, and the
 command exits with that nonzero `exit_code`. The
 [automation guide](https://github.com/stormlightlabs/arclightning/blob/main/apps/website/src/content/docs/guides/automation.md)
@@ -27,7 +27,9 @@ ID fields.
 
 ## Work the loop
 
-1. Find work. `arcl --json ready` returns `data.tasks` in order, and
+1. Find work. First resume your own parked work:
+   `arcl --json list --kind task --status parked` lists tasks a session handed
+   off. Otherwise `arcl --json ready` returns `data.tasks` in order, and
    `arcl --json next` returns the first as `data.task`. An empty list means
    nothing can start.
 2. Start it. `arcl --json task start <id>` moves the task to in progress. If
@@ -45,8 +47,9 @@ ID fields.
      step 1.
    - Not done: `arcl --json task handoff <id> --note "<note>"`, where the
      note says where the work stands and what is next. This parks the task.
-     The next session runs `arcl task unpark <id>`, then starts it again and
-     reads the note from the context.
+     The next session finds it in step 1, runs
+     `arcl --json task unpark <id>`, then starts it again and reads the note
+     from the context.
 
 Use `--evidence-file -` and `--note-file -` to pass longer Markdown on
 standard input.
@@ -59,5 +62,5 @@ When you find work outside the task, capture it instead of doing it:
 arcl --json capture create "<title>" --body "<what and why>"
 ```
 
-Run `arcl <command> --help` for every flag. `arcl explain <id>` says why a task
-is not ready, and `arcl check` validates the project.
+Run `arcl <command> --help` for every flag, and `arcl check` to validate the
+project.
