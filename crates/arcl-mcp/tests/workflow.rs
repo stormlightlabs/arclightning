@@ -4,28 +4,40 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::{Arc, Mutex, mpsc};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use arcl_cli::cli::ColorChoice;
 use arcl_cli::output::{OutputMode, Renderer};
-use arcl_core::domain::{CaptureId, TaskAction, TaskId};
+use arcl_core::domain::{CaptureId, PhaseId, PlanId, SpecId, TaskAction, TaskId, TaskPriority};
 use arcl_mcp::error::ToolError;
-use arcl_repo::workspace::ProjectConfig;
-use arcl_store::{CaptureTaskPromotion, Database, StorageError};
+use arcl_repo::workspace::{ProjectConfig, WorkspaceManifest, encode_manifest};
+use arcl_store::{CapturePromotionResult, CaptureTaskPromotion, Database, StorageError};
 
 /// The tools that change no records. Every other tool writes.
 const READ_TOOLS: &[&str] = &["context", "explain", "list", "ready", "show"];
+
+/// How long the server has to answer a request or to exit before the test
+/// fails instead of hanging.
+const TIMEOUT: Duration = Duration::from_secs(30);
 
 /// An MCP client talking to an `arcl-mcp` child process over stdio.
 struct Client {
     child: Child,
     stdin: Option<ChildStdin>,
-    stdout: BufReader<ChildStdout>,
+    /// Lines from the server's stdout, read on their own thread so a read
+    /// can time out.
+    lines: Receiver<String>,
+    /// Everything the server has written to stderr, for failure messages.
+    stderr: Arc<Mutex<String>>,
     next_id: u64,
     output_schemas: BTreeMap<String, Value>,
 }
@@ -38,12 +50,34 @@ impl Client {
             .current_dir(directory)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
             .expect("the server starts");
         let stdin = child.stdin.take();
         let stdout = BufReader::new(child.stdout.take().expect("stdout"));
-        let mut client = Self { child, stdin, stdout, next_id: 0, output_schemas: BTreeMap::new() };
+        let (sender, lines) = mpsc::channel();
+        thread::spawn(move || {
+            for line in stdout.lines() {
+                let Ok(line) = line else { break };
+                if sender.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        let stderr = Arc::new(Mutex::new(String::new()));
+        let mut stderr_pipe = child.stderr.take().expect("stderr");
+        let collected = Arc::clone(&stderr);
+        thread::spawn(move || {
+            let mut buffer = [0; 4096];
+            while let Ok(read) = stderr_pipe.read(&mut buffer) {
+                if read == 0 {
+                    break;
+                }
+                let text = String::from_utf8_lossy(&buffer[..read]);
+                collected.lock().expect("stderr buffer").push_str(&text);
+            }
+        });
+        let mut client = Self { child, stdin, lines, stderr, next_id: 0, output_schemas: BTreeMap::new() };
         let initialized = client.request(
             "initialize",
             json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "0"}}),
@@ -57,6 +91,11 @@ impl Client {
         client
     }
 
+    /// What the server has written to stderr so far.
+    fn stderr(&self) -> String {
+        self.stderr.lock().expect("stderr buffer").clone()
+    }
+
     /// The listed tools.
     fn tools(&mut self) -> Vec<Value> {
         let listed = self.request("tools/list", json!({}));
@@ -67,7 +106,12 @@ impl Client {
     /// result or on content its output schema does not allow.
     fn ok(&mut self, name: &str, arguments: Value) -> Value {
         let result = self.call(name, arguments);
-        assert_ne!(result["isError"], json!(true), "{name} failed: {result}");
+        assert_ne!(
+            result["isError"],
+            json!(true),
+            "{name} failed: {result}\nstderr:\n{}",
+            self.stderr()
+        );
         let content = result["structuredContent"].clone();
         let schema = &self.output_schemas[name];
         let validator = jsonschema::validator_for(schema).expect("output schema compiles");
@@ -82,7 +126,12 @@ impl Client {
     /// Call `name`, expect an error result and return its failure envelope.
     fn fail(&mut self, name: &str, arguments: Value) -> Value {
         let result = self.call(name, arguments);
-        assert_eq!(result["isError"], json!(true), "{name} succeeded: {result}");
+        assert_eq!(
+            result["isError"],
+            json!(true),
+            "{name} succeeded: {result}\nstderr:\n{}",
+            self.stderr()
+        );
         result["structuredContent"].clone()
     }
 
@@ -92,16 +141,26 @@ impl Client {
         response["result"].clone()
     }
 
-    /// Send a request and return the response with the same ID.
+    /// Send a request and return the response with the same ID. Fails, with
+    /// the server's stderr, when no response comes within [`TIMEOUT`].
     fn request(&mut self, method: &str, params: Value) -> Value {
         self.next_id += 1;
         let id = self.next_id;
         self.send(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
+        let deadline = Instant::now() + TIMEOUT;
         loop {
-            let mut line = String::new();
-            let read = self.stdout.read_line(&mut line).expect("read response");
-            assert_ne!(read, 0, "the server closed stdout");
-            let message: Value = serde_json::from_str(&line).expect("a JSON-RPC message");
+            let left = deadline.saturating_duration_since(Instant::now());
+            let line = match self.lines.recv_timeout(left) {
+                Ok(line) => line,
+                Err(RecvTimeoutError::Timeout) => {
+                    panic!("no response to {method} within {TIMEOUT:?}\nstderr:\n{}", self.stderr())
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    panic!("the server closed stdout during {method}\nstderr:\n{}", self.stderr())
+                }
+            };
+            let message: Value = serde_json::from_str(&line)
+                .unwrap_or_else(|error| panic!("not a JSON-RPC message ({error}): {line}\nstderr:\n{}", self.stderr()));
             if message["id"] == json!(id) {
                 return message;
             }
@@ -113,16 +172,41 @@ impl Client {
         writeln!(stdin, "{message}").expect("write request");
     }
 
-    /// Close standard input and check that the server exits cleanly.
+    /// Close standard input and check that the server exits cleanly within
+    /// [`TIMEOUT`].
     fn finish(mut self) {
         drop(self.stdin.take());
-        assert!(self.child.wait().expect("the server exits").success());
+        let deadline = Instant::now() + TIMEOUT;
+        let status = loop {
+            if let Some(status) = self.child.try_wait().expect("poll the server") {
+                break status;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the server did not exit within {TIMEOUT:?}\nstderr:\n{}",
+                self.stderr()
+            );
+            thread::sleep(Duration::from_millis(20));
+        };
+        assert!(
+            status.success(),
+            "the server exited with {status}\nstderr:\n{}",
+            self.stderr()
+        );
+    }
+}
+
+impl Drop for Client {
+    /// Stop a server a failed test left running.
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 }
 
 #[test]
 fn a_capture_goes_to_completion_through_mcp_tools() {
-    let project = project();
+    let project = project(false);
     let mut client = Client::start(project.path());
 
     let captured = client.ok(
@@ -201,7 +285,7 @@ fn a_capture_goes_to_completion_through_mcp_tools() {
 
 #[test]
 fn tools_stay_inside_their_authority() {
-    let project = project();
+    let project = project(false);
     let mut client = Client::start(project.path());
 
     for tool in client.tools() {
@@ -256,7 +340,7 @@ fn tools_stay_inside_their_authority() {
 
 #[test]
 fn invalid_transitions_carry_the_application_error() {
-    let project = project();
+    let project = project(false);
     let mut client = Client::start(project.path());
     let database = || Database::open(project.path().join(".arcl/arcl.db")).expect("open database");
 
@@ -309,7 +393,7 @@ fn invalid_transitions_carry_the_application_error() {
 
 #[test]
 fn capture_promote_checks_run_in_the_cli_order() {
-    let project = project();
+    let project = project(false);
     let mut client = Client::start(project.path());
     let database = || Database::open(project.path().join(".arcl/arcl.db")).expect("open database");
     let parent = create_task(&mut client, json!({"title": "Parent"}));
@@ -341,7 +425,7 @@ fn capture_promote_checks_run_in_the_cli_order() {
 
 #[test]
 fn capture_promote_data_matches_the_cli() {
-    let project = project();
+    let project = project(false);
     let mut client = Client::start(project.path());
     let database = || Database::open(project.path().join(".arcl/arcl.db")).expect("open database");
     let renderer = Renderer::new(OutputMode::Json, ColorChoice::Never);
@@ -391,15 +475,263 @@ fn capture_promote_data_matches_the_cli() {
     client.finish();
 }
 
-/// A project without the workspace in a temp directory.
-fn project() -> TempDir {
+#[test]
+fn capture_promote_parses_target_and_priority_where_the_cli_does() {
+    let project = project(false);
+    let mut client = Client::start(project.path());
+    let missing = "arcl-c-01M5QPZZKW6X9JPSGZ4VWRAMCY".to_owned();
+    let capture = |client: &mut Client, title: &str| {
+        let captured = client.ok("capture_create", json!({"title": title}));
+        captured["data"]["capture"]["id"]
+            .as_str()
+            .expect("capture ID")
+            .to_owned()
+    };
+
+    // A missing capture is reported before a bad priority or target.
+    for arguments in [
+        json!({"capture_id": missing, "target": "task", "priority": "urgent"}),
+        json!({"capture_id": missing, "target": "plan"}),
+    ] {
+        let failed = client.fail("capture_promote", arguments);
+        let expected = Err(StorageError::CaptureNotFound { id: missing.clone() });
+        assert_same_failure(&failed, expected, ("not_found", 5));
+    }
+
+    // A bad capture ID is reported before anything else.
+    let bad_id = ToolError::from(CaptureId::parse("bogus").expect_err("not a capture ID")).envelope();
+    for arguments in [
+        json!({"capture_id": "bogus", "target": "task", "priority": "urgent"}),
+        json!({"capture_id": "bogus", "target": "plan"}),
+        json!({"capture_id": "bogus"}),
+    ] {
+        assert_eq!(client.fail("capture_promote", arguments), bad_id);
+    }
+
+    // Then a target must be given.
+    let untargeted = client.fail("capture_promote", json!({"capture_id": missing}));
+    let expected = ToolError::invalid_request("capture promotion requires a target: spec, task, or note");
+    assert_eq!(untargeted, expected.envelope());
+    assert_eq!(code(&untargeted), ("invalid_request", 3));
+
+    // The priority applies only to a task, so a note ignores it.
+    let note = capture(&mut client, "A note");
+    let promoted = client.ok(
+        "capture_promote",
+        json!({"capture_id": note, "target": "note", "priority": "urgent"}),
+    );
+    assert_eq!(promoted["data"]["promotion"]["target"]["kind"], json!("note"));
+
+    // The target ignores ASCII case.
+    let task = capture(&mut client, "A task");
+    let promoted = client.ok("capture_promote", json!({"capture_id": task, "target": "Task"}));
+    assert_eq!(promoted["data"]["promotion"]["target"]["kind"], json!("task"));
+
+    // An unknown target, then a task's priority, fail once the capture is found.
+    let pending = capture(&mut client, "Not promoted");
+    let unknown = client.fail("capture_promote", json!({"capture_id": pending, "target": "Plan"}));
+    let expected = ToolError::invalid_request("unknown capture promotion target `plan`; use spec, task, or note");
+    assert_eq!(unknown, expected.envelope());
+    assert_eq!(code(&unknown), ("invalid_request", 3));
+    for priority in ["urgent", "High"] {
+        let failed = client.fail(
+            "capture_promote",
+            json!({"capture_id": pending, "target": "task", "priority": priority}),
+        );
+        let expected = ToolError::from(TaskPriority::parse(priority).expect_err("not a priority")).envelope();
+        assert_eq!(failed, expected);
+        assert_eq!(code(&failed), ("invalid_request", 3));
+    }
+    let shown = client.ok("show", json!({"id": pending}));
+    assert_eq!(shown["data"]["capture"]["status"], json!("captured"));
+    client.finish();
+}
+
+#[test]
+fn a_promote_with_every_field_matches_the_cli() {
+    let project = project(false);
+    let mut client = Client::start(project.path());
+    let database = || Database::open(project.path().join(".arcl/arcl.db")).expect("open database");
+    let renderer = Renderer::new(OutputMode::Json, ColorChoice::Never);
+    let render = |result: &CapturePromotionResult| -> Value {
+        let rendered = renderer
+            .render_capture_promotion(result)
+            .expect("render")
+            .expect("JSON output");
+        serde_json::from_str(&rendered).expect("CLI JSON")
+    };
+    // Two captures alike, one promoted by the tool and one as the CLI does.
+    let pair = |client: &mut Client| {
+        let mut ids = Vec::new();
+        for _ in 0..2 {
+            let captured = client.ok("capture_create", json!({"title": "Original", "body": "Original body."}));
+            ids.push(
+                captured["data"]["capture"]["id"]
+                    .as_str()
+                    .expect("capture ID")
+                    .to_owned(),
+            );
+        }
+        (ids[0].clone(), ids[1].clone())
+    };
+
+    let spec = database()
+        .create_spec("Spec".to_owned(), String::new(), String::new())
+        .expect("spec");
+    let plan = database()
+        .create_plan(spec.id, "Plan".to_owned(), String::new())
+        .expect("plan");
+    let phase = database()
+        .create_phase(plan.id, "Phase".to_owned(), String::new(), 0)
+        .expect("phase");
+    let (spec_id, plan_id, phase_id) = (spec.id.to_string(), plan.id.to_string(), phase.id.to_string());
+    let parent = create_task(
+        &mut client,
+        json!({"title": "Parent", "spec": spec_id, "plan": plan_id, "phase": phase_id}),
+    );
+
+    let (tool_capture, cli_capture) = pair(&mut client);
+    let promoted = client.ok(
+        "capture_promote",
+        json!({
+            "capture_id": tool_capture,
+            "target": "task",
+            "title": "Promoted title",
+            "body": "Promoted body.",
+            "acceptance_criteria": "- Ignored for a task.",
+            "spec": spec_id,
+            "plan": plan_id,
+            "phase": phase_id,
+            "parent": parent,
+            "priority": "high",
+            "position": 7
+        }),
+    );
+    let task = &promoted["data"]["task"];
+    assert_eq!(
+        (
+            &task["title"],
+            &task["body"],
+            &task["spec_id"],
+            &task["plan_id"],
+            &task["phase_id"],
+            &task["parent_id"],
+            &task["priority"],
+            &task["position"]
+        ),
+        (
+            &json!("Promoted title"),
+            &json!("Promoted body."),
+            &json!(spec_id),
+            &json!(plan_id),
+            &json!(phase_id),
+            &json!(parent),
+            &json!("high"),
+            &json!(7)
+        ),
+        "{task}"
+    );
+    let result = database()
+        .promote_capture_to_task(
+            CaptureId::parse(&cli_capture).expect("capture ID"),
+            CaptureTaskPromotion {
+                spec_id: Some(SpecId::parse(&spec_id).expect("spec ID")),
+                plan_id: Some(PlanId::parse(&plan_id).expect("plan ID")),
+                phase_id: Some(PhaseId::parse(&phase_id).expect("phase ID")),
+                parent_id: Some(TaskId::parse(&parent).expect("task ID")),
+                title: "Promoted title".to_owned(),
+                body: "Promoted body.".to_owned(),
+                priority: TaskPriority::parse("high").expect("priority"),
+                position: 7,
+            },
+        )
+        .expect("the store promotes the capture");
+    let cli = render(&result);
+    let renames = [
+        (cli_capture.as_str(), tool_capture.as_str()),
+        (
+            &result.promotion.target.promotion_target_id(),
+            task["id"].as_str().expect("task ID"),
+        ),
+    ];
+    assert_eq!(normalize(&promoted, &[]), normalize(&cli, &renames));
+
+    let (tool_capture, cli_capture) = pair(&mut client);
+    let promoted = client.ok(
+        "capture_promote",
+        json!({
+            "capture_id": tool_capture,
+            "target": "spec",
+            "title": "Promoted spec",
+            "body": "Spec body.",
+            "acceptance_criteria": "- It works."
+        }),
+    );
+    assert_eq!(promoted["data"]["spec"]["acceptance_criteria"], json!("- It works."));
+    let result = database()
+        .promote_capture_to_spec(
+            CaptureId::parse(&cli_capture).expect("capture ID"),
+            "Promoted spec".to_owned(),
+            "Spec body.".to_owned(),
+            "- It works.".to_owned(),
+        )
+        .expect("the store promotes the capture");
+    let cli = render(&result);
+    let spec_id = promoted["data"]["spec"]["id"].as_str().expect("spec ID");
+    let renames = [
+        (cli_capture.as_str(), tool_capture.as_str()),
+        (&result.promotion.target.promotion_target_id(), spec_id),
+    ];
+    assert_eq!(normalize(&promoted, &[]), normalize(&cli, &renames));
+    client.finish();
+}
+
+#[test]
+fn a_promote_is_exported_to_the_workspace() {
+    let project = project(true);
+    let mut client = Client::start(project.path());
+    let captured = client.ok("capture_create", json!({"title": "Export the promote"}));
+    let capture = captured["data"]["capture"]["id"]
+        .as_str()
+        .expect("capture ID")
+        .to_owned();
+
+    let promoted = client.ok(
+        "capture_promote",
+        json!({"capture_id": capture, "target": "task", "priority": "high"}),
+    );
+    assert!(promoted.get("warnings").is_none(), "{promoted}");
+    let task = promoted["data"]["task"]["id"].as_str().expect("task ID");
+
+    let workspace = project.path().join(".arcl/workspace");
+    let capture_file =
+        fs::read_to_string(workspace.join("captures").join(format!("{capture}.md"))).expect("the capture is exported");
+    assert!(capture_file.contains("status = \"promoted\""), "{capture_file}");
+    assert!(capture_file.contains(task), "{capture_file}");
+    let task_file =
+        fs::read_to_string(workspace.join("tasks").join(format!("{task}.md"))).expect("the task is exported");
+    assert!(task_file.contains("title = \"Export the promote\""), "{task_file}");
+    assert!(task_file.contains("priority = \"high\""), "{task_file}");
+    client.finish();
+}
+
+/// A project in a temp directory, with the workspace on or off.
+fn project(workspace: bool) -> TempDir {
     let directory = TempDir::new().expect("temp dir");
     let arcl = directory.path().join(".arcl");
     fs::create_dir_all(&arcl).expect("create .arcl");
     let mut config = ProjectConfig::default();
-    config.workspace.enabled = false;
+    config.workspace.enabled = workspace;
     fs::write(arcl.join("config.toml"), config.render().expect("render config")).expect("write config");
     Database::open(arcl.join("arcl.db")).expect("create database");
+    if workspace {
+        let root = arcl.join("workspace");
+        for kind in ["captures", "releases", "specs", "plans", "phases", "tasks", "notes"] {
+            fs::create_dir_all(root.join(kind)).expect("create workspace directory");
+        }
+        let manifest = encode_manifest(&WorkspaceManifest::default()).expect("encode manifest");
+        fs::write(root.join("manifest.toml"), manifest).expect("write manifest");
+    }
     directory
 }
 
@@ -436,4 +768,32 @@ fn assert_same_failure(envelope: &Value, expected: Result<(), StorageError>, cod
     let error = expected.expect_err("the store refuses the same call");
     assert_eq!(envelope, &ToolError::from(error).envelope());
     assert_eq!(code(envelope), code_and_exit, "{envelope}");
+}
+
+/// `value` with each `(from, to)` ID renamed and every `*_at` timestamp
+/// blanked, so two promotions of alike captures compare equal.
+fn normalize(value: &Value, renames: &[(&str, &str)]) -> Value {
+    let mut text = value.to_string();
+    for (from, to) in renames {
+        text = text.replace(from, to);
+    }
+    let mut value: Value = serde_json::from_str(&text).expect("JSON");
+    blank_timestamps(&mut value);
+    value
+}
+
+fn blank_timestamps(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            for (key, field) in map.iter_mut() {
+                if key.ends_with("_at") && field.is_string() {
+                    *field = json!("<time>");
+                } else {
+                    blank_timestamps(field);
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(blank_timestamps),
+        _ => {}
+    }
 }

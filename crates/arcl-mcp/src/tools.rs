@@ -118,15 +118,6 @@ pub enum OpenSubtasks {
     Complete,
 }
 
-/// The kind of record a capture becomes, as `arcl capture promote` takes it.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum PromotionTarget {
-    Spec,
-    Task,
-    Note,
-}
-
 /// The record a promotion created, keyed by its kind.
 #[derive(Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -235,8 +226,10 @@ pub struct CaptureCreateInput {
 pub struct CapturePromoteInput {
     /// The capture ID, `arcl-c-…`.
     pub capture_id: String,
-    /// The kind of record the capture becomes.
-    pub target: PromotionTarget,
+    /// The kind of record the capture becomes: `spec`, `task` or `note`, in
+    /// any case. Checked after the capture is found, as the CLI checks it.
+    #[schemars(required, extend("examples" = ["spec", "task", "note"]))]
+    pub target: Option<String>,
     /// The new record's title. Defaults to the capture's.
     pub title: Option<String>,
     /// The new record's Markdown body. Defaults to the capture's.
@@ -251,9 +244,11 @@ pub struct CapturePromoteInput {
     pub phase: Option<String>,
     /// For a task: the parent task, `arcl-t-…`.
     pub parent: Option<String>,
-    /// For a task: the priority. Defaults to `normal`.
-    #[serde(default)]
-    pub priority: TaskPriority,
+    /// For a task: `critical`, `high`, `normal` or `low`. Defaults to
+    /// `normal`. Checked only when the target is a task, as the CLI checks it.
+    #[serde(default = "normal_priority")]
+    #[schemars(extend("examples" = ["critical", "high", "normal", "low"]))]
+    pub priority: String,
     /// For a task: the order among its siblings. Defaults to 0.
     #[serde(default)]
     pub position: i64,
@@ -485,4 +480,10 @@ pub struct ReadyData {
     /// Pass as `cursor` for the next page. Left out on the last page.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
+}
+
+/// The priority a promoted task gets when the call names none, as the CLI's
+/// `--priority` defaults.
+fn normal_priority() -> String {
+    TaskPriority::Normal.as_str().to_owned()
 }

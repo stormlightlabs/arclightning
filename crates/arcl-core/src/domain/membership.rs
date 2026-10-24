@@ -101,6 +101,27 @@ pub struct RecordLink {
     pub target_id: String,
 }
 
+/// The kind of record a capture is promoted to, before the record exists.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CapturePromotionKind {
+    Spec,
+    Task,
+    Note,
+}
+
+impl CapturePromotionKind {
+    /// Parse `spec`, `task` or `note`, ignoring ASCII case. Returns `None`
+    /// for any other value, so each caller reports it in its own terms.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "spec" => Some(Self::Spec),
+            "task" => Some(Self::Task),
+            "note" => Some(Self::Note),
+            _ => None,
+        }
+    }
+}
+
 /// A valid target for capture promotion.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -138,4 +159,17 @@ pub struct CapturePromotion {
     pub project_id: ProjectId,
     pub capture_id: super::CaptureId,
     pub target: CapturePromotionTarget,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn promotion_kind_parses_any_ascii_case() {
+        assert_eq!(CapturePromotionKind::parse("Task"), Some(CapturePromotionKind::Task));
+        assert_eq!(CapturePromotionKind::parse("SPEC"), Some(CapturePromotionKind::Spec));
+        assert_eq!(CapturePromotionKind::parse("note"), Some(CapturePromotionKind::Note));
+        assert_eq!(CapturePromotionKind::parse("plan"), None);
+    }
 }

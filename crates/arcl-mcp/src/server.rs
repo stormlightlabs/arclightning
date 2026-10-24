@@ -18,8 +18,8 @@ use rmcp::{
 use tokio_util::sync::CancellationToken;
 
 use arcl_core::domain::{
-    CaptureId, NoteId, PhaseId, PlanId, PlanningTask, ReleaseId, SpecId, TaskAction, TaskId, TaskPriority,
-    validate_title,
+    CaptureId, CapturePromotionKind, NoteId, PhaseId, PlanId, PlanningTask, ReleaseId, SpecId, TaskAction, TaskId,
+    TaskPriority, validate_title,
 };
 use arcl_store::{
     CapturePromotionRecord, CaptureTaskPromotion, Database, PlanningContext, PlanningReadyFilter, PlanningTaskCreate,
@@ -458,41 +458,58 @@ fn version_meta(format_version: u8) -> MetaObject {
 
 /// Promote a capture as `arcl capture promote` does: the capture's title and
 /// body unless the input gives others, and task placement only for a task.
-/// The checks run in the CLI's order, so a call both reject fails the same
-/// way: the capture ID, the capture's existence, task placement, then the
-/// store's own checks, title included.
+/// The checks run in the CLI's order and with its rules, so a call both reject
+/// fails the same way: the capture ID, a target given, the capture's
+/// existence, the target's kind, then for a spec or note no task placement,
+/// or for a task the priority and placement IDs, then the store's own checks,
+/// title included.
 fn promote_capture(database: &mut Database, input: CapturePromoteInput) -> Result<CapturePromotionData, ToolError> {
     let id = CaptureId::parse(&input.capture_id)?;
+    let target = input
+        .target
+        .ok_or_else(|| ToolError::invalid_request("capture promotion requires a target: spec, task, or note"))?;
     let capture = database
         .capture(id)?
         .ok_or_else(|| StorageError::CaptureNotFound { id: id.to_string() })?;
-    if input.target != PromotionTarget::Task
-        && (input.spec.is_some() || input.plan.is_some() || input.phase.is_some() || input.parent.is_some())
-    {
-        return Err(ToolError::invalid_request(
-            "task placement options apply only when promoting to a task",
-        ));
-    }
     let title = input.title.unwrap_or(capture.title);
     let body = input.body.unwrap_or(capture.body);
-    let result = match input.target {
-        PromotionTarget::Spec => {
+    let placed = input.spec.is_some() || input.plan.is_some() || input.phase.is_some() || input.parent.is_some();
+    let misplaced = || ToolError::invalid_request("task placement options apply only when promoting to a task");
+    let result = match CapturePromotionKind::parse(&target) {
+        Some(CapturePromotionKind::Spec) => {
+            if placed {
+                return Err(misplaced());
+            }
             database.promote_capture_to_spec(id, title, body, input.acceptance_criteria.unwrap_or_default())?
         }
-        PromotionTarget::Task => database.promote_capture_to_task(
-            id,
-            CaptureTaskPromotion {
-                spec_id: input.spec.as_deref().map(SpecId::parse).transpose()?,
-                plan_id: input.plan.as_deref().map(PlanId::parse).transpose()?,
-                phase_id: input.phase.as_deref().map(PhaseId::parse).transpose()?,
-                parent_id: input.parent.as_deref().map(TaskId::parse).transpose()?,
-                title,
-                body,
-                priority: input.priority,
-                position: input.position,
-            },
-        )?,
-        PromotionTarget::Note => database.promote_capture_to_note(id, title, body)?,
+        Some(CapturePromotionKind::Task) => {
+            let priority = TaskPriority::parse(&input.priority)?;
+            database.promote_capture_to_task(
+                id,
+                CaptureTaskPromotion {
+                    spec_id: input.spec.as_deref().map(SpecId::parse).transpose()?,
+                    plan_id: input.plan.as_deref().map(PlanId::parse).transpose()?,
+                    phase_id: input.phase.as_deref().map(PhaseId::parse).transpose()?,
+                    parent_id: input.parent.as_deref().map(TaskId::parse).transpose()?,
+                    title,
+                    body,
+                    priority,
+                    position: input.position,
+                },
+            )?
+        }
+        Some(CapturePromotionKind::Note) => {
+            if placed {
+                return Err(misplaced());
+            }
+            database.promote_capture_to_note(id, title, body)?
+        }
+        None => {
+            return Err(ToolError::invalid_request(format!(
+                "unknown capture promotion target `{}`; use spec, task, or note",
+                target.to_ascii_lowercase()
+            )));
+        }
     };
     let record = match result.record {
         CapturePromotionRecord::Spec(spec) => PromotedRecord::Spec(spec),
