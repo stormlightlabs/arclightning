@@ -5,6 +5,7 @@ members = [
     "crates/arcl-repo",
     "crates/arcl-cli",
     "crates/arcl-mcp",
+    "crates/arcl-serve",
 ]
 resolver = "3"
 

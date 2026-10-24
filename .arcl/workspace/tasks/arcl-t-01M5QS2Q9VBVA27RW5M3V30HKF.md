@@ -2,9 +2,10 @@
 id = "arcl-t-01M5QS2Q9VBVA27RW5M3V30HKF"
 parent = "arcl-t-01M5NE5P6XHRR4Q84820YACQ07"
 title = "T18.1: Serve a read-only API and the web app shell"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 1
+evidence = "Delivered on branch claude/t18-1-serve-shell: the arcl-serve crate, `arcl serve` and the apps/web shell. Verified with `cargo test --workspace --all-features serve`, `pnpm --filter @arclightning/web check`, `test`, `test:e2e`, `test:visual` and `just check`."
 +++
 
 Serve a read-only web app from the `arcl` binary, with the security checks in
@@ -28,17 +29,17 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] `arcl serve` binds `127.0.0.1` on an ephemeral port by default, `--port`
+- [x] `arcl serve` binds `127.0.0.1` on an ephemeral port by default, `--port`
       pins one, and it prints the URL on start
-- [ ] Every request needs a matching `Host` header and the per-run token in a
+- [x] Every request needs a matching `Host` header and the per-run token in a
       request header; the token is never in a cookie, and the app drops it
       from the URL after the first page load
-- [ ] Responses carry no CORS headers, and no GET changes state
-- [ ] Read endpoints for records, lists, ready work, readiness explanation and
+- [x] Responses carry no CORS headers, and no GET changes state
+- [x] Read endpoints for records, lists, ready work, readiness explanation and
       context return the same data and errors as the CLI's JSON envelopes
-- [ ] `apps/web` builds and renders an empty shell with the Inbox, Work and
+- [x] `apps/web` builds and renders an empty shell with the Inbox, Work and
       Planning navigation from shared UI components
-- [ ] `apps/web` has `check`, `test`, `test:e2e` and `test:visual` scripts
+- [x] `apps/web` has `check`, `test`, `test:e2e` and `test:visual` scripts
 
 Verification:
 

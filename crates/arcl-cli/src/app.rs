@@ -27,6 +27,8 @@ mod commands;
 mod error;
 mod init;
 mod query;
+mod reads;
+mod serve;
 mod skill;
 mod support;
 mod workspace;
@@ -37,9 +39,11 @@ use commands::{
 pub use error::ApplicationError;
 use error::{CResult, CommandError};
 use init::initialize;
-use query::{connected_tree, list_connected, resolve_ready_filter, show_record};
+use query::{connected_tree, resolve_ready_filter};
+use reads::{read_context, read_explain, read_list, read_ready, read_show};
+use serve::exec_serve;
 use skill::exec_skill;
-use support::{open_database, parse_task_id, write_output};
+use support::{open_database, write_output};
 use workspace::exec_workspace;
 
 use auto_sync::{Access, auto_sync, command_access, workspace_roots};
@@ -185,36 +189,16 @@ fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Wa
         Some(Command::Dependency { command }) => exec_dependency(command, renderer),
         Some(Command::Note { command }) => exec_note(command, renderer),
         Some(Command::Skill { command }) => exec_skill(command, renderer),
-        Some(Command::Show { id }) => {
-            let database = open_database().map_err(ApplicationError::from_command)?;
-            let message = show_record(&database, &id, renderer).map_err(ApplicationError::from_command)?;
-            write_output(message)
-        }
-        Some(Command::List { filters }) => {
-            let database = open_database().map_err(ApplicationError::from_command)?;
-            let summaries = list_connected(&database, filters).map_err(ApplicationError::from_command)?;
-            write_output(renderer.render_connected_summaries(&summaries)?)
-        }
+        Some(Command::Show { id }) => write_output(read_show(&id, renderer)?),
+        Some(Command::List { filters }) => write_output(read_list(filters, renderer)?),
         Some(Command::Tree { id }) => {
             let database = open_database().map_err(ApplicationError::from_command)?;
             let graph = database.connected_graph().map_err(ApplicationError::from_command)?;
             let nodes = connected_tree(&graph, id.as_deref()).map_err(ApplicationError::from_command)?;
             write_output(renderer.render_connected_tree(&nodes)?)
         }
-        Some(Command::Explain { task_id }) => {
-            let id = parse_task_id(&task_id).map_err(ApplicationError::from_command)?;
-            let database = open_database().map_err(ApplicationError::from_command)?;
-            let view = database
-                .planning_task_view(id)
-                .map_err(ApplicationError::from_command)?;
-            write_output(renderer.render_planning_task_view(&view)?)
-        }
-        Some(Command::Context { task_id }) => {
-            let id = parse_task_id(&task_id).map_err(ApplicationError::from_command)?;
-            let database = open_database().map_err(ApplicationError::from_command)?;
-            let context = database.planning_context(id).map_err(ApplicationError::from_command)?;
-            write_output(renderer.render_planning_context(&context)?)
-        }
+        Some(Command::Explain { task_id }) => write_output(read_explain(&task_id, renderer)?),
+        Some(Command::Context { task_id }) => write_output(read_context(&task_id, renderer)?),
         Some(Command::Check) => {
             let database = open_database().map_err(ApplicationError::from_command)?;
             let report = database.check().map_err(ApplicationError::from_command)?;
@@ -235,14 +219,7 @@ fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Wa
                 None => write_output(None),
             }
         }
-        Some(Command::Ready { filters }) => {
-            let database = open_database().map_err(ApplicationError::from_command)?;
-            let filter = resolve_ready_filter(filters).map_err(ApplicationError::from_command)?;
-            let tasks = database
-                .ready_planning_tasks_filtered(&filter)
-                .map_err(ApplicationError::from_command)?;
-            write_output(renderer.render_planning_ready_tasks(&tasks)?)
-        }
+        Some(Command::Ready { filters }) => write_output(read_ready(filters, renderer)?),
         Some(Command::Next { filters }) => {
             let database = open_database().map_err(ApplicationError::from_command)?;
             let filter = resolve_ready_filter(filters).map_err(ApplicationError::from_command)?;
@@ -253,6 +230,7 @@ fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Wa
                 .next();
             write_output(renderer.render_next_planning_task(task.as_ref())?)
         }
+        Some(Command::Serve { port }) => exec_serve(port, renderer),
         None => write_output(renderer.render_startup()?),
     }
 }
