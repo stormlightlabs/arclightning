@@ -5,7 +5,7 @@ title = "T16.3: Add a shared blocker edge validator for dependency add and task 
 status = "completed"
 priority = "normal"
 position = 3
-evidence = "Added validate_blocker_edges in arcl-core (crates/arcl-core/src/domain/dependency.rs): it takes the whole parent map and edge list and returns every EdgeViolation (Cycle with its closed path, Ancestry with the edge, ancestor/descendant kinship and parent chain), with new DomainError::BlockerCycle and BlockerAncestry. add_planning_dependency and create_planning_task_with_dependencies drop their recursive SQL queries, write the edge in the transaction, run the validator over the project, and roll back on the first violation that involves a new edge; violations elsewhere are ignored. Tests: dependency::tests (valid graph, cycle, ancestor, descendant, every violation), connected_dependencies_* in arcl-store, and dependency_edge_* CLI tests including dependency_edge_existing_violation_does_not_block_unrelated_add. Gates run: cargo fmt --all --check, cargo clippy --workspace --all-targets -D warnings, cargo test --workspace, pnpm check, pnpm test, all passing. Branch claude/t16-3-edge-validator."
+evidence = "validate_blocker_edges in arcl-core reports every cycle and ancestry violation with its path. dependency add and task create --blocked-by refuse violations that involve the new edge."
 +++
 
 Add one blocker edge validator and use it for `dependency add` and
@@ -26,19 +26,19 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] Adding an edge that closes a cycle fails with an error that lists the
+- [x] Adding an edge that closes a cycle fails with an error that lists the
       task IDs along the cycle, and writes nothing
-- [ ] Adding an edge between a task and its ancestor or descendant fails, in
+- [x] Adding an edge between a task and its ancestor or descendant fails, in
       either direction, and the error names the parent chain that joins them
-- [ ] `dependency add` and `task create --blocked-by` call the validator and
+- [x] `dependency add` and `task create --blocked-by` call the validator and
       refuse the same edges
-- [ ] The validator is public in arcl-core, takes the whole graph of parents
+- [x] The validator is public in arcl-core, takes the whole graph of parents
       and edges, and reports every violation in it, so T16.4 and T16.5 can
       reuse it unchanged
-- [ ] `dependency add` and `task create --blocked-by` refuse only violations
+- [x] `dependency add` and `task create --blocked-by` refuse only violations
       that involve the new edge. A violation already elsewhere in the graph
       does not block them; T16.5 reports it
-- [ ] The recursive SQL cycle queries in `add_planning_dependency` and
+- [x] The recursive SQL cycle queries in `add_planning_dependency` and
       `create_planning_task_with_dependencies` are gone
 
 Verification:
