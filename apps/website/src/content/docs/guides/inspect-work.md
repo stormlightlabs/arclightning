@@ -60,10 +60,24 @@ arcl context arcl-t-01J... --json
 ```
 
 The output will contain the task, ancestor chain, milestone, epic, optional
-release, linked spec path, blockers and direct dependents, readiness reasons,
-current handoff, task evidence, and evidence from completed blockers. Blockers
-include those inherited from ancestor tasks, each with the ancestor that holds
-it.
+release, linked spec path, direct blockers and dependents, readiness reasons,
+current handoff, task evidence, and evidence from completed blockers.
+
+Blockers held by an ancestor task block every task under it. `explain` and
+`context` list them apart from direct blockers, nearest ancestor first, each
+with the ancestor that holds it:
+
+- JSON: `blockers` holds direct blockers only. `inherited_blockers` holds the
+  inherited ones, each with an `ancestor` field.
+- Plain: `explain` prints `inherited\t<blocker>\t<ancestor>` and `context`
+  prints `inherited_blocker\t<blocker>\t<status>\t<ancestor>`. The `blockers`
+  and `blocker` records stay direct only.
+- Human: inherited blockers end with `via <ancestor>`.
+
+`completion_evidence` draws on both lists and names each blocker once.
+Readiness reasons follow the same order: the task's own blockers, then each
+ancestor's, nearest first. An ancestor blocked by the task itself does not
+block it.
 
 ## Check Graph Integrity
 

@@ -1502,8 +1502,15 @@ fn explain_and_context_list_a_blocker_inherited_through_a_grandparent() {
     );
 
     let explained = run_json(directory.path(), ["--json", "explain", &leaf].as_ref());
-    assert_eq!(explained["data"]["blockers"][0]["task"]["id"], blocker.as_str());
-    assert_eq!(explained["data"]["blockers"][0]["ancestor"], grandparent.as_str());
+    assert_eq!(explained["data"]["blockers"], serde_json::json!([]));
+    assert_eq!(
+        explained["data"]["inherited_blockers"][0]["task"]["id"],
+        blocker.as_str()
+    );
+    assert_eq!(
+        explained["data"]["inherited_blockers"][0]["ancestor"],
+        grandparent.as_str()
+    );
     assert_eq!(
         explained["data"]["readiness"]["reasons"],
         serde_json::json!([format!("ancestor `{grandparent}` is blocked by `{blocker}` (pending)")])
@@ -1515,7 +1522,7 @@ fn explain_and_context_list_a_blocker_inherited_through_a_grandparent() {
         "{human}"
     );
     let plain = stdout_of(directory.path(), &["--plain", "explain", &leaf]);
-    assert!(plain.contains(&format!("blockers\t{blocker}\n")), "{plain}");
+    assert!(plain.contains("blockers\t\n"), "{plain}");
     assert!(
         plain.contains(&format!("inherited\t{blocker}\t{grandparent}")),
         "{plain}"
@@ -1525,7 +1532,20 @@ fn explain_and_context_list_a_blocker_inherited_through_a_grandparent() {
         directory.path(),
         ["--json", "task", "complete", &blocker, "--evidence", "Shipped"].as_ref(),
     );
+    let plain = stdout_of(directory.path(), &["--plain", "context", &leaf]);
+    assert!(!plain.contains("\nblocker\t"), "{plain}");
+    assert!(
+        plain.contains(&format!("inherited_blocker\t{blocker}\tcompleted\t{grandparent}")),
+        "{plain}"
+    );
+    let human = stdout_of(directory.path(), &["--color", "never", "context", &leaf]);
+    assert!(
+        human.contains(&format!("Blocker: {blocker} [completed] via `{grandparent}`")),
+        "{human}"
+    );
+
     let context = run_json(directory.path(), ["--json", "context", &leaf].as_ref());
+    assert_eq!(context["data"]["blockers"], serde_json::json!([]));
     assert_eq!(
         context["data"]["completion_evidence"][0]["task"]["id"],
         blocker.as_str()
@@ -1550,4 +1570,30 @@ fn explain_json_omits_the_ancestor_of_a_direct_blocker() {
     let explained = run_json(directory.path(), ["--json", "explain", &task].as_ref());
     assert_eq!(explained["data"]["blockers"][0]["task"]["id"], blocker.as_str());
     assert!(explained["data"]["blockers"][0].get("ancestor").is_none());
+    assert_eq!(explained["data"]["inherited_blockers"], serde_json::json!([]));
+
+    let plain = stdout_of(directory.path(), &["--plain", "explain", &task]);
+    assert!(plain.contains(&format!("blockers\t{blocker}\n")), "{plain}");
+    assert!(!plain.contains("inherited\t"), "{plain}");
+    let plain = stdout_of(directory.path(), &["--plain", "context", &task]);
+    assert!(plain.contains(&format!("\nblocker\t{blocker}\tpending\n")), "{plain}");
+}
+
+#[test]
+fn a_parent_blocked_by_its_own_child_leaves_the_child_ready() {
+    let directory = initialized_directory();
+    let parent = create_task_id(directory.path(), "Parent", None);
+    let leaf = create_task_id(directory.path(), "Leaf", Some(&parent));
+    run_json(
+        directory.path(),
+        ["--json", "dependency", "add", &parent, "--blocked-by", &leaf].as_ref(),
+    );
+
+    assert_eq!(ready_ids(directory.path()), vec![leaf.clone()]);
+    let explained = run_json(directory.path(), ["--json", "explain", &leaf].as_ref());
+    assert_eq!(explained["data"]["readiness"]["ready"], true);
+    assert_eq!(explained["data"]["readiness"]["reasons"], serde_json::json!([]));
+    assert_eq!(explained["data"]["inherited_blockers"], serde_json::json!([]));
+    let human = stdout_of(directory.path(), &["--color", "never", "explain", &leaf]);
+    assert!(human.contains("Blockers: \n"), "{human}");
 }
