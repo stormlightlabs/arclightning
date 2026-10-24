@@ -60,8 +60,10 @@ arcl context arcl-t-01J... --json
 ```
 
 The output will contain the task, ancestor chain, milestone, epic, optional
-release, linked spec path, direct blockers and dependents, readiness reasons,
-current handoff, task evidence, and evidence from completed blockers.
+release, linked spec path, blockers and direct dependents, readiness reasons,
+current handoff, task evidence, and evidence from completed blockers. Blockers
+include those inherited from ancestor tasks, each with the ancestor that holds
+it.
 
 ## Check Graph Integrity
 

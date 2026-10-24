@@ -1482,3 +1482,72 @@ fn readiness_returns_when_the_ancestor_blocker_completes() {
     assert_eq!(readiness["blocked"], false);
     assert_eq!(ready_ids(directory.path()), vec![leaf]);
 }
+
+fn stdout_of(directory: &Path, args: &[&str]) -> String {
+    let output = arcl_in(directory).args(args).output().expect("arcl runs");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    String::from_utf8(output.stdout).expect("stdout is UTF-8")
+}
+
+#[test]
+fn explain_and_context_list_a_blocker_inherited_through_a_grandparent() {
+    let directory = initialized_directory();
+    let blocker = create_task_id(directory.path(), "Blocker", None);
+    let grandparent = create_task_id(directory.path(), "Grandparent", None);
+    let parent = create_task_id(directory.path(), "Parent", Some(&grandparent));
+    let leaf = create_task_id(directory.path(), "Leaf", Some(&parent));
+    run_json(
+        directory.path(),
+        ["--json", "dependency", "add", &grandparent, "--blocked-by", &blocker].as_ref(),
+    );
+
+    let explained = run_json(directory.path(), ["--json", "explain", &leaf].as_ref());
+    assert_eq!(explained["data"]["blockers"][0]["task"]["id"], blocker.as_str());
+    assert_eq!(explained["data"]["blockers"][0]["ancestor"], grandparent.as_str());
+    assert_eq!(
+        explained["data"]["readiness"]["reasons"],
+        serde_json::json!([format!("ancestor `{grandparent}` is blocked by `{blocker}` (pending)")])
+    );
+
+    let human = stdout_of(directory.path(), &["--color", "never", "explain", &leaf]);
+    assert!(
+        human.contains(&format!("Blockers: {blocker} (via `{grandparent}`)")),
+        "{human}"
+    );
+    let plain = stdout_of(directory.path(), &["--plain", "explain", &leaf]);
+    assert!(plain.contains(&format!("blockers\t{blocker}\n")), "{plain}");
+    assert!(
+        plain.contains(&format!("inherited\t{blocker}\t{grandparent}")),
+        "{plain}"
+    );
+
+    run_json(
+        directory.path(),
+        ["--json", "task", "complete", &blocker, "--evidence", "Shipped"].as_ref(),
+    );
+    let context = run_json(directory.path(), ["--json", "context", &leaf].as_ref());
+    assert_eq!(
+        context["data"]["completion_evidence"][0]["task"]["id"],
+        blocker.as_str()
+    );
+    assert_eq!(context["data"]["completion_evidence"][0]["evidence"], "Shipped");
+    assert_eq!(
+        context["data"]["completion_evidence"][0]["ancestor"],
+        grandparent.as_str()
+    );
+}
+
+#[test]
+fn explain_json_omits_the_ancestor_of_a_direct_blocker() {
+    let directory = initialized_directory();
+    let blocker = create_task_id(directory.path(), "Blocker", None);
+    let task = create_task_id(directory.path(), "Task", None);
+    run_json(
+        directory.path(),
+        ["--json", "dependency", "add", &task, "--blocked-by", &blocker].as_ref(),
+    );
+
+    let explained = run_json(directory.path(), ["--json", "explain", &task].as_ref());
+    assert_eq!(explained["data"]["blockers"][0]["task"]["id"], blocker.as_str());
+    assert!(explained["data"]["blockers"][0].get("ancestor").is_none());
+}

@@ -36,7 +36,8 @@ pub struct PlanningReadiness {
     pub reasons: Vec<String>,
 }
 
-/// A direct connected-model blocker and its completion evidence.
+/// A connected-model blocker of a task or of one of its ancestors, with its
+/// completion evidence.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct PlanningBlockerView {
     /// The blocking task.
@@ -45,6 +46,11 @@ pub struct PlanningBlockerView {
     pub completed: bool,
     /// Markdown evidence recorded on the blocker.
     pub evidence: String,
+    /// The ancestor task that holds the dependency when the blocker is
+    /// inherited, or `None` for a direct blocker. JSON omits it for direct
+    /// blockers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ancestor: Option<TaskId>,
 }
 
 /// An enriched connected-model task view.
@@ -54,7 +60,8 @@ pub struct PlanningTaskView {
     pub task: PlanningTask,
     /// The computed readiness result.
     pub readiness: PlanningReadiness,
-    /// Direct blockers of the task.
+    /// Direct blockers of the task, then blockers inherited from ancestors
+    /// from the immediate parent up.
     pub blockers: Vec<PlanningBlockerView>,
     /// Tasks that directly depend on this task.
     pub dependents: Vec<PlanningTask>,
@@ -83,13 +90,14 @@ pub struct PlanningContext {
     pub plan: Option<Plan>,
     /// The effective phase, if this task is under one.
     pub phase: Option<Phase>,
-    /// Direct blockers and their evidence.
+    /// Direct blockers, then blockers inherited from ancestors from the
+    /// immediate parent up, with their evidence.
     pub blockers: Vec<PlanningBlockerView>,
     /// Tasks that directly depend on this task.
     pub dependents: Vec<PlanningTask>,
     /// The computed readiness result.
     pub readiness: PlanningReadiness,
-    /// Completed direct blockers that supplied evidence.
+    /// Completed direct and inherited blockers that supplied evidence.
     pub completion_evidence: Vec<PlanningBlockerView>,
 }
 
@@ -154,7 +162,7 @@ pub fn planning_task_view(connection: &Connection, id: TaskId) -> Result<Plannin
     let data = load_data(connection, task.project_id)?;
     let ancestry_ids = effective_ancestry(&data, id, &mut HashSet::new())?;
     let ancestors = parent_chain(&data, id)?;
-    let blockers = blocker_views(&data, id)?;
+    let blockers = blocker_views(&data, id, &ancestors)?;
     let dependents = dependent_tasks(&data, id);
     let children = child_tasks(&data, id);
     let readiness = readiness(&data, &task, &ancestry_ids)?;
@@ -624,23 +632,35 @@ fn parent_chain(data: &PlanningData, id: TaskId) -> Result<Vec<PlanningTask>> {
     Ok(chain)
 }
 
-fn blocker_views(data: &PlanningData, id: TaskId) -> Result<Vec<PlanningBlockerView>> {
-    data.dependencies
-        .iter()
-        .filter(|dependency| dependency.task_id == id)
-        .map(|dependency| {
+/// List the direct blockers of `id`, then the blockers of each ancestor from
+/// the immediate parent up, each tagged with the ancestor that holds it.
+///
+/// `ancestors` is the parent chain ordered from the oldest ancestor to the
+/// immediate parent, as [`parent_chain`] returns it.
+fn blocker_views(data: &PlanningData, id: TaskId, ancestors: &[PlanningTask]) -> Result<Vec<PlanningBlockerView>> {
+    let holders =
+        std::iter::once((id, None)).chain(ancestors.iter().rev().map(|ancestor| (ancestor.id, Some(ancestor.id))));
+    let mut views = Vec::new();
+    for (holder_id, ancestor) in holders {
+        for dependency in data
+            .dependencies
+            .iter()
+            .filter(|dependency| dependency.task_id == holder_id)
+        {
             let task = data
                 .tasks
                 .get(&dependency.blocker_id)
                 .cloned()
                 .ok_or_else(|| StorageError::PlanningTaskNotFound { id: dependency.blocker_id.to_string() })?;
-            Ok(PlanningBlockerView {
+            views.push(PlanningBlockerView {
                 completed: task.status == TaskStatus::Completed,
                 evidence: task.evidence.clone(),
                 task,
-            })
-        })
-        .collect()
+                ancestor,
+            });
+        }
+    }
+    Ok(views)
 }
 
 fn dependent_tasks(data: &PlanningData, id: TaskId) -> Vec<PlanningTask> {

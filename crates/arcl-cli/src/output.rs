@@ -828,7 +828,10 @@ impl PlanningTaskViewOutput for PlanningTaskView {
                 "Blockers: {}",
                 self.blockers
                     .iter()
-                    .map(|blocker| blocker.task.id.to_string())
+                    .map(|blocker| match blocker.ancestor {
+                        Some(ancestor) => format!("{} (via `{ancestor}`)", blocker.task.id),
+                        None => blocker.task.id.to_string(),
+                    })
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
@@ -894,6 +897,11 @@ impl PlanningTaskViewOutput for PlanningTaskView {
             format!("handoff\t{}", plain_escape(&self.task.handoff)),
             format!("evidence\t{}", plain_escape(&self.task.evidence)),
         ];
+        lines.extend(self.blockers.iter().filter_map(|blocker| {
+            blocker
+                .ancestor
+                .map(|ancestor| format!("inherited\t{}\t{ancestor}", blocker.task.id))
+        }));
         lines.extend(
             self.readiness
                 .reasons
@@ -950,11 +958,13 @@ impl PlanningContextOutput for PlanningContext {
             "Evidence: {}",
             if self.task.evidence.is_empty() { "none" } else { &self.task.evidence }
         ));
-        lines.extend(
-            self.blockers
-                .iter()
-                .map(|blocker| format!("Blocker: {} [{}]", blocker.task.id, blocker.task.status.as_str())),
-        );
+        lines.extend(self.blockers.iter().map(|blocker| {
+            let via = blocker
+                .ancestor
+                .map(|ancestor| format!(" via `{ancestor}`"))
+                .unwrap_or_default();
+            format!("Blocker: {} [{}]{via}", blocker.task.id, blocker.task.status.as_str())
+        }));
         lines.join("\n")
     }
 
@@ -980,11 +990,13 @@ impl PlanningContextOutput for PlanningContext {
         if let Some(phase) = &self.phase {
             lines.push(format!("phase\t{}\t{}", phase.id, plain_escape(&phase.body)));
         }
-        lines.extend(
-            self.blockers
-                .iter()
-                .map(|blocker| format!("blocker\t{}\t{}", blocker.task.id, blocker.task.status.as_str())),
-        );
+        lines.extend(self.blockers.iter().map(|blocker| {
+            let via = blocker
+                .ancestor
+                .map(|ancestor| format!("\t{ancestor}"))
+                .unwrap_or_default();
+            format!("blocker\t{}\t{}{via}", blocker.task.id, blocker.task.status.as_str())
+        }));
         lines.extend(
             self.readiness
                 .reasons
