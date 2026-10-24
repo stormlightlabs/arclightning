@@ -93,6 +93,25 @@ macro_rules! define_id {
                 Self::parse(&value).map_err(serde::de::Error::custom)
             }
         }
+
+        /// A string: the prefix, then a canonical 26-character ULID.
+        #[cfg(feature = "schema")]
+        impl schemars::JsonSchema for $name {
+            fn inline_schema() -> bool {
+                true
+            }
+
+            fn schema_name() -> std::borrow::Cow<'static, str> {
+                stringify!($name).into()
+            }
+
+            fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+                schemars::json_schema!({
+                    "type": "string",
+                    "pattern": concat!("^", $prefix, "[0-9A-HJKMNP-TV-Z]{26}$"),
+                })
+            }
+        }
     };
 }
 

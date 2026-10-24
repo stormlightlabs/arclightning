@@ -4,6 +4,7 @@ use super::{ContainerStatus, DomainError, PlanId, ProjectId, SpecId, validate_ti
 
 /// A persistent implementation plan belonging to one specification.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Plan {
     pub id: PlanId,
     pub project_id: ProjectId,

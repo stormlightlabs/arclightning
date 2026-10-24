@@ -4,6 +4,7 @@ use super::{CaptureId, ContainerStatus, DomainError, ProjectId, SpecId, validate
 
 /// A specification owned and edited by Arc Lightning.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Spec {
     pub id: SpecId,
     pub project_id: ProjectId,

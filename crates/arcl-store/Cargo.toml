@@ -3,9 +3,14 @@ name = "arcl-store"
 version.workspace = true
 edition.workspace = true
 
+[features]
+# Derive JSON Schemas for the serialized records, for adapters that publish them.
+schema = ["dep:schemars", "arcl-core/schema"]
+
 [dependencies]
 arcl-core = { path = "../arcl-core" }
 rusqlite.workspace = true
+schemars = { workspace = true, optional = true }
 serde.workspace = true
 thiserror.workspace = true
 

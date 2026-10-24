@@ -1,0 +1,25 @@
+[package]
+name = "arcl-mcp"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "arcl-mcp"
+path = "src/main.rs"
+
+[dependencies]
+arcl-core = { path = "../arcl-core", features = ["schema"] }
+arcl-repo = { path = "../arcl-repo" }
+arcl-store = { path = "../arcl-store", features = ["schema"] }
+rmcp.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+jsonschema = { version = "0.60", default-features = false }
+tempfile = "3.23"
+tokio = { workspace = true, features = ["time"] }

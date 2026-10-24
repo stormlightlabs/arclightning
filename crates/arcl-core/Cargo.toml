@@ -3,7 +3,12 @@ name = "arcl-core"
 version.workspace = true
 edition.workspace = true
 
+[features]
+# Derive JSON Schemas for the serialized records, for adapters that publish them.
+schema = ["dep:schemars"]
+
 [dependencies]
+schemars = { workspace = true, optional = true }
 serde.workspace = true
 thiserror.workspace = true
 toml.workspace = true

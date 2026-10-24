@@ -116,6 +116,17 @@ impl WorkspaceSyncError {
             Self::Export(_) | Self::Storage(_) => 1,
         }
     }
+
+    /// The hint to add when this failure stops a change: `arcl workspace
+    /// resolve` only for files the database and the workspace changed
+    /// differently, which it settles, and empty otherwise. A file removed from
+    /// the workspace carries its own `resolve --keep database` hint.
+    pub const fn resolve_hint(&self) -> &'static str {
+        match self {
+            Self::Divergent { .. } => "; `arcl workspace resolve` settles files both sides changed",
+            _ => "",
+        }
+    }
 }
 
 /// The paths a sync carried from one side to the other.

@@ -102,6 +102,63 @@ npx skills add stormlightlabs/arclightning --skill arclightning
 `--skill arclightning` picks it out of the other skills this repository keeps
 for its own development.
 
+## Connect the MCP server
+
+`arcl-mcp` serves the same operations as typed MCP tools over standard input
+and output, with no CLI text to parse. Install it, then have the MCP client
+start it in the project directory. For Claude Code:
+
+```sh
+cargo install --git https://github.com/stormlightlabs/arclightning arcl-mcp
+claude mcp add arcl -- arcl-mcp
+```
+
+Each tool calls the application operations directly and syncs the workspace
+around the call, as a command does. The read tools carry `readOnlyHint`
+because they change no records, but with the workspace on, a read first
+imports workspace changes into the database and exports the result.
+
+A call waits up to 10 seconds for an `arcl` command in the same project to
+finish, then fails with `application_error` (exit code `1`) naming the
+`.arcl/arcl.db-sync.lock` file. A call the client cancels while it waits
+changes nothing. Once its operation starts, a write runs to the end.
+
+| Tool             | Command          | `format_version`              |
+| ---------------- | ---------------- | ----------------------------- |
+| `show`           | `show`           | `2` for a task, `1` otherwise |
+| `list`           | `list`           | `1`                           |
+| `ready`          | `ready`          | `1`                           |
+| `explain`        | `explain`        | `2`                           |
+| `context`        | `context`        | `2`                           |
+| `capture_create` | `capture create` | `1`                           |
+| `spec_create`    | `spec create`    | `1`                           |
+| `plan_create`    | `plan create`    | `1`                           |
+| `task_create`    | `task create`    | `1`                           |
+| `task_update`    | `task update`    | `1`                           |
+| `note_create`    | `note create`    | `1`                           |
+| `task_start`     | `task start`     | `1`                           |
+| `task_handoff`   | `task handoff`   | `1`                           |
+| `task_unpark`    | `task unpark`    | `1`                           |
+| `task_complete`  | `task complete`  | `2`                           |
+
+A tool's structured content is the command's envelope: `format_version`,
+`data`, and a `warnings` array of `code` and `message` objects when the call
+went on despite a problem, such as a workspace sync that did not run. Each
+tool lists an input and an output JSON Schema, and its `_meta` names its
+version as `arcl/format_version`. A change to either schema comes with a new
+version. A failure, including arguments the input schema rejects, is an error
+result whose structured content is the version 1 failure object above.
+
+`list` and `ready` return at most `limit` records, from 1 to 200 and 50 by
+default. While more remain, `data.next_cursor` holds the `cursor` for the next
+page. `list` pages by kind, then ID, so new records do not shift later pages.
+`ready` pages by each task's place in the ready order (priority, position,
+then ID), so a task that starts between pages does not hide the next one. A
+malformed `cursor` fails with `invalid_request`.
+
+`task_start` has no force option. A task that is not ready fails with
+`invalid_request`, and `explain` gives the typed reasons.
+
 ## Use plain or quiet output
 
 `--plain` emits one stable, unstyled record per line:

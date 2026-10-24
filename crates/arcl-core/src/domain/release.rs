@@ -4,6 +4,7 @@ use super::{ContainerStatus, DomainError, ReleaseId, validate_title};
 
 /// A release grouping one or more epics.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Release {
     pub id: ReleaseId,
     pub title: String,

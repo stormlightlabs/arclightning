@@ -67,6 +67,17 @@ pub enum VcsError {
     Operation { operation: &'static str, message: String },
 }
 
+impl VcsError {
+    /// Return the CLI exit category: `3` when no usable worktree was found,
+    /// `1` when a Git operation failed.
+    pub const fn exit_code(&self) -> u8 {
+        match self {
+            Self::Discovery { .. } | Self::BareRepository { .. } | Self::MissingWorktree { .. } => 3,
+            Self::PathOutsideWorktree { .. } | Self::Operation { .. } => 1,
+        }
+    }
+}
+
 /// The gix-backed VCS implementation.
 #[derive(Debug)]
 pub struct GixVcs {

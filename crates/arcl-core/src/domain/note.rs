@@ -4,6 +4,7 @@ use super::{DomainError, NoteId, ProjectId, validate_title};
 
 /// A Markdown research, decision, reference, or debugging record.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Note {
     pub id: NoteId,
     pub project_id: ProjectId,

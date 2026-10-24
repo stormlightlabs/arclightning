@@ -4,6 +4,7 @@ use super::{CaptureId, DomainError, ProjectId, validate_title};
 
 /// The lifecycle of an inbox capture.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum CaptureStatus {
     Captured,
@@ -62,6 +63,7 @@ impl CaptureAction {
 
 /// An unstructured thought waiting in the project inbox.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Capture {
     pub id: CaptureId,
     pub project_id: ProjectId,
