@@ -24,7 +24,9 @@
       "default": "./src/lib/index.ts"
     },
     "./styles.css": "./src/lib/styles/index.css",
-    "./tokens.css": "./src/lib/styles/tokens.css"
+    "./tokens.css": "./src/lib/styles/tokens.css",
+    "./inter.css": "./src/lib/styles/inter.css",
+    "./uno.config": "./uno.config.mjs"
   },
   "files": ["dist"],
   "peerDependencies": {
@@ -34,9 +36,12 @@
     "@fontsource-variable/google-sans": "catalog:",
     "@fontsource-variable/google-sans-code": "catalog:",
     "@fontsource-variable/ibm-plex-sans": "catalog:",
+    "@fontsource-variable/inter": "catalog:",
     "micromark": "^4.0.2"
   },
   "devDependencies": {
+    "@iconify-json/bi": "^1.2.7",
+    "@iconify-json/ph": "^1.2.2",
     "@iconify-json/ri": "^1.2.10",
     "@playwright/test": "catalog:",
     "@storybook/addon-a11y": "^10.5.2",

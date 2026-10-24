@@ -1,0 +1,6 @@
+/* Inter for body text, layered over the shared styles by the web app. */
+@import "@fontsource-variable/inter";
+
+:root {
+  --arcl-font-body: "Inter Variable", "Inter", system-ui, sans-serif;
+}

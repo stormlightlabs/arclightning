@@ -20,8 +20,8 @@ const SYNC_LOCK_FILE: &str = "arcl.db-sync.lock";
 /// How a command touches project records.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Access {
-    /// The command does not read or write records, or manages the workspace
-    /// itself.
+    /// The command does not read or write records, manages the workspace
+    /// itself, or, like `serve`, runs too long to hold the sync lock.
     Untracked,
     /// The command only reads records.
     Read,
@@ -46,7 +46,11 @@ impl WorkspaceRoots {
 pub(super) fn command_access(command: Option<&Command>) -> Access {
     let read_when = |read: bool| if read { Access::Read } else { Access::Write };
     match command {
-        None | Some(Command::Init { .. } | Command::Workspace { .. } | Command::Skill { .. }) => Access::Untracked,
+        // `serve` runs until interrupted, so it must not hold the sync lock.
+        None
+        | Some(Command::Init { .. } | Command::Workspace { .. } | Command::Serve { .. } | Command::Skill { .. }) => {
+            Access::Untracked
+        }
         Some(
             Command::Show { .. }
             | Command::List { .. }
