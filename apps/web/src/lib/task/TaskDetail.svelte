@@ -10,6 +10,11 @@
     panelOpen?: boolean;
     /** Reload `detail` after a change; the view waits for it before it shows the result. */
     onchanged?: () => Promise<void>;
+    /**
+     * Set by the view: whether an open form holds input that leaving would
+     * lose, such as a typed handoff note or a changed field.
+     */
+    unsaved?: boolean;
   }
 </script>
 
@@ -32,7 +37,7 @@
   } from "./actions";
   import { inheritedGroups, propertiesOf, reasonSegments, titlesOf } from "./view";
 
-  let { detail, workHref, panelOpen = $bindable(true), onchanged }: TaskDetailProps = $props();
+  let { detail, workHref, panelOpen = $bindable(true), onchanged, unsaved = $bindable(false) }: TaskDetailProps = $props();
   let showSource = $state(false);
 
   /** The action running now, or `"edit"` while an edit saves. */
@@ -57,6 +62,10 @@
   let reasonCount = $derived(reasons.length === 1 ? "1 reason" : `${reasons.length} reasons`);
   let actions = $derived(actionsFor(task.status));
   let edit = $derived(draft === null ? {} : editOf(task, draft));
+
+  $effect(() => {
+    unsaved = (asking !== null && text.trim() !== "") || Object.keys(edit).length > 0;
+  });
 
   /** Run `action`, or open its Markdown form first when it takes text. */
   function choose(action: TaskAction) {

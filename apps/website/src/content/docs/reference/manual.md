@@ -237,7 +237,10 @@ of the command's options, named like its flags with `_` for `-`:
 | `complete` | `evidence`, `allow_open_children`, `with_subtasks`                        |
 
 `park` and `unpark` take an empty body or `{}`. An unknown option, a body that
-is not JSON, or a body over 1 MiB is refused. A failure returns the CLI's error
+is not JSON, or a body over 1 MiB is refused. The server reads a body only
+after the request passes its checks, and gives up on a body that has not
+arrived after 5 seconds; that request gets status 408 once the client sends the
+rest or closes. A failure returns the CLI's error
 envelope with status 400 for exit codes 2 and 3, 404 for 5, 409 for 4, and 500
 otherwise.
 
@@ -267,7 +270,7 @@ task it names links to that task's view. The description renders as Markdown,
 and **View Markdown** opens the source in a read-only editor. The properties
 panel lists status, readiness, priority, parent, spec, plan and phase; `]`
 collapses and expands it. `Escape` returns to the Work list with its filters
-and the task selected.
+and the task selected, except while an open form holds unsaved input.
 
 Buttons under the title change the task. A pending task offers Start and
 Park, an in-progress task Complete, Hand off and Park, and a parked task

@@ -89,6 +89,12 @@ describe("taskKeyAction", () => {
     expect(taskKeyAction(key("j"))).toBeNull();
   });
 
+  it("stays on the task on Escape while a form holds unsaved input", () => {
+    expect(taskKeyAction(key("Escape"), true)).toBeNull();
+    expect(taskKeyAction(key("]"), true)).toBe("properties");
+    expect(taskKeyAction(key("Escape"), false)).toBe("back");
+  });
+
   it("leaves keys that are handled, held with a modifier, or typed into a field", () => {
     expect(taskKeyAction(key("Escape", { defaultPrevented: true }))).toBeNull();
     expect(taskKeyAction(key("]", { metaKey: true }))).toBeNull();

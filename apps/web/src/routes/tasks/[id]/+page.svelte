@@ -11,6 +11,8 @@
   let detail = $state<TaskDetail | null>(null);
   let failure = $state<string | null>(null);
   let panelOpen = $state(true);
+  /** Whether an open form holds input that leaving would lose. */
+  let unsaved = $state(false);
   // The Work list URL this view was opened from, kept across links to other
   // tasks so Escape brings back its filters.
   let from = $state<URL | null>(null);
@@ -23,6 +25,7 @@
     const current = id;
     detail = null;
     failure = null;
+    unsaved = false;
     dataSource()
       .task(current)
       .then((loaded) => {
@@ -41,7 +44,7 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
-    const action = taskKeyAction(event);
+    const action = taskKeyAction(event, unsaved);
     if (action === null) return;
     if (action === "back") goto(workHref(id, from));
     else panelOpen = !panelOpen;
@@ -57,7 +60,7 @@
 {:else if detail === null}
   <p class="loading" role="status">Loading task…</p>
 {:else}
-  <TaskDetailView {detail} workHref={workHref(id, from)} bind:panelOpen onchanged={refresh} />
+  <TaskDetailView {detail} workHref={workHref(id, from)} bind:panelOpen bind:unsaved onchanged={refresh} />
 {/if}
 
 <style>

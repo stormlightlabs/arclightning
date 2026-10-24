@@ -18,11 +18,12 @@ export interface InheritedGroup {
  * The Task view action for a key press, or `null`: `Escape` returns to the
  * Work list and `]` collapses or expands the properties panel. Keys typed
  * into a form field or the editor, held with a modifier, or already handled
- * are left alone.
+ * are left alone, and `Escape` does nothing while `unsaved` says an open form
+ * holds input that leaving would lose.
  */
-export function taskKeyAction(event: WorkKey & { defaultPrevented: boolean }): TaskKeyAction | null {
+export function taskKeyAction(event: WorkKey & { defaultPrevented: boolean }, unsaved = false): TaskKeyAction | null {
   if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || inField(event.target)) return null;
-  if (event.key === "Escape") return "back";
+  if (event.key === "Escape") return unsaved ? null : "back";
   if (event.key === "]") return "properties";
   return null;
 }
