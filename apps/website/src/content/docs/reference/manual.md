@@ -138,6 +138,13 @@ child tasks is the one reason it skips. `--force` starts the task anyway.
 Completion accepts either `--evidence <MARKDOWN>` or `--evidence-file <PATH|->`.
 Each pair is mutually exclusive, and `-` reads UTF-8 Markdown from standard input.
 
+`complete` refuses a task with open descendants. `--allow-open-children`
+completes only the task. `--with-subtasks` also completes its pending and
+in-progress descendants in one write, and refuses, writing nothing, while a
+descendant is parked or a blocker outside the subtree is unfinished. The two
+flags conflict. JSON output from `task complete` includes `completed_subtasks`,
+the IDs it completed in tree order.
+
 ## Inspection
 
 | Command                  | Purpose                                                            |

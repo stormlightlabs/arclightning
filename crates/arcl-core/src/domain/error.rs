@@ -74,6 +74,10 @@ pub enum DomainError {
     /// Starting a pending task that readiness reports as not ready, without `--force`.
     #[error("cannot start task `{id}` while it is not ready: {}; pass --force to override", reasons.join("; "))]
     NotReady { id: String, reasons: Vec<String> },
+    /// Completing a task with its subtasks, while a subtask is parked or the
+    /// subtree has an unfinished blocker from outside it.
+    #[error("cannot complete task `{id}` with its subtasks: {}", reasons.join("; "))]
+    SubtasksNotCompletable { id: String, reasons: Vec<String> },
     #[error(transparent)]
     InvalidId(#[from] IdError),
 }

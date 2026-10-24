@@ -44,5 +44,9 @@ non-terminal unless the command includes `--allow-open-children`.
 The `--allow-open-children` override changes only the selected record. It never
 cascades to descendants, so open child work stays available for later review.
 
+To finish a task and its open subtasks together, use
+`arcl task complete <id> --with-subtasks`. The [Tasks guide](/guides/tasks/)
+lists when it refuses.
+
 See the guides for [releases](/guides/releases/), [epics](/guides/epics/), [milestones](/guides/milestones/),
 and [tasks](/guides/tasks/) for entity-specific commands and hierarchy rules.

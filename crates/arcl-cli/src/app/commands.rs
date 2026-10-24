@@ -513,15 +513,19 @@ pub(super) fn exec_task(command: TaskCommand, renderer: &Renderer) -> anyhow::Re
                 ),
             )
         }
-        TaskCommand::Complete { id, allow_open_children, evidence, evidence_file } => {
+        TaskCommand::Complete { id, allow_open_children, with_subtasks, evidence, evidence_file } => {
             let evidence = resolve_optional_value(evidence, evidence_file).map_err(ApplicationError::from_command)?;
             let id = parse_task_id(&id).map_err(ApplicationError::from_command)?;
+            let open_subtasks = match (with_subtasks, allow_open_children) {
+                (true, _) => arcl_store::OpenSubtasks::Complete,
+                (false, true) => arcl_store::OpenSubtasks::Leave,
+                (false, false) => arcl_store::OpenSubtasks::Refuse,
+            };
             let mut database = open_database().map_err(ApplicationError::from_command)?;
             render_output(
-                renderer.render_planning_task(
-                    "completed",
+                renderer.render_planning_completion(
                     &database
-                        .complete_planning_task(id, allow_open_children, evidence)
+                        .complete_planning_task(id, open_subtasks, evidence)
                         .map_err(ApplicationError::from_command)?,
                 ),
             )

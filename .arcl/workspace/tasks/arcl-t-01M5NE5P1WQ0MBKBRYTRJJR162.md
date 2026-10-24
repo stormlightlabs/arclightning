@@ -2,10 +2,11 @@
 id = "arcl-t-01M5NE5P1WQ0MBKBRYTRJJR162"
 phase = "arcl-ph-01M5NE5P14T2DD4DCF1P6X059E"
 title = "T16: Make blocking relationships strict"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 0
 blocked-by = ["arcl-t-01M5NH23576GMX0CPHRBWK4DA1"]
+evidence = "Delivered by T16.1–T16.6: #15, #16, #17, #18, #19 and the PR completing T16.6."
 +++
 
 Make blockers apply through the task hierarchy and to task transitions, so
@@ -18,20 +19,20 @@ completes T16 as well (Decision: Parent completion).
 
 Acceptance criteria:
 
-- [ ] Treat a task as blocked when it or any ancestor task has an unfinished
+- [x] Treat a task as blocked when it or any ancestor task has an unfinished
       blocker, and name that ancestor in readiness explanations
-- [ ] Refuse `task start` from pending for a task that is not ready unless
+- [x] Refuse `task start` from pending for a task that is not ready unless
       the caller passes `--force`; having child tasks does not count against
       start, starting an in-progress task stays a no-op, and the MCP start
       tool does not expose force
-- [ ] Refuse blocker edges that form a cycle or join a task to its own
+- [x] Refuse blocker edges that form a cycle or join a task to its own
       ancestor or descendant; report existing ones through readiness,
       `arcl check`, and import with the path that forms them
-- [ ] Report a cancelled blocker as its own readiness reason that asks for the
+- [x] Report a cancelled blocker as its own readiness reason that asks for the
       dependency to be removed or replaced
-- [ ] Keep dependency validation the same across the CLI, plan application,
+- [x] Keep dependency validation the same across the CLI, plan application,
       and workspace import
-- [ ] Complete a task and its open subtasks in one atomic command,
+- [x] Complete a task and its open subtasks in one atomic command,
       `task complete --with-subtasks`
 
 Verification:

@@ -10,7 +10,7 @@ use arcl_repo::{
     vcs::{HeadState, PathState},
     workspace::{Change, RecordStatusKind, WorkspaceStatus},
 };
-use arcl_store::{CheckReport, PlanApplyResult, PlanDiff, PlanningContext, PlanningTaskView};
+use arcl_store::{CheckReport, PlanApplyResult, PlanDiff, PlanningCompletion, PlanningContext, PlanningTaskView};
 
 /// The heading for files with lines that look like conflict markers.
 const MARKER_LABEL: &str = "Lines that look like conflict markers (sync accepts them as content):";
@@ -224,6 +224,37 @@ impl Renderer {
     /// Render one connected planning task mutation.
     pub fn render_planning_task(&self, action: &str, task: &PlanningTask) -> Result<Option<String>, OutputError> {
         self.render_named_mutation(action, "task", &task.id.to_string(), &task.title, task)
+    }
+
+    /// Render a task completion with the subtasks it completed, in tree order.
+    /// JSON lists their IDs as `completed_subtasks`.
+    pub fn render_planning_completion(&self, completion: &PlanningCompletion) -> Result<Option<String>, OutputError> {
+        let task = &completion.task;
+        let subtasks = &completion.completed_subtasks;
+        let message = match self.mode {
+            OutputMode::Human => std::iter::once(format!("Completed task `{}`: {}", task.id, task.title))
+                .chain(
+                    subtasks
+                        .iter()
+                        .map(|subtask| format!("Completed subtask `{}`: {}", subtask.id, subtask.title)),
+                )
+                .collect::<Vec<_>>()
+                .join("\n"),
+            OutputMode::Plain => std::iter::once(task.id.to_string())
+                .chain(subtasks.iter().map(|subtask| subtask.id.to_string()))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            OutputMode::Json => serde_json::to_string(&Envelope {
+                format_version: 1,
+                data: CompletionData {
+                    action: "completed",
+                    task,
+                    completed_subtasks: subtasks.iter().map(|subtask| subtask.id.to_string()).collect(),
+                },
+            })?,
+            OutputMode::Quiet => return Ok(None),
+        };
+        Ok(Some(self.style(message)))
     }
 
     /// Render connected planning tasks in deterministic order.
@@ -779,6 +810,13 @@ pub struct PlanDetail {
     pub phases: Vec<Phase>,
     pub tasks: Vec<PlanningTask>,
     pub dependencies: Vec<TaskDependency>,
+}
+
+#[derive(Debug, Serialize)]
+struct CompletionData<'a> {
+    action: &'static str,
+    task: &'a PlanningTask,
+    completed_subtasks: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
