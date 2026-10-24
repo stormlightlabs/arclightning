@@ -207,7 +207,9 @@ does not name the server. Reads take GET and changes take POST; the server
 refuses any other method, so a GET never changes records. A change also needs
 an `Origin` header naming the server, which stops other pages, including
 those on other `127.0.0.1` ports, from sending one. Responses carry no CORS
-headers. The server runs until interrupted.
+headers. The page's Content-Security-Policy runs only the app's own script and
+loads images only from the server or `data:` URLs, so Markdown cannot pull
+images from other hosts. The server runs until interrupted.
 
 | Endpoint                        | Same JSON as             |
 | ------------------------------- | ------------------------ |
@@ -216,6 +218,7 @@ headers. The server runs until interrupted.
 | `GET /api/ready`                | `arcl ready`             |
 | `GET /api/tasks/<id>/explain`   | `arcl explain <task-id>` |
 | `GET /api/tasks/<id>/context`   | `arcl context <task-id>` |
+| `GET /api/work`                 | none (see below)         |
 | `POST /api/tasks`               | `arcl task create`       |
 | `POST /api/tasks/<id>/update`   | `arcl task update`       |
 | `POST /api/tasks/<id>/start`    | `arcl task start`        |
@@ -225,8 +228,14 @@ headers. The server runs until interrupted.
 | `POST /api/tasks/<id>/complete` | `arcl task complete`     |
 
 `/api/records` and `/api/ready` take the command's flags as query parameters,
-such as `?kind=task&status=pending&status=parked`. A POST takes a JSON object
-of the command's options, named like its flags with `_` for `-`:
+such as `?kind=task&status=pending&status=parked`. `/api/work` takes none and
+returns the Work list in one request: every task with the readiness
+`arcl explain` reports and its phase ID, inherited from an ancestor where the
+task has none, and every phase. Its envelope is
+`{"format_version": 2, "data": {"tasks": [{"task", "readiness", "phase_id"}], "phases": [...]}}`.
+
+A POST takes a JSON object of the command's options, named like its flags
+with `_` for `-`:
 
 | Endpoint   | Options                                                                   |
 | ---------- | ------------------------------------------------------------------------- |
@@ -240,17 +249,19 @@ of the command's options, named like its flags with `_` for `-`:
 is not JSON, or a body over 1 MiB is refused. The server reads a body only
 after the request passes its checks, and gives up on a body that has not
 arrived after 5 seconds; that request gets status 408 once the client sends the
-rest or closes. A failure returns the CLI's error
-envelope with status 400 for exit codes 2 and 3, 404 for 5, 409 for 4, and 500
-otherwise.
+rest or closes. A failure returns the CLI's error envelope with status 400 for
+exit codes 2 and 3, 404 for 5, 409 for 4, and 500 otherwise.
 
-A read opens the database without syncing the workspace and never changes
-records; opening the database can still run its migrations. A change runs as
-the CLI runs it: under the project's sync lock, after a sync that must
-succeed, followed by a sync that exports it. The server prints their
-warnings to stderr. Other `arcl` commands run while it serves, and wait only
-while a change holds the lock. Outside a project, `arcl serve` exits with code
-3 before it binds.
+A read opens the database without syncing the workspace, takes no lock and
+never changes records; opening the database can still run its migrations. A
+change runs as the CLI runs it: under the project's sync lock, after a sync
+that must succeed, followed by a sync that exports it. Where a sync or export
+warns, the reply's envelope lists the warnings in `warnings`, as the CLI's
+JSON output does. A change waits at most 3 seconds for the lock; if another
+`arcl` command still holds it, the change fails with `application_error`,
+status 503 and a `Retry-After` header, and records stay as they were. Other
+`arcl` commands run while the server serves. Outside a project, `arcl serve`
+exits with code 3 before it binds.
 
 The Work view lists every task by milestone, then by status, in the order
 `arcl tree` gives: milestones by plan and position, and tasks by position,
@@ -269,8 +280,10 @@ subtasks, the tasks it unblocks, the latest handoff and the evidence. Each
 task it names links to that task's view. The description renders as Markdown,
 and **View Markdown** opens the source in a read-only editor. The properties
 panel lists status, readiness, priority, parent, spec, plan and phase; `]`
-collapses and expands it. `Escape` returns to the Work list with its filters
-and the task selected, except while an open form holds unsaved input.
+collapses and expands it, also from inside the read-only source. `Escape`
+returns to the Work list with its filters and the task selected, except while
+an open form holds unsaved input; inside the source, the first `Escape` moves
+focus out of the editor. A failed read shows an error with a Retry button.
 
 Buttons under the title change the task. A pending task offers Start and
 Park, an in-progress task Complete, Hand off and Park, and a parked task
@@ -279,7 +292,8 @@ Markdown note, which parks the task. **Edit** opens the title, priority and
 description in a writable editor; Save sends only the fields that changed.
 Each change runs the `arcl task` command of the same name, so the CLI's
 validation applies. A refused change shows the CLI's message and error code
-next to its button. After a change the view reloads the task, and after a
+next to its button. A saved change whose sync or export warned shows the
+warnings in a notice. After a change the view reloads the task, and after a
 completion it lists the tasks the completion made ready.
 
 `arcl` embeds the web app from `apps/web/build` when it compiles. That build is

@@ -22,7 +22,6 @@
     label?: string;
     /** The key that toggles the panel, shown on its button. */
     shortcut?: string;
-    ontoggle?: (open: boolean) => void;
   }
 </script>
 
@@ -30,12 +29,11 @@
   import PriorityBadge from "./PriorityBadge.svelte";
   import StatusBadge from "./StatusBadge.svelte";
 
-  let { properties, open = $bindable(true), label = "Properties", shortcut, ontoggle }: PropertiesPanelProps = $props();
+  let { properties, open = $bindable(true), label = "Properties", shortcut }: PropertiesPanelProps = $props();
   const listId = $props.id();
 
   function toggle() {
     open = !open;
-    ontoggle?.(open);
   }
 </script>
 

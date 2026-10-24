@@ -19,6 +19,10 @@
 //! not arrive within [`BODY_DEADLINE`] is abandoned, so a slow client cannot
 //! hold the serving thread.
 //!
+//! The page's Content-Security-Policy runs only the app's own inline script,
+//! by hash, and lets it load images and fonts from itself or `data:` URLs and
+//! connect only to this server. API responses allow nothing to load.
+//!
 //! | Request                          | CLI equivalent           |
 //! | -------------------------------- | ------------------------ |
 //! | `GET /api/records`               | `arcl list`              |
@@ -26,6 +30,7 @@
 //! | `GET /api/ready`                 | `arcl ready`             |
 //! | `GET /api/tasks/{id}/explain`    | `arcl explain <task-id>` |
 //! | `GET /api/tasks/{id}/context`    | `arcl context <task-id>` |
+//! | `GET /api/work`                  | none; see below          |
 //! | `POST /api/tasks`                | `arcl task create`       |
 //! | `POST /api/tasks/{id}/update`    | `arcl task update`       |
 //! | `POST /api/tasks/{id}/start`     | `arcl task start`        |
@@ -35,14 +40,22 @@
 //! | `POST /api/tasks/{id}/complete`  | `arcl task complete`     |
 //!
 //! `/api/records` and `/api/ready` take the CLI's filter flags as query
-//! parameters, such as `?kind=task&status=pending&status=parked`. A mutation
-//! takes a JSON object of the command's options, such as
+//! parameters, such as `?kind=task&status=pending&status=parked`.
+//!
+//! `/api/work` answers the web app's Work list in one request: every task
+//! with the readiness `arcl explain` reports and its effective phase ID, and
+//! every phase, as `{"format_version": 2, "data": {"tasks": [{"task",
+//! "readiness", "phase_id"}], "phases": [...]}}`. It takes no query
+//! parameters.
+//!
+//! A mutation takes a JSON object of the command's options, such as
 //! `{"evidence": "Delivered by #41."}`; see [`NewTask`], [`TaskEdit`],
 //! [`TaskStart`], [`Handoff`] and [`Completion`].
 
 use std::io::{self, Cursor, Read};
 use std::net::{Ipv4Addr, TcpListener};
 use std::sync::mpsc;
+use std::sync::LazyLock;
 use std::thread;
 use std::time::Duration;
 
@@ -71,6 +84,20 @@ const MAX_BODY_BYTES: usize = 1024 * 1024;
 
 /// The page served when `apps/web` was not built before `arcl` was compiled.
 const NOT_BUILT_PAGE: &str = include_str!("not_built.html");
+
+/// The Content-Security-Policy of every API response: a JSON body loads nothing.
+const API_CSP: &str = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+
+/// The Content-Security-Policy of the page. Scripts run only when their hash
+/// is one of the built page's inline scripts. Styles may be inline, since
+/// Svelte and CodeMirror set style attributes and elements at run time.
+static PAGE_CSP: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "default-src 'self'; script-src 'self' {INDEX_SCRIPT_HASHES}; style-src 'self' 'unsafe-inline'; \
+         img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; \
+         frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+    )
+});
 
 /// A failure to start or run the server.
 #[derive(Debug, Error)]
@@ -102,6 +129,9 @@ enum Route {
     Explain(String),
     /// `arcl context <task-id>`.
     Context(String),
+    /// Every task with its readiness and phase, and every phase. Holds
+    /// whether the request carried query parameters, which it refuses.
+    Work { has_query: bool },
     /// A task mutation, which needs POST and a matching `Origin`.
     Write(Write),
     /// An `/api` path with no endpoint.
@@ -380,6 +410,8 @@ struct Answer {
     body: Vec<u8>,
     /// The method to name in an `Allow` header, on a 405.
     allow: Option<&'static str>,
+    /// The Content-Security-Policy header's value.
+    csp: &'static str,
 }
 
 impl Answer {
@@ -391,6 +423,7 @@ impl Answer {
             ("X-Content-Type-Options", "nosniff"),
             ("Referrer-Policy", "no-referrer"),
             ("X-Frame-Options", "DENY"),
+            ("Content-Security-Policy", self.csp),
         ];
         if let Some(method) = self.allow {
             headers.push(("Allow", method));
@@ -399,7 +432,13 @@ impl Answer {
     }
 
     fn json(reply: Reply) -> Self {
-        Self { status: reply.status, content_type: "application/json", body: reply.body.into_bytes(), allow: None }
+        Self {
+            status: reply.status,
+            content_type: "application/json",
+            body: reply.body.into_bytes(),
+            allow: None,
+            csp: API_CSP,
+        }
     }
 
     /// The HTTP response for this answer.
@@ -530,6 +569,9 @@ pub trait Reads {
     fn explain(&self, task_id: &str) -> Reply;
     /// `arcl context <task-id>`.
     fn context(&self, task_id: &str) -> Reply;
+    /// Every task with its readiness and effective phase, and every phase,
+    /// for the Work list.
+    fn work(&self) -> Reply;
 }
 
 /// The application's task mutations, each answering with the CLI's JSON
@@ -560,6 +602,8 @@ fn dispatch(route: Route, incoming: &Incoming, reads: &dyn Reads, mutations: &dy
         Route::Ready(query) => Answer::json(reads.ready(&query)),
         Route::Explain(id) => Answer::json(reads.explain(&id)),
         Route::Context(id) => Answer::json(reads.context(&id)),
+        Route::Work { has_query: true } => Answer::json(Reply::invalid_request("`/api/work` takes no query parameters")),
+        Route::Work { has_query: false } => Answer::json(reads.work()),
         Route::Write(write) => Answer::json(mutate(write, incoming.body.as_deref(), mutations)),
         Route::UnknownApi => Answer::json(Reply::refusal(404, "not_found", "no endpoint has this path")),
         Route::Page => page(),
@@ -704,6 +748,7 @@ fn route(path: &str, query: Vec<(String, String)>) -> Route {
         ["api", "ready"] => Route::Ready(query),
         ["api", "tasks", id, "explain"] if !id.is_empty() => Route::Explain((*id).to_owned()),
         ["api", "tasks", id, "context"] if !id.is_empty() => Route::Context((*id).to_owned()),
+        ["api", "work"] => Route::Work { has_query: !query.is_empty() },
         ["api", "tasks"] => Route::Write(Write::Create),
         ["api", "tasks", id, action] if !id.is_empty() => {
             let id = (*id).to_owned();
@@ -729,6 +774,7 @@ fn page() -> Answer {
         content_type: "text/html; charset=utf-8",
         body: INDEX_HTML.unwrap_or(NOT_BUILT_PAGE.as_bytes()).to_vec(),
         allow: None,
+        csp: PAGE_CSP.as_str(),
     }
 }
 
@@ -738,6 +784,7 @@ mod tests {
     use std::net::{Shutdown, TcpStream};
 
     use super::*;
+    use sha2::Digest;
 
     const TOKEN: &str = "abc123";
     const PORT: u16 = 4321;
@@ -760,6 +807,9 @@ mod tests {
         }
         fn context(&self, task_id: &str) -> Reply {
             Reply::failure(5, format!("context {task_id}"))
+        }
+        fn work(&self) -> Reply {
+            Reply::success("work".to_owned())
         }
     }
 
@@ -937,6 +987,17 @@ mod tests {
     }
 
     #[test]
+    fn serve_checks_the_host_and_token_on_the_work_endpoint() {
+        assert_eq!(answered(&mut gate(), &get("/api/work", None)).status, 401);
+        assert_eq!(answered(&mut gate(), &get("/api/work", Some("abc124"))).status, 401);
+        let wrong_host = Incoming { host: Some("evil.example:4321".to_owned()), ..get("/api/work", Some(TOKEN)) };
+        assert_eq!(answered(&mut gate(), &wrong_host).status, 403);
+        let query_token = answered(&mut gate(), &get(&format!("/api/work?token={TOKEN}"), None));
+        assert_eq!(query_token.status, 401);
+        assert_eq!(answered(&mut gate(), &get("/api/work", Some(TOKEN))).status, 200);
+    }
+
+    #[test]
     fn serve_answers_reads_only_on_get() {
         let incoming = post("/api/records", "");
         let answer = answered(&mut gate(), &incoming);
@@ -1099,6 +1160,11 @@ mod tests {
             body("/api/tasks/arcl-t-1/context"),
             (404, "context arcl-t-1".to_owned())
         );
+        assert_eq!(body("/api/work"), (200, "work".to_owned()));
+        let (status, refused) = body("/api/work?status=pending");
+        assert_eq!(status, 400);
+        assert!(refused.contains("invalid_request"), "{refused}");
+        assert_eq!(body("/api/work/x").0, 404);
         assert_eq!(body("/api/nothing").0, 404);
         assert_eq!(body("/api/records/a%ZZ").0, 400);
     }
@@ -1108,6 +1174,72 @@ mod tests {
         let answer = answered(&mut gate(), &get("/planning/anything", Some(TOKEN)));
         assert_eq!(answer.status, 200);
         assert_eq!(answer.content_type, "text/html; charset=utf-8");
+    }
+
+    #[test]
+    fn serve_sends_a_content_security_policy() {
+        let csp = |answer: &Answer| {
+            let headers = answer.headers();
+            let found = headers.iter().find(|(name, _)| *name == "Content-Security-Policy");
+            found.expect("a Content-Security-Policy header").1.to_owned()
+        };
+        let page = answered(&mut gate(), &get("/", Some(TOKEN)));
+        let policy = csp(&page);
+        for directive in [
+            "default-src 'self'",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data:",
+            "font-src 'self' data:",
+            "connect-src 'self'",
+            "object-src 'none'",
+            "frame-ancestors 'none'",
+            "base-uri 'none'",
+            "form-action 'self'",
+        ] {
+            assert!(
+                policy.split("; ").any(|part| part == directive),
+                "{directive} in {policy}"
+            );
+        }
+        let script_src = policy
+            .split("; ")
+            .find(|part| part.starts_with("script-src "))
+            .expect("script-src");
+        assert!(!script_src.contains("unsafe"), "{script_src}");
+        // Each inline script in the page runs, and nothing else inline does.
+        let html = String::from_utf8(page.body).expect("UTF-8");
+        let scripts: Vec<String> = html
+            .split("<script>")
+            .skip(1)
+            .map(|rest| rest.split("</script>").next().expect("a closing tag"))
+            .map(|script| format!("'sha256-{}'", base64(&sha2::Sha256::digest(script.as_bytes()))))
+            .collect();
+        let sources: Vec<&str> = script_src.split(' ').skip(2).collect();
+        assert_eq!(sources, scripts.iter().map(String::as_str).collect::<Vec<_>>());
+
+        let api = answered(&mut gate(), &get("/api/records", Some(TOKEN)));
+        assert_eq!(csp(&api), API_CSP);
+        assert!(API_CSP.starts_with("default-src 'none'"));
+    }
+
+    /// `bytes` in padded standard base64, as CSP hash sources write them.
+    fn base64(bytes: &[u8]) -> String {
+        const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::new();
+        for chunk in bytes.chunks(3) {
+            let word = chunk
+                .iter()
+                .enumerate()
+                .fold(0u32, |word, (i, byte)| word | u32::from(*byte) << (16 - 8 * i));
+            for i in 0..4 {
+                out.push(if i <= chunk.len() {
+                    char::from(ALPHABET[(word >> (18 - 6 * i)) as usize & 63])
+                } else {
+                    '='
+                });
+            }
+        }
+        out
     }
 
     #[test]

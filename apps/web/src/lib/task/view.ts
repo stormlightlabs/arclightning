@@ -1,5 +1,5 @@
 import { formatStatus, type PropertyItem } from "@arclightning/ui";
-import type { InheritedBlocker, ReadinessReason, Task, TaskDetail } from "$lib/data";
+import type { Blocker, InheritedBlocker, ReadinessReason, Task, TaskDetail } from "$lib/data";
 import { inField, taskHref, type WorkKey } from "$lib/work";
 
 /** What a key does in the Task view. */
@@ -8,23 +8,52 @@ export type TaskKeyAction = "back" | "properties";
 /** A run of a readiness reason's text: plain, or a record it names. */
 export type ReasonSegment = { text: string } | { id: string; label: string; href: string };
 
-/** The inherited blockers one ancestor holds. */
+/** The unfinished inherited blockers one ancestor holds. */
 export interface InheritedGroup {
   ancestor: { id: string; title: string };
   blockers: InheritedBlocker[];
 }
 
+/** A completed blocker, with the ancestor that holds it when it is inherited. */
+export interface DoneBlocker {
+  blocker: Blocker;
+  ancestor: { id: string; title: string } | null;
+}
+
+/** A task's blockers: those it still waits on, and those already completed. */
+export interface Blockers {
+  /** Unfinished direct blockers. */
+  direct: Blocker[];
+  /** Unfinished inherited blockers, by the ancestor that holds them. */
+  inherited: InheritedGroup[];
+  /** Completed blockers, direct ones first. */
+  done: DoneBlocker[];
+}
+
+/** The parts of a keyboard event {@link taskKeyAction} reads. */
+export interface TaskKey extends WorkKey {
+  defaultPrevented: boolean;
+  /** Absent where the event has no modifier state, as in tests. */
+  getModifierState?: (key: string) => boolean;
+}
+
 /**
  * The Task view action for a key press, or `null`: `Escape` returns to the
  * Work list and `]` collapses or expands the properties panel. Keys typed
- * into a form field or the editor, held with a modifier, or already handled
- * are left alone, and `Escape` does nothing while `unsaved` says an open form
- * holds input that leaving would lose.
+ * into a form field or the editor, or already handled, are left alone, and so
+ * is `Escape` held with a modifier. `]` is taken whatever modifier a layout
+ * needs to type it, AltGr (reported as Ctrl and Alt where the browser lacks
+ * the `AltGraph` state) or Option, but not with Meta or with Ctrl alone.
+ * `Escape` does nothing while `unsaved` says an open form holds input that
+ * leaving would lose.
  */
-export function taskKeyAction(event: WorkKey & { defaultPrevented: boolean }, unsaved = false): TaskKeyAction | null {
-  if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || inField(event.target)) return null;
-  if (event.key === "Escape") return unsaved ? null : "back";
-  if (event.key === "]") return "properties";
+export function taskKeyAction(event: TaskKey, unsaved = false): TaskKeyAction | null {
+  if (event.defaultPrevented || event.metaKey || inField(event.target)) return null;
+  if (event.key === "Escape") return event.altKey || event.ctrlKey || unsaved ? null : "back";
+  if (event.key === "]") {
+    const altGraph = event.getModifierState?.("AltGraph") ?? (event.ctrlKey && event.altKey);
+    return event.ctrlKey && !altGraph ? null : "properties";
+  }
   return null;
 }
 
@@ -60,14 +89,30 @@ export function reasonSegments(reason: ReadinessReason, titles: Map<string, stri
     .filter((segment) => !("text" in segment) || segment.text !== "");
 }
 
-/** Group inherited blockers by the ancestor that holds them, the root first. */
+/** Group unfinished inherited blockers by the ancestor that holds them, the root first. */
 export function inheritedGroups(detail: TaskDetail): InheritedGroup[] {
   const titles = titlesOf(detail);
-  const holders = [...new Set([...detail.ancestors.map((ancestor) => ancestor.id), ...detail.inherited_blockers.map((b) => b.ancestor)])];
+  const waiting = detail.inherited_blockers.filter((blocker) => !blocker.completed);
+  const holders = [...new Set([...detail.ancestors.map((ancestor) => ancestor.id), ...waiting.map((b) => b.ancestor)])];
   return holders.flatMap((id) => {
-    const blockers = detail.inherited_blockers.filter((blocker) => blocker.ancestor === id);
+    const blockers = waiting.filter((blocker) => blocker.ancestor === id);
     return blockers.length ? [{ ancestor: { id, title: titles.get(id) ?? id }, blockers }] : [];
   });
+}
+
+/**
+ * Split a task's blockers into those it still waits on and those completed.
+ * `arcl show` lists both, and only the unfinished ones block.
+ */
+export function blockersOf(detail: TaskDetail): Blockers {
+  const titles = titlesOf(detail);
+  const done: DoneBlocker[] = [
+    ...detail.blockers.filter((blocker) => blocker.completed).map((blocker) => ({ blocker, ancestor: null })),
+    ...detail.inherited_blockers
+      .filter((blocker) => blocker.completed)
+      .map((blocker) => ({ blocker, ancestor: { id: blocker.ancestor, title: titles.get(blocker.ancestor) ?? blocker.ancestor } })),
+  ];
+  return { direct: detail.blockers.filter((blocker) => !blocker.completed), inherited: inheritedGroups(detail), done };
 }
 
 /** The words for a task's readiness: ready, blocked, or not ready for another reason. */

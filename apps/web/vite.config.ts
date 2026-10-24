@@ -1,3 +1,4 @@
+import { playwright } from "@vitest/browser-playwright";
 import { sveltekit } from "@sveltejs/kit/vite";
 import unoConfig from "@arclightning/ui/uno.config";
 import UnoCSS from "unocss/vite";
@@ -10,14 +11,38 @@ export default defineConfig({
   test: {
     projects: [
       {
-        extends: true,
-        test: { name: "unit", environment: "node", include: ["src/**/*.test.ts"], exclude: ["src/**/*.dom.test.ts"] },
+        extends: "./vite.config.ts",
+        test: {
+          name: "unit",
+          environment: "node",
+          include: ["src/**/*.test.ts"],
+          exclude: ["src/**/*.svelte.test.ts", "src/**/*.dom.test.ts"],
+        },
       },
       {
         // Components mounted in a DOM need Svelte's client runtime.
-        extends: true,
+        extends: "./vite.config.ts",
         resolve: { conditions: ["browser"] },
         test: { name: "dom", environment: "happy-dom", include: ["src/**/*.dom.test.ts"] },
+      },
+      {
+        extends: "./vite.config.ts",
+        test: {
+          name: "browser",
+          browser: {
+            enabled: true,
+            headless: true,
+            provider: playwright({
+              launchOptions: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+                ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+                : undefined,
+            }),
+            instances: [{ browser: "chromium" }],
+            viewport: { width: 1024, height: 768 },
+          },
+          include: ["src/**/*.svelte.test.ts"],
+          setupFiles: ["vitest-browser-svelte"],
+        },
       },
     ],
   },

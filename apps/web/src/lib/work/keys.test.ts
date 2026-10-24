@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { moveSelection, workKeyAction, type WorkKey } from "./keys";
+import { rowOrder } from "@arclightning/ui";
+import { parseFilters } from "./filters";
+import { agents, ready } from "./fixtures";
+import { groupWork } from "./grouping";
+import { moveSelection, visibleSelection, workKeyAction, type WorkKey } from "./keys";
 
 /** A stand-in element that matches the selectors in `matching`. */
 function element(...matching: string[]): EventTarget {
@@ -57,5 +61,17 @@ describe("moveSelection", () => {
 
   it("selects nothing in an empty list", () => {
     expect(moveSelection([], "a", 1)).toBeNull();
+  });
+});
+
+describe("visibleSelection", () => {
+  it("drops a selected task the filters hide, so Enter opens nothing", () => {
+    const list = { milestones: [agents], items: [ready("a", agents, { priority: "high" }), ready("b", agents)] };
+    const all = rowOrder(groupWork(list, parseFilters(new URLSearchParams())));
+    expect(visibleSelection(all, "b")).toBe("b");
+    const high = rowOrder(groupWork(list, parseFilters(new URLSearchParams("priority=high"))));
+    expect(high).toEqual(["a"]);
+    expect(visibleSelection(high, "b")).toBeNull();
+    expect(visibleSelection(high, null)).toBeNull();
   });
 });

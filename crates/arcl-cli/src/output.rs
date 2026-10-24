@@ -10,7 +10,9 @@ use arcl_repo::{
     vcs::{HeadState, PathState},
     workspace::{Change, RecordStatusKind, WorkspaceStatus},
 };
-use arcl_store::{CheckReport, PlanApplyResult, PlanDiff, PlanningCompletion, PlanningContext, PlanningTaskView};
+use arcl_store::{
+    CheckReport, PlanApplyResult, PlanDiff, PlanningCompletion, PlanningContext, PlanningTaskView, PlanningWork,
+};
 
 /// The heading for files with lines that look like conflict markers.
 const MARKER_LABEL: &str = "Lines that look like conflict markers (sync accepts them as content):";
@@ -394,6 +396,25 @@ impl Renderer {
             OutputMode::Plain => context.plain(),
             OutputMode::Json => {
                 serde_json::to_string(&Envelope { format_version: READINESS_FORMAT_VERSION, data: context })?
+            }
+            OutputMode::Quiet => return Ok(None),
+        };
+        Ok(Some(self.style(message)))
+    }
+
+    /// Render the Work list `arcl serve` answers on `/api/work`. Its JSON
+    /// carries typed readiness reasons, so it uses the readiness version.
+    /// Human and plain output print one task ID per line.
+    pub fn render_planning_work(&self, work: &PlanningWork) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human | OutputMode::Plain => work
+                .tasks
+                .iter()
+                .map(|item| item.task.id.to_string())
+                .collect::<Vec<_>>()
+                .join("\n"),
+            OutputMode::Json => {
+                serde_json::to_string(&Envelope { format_version: READINESS_FORMAT_VERSION, data: work })?
             }
             OutputMode::Quiet => return Ok(None),
         };

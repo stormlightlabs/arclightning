@@ -28,16 +28,31 @@ export interface WorkFilters {
   milestone: string[];
 }
 
-/** Read filters from a page URL's query, dropping values the list does not know. */
+/**
+ * Read filters from a page URL's query. Each filter takes the first value of
+ * its parameter, as its menu shows it, and drops a value the list does not
+ * know. Milestone IDs are checked by {@link withKnownMilestone} once the list
+ * loads.
+ */
 export function parseFilters(search: URLSearchParams): WorkFilters {
-  const known = <T extends string>(name: string, values: readonly T[]) =>
-    search.getAll(name).filter((value): value is T => values.includes(value as T));
-  return {
-    status: known("status", STATUSES),
-    readiness: known("readiness", READINESS),
-    priority: known("priority", PRIORITIES),
-    milestone: search.getAll("milestone").filter((value) => value !== ""),
+  const first = <T extends string>(name: string, values: readonly T[]): T[] => {
+    const value = search.get(name);
+    return value !== null && values.includes(value as T) ? [value as T] : [];
   };
+  const milestone = search.get("milestone");
+  return {
+    status: first("status", STATUSES),
+    readiness: first("readiness", READINESS),
+    priority: first("priority", PRIORITIES),
+    milestone: milestone === null || milestone === "" ? [] : [milestone],
+  };
+}
+
+/** `filters` without a milestone value that is not one of `milestoneIds` or {@link NO_MILESTONE}. */
+export function withKnownMilestone(filters: WorkFilters, milestoneIds: Iterable<string>): WorkFilters {
+  const known = new Set([...milestoneIds, NO_MILESTONE]);
+  const milestone = filters.milestone.filter((id) => known.has(id));
+  return milestone.length === filters.milestone.length ? filters : { ...filters, milestone };
 }
 
 /** Write `filters` into a copy of `search`, replacing the filter parameters it had. */

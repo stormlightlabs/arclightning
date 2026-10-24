@@ -59,6 +59,10 @@ impl Reads for ServeApp {
     fn context(&self, task_id: &str) -> Reply {
         reply(read_context(task_id, &self.renderer))
     }
+
+    fn work(&self) -> Reply {
+        reply(read_work(&self.renderer))
+    }
 }
 
 impl Mutations for ServeApp {

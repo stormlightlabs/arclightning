@@ -39,12 +39,35 @@ describe("MarkdownEditor", () => {
     await expect.element(page.getByText("1 edits")).toBeInTheDocument();
   });
 
-  it("gives up focus on Escape", async () => {
-    await render(TaskViewHarness);
+  it("does not report an edit when the value changes from props", async () => {
+    await render(TaskViewHarness, { readonly: false });
     const editor = page.getByRole("textbox", { name: "Description Markdown" });
+    await page.getByRole("button", { name: "Replace value" }).click();
+    await expect.element(editor).toHaveTextContent("Replaced from props.");
+    await expect.element(page.getByText("0 edits")).toBeInTheDocument();
     editor.element().focus();
-    await expect.element(editor).toHaveFocus();
-    await userEvent.keyboard("{Escape}");
-    await expect.element(editor).not.toHaveFocus();
+    await userEvent.keyboard("x");
+    await expect.element(page.getByText("1 edits")).toBeInTheDocument();
+  });
+
+  for (const readonly of [true, false]) {
+    it(`moves focus to its frame on Escape when ${readonly ? "read-only" : "writable"}`, async () => {
+      await render(TaskViewHarness, { readonly });
+      const editor = page.getByRole("textbox", { name: "Description Markdown" });
+      editor.element().focus();
+      await expect.element(editor).toHaveFocus();
+      await userEvent.keyboard("{Escape}");
+      expect(document.activeElement).toBe(editor.element().closest(".arcl-markdown-editor"));
+    });
+  }
+
+  it("is editable only when writable, and keeps a tab stop when read-only", async () => {
+    const { rerender } = await render(TaskViewHarness);
+    const editor = page.getByRole("textbox", { name: "Description Markdown" });
+    await expect.element(editor).toHaveAttribute("contenteditable", "false");
+    await expect.element(editor).toHaveAttribute("tabindex", "0");
+    await rerender({ readonly: false });
+    await expect.element(editor).toHaveAttribute("contenteditable", "true");
+    await expect.element(editor).not.toHaveAttribute("tabindex");
   });
 });

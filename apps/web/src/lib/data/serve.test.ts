@@ -1,28 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { DataError, dataSource, serveSource, setDataSource, type DataSource } from "./index";
+import { DataError, dataSource, latestRead, serveSource, setDataSource, type DataSource } from "./index";
 
-const phase = { id: "ph-7", project_id: "pj", plan_id: "pl", title: "Milestone 7", body: "", status: "open", position: 7 };
+const phase = (id: string, position: number) => ({ id, project_id: "pj", plan_id: "pl", title: `Milestone ${position}`, body: "", status: "open", position });
 
-function explanation(id: string, phaseId: string | null) {
+function item(id: string, phaseId: string | null) {
   return {
-    format_version: 2,
-    data: {
-      task: { id, title: `Task ${id}`, status: "pending", priority: "normal", phase_id: null },
-      readiness: { ready: true, blocked: false, reasons: [] },
-      phase: phaseId === null ? null : phase,
-      blockers: [],
-    },
+    task: { id, title: `Task ${id}`, status: "pending", priority: "normal", phase_id: null },
+    readiness: { ready: true, blocked: false, reasons: [] },
+    phase_id: phaseId,
   };
 }
 
 /** A fetch that answers from `routes` and records each request. */
 function fakeFetch(routes: Record<string, { status?: number; body: unknown }>) {
-  const calls: { path: string; headers: Record<string, string>; method?: string; body?: unknown }[] = [];
+  const calls: { path: string; headers: Record<string, string>; method?: string; body?: unknown; signal?: AbortSignal | null }[] =
+    [];
   const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     const call: (typeof calls)[number] = { path, headers: (init?.headers ?? {}) as Record<string, string> };
     if (init?.method) call.method = init.method;
     if (init?.body !== undefined) call.body = JSON.parse(String(init.body));
+    if (init?.signal !== undefined) call.signal = init.signal;
     calls.push(call);
     const route = routes[path];
     if (!route) return new Response("{}", { status: 404 });
@@ -31,26 +29,25 @@ function fakeFetch(routes: Record<string, { status?: number; body: unknown }>) {
   return { fetch, calls };
 }
 
-const listing = (records: { id: string; kind: string; status: string; title: string }[]) => ({ format_version: 1, data: { records } });
+/** A fetch that never answers and rejects when its signal aborts, as the browser's does. */
+function hangingFetch() {
+  const signals: AbortSignal[] = [];
+  const fetch = ((_input: RequestInfo | URL, init?: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!signal) return;
+      signals.push(signal);
+      signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+    })) as typeof globalThis.fetch;
+  return { fetch, signals };
+}
 
 describe("serveSource", () => {
-  it("builds the Work list from list, explain and show, with the token on every request", async () => {
+  it("builds the Work list from one request, with the token on it", async () => {
     const { fetch, calls } = fakeFetch({
-      "/api/records?kind=task": {
-        body: listing([
-          { id: "t-2", kind: "task", status: "pending", title: "Task t-2" },
-          { id: "t-1", kind: "task", status: "pending", title: "Task t-1" },
-        ]),
+      "/api/work": {
+        body: { format_version: 2, data: { tasks: [item("t-2", "ph-7"), item("t-1", null)], phases: [phase("ph-7", 7), phase("ph-8", 8)] } },
       },
-      "/api/records?kind=phase": {
-        body: listing([
-          { id: "ph-7", kind: "phase", status: "open", title: "Milestone 7" },
-          { id: "ph-8", kind: "phase", status: "open", title: "Milestone 8" },
-        ]),
-      },
-      "/api/tasks/t-2/explain": { body: explanation("t-2", "ph-7") },
-      "/api/tasks/t-1/explain": { body: explanation("t-1", null) },
-      "/api/records/ph-8": { body: { format_version: 1, data: { action: "shown", phase: { ...phase, id: "ph-8", title: "Milestone 8", position: 8 } } } },
     });
 
     const work = await serveSource({ fetch, headers: () => ({ "X-Arcl-Token": "abc" }) }).work();
@@ -59,57 +56,70 @@ describe("serveSource", () => {
       { id: "ph-7", plan_id: "pl", title: "Milestone 7", status: "open", position: 7 },
       { id: "ph-8", plan_id: "pl", title: "Milestone 8", status: "open", position: 8 },
     ]);
-    expect(work.items.map((item) => [item.task.id, item.milestone?.id ?? null])).toEqual([
+    expect(work.items.map((entry) => [entry.task.id, entry.milestone?.id ?? null])).toEqual([
       ["t-2", "ph-7"],
       ["t-1", null],
     ]);
     expect(work.items[0].milestone).toEqual({ id: "ph-7", plan_id: "pl", title: "Milestone 7", status: "open", position: 7 });
-    expect(calls).toHaveLength(5);
-    expect(calls.every((call) => call.headers["X-Arcl-Token"] === "abc")).toBe(true);
+    expect(calls.map((call) => call.path)).toEqual(["/api/work"]);
+    expect(calls[0].headers["X-Arcl-Token"]).toBe("abc");
   });
 
   it("raises the CLI's error code and message", async () => {
     const { fetch } = fakeFetch({
-      "/api/records?kind=task": { status: 401, body: { format_version: 1, error: { code: "unauthorized", message: "the X-Arcl-Token header is missing" } } },
-      "/api/records?kind=phase": { body: listing([]) },
+      "/api/work": { status: 401, body: { format_version: 1, error: { code: "unauthorized", message: "the X-Arcl-Token header is missing" } } },
     });
     const failure = await serveSource({ fetch, headers: () => ({}) }).work().catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(DataError);
     expect(failure).toMatchObject({ code: "unauthorized", message: "the X-Arcl-Token header is missing" });
   });
 
-  it("leaves out a task deleted between the list and its explain", async () => {
-    const gone = { format_version: 1, error: { code: "not_found", message: "planning task `t-1` was not found" } };
-    const { fetch } = fakeFetch({
-      "/api/records?kind=task": {
-        body: listing([
-          { id: "t-1", kind: "task", status: "pending", title: "Task t-1" },
-          { id: "t-2", kind: "task", status: "pending", title: "Task t-2" },
-        ]),
-      },
-      "/api/records?kind=phase": { body: listing([]) },
-      "/api/tasks/t-1/explain": { status: 404, body: gone },
-      "/api/tasks/t-2/explain": { body: explanation("t-2", null) },
+  it("stops the request when its signal aborts", async () => {
+    const { fetch, signals } = hangingFetch();
+    const controller = new AbortController();
+    const pending = serveSource({ fetch, headers: () => ({}) }).work(controller.signal);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(signals).toEqual([controller.signal]);
+  });
+});
+
+describe("latestRead", () => {
+  it("aborts the read in flight on restart and on stop, and reports only the newest", async () => {
+    const { fetch, signals } = hangingFetch();
+    const source = serveSource({ fetch, headers: () => ({}) });
+    const reported: string[] = [];
+    const read = latestRead((signal) => source.work(signal), {
+      loaded: () => reported.push("loaded"),
+      failed: (error) => reported.push(`failed: ${String(error)}`),
     });
-    const work = await serveSource({ fetch, headers: () => ({}) }).work();
-    expect(work.items.map((item) => item.task.id)).toEqual(["t-2"]);
+
+    read.start();
+    read.start(); // Retry
+    expect(signals.map((signal) => signal.aborted)).toEqual([true, false]);
+    read.stop(); // unmount
+    expect(signals.map((signal) => signal.aborted)).toEqual([true, true]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reported).toEqual([]);
   });
 
-  it("fails the list on an explain error other than not_found", async () => {
-    const { fetch } = fakeFetch({
-      "/api/records?kind=task": { body: listing([{ id: "t-1", kind: "task", status: "pending", title: "Task t-1" }]) },
-      "/api/records?kind=phase": { body: listing([]) },
-      "/api/tasks/t-1/explain": { status: 500, body: { format_version: 1, error: { code: "storage", message: "database is locked" } } },
-    });
-    const failure = await serveSource({ fetch, headers: () => ({}) }).work().catch((error: unknown) => error);
-    expect(failure).toMatchObject({ code: "storage", message: "database is locked" });
+  it("reports the newest read's value or failure", async () => {
+    const reported: unknown[] = [];
+    const report = { loaded: (value: unknown) => reported.push(value), failed: (error: unknown) => reported.push(error) };
+    latestRead(() => Promise.resolve("list"), report).start();
+    latestRead(() => Promise.reject(new Error("database is locked")), report).start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reported).toEqual(["list", new Error("database is locked")]);
   });
 });
 
 describe("serveSource.task", () => {
   it("reads the task's show envelope, escaping the ID, with the token", async () => {
+    const { task, readiness } = item("t 1", null);
     const detail = {
-      ...explanation("t 1", null).data,
+      task,
+      readiness,
+      phase: null,
       blockers: [],
       inherited_blockers: [],
       dependents: [],
@@ -119,9 +129,10 @@ describe("serveSource.task", () => {
       plan: null,
     };
     const { fetch, calls } = fakeFetch({ "/api/records/t%201": { body: { format_version: 2, data: detail } } });
-    const loaded = await serveSource({ fetch, headers: () => ({ "X-Arcl-Token": "abc" }) }).task("t 1");
+    const signal = new AbortController().signal;
+    const loaded = await serveSource({ fetch, headers: () => ({ "X-Arcl-Token": "abc" }) }).task("t 1", signal);
     expect(loaded).toEqual(detail);
-    expect(calls).toEqual([{ path: "/api/records/t%201", headers: { "X-Arcl-Token": "abc" } }]);
+    expect(calls).toEqual([{ path: "/api/records/t%201", headers: { "X-Arcl-Token": "abc" }, signal }]);
   });
 
   it("refuses a record that is not a task", async () => {

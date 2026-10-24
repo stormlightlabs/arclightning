@@ -52,6 +52,11 @@ export function inField(target: EventTarget | null): boolean {
   return Boolean(closestOf(target)?.closest("input, textarea, select, [role=combobox], [role=listbox], [contenteditable]:not([contenteditable='false'])"));
 }
 
+/** `selected` when the list shows it in `order`, otherwise `null`. */
+export function visibleSelection(order: string[], selected: string | null): string | null {
+  return selected !== null && order.includes(selected) ? selected : null;
+}
+
 /** `target` as something with `closest`, which every element has. */
 function closestOf(target: EventTarget | null): Pick<Element, "closest"> | null {
   const candidate = target as Partial<Pick<Element, "closest">> | null;
