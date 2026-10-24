@@ -9,7 +9,9 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use arcl_core::domain::{Capture, Note, Phase, Plan, PlanningTask, Release, Spec, TaskId, TaskPriority};
+use arcl_core::domain::{
+    Capture, CapturePromotion, Note, Phase, Plan, PlanningTask, Release, Spec, TaskId, TaskPriority,
+};
 use arcl_store::PlanningTaskView;
 
 use crate::project::Warning;
@@ -116,6 +118,24 @@ pub enum OpenSubtasks {
     Complete,
 }
 
+/// The kind of record a capture becomes, as `arcl capture promote` takes it.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum PromotionTarget {
+    Spec,
+    Task,
+    Note,
+}
+
+/// The record a promotion created, keyed by its kind.
+#[derive(Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PromotedRecord {
+    Spec(Spec),
+    Task(PlanningTask),
+    Note(Note),
+}
+
 /// The record `show` returns: a task view for a task, or `{"action":
 /// "shown", "<kind>": record}` for any other kind.
 #[derive(Debug, JsonSchema, Serialize)]
@@ -207,6 +227,36 @@ pub struct CaptureCreateInput {
     /// Markdown: what and why.
     #[serde(default)]
     pub body: String,
+}
+
+/// A capture to promote, and the record it becomes.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CapturePromoteInput {
+    /// The capture ID, `arcl-c-…`.
+    pub capture_id: String,
+    /// The kind of record the capture becomes.
+    pub target: PromotionTarget,
+    /// The new record's title. Defaults to the capture's.
+    pub title: Option<String>,
+    /// The new record's Markdown body. Defaults to the capture's.
+    pub body: Option<String>,
+    /// Markdown acceptance criteria for a spec.
+    pub acceptance_criteria: Option<String>,
+    /// For a task: the spec it is under, `arcl-s-…`.
+    pub spec: Option<String>,
+    /// For a task: the plan it is under, `arcl-pl-…`.
+    pub plan: Option<String>,
+    /// For a task: the phase it is under, `arcl-ph-…`.
+    pub phase: Option<String>,
+    /// For a task: the parent task, `arcl-t-…`.
+    pub parent: Option<String>,
+    /// For a task: the priority. Defaults to `normal`.
+    #[serde(default)]
+    pub priority: TaskPriority,
+    /// For a task: the order among its siblings. Defaults to 0.
+    #[serde(default)]
+    pub position: i64,
 }
 
 /// A new spec.
@@ -321,6 +371,20 @@ pub struct CaptureData {
     pub action: String,
     /// The capture.
     pub capture: Capture,
+}
+
+/// A promoted capture, as `arcl capture promote` returns it: the capture,
+/// the promotion, and the new record under its kind (`spec`, `task` or
+/// `note`).
+#[derive(Debug, JsonSchema, Serialize)]
+pub struct CapturePromotionData {
+    /// The capture, now promoted.
+    pub capture: Capture,
+    /// The link from the capture to the new record.
+    pub promotion: CapturePromotion,
+    /// The new record.
+    #[serde(flatten)]
+    pub record: PromotedRecord,
 }
 
 /// A spec and what the tool did to it.

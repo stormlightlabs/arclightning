@@ -19,6 +19,7 @@ use arcl_store::{Database, PlanningTaskUpdate};
 
 const TOOLS: &[(&str, u64)] = &[
     ("capture_create", 1),
+    ("capture_promote", 1),
     ("context", 2),
     ("explain", 2),
     ("list", 1),

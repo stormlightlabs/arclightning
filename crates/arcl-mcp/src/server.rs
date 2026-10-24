@@ -22,7 +22,8 @@ use arcl_core::domain::{
     validate_title,
 };
 use arcl_store::{
-    Database, PlanningContext, PlanningReadyFilter, PlanningTaskCreate, PlanningTaskUpdate, StorageError,
+    CapturePromotionRecord, CaptureTaskPromotion, Database, PlanningContext, PlanningReadyFilter, PlanningTaskCreate,
+    PlanningTaskUpdate, StorageError,
 };
 
 use crate::error::ToolError;
@@ -215,6 +216,24 @@ impl ArclServer {
             validate_title(&input.title)?;
             let capture = database.create_capture(input.title, input.body)?;
             Ok(CaptureData { action: "created".to_owned(), capture })
+        })
+        .await
+    }
+
+    /// Promote a capture to a spec, task or note, like `arcl capture promote`.
+    #[tool(
+        description = "Promote a capture to a spec, task or note, like `arcl capture promote`. The new \
+        record takes the capture's title and body unless the call gives others. `spec`, `plan`, `phase` \
+        and `parent` apply only to a task.",
+        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false),
+        meta = version_meta(FORMAT_VERSION)
+    )]
+    pub async fn capture_promote(
+        &self, Parameters(input): Parameters<CapturePromoteInput>, cancelled: CancellationToken,
+    ) -> Result<Json<Envelope<CapturePromotionData>>, ToolError> {
+        let input = input?;
+        self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
+            promote_capture(database, input)
         })
         .await
     }
@@ -435,6 +454,52 @@ fn version_meta(format_version: u8) -> MetaObject {
     let mut meta = serde_json::Map::new();
     meta.insert(FORMAT_VERSION_META_KEY.to_owned(), format_version.into());
     MetaObject(meta)
+}
+
+/// Promote a capture as `arcl capture promote` does: the capture's title and
+/// body unless the input gives others, and task placement only for a task.
+fn promote_capture(database: &mut Database, input: CapturePromoteInput) -> Result<CapturePromotionData, ToolError> {
+    let id = CaptureId::parse(&input.capture_id)?;
+    if input.target != PromotionTarget::Task
+        && (input.spec.is_some() || input.plan.is_some() || input.phase.is_some() || input.parent.is_some())
+    {
+        return Err(ToolError::invalid_request(
+            "task placement options apply only when promoting to a task",
+        ));
+    }
+    if let Some(title) = &input.title {
+        validate_title(title)?;
+    }
+    let capture = database
+        .capture(id)?
+        .ok_or_else(|| StorageError::CaptureNotFound { id: id.to_string() })?;
+    let title = input.title.unwrap_or(capture.title);
+    let body = input.body.unwrap_or(capture.body);
+    let result = match input.target {
+        PromotionTarget::Spec => {
+            database.promote_capture_to_spec(id, title, body, input.acceptance_criteria.unwrap_or_default())?
+        }
+        PromotionTarget::Task => database.promote_capture_to_task(
+            id,
+            CaptureTaskPromotion {
+                spec_id: input.spec.as_deref().map(SpecId::parse).transpose()?,
+                plan_id: input.plan.as_deref().map(PlanId::parse).transpose()?,
+                phase_id: input.phase.as_deref().map(PhaseId::parse).transpose()?,
+                parent_id: input.parent.as_deref().map(TaskId::parse).transpose()?,
+                title,
+                body,
+                priority: input.priority,
+                position: input.position,
+            },
+        )?,
+        PromotionTarget::Note => database.promote_capture_to_note(id, title, body)?,
+    };
+    let record = match result.record {
+        CapturePromotionRecord::Spec(spec) => PromotedRecord::Spec(spec),
+        CapturePromotionRecord::Task(task) => PromotedRecord::Task(task),
+        CapturePromotionRecord::Note(note) => PromotedRecord::Note(note),
+    };
+    Ok(CapturePromotionData { capture: result.capture, promotion: result.promotion, record })
 }
 
 /// Look a record up by its ID prefix. Returns the envelope version with it.

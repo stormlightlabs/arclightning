@@ -103,6 +103,7 @@ pub struct RecordLink {
 
 /// A valid target for capture promotion.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum CapturePromotionTarget {
     Spec(SpecId),
@@ -132,6 +133,7 @@ impl CapturePromotionTarget {
 
 /// Provenance preserved when a capture becomes a planning record.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CapturePromotion {
     pub project_id: ProjectId,
     pub capture_id: super::CaptureId,
