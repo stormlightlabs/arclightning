@@ -55,6 +55,14 @@ Without `--check`, each file is `created`, `updated`, or `unchanged`. `--plain`
 prints `<status>\t<path>` per file, and `--json` prints `action` (`installed`
 or `checked`), `root`, and a `files` array of `path` and `status`.
 
+The command checks every target before it writes any file, and replaces a file
+by writing a temporary file beside it and renaming it. It exits with status
+code `3` and writes nothing when a skill file is a symbolic link or not a
+regular file, a skill directory is not a directory, or a path resolves outside
+the project root. A linked directory, such as `.agents/skills` pointing at
+`../.claude/skills`, is followed: the file is written once and its second path
+is reported as `unchanged`.
+
 ## Workspace
 
 | Command                                          | Purpose                                                         |

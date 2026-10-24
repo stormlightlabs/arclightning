@@ -85,7 +85,15 @@ typed reasons from `explain` instead. `--force` starts the task anyway.
 ## Give an agent the skill
 
 The Arc Lightning skill teaches a coding agent the loop above with `--json`.
-Install it into a project with the [skills CLI](https://skills.sh):
+`arcl skill install` writes the copy built into `arcl` into the project's
+`.claude/skills/` and `.agents/skills/`, and `--check` reports drift without
+writing:
+
+```sh
+arcl skill install
+```
+
+The [skills CLI](https://skills.sh) installs it from GitHub instead:
 
 ```sh
 npx skills add stormlightlabs/arclightning --skill arclightning

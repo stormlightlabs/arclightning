@@ -84,6 +84,16 @@ impl DependencyMutation {
     }
 }
 
+/// Whether a `skill install` report comes from an install or a `--check`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillAction {
+    /// `skill install` wrote missing and changed files.
+    Installed,
+    /// `skill install --check` compared the files and wrote nothing.
+    Checked,
+}
+
 /// What `skill install` did, or with `--check` found, for one skill file.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -738,10 +748,12 @@ impl Renderer {
                     .collect::<Vec<_>>();
                 let root = &report.root;
                 let heading = match (report.action, changed.is_empty()) {
-                    ("checked", true) => format!("The Arc Lightning skill in `{root}` matches this arcl."),
-                    ("checked", false) => format!("The Arc Lightning skill in `{root}` differs from this arcl:"),
-                    (_, true) => format!("The Arc Lightning skill in `{root}` is up to date."),
-                    (_, false) => format!("Installed the Arc Lightning skill in `{root}`:"),
+                    (SkillAction::Checked, true) => format!("The Arc Lightning skill in `{root}` matches this arcl."),
+                    (SkillAction::Checked, false) => {
+                        format!("The Arc Lightning skill in `{root}` differs from this arcl:")
+                    }
+                    (SkillAction::Installed, true) => format!("The Arc Lightning skill in `{root}` is up to date."),
+                    (SkillAction::Installed, false) => format!("Installed the Arc Lightning skill in `{root}`:"),
                 };
                 std::iter::once(heading)
                     .chain(
@@ -833,6 +845,7 @@ struct DependencyMutationData<'a> {
 pub struct SkillFile {
     /// The path relative to the project root, with `/` separators.
     pub path: String,
+    /// What the install did to the file, or what `--check` found.
     pub status: SkillFileStatus,
 }
 
@@ -840,7 +853,7 @@ pub struct SkillFile {
 #[derive(Clone, Debug, Serialize)]
 pub struct SkillReport {
     /// `installed`, or `checked` under `--check`.
-    pub action: &'static str,
+    pub action: SkillAction,
     /// The project root the paths are relative to.
     pub root: String,
     /// One entry per agent directory and skill file, in install order.

@@ -3297,3 +3297,84 @@ fn skill_install_requires_an_initialized_project() {
     assert_eq!(output.status.code(), Some(3));
     assert!(!directory.path().join(".claude").exists());
 }
+
+#[cfg(unix)]
+#[test]
+fn skill_install_follows_a_linked_agents_directory_once() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    fs::create_dir_all(dir.join(".claude/skills")).expect("claude skills directory");
+    fs::create_dir_all(dir.join(".agents")).expect("agents directory");
+    std::os::unix::fs::symlink("../.claude/skills", dir.join(".agents/skills")).expect("symlink is created");
+
+    let report = run_json(dir, ["--json", "skill", "install"].as_ref());
+    let expected = vec![
+        (SKILL_PATHS[0].to_owned(), "created".to_owned()),
+        (SKILL_PATHS[1].to_owned(), "unchanged".to_owned()),
+    ];
+    assert_eq!(skill_statuses(&report), expected);
+    assert_eq!(
+        fs::read_to_string(dir.join(SKILL_PATHS[1])).expect("skill reads through the link"),
+        skill_source()
+    );
+    assert!(
+        fs::symlink_metadata(dir.join(".agents/skills"))
+            .expect("link stays")
+            .file_type()
+            .is_symlink()
+    );
+
+    let (code, report, stderr) = skill_check(dir);
+    assert_eq!(code, Some(0), "stderr: {stderr}");
+    let expected = SKILL_PATHS.map(|path| (path.to_owned(), "unchanged".to_owned()));
+    assert_eq!(skill_statuses(&report), expected);
+}
+
+#[cfg(unix)]
+#[test]
+fn skill_install_refuses_a_linked_skill_file() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let outside = tempdir().expect("outside directory");
+    let target = outside.path().join("bashrc");
+    fs::write(&target, "outside\n").expect("outside file writes");
+    let skill_dir = dir.join(".agents/skills/arclightning");
+    fs::create_dir_all(&skill_dir).expect("skill directory");
+    std::os::unix::fs::symlink(&target, skill_dir.join("SKILL.md")).expect("symlink is created");
+
+    for args in [
+        ["--json", "skill", "install"].as_ref(),
+        ["--json", "skill", "install", "--check"].as_ref(),
+    ] {
+        let output = arcl_in(dir).args(args).output().expect("skill install runs");
+        assert_eq!(output.status.code(), Some(3), "{args:?}");
+        assert!(output.stdout.is_empty(), "{args:?}");
+        let error = json(&output.stderr);
+        assert_eq!(error["error"]["code"], "invalid_request");
+        let message = error["error"]["message"].as_str().expect("message");
+        assert!(message.contains("symbolic link"), "message: {message}");
+        assert_eq!(fs::read_to_string(&target).expect("outside file reads"), "outside\n");
+        // The check runs before any write, so the valid target stays absent.
+        assert!(!dir.join(SKILL_PATHS[0]).exists(), "{args:?}");
+    }
+}
+
+#[test]
+fn skill_install_writes_nothing_when_a_parent_is_a_file() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    fs::write(dir.join(".agents"), "not a directory\n").expect("file writes");
+    let output = arcl_in(dir)
+        .args(["--json", "skill", "install"])
+        .output()
+        .expect("skill install runs");
+    assert_eq!(output.status.code(), Some(3));
+    let error = json(&output.stderr);
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .expect("message")
+            .contains("is not a directory")
+    );
+    assert!(!dir.join(".claude").exists());
+}

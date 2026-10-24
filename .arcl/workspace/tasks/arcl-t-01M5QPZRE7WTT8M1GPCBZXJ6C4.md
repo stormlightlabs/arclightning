@@ -6,7 +6,7 @@ status = "completed"
 priority = "normal"
 position = 2
 blocked-by = ["arcl-t-01M5QPZJRBMHJYTP3NVNHQ8T4Y"]
-evidence = "Branch `claude/t10-2-skill-install` adds `arcl skill install [--check]`. It writes `skills/arclightning/` into `.claude/skills/arclightning/` and `.agents/skills/arclightning/`, leaves identical files alone, and under `--check` writes nothing and exits 4 on a missing or changed file. The files are embedded with `include_str!` from `skills/arclightning/`; a unit test fails when that directory holds a file the binary does not embed. Verified with `cargo test -p arcl-cli skill` (7 CLI tests and the embedding test) and each `just check` step."
+evidence = "Delivered by #33: adds `arcl skill install [--check]`. It writes `skills/arclightning/` into `.claude/skills/arclightning/` and `.agents/skills/arclightning/`, leaves identical files alone, and under `--check` writes nothing and exits 4 on a missing or changed file. The files are embedded with `include_str!` from `skills/arclightning/`; a unit test fails when that directory holds a file the binary does not embed. It refuses a linked or non-regular skill file and a path that resolves outside the project, checks every target before writing, and follows a linked `.agents/skills` directory. Verified with `cargo test -p arcl-cli skill` (10 CLI tests and the embedding test) and each `just check` step."
 +++
 
 Install the Arc Lightning skill from the binary, so a project gets it without
