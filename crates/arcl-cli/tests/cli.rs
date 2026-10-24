@@ -1509,6 +1509,42 @@ fn start_refuses_a_task_in_a_closed_plan_unless_forced() {
     assert_start_needs_force(dir, &task, &format!("plan `{plan_id}` is `cancelled`"));
 }
 
+#[test]
+fn start_refuses_a_task_whose_ancestor_has_an_unfinished_blocker_unless_forced() {
+    let directory = initialized_directory();
+    let blocker = create_task(directory.path(), "Blocker", None);
+    let parent = create_task(directory.path(), "Parent", None);
+    let child = create_task(directory.path(), "Child", Some(&parent));
+    block_start_task(directory.path(), &parent, &blocker);
+
+    assert_start_needs_force(
+        directory.path(),
+        &child,
+        &format!("ancestor `{parent}` is blocked by `{blocker}` (pending)"),
+    );
+}
+
+#[test]
+fn start_starts_a_child_its_parent_is_blocked_by_without_force() {
+    let directory = initialized_directory();
+    let parent = create_task(directory.path(), "Parent", None);
+    let child = create_task(directory.path(), "Child", Some(&parent));
+    // `dependency add` refuses this edge, so insert it as an older project would hold it.
+    let database = rusqlite::Connection::open(directory.path().join(".arcl/arcl.db")).expect("database opens");
+    database
+        .execute(
+            "INSERT INTO planning_task_dependencies (project_id, task_id, blocker_id)
+             SELECT project_id, ?1, ?2 FROM planning_tasks WHERE id = ?1",
+            [&parent, &child],
+        )
+        .expect("bad edge inserts");
+    drop(database);
+
+    let started = run_json(directory.path(), ["--json", "task", "start", &child].as_ref());
+    assert_eq!(started["data"]["action"], "started");
+    assert_eq!(started["data"]["task"]["status"], "in_progress");
+}
+
 fn ready_ids(directory: &Path) -> Vec<String> {
     run_json(directory, ["--json", "ready"].as_ref())["data"]["tasks"]
         .as_array()

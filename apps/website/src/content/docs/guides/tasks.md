@@ -100,7 +100,9 @@ arcl task handoff arcl-t-01J... --note-file handoff.md
 
 `handoff` stores the note and parks the task in one transaction. Unparking and
 starting the task preserve the note until another handoff replaces it. Use
-`--note-file -` to read UTF-8 Markdown from standard input.
+`--note-file -` to read UTF-8 Markdown from standard input. After `unpark`,
+`start` refuses a task that became not ready while parked; resolve the blocker
+or pass `--force`.
 
 ## Record Completion
 
