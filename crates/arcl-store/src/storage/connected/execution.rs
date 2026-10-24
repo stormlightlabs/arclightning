@@ -823,10 +823,11 @@ mod tests {
                 [a.id.to_string()],
             )
             .expect("status updates");
-        let cycle = format!(
-            "blocker cycle: {} -> {} -> {} -> {}; each task is blocked by the next",
-            a.id, b.id, c.id, a.id
-        );
+        // The report starts at the smallest task ID, whatever the edge order.
+        let order = [a.id, b.id, c.id];
+        let start = (0..3).min_by_key(|&index| order[index]).expect("three tasks");
+        let path: Vec<String> = (0..=3).map(|step| order[(start + step) % 3].to_string()).collect();
+        let cycle = format!("blocker cycle: {}; each task is blocked by the next", path.join(" -> "));
 
         let report = database.check().expect("check runs");
         assert!(!report.valid);

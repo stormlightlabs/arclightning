@@ -92,7 +92,7 @@ positions as warnings. It exits successfully when no errors are found.
 A database written by an older version, or edited by hand, can hold blocker
 edges that `dependency add` now refuses. `check` reports each one as an error:
 
-- A cycle, once, with the tasks along it:
+- A cycle, once, with the tasks along it, starting at the smallest task ID:
   ``blocker cycle: <a> -> <b> -> <a>; each task is blocked by the next``.
 - An edge to the task's own ancestor or descendant, with the parent chain from
   the descendant up to the ancestor:

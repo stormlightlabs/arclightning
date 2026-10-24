@@ -1759,7 +1759,9 @@ fn invalid_edge_cycle_is_reported_by_check_and_explain() {
     let path = directory.path();
     let (a, b) = (create_task(path, "A", None), create_task(path, "B", None));
     insert_raw_edges(path, &[(&a, &b), (&b, &a)]);
-    let cycle = format!("blocker cycle: {a} -> {b} -> {a}; each task is blocked by the next");
+    // The report starts at the smallest task ID, whatever the edge order.
+    let (low, high) = if a < b { (&a, &b) } else { (&b, &a) };
+    let cycle = format!("blocker cycle: {low} -> {high} -> {low}; each task is blocked by the next");
 
     assert_eq!(failed_check_errors(path), vec![cycle.clone()]);
     for task in [&a, &b] {
