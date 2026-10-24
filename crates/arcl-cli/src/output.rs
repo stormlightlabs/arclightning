@@ -945,7 +945,7 @@ impl PlanningTaskViewOutput for PlanningTaskView {
             self.readiness
                 .reasons
                 .iter()
-                .map(|reason| format!("reason\t{}", plain_escape(reason))),
+                .map(|reason| format!("reason\t{}", plain_escape(&reason.message))),
         );
         lines.join("\n")
     }
@@ -1047,7 +1047,7 @@ impl PlanningContextOutput for PlanningContext {
             self.readiness
                 .reasons
                 .iter()
-                .map(|reason| format!("reason\t{}", plain_escape(reason))),
+                .map(|reason| format!("reason\t{}", plain_escape(&reason.message))),
         );
         lines.join("\n")
     }
