@@ -2,10 +2,14 @@
 - In Rust code, never separate impls from their types and avoid `unsafe`
   - Order: constants, enums, structs, then free functions. pub before private/local
   - Use only 1 level of super (i.e. no `super::super::`)
+  - Import shared crate items through `arcl_core::prelude::*` and
+    `arcl_store::prelude::*` rather than long item lists
 - Use the writing-docs skill and keep communication direct & succinct while retaining
   the user's voice. Describe the current product directly instead of framing it
   against earlier versions.
 - Linting must clear even if warnings are unrelated.
+- Disk is limited. After you address review changes, run `cargo clean` (or delete
+  your own `CARGO_TARGET_DIR`) so build output doesn't fill it.
 
 <!-- fabrial:begin -->
 ## Branches and pull requests

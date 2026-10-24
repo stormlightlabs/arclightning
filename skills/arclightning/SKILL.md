@@ -71,10 +71,11 @@ When you find work outside the task, capture it instead of doing it:
 arcl --json capture create "<title>" --body "<what and why>"
 ```
 
-The tool is `capture_create`. The server also has `show`, `spec_create`,
-`plan_create`, `task_create`, `task_update` and `note_create`, for
-`arcl show`, `arcl spec create`, `arcl plan create`, `arcl task create`,
-`arcl task update` and `arcl note create`.
+The tool is `capture_create`. The server also has `capture_promote`, `show`,
+`spec_create`, `plan_create`, `task_create`, `task_update` and `note_create`,
+for `arcl capture promote`, `arcl show`, `arcl spec create`,
+`arcl plan create`, `arcl task create`, `arcl task update` and
+`arcl note create`.
 
 Run `arcl <command> --help` for every flag, and `arcl check` to validate the
 project.

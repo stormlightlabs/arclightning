@@ -24,7 +24,7 @@ use tokio_util::sync::CancellationToken;
 
 use arcl_repo::vcs::{GixVcs, Vcs, VcsError};
 use arcl_repo::workspace::{ProjectConfig, WorkspaceSyncError, resolve_workspace_root, sync_workspace};
-use arcl_store::{Database, StorageError};
+use arcl_store::prelude::*;
 
 use crate::error::ToolError;
 

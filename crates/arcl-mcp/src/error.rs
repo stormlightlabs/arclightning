@@ -7,9 +7,9 @@ use rmcp::{
 use serde_json::{Value, json};
 use thiserror::Error;
 
-use arcl_core::domain::{DomainError, IdError};
+use arcl_core::prelude::*;
 use arcl_repo::{vcs::VcsError, workspace::WorkspaceSyncError};
-use arcl_store::StorageError;
+use arcl_store::prelude::*;
 
 /// The `format_version` of every failure envelope.
 pub const ERROR_FORMAT_VERSION: u8 = 1;
