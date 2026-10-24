@@ -194,10 +194,23 @@ pub fn context(connection: &Connection, id: TaskId) -> Result<PlanningContext> {
 }
 
 /// Apply one connected-model task lifecycle action atomically.
+///
+/// A start through this entry point is never forced; use
+/// [`start_planning_task`] to choose.
 pub fn transition_planning_task(
     connection: &mut Connection, project_id: ProjectId, id: TaskId, action: TaskAction, allow_open_children: bool,
 ) -> Result<PlanningTask> {
-    transition(connection, project_id, id, action, allow_open_children, None)
+    transition(connection, project_id, id, action, allow_open_children, false, None)
+}
+
+/// Start a connected-model task atomically.
+///
+/// A pending task must be ready, apart from having child tasks, unless `force`
+/// is set. Starting an in-progress task is a no-op either way.
+pub fn start_planning_task(
+    connection: &mut Connection, project_id: ProjectId, id: TaskId, force: bool,
+) -> Result<PlanningTask> {
+    transition(connection, project_id, id, TaskAction::Start, false, force, None)
 }
 
 /// Complete a connected-model task and optionally store Markdown evidence atomically.
@@ -210,6 +223,7 @@ pub fn complete_planning_task(
         id,
         TaskAction::Complete,
         allow_open_children,
+        false,
         evidence,
     )
 }
@@ -239,7 +253,7 @@ pub fn handoff_planning_task(
 
 fn transition(
     connection: &mut Connection, project_id: ProjectId, id: TaskId, action: TaskAction, allow_open_children: bool,
-    evidence: Option<String>,
+    force: bool, evidence: Option<String>,
 ) -> Result<PlanningTask> {
     let tx = connection.transaction()?;
     let current = planning_task(&tx, id)?.ok_or_else(|| StorageError::PlanningTaskNotFound { id: id.to_string() })?;
@@ -251,6 +265,17 @@ fn transition(
         .map_err(StorageError::InvalidPlanningTask)?;
     if next_status == current.status && evidence.is_none() {
         return Ok(current);
+    }
+    if matches!(action, TaskAction::Start) && current.status == TaskStatus::Pending && !force {
+        let data = load_data(&tx, project_id)?;
+        let ancestry = effective_ancestry(&data, id, &mut HashSet::new())?;
+        let readiness = readiness_counting_children(&data, &current, &ancestry, false)?;
+        if !readiness.ready {
+            return Err(StorageError::InvalidPlanningTask(DomainError::NotReady {
+                id: id.to_string(),
+                reasons: readiness.reasons,
+            }));
+        }
     }
     if matches!(action, TaskAction::Complete | TaskAction::Cancel) && !allow_open_children {
         let has_open_descendants: bool = tx.query_row(
@@ -514,12 +539,20 @@ fn ensure_open_containers(data: &PlanningData, ancestry: Ancestry) -> Result<()>
 }
 
 fn readiness(data: &PlanningData, task: &PlanningTask, ancestry: &Ancestry) -> Result<PlanningReadiness> {
+    readiness_counting_children(data, task, ancestry, true)
+}
+
+/// Compute readiness. `count_children` adds the "has child tasks" reason,
+/// which start skips.
+fn readiness_counting_children(
+    data: &PlanningData, task: &PlanningTask, ancestry: &Ancestry, count_children: bool,
+) -> Result<PlanningReadiness> {
     let mut reasons = Vec::new();
     if task.status != TaskStatus::Pending {
         reasons.push(format!("task status is `{}`", task.status.as_str()));
     }
     let children = child_tasks(data, task.id);
-    if !children.is_empty() {
+    if count_children && !children.is_empty() {
         reasons.push(format!("task has {} child task(s)", children.len()));
     }
     for ancestor in parent_chain(data, task.id)? {
@@ -917,13 +950,120 @@ mod tests {
         ));
         assert_eq!(database.planning_tasks().expect("tasks remain").len(), 1);
 
+        // The closed plan makes the task not ready, so starting it takes force.
         database
-            .transition_planning_task(task.id, TaskAction::Start, false)
+            .start_planning_task(task.id, true)
             .expect("task can still be explicitly started after a forced container close");
         let handoff = database
             .handoff_planning_task(task.id, "resume".to_owned())
             .expect("handoff parks atomically");
         assert_eq!(handoff.status, TaskStatus::Parked);
         assert_eq!(handoff.handoff, "resume");
+    }
+
+    #[test]
+    fn start_refuses_unready_task_unless_forced() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let blocker = task(&mut database, project.id, "Blocker");
+        let blocked = task(&mut database, project.id, "Blocked");
+        database
+            .add_planning_dependency(blocked.id, blocker.id)
+            .expect("dependency creates");
+
+        let error = database
+            .start_planning_task(blocked.id, false)
+            .expect_err("blocked task is refused");
+        match error {
+            StorageError::InvalidPlanningTask(DomainError::NotReady { id, reasons }) => {
+                assert_eq!(id, blocked.id.to_string());
+                assert_eq!(reasons, vec![format!("blocked by `{}` (pending)", blocker.id)]);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        let unchanged = database
+            .planning_task(blocked.id)
+            .expect("task reads")
+            .expect("task exists");
+        assert_eq!(unchanged.status, TaskStatus::Pending);
+
+        let started = database
+            .start_planning_task(blocked.id, true)
+            .expect("forced start succeeds");
+        assert_eq!(started.status, TaskStatus::InProgress);
+    }
+
+    #[test]
+    fn start_repeats_on_in_progress_task_with_or_without_force() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let blocker = task(&mut database, project.id, "Blocker");
+        let blocked = task(&mut database, project.id, "Blocked");
+        database
+            .add_planning_dependency(blocked.id, blocker.id)
+            .expect("dependency creates");
+        database
+            .start_planning_task(blocked.id, true)
+            .expect("forced start succeeds");
+
+        for force in [false, true] {
+            let repeated = database
+                .start_planning_task(blocked.id, force)
+                .expect("repeat start is a no-op");
+            assert_eq!(repeated.status, TaskStatus::InProgress);
+        }
+    }
+
+    #[test]
+    fn start_skips_only_the_child_task_reason() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let parent = task(&mut database, project.id, "Parent");
+        let child = database
+            .create_planning_task(PlanningTaskCreate {
+                project_id: project.id,
+                spec_id: None,
+                plan_id: None,
+                phase_id: None,
+                parent_id: Some(parent.id),
+                title: "Child".to_owned(),
+                body: String::new(),
+                priority: TaskPriority::Normal,
+                position: 0,
+            })
+            .expect("child creates");
+        assert!(child.parent_id.is_some());
+        let started = database
+            .start_planning_task(parent.id, false)
+            .expect("parent with children starts");
+        assert_eq!(started.status, TaskStatus::InProgress);
+
+        let blocker = task(&mut database, project.id, "Blocker");
+        let blocked_parent = task(&mut database, project.id, "Blocked parent");
+        database
+            .create_planning_task(PlanningTaskCreate {
+                project_id: project.id,
+                spec_id: None,
+                plan_id: None,
+                phase_id: None,
+                parent_id: Some(blocked_parent.id),
+                title: "Blocked child".to_owned(),
+                body: String::new(),
+                priority: TaskPriority::Normal,
+                position: 0,
+            })
+            .expect("child creates");
+        database
+            .add_planning_dependency(blocked_parent.id, blocker.id)
+            .expect("dependency creates");
+        let error = database
+            .start_planning_task(blocked_parent.id, false)
+            .expect_err("blocked parent is refused");
+        match error {
+            StorageError::InvalidPlanningTask(DomainError::NotReady { reasons, .. }) => {
+                assert_eq!(reasons, vec![format!("blocked by `{}` (pending)", blocker.id)]);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 }

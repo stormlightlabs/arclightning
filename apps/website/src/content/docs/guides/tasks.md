@@ -70,7 +70,11 @@ The allowed task statuses are:
 | `completed`   | Terminal success state.                               |
 | `cancelled`   | Terminal state for work that will not continue.       |
 
-`start` moves pending work to `in_progress`. `park` accepts pending or in-progress
+`start` moves pending work to `in_progress` when `arcl task explain` reports it
+ready. Having child tasks does not count against start, so a parent starts once
+it has no other reason. Any other reason, such as an unfinished blocker, refuses
+the start and lists the reasons; `--force` starts the task anyway. Starting a
+task that is already in progress does nothing. `park` accepts pending or in-progress
 work. `unpark` always returns parked work to `pending`. `complete` accepts
 pending or in-progress work, and `cancel` accepts any non-terminal task.
 

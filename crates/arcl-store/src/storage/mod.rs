@@ -641,6 +641,13 @@ impl Database {
         connected::transition_planning_task(&mut self.connection, project.id, id, action, allow_open_children)
     }
 
+    /// Start a connected-model task atomically. A pending task must be ready,
+    /// apart from having child tasks, unless `force` is set.
+    pub fn start_planning_task(&mut self, id: TaskId, force: bool) -> Result<PlanningTask> {
+        let project = self.project()?;
+        connected::start_planning_task(&mut self.connection, project.id, id, force)
+    }
+
     /// Complete a connected-model task and optionally store Markdown evidence atomically.
     pub fn complete_planning_task(
         &mut self, id: TaskId, allow_open_children: bool, evidence: Option<String>,

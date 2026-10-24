@@ -16,7 +16,9 @@ arcl task complete arcl-t-01J...
 arcl task cancel arcl-t-01J...
 ```
 
-Tasks can complete from `pending` or `in_progress`; parked tasks must be unparked first.
+`start` refuses a pending task that is not ready, apart from having child
+tasks, unless you pass `--force`. Tasks can complete from `pending` or
+`in_progress`; parked tasks must be unparked first.
 
 Repeating the same terminal command is safe, but changing a completed
 task to cancelled or a cancelled task to completed is rejected.
