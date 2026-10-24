@@ -222,6 +222,13 @@ workspace, and a read never changes records; opening the database can still
 run its migrations. Any other `arcl` command syncs the workspace. Outside a
 project, `arcl serve` exits with code 3 before it binds.
 
+The Work view lists every task by milestone, then by status, in the order
+`arcl list` gives. A glyph leads each row; hover over it or focus the row to
+read why the task is not ready. `j` and `k` move the selection, and `Enter`
+opens the task. Filters narrow the list by status, priority, milestone and
+readiness: ready, blocked by an incomplete task, or waiting for another
+reason, such as open subtasks. The page URL keeps the filters.
+
 `arcl` embeds the web app from `apps/web/build` when it compiles. That build is
 not committed, so `cargo install --git` produces an `arcl` whose `serve` shows
 a page saying the web app was not built. To get the web app, run

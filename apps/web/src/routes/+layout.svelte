@@ -3,7 +3,7 @@
   import "@arclightning/ui/inter.css";
   import "virtual:uno.css";
   import { Icon, type IconName } from "@arclightning/ui";
-  import { afterNavigate, replaceState } from "$app/navigation";
+  import { afterNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
   import { adoptToken } from "$lib/token";
 
@@ -15,11 +15,16 @@
     { href: "/planning", label: "Planning", icon: "planning" },
   ];
 
-  // The router is ready once the first navigation finishes; `replaceState`
-  // throws before that.
+  // Store the token before any view mounts and reads data. Drop it from the
+  // URL once the first navigation finishes, since the router refuses to
+  // navigate before that. A real navigation, unlike shallow `replaceState`,
+  // updates `page.url` too, so views that rewrite the query do not bring the
+  // token back.
+  let cleaned = adoptToken(new URL(window.location.href), window.sessionStorage);
   afterNavigate(() => {
-    const cleaned = adoptToken(new URL(window.location.href), window.sessionStorage);
-    if (cleaned) replaceState(cleaned, page.state);
+    const target = cleaned;
+    cleaned = null;
+    if (target) goto(target, { replaceState: true, keepFocus: true, noScroll: true });
   });
 </script>
 

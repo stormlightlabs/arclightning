@@ -15,6 +15,10 @@ export { default as RecordSummary } from "./components/RecordSummary.svelte";
 export { default as Select } from "./components/Select.svelte";
 export { default as StatusBadge } from "./components/StatusBadge.svelte";
 export { default as Tabs } from "./components/Tabs.svelte";
+export { default as TaskGlyph } from "./components/TaskGlyph.svelte";
+export { default as TaskGroupHeader } from "./components/TaskGroupHeader.svelte";
+export { default as TaskList, rowOrder } from "./components/TaskList.svelte";
+export { default as TaskRow } from "./components/TaskRow.svelte";
 
 export type { BadgeProps, BadgeTone } from "./components/Badge.svelte";
 export type { ButtonProps, ButtonVariant } from "./components/Button.svelte";
@@ -34,5 +38,17 @@ export type { RecordSummaryProps } from "./components/RecordSummary.svelte";
 export type { SelectOption, SelectProps } from "./components/Select.svelte";
 export type { RecordStatus, StatusBadgeProps } from "./components/StatusBadge.svelte";
 export type { TabItem, TabsProps } from "./components/Tabs.svelte";
-export { formatStatus } from "./labels";
-export type { PlanningRecordKind, PlanningRecordSummary, PlanningTreeNode } from "./types";
+export type { TaskGlyphProps } from "./components/TaskGlyph.svelte";
+export type { TaskGroupHeaderProps } from "./components/TaskGroupHeader.svelte";
+export type { TaskListProps } from "./components/TaskList.svelte";
+export type { TaskRowProps } from "./components/TaskRow.svelte";
+export { formatGlyph, formatStatus } from "./labels";
+export type {
+  PlanningRecordKind,
+  PlanningRecordSummary,
+  PlanningTreeNode,
+  TaskGlyphKind,
+  TaskGroup,
+  TaskRowItem,
+  TaskSection,
+} from "./types";

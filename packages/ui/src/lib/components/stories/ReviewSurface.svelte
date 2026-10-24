@@ -50,7 +50,7 @@
   </section>
 
   <section aria-labelledby="records"><h2 id="records">Planning records</h2>
-    <div class="row"><StatusBadge status="draft" /><StatusBadge status="ready" /><StatusBadge status="in_progress" /><StatusBadge status="complete" /><PriorityBadge priority="low" /><PriorityBadge priority="critical" /></div>
+    <div class="row"><StatusBadge status="draft" /><StatusBadge status="ready" /><StatusBadge status="in_progress" /><StatusBadge status="completed" /><PriorityBadge priority="low" /><PriorityBadge priority="critical" /></div>
     <RecordSummary record={task} selected={selected === task.id} onselect={(record) => selected = record.id} />
     <PlanningTree nodes={tree} selectedId={selected} onselect={(node) => selected = node.id} />
     <Readiness ready={false} reasons={["Waiting for Export workspace atomically", "Plan is still in progress"]} />
