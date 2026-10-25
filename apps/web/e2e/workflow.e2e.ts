@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { serveScratch, type Served } from "./serve";
+import { serveScratch, stopAll, type Served } from "./serve";
 
 /** A record as the CLI's JSON lists it. */
 interface Listed {
@@ -19,9 +19,12 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-// `served` stays unset when `serveScratch` fails, and it cleans up after itself then.
+// `stopAll` also cleans up a `serveScratch` that timed out before `served` was set.
 test.afterEach(async () => {
-  await served?.stop();
+  await stopAll();
+});
+test.afterAll(async () => {
+  await stopAll();
 });
 
 /** The records of `kind` the CLI lists, such as `task` or `spec`. */

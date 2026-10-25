@@ -108,13 +108,15 @@
   }
 
   /**
-   * Close the views menu on Escape and return focus to its toggle. This runs
-   * in the capture phase and prevents the default, so the view's own Escape,
-   * such as the Task view's "back", does not run too. Dialogs keep their Escape.
+   * Close the views menu on Escape pressed inside the bar, and return focus to
+   * its toggle. This runs in the capture phase and prevents the default, so the
+   * view's own Escape, such as the Task view's "back", does not run too. Escape
+   * pressed anywhere else, such as in an editor or a select in the view, keeps
+   * its own meaning.
    */
   function closeNavOnEscape(event: KeyboardEvent) {
-    if (event.key !== "Escape" || !navOpen || event.defaultPrevented || menuOpen || captureOpen) return;
-    if (!navToggle?.checkVisibility() || (event.target instanceof Element && event.target.closest("dialog"))) return;
+    if (event.key !== "Escape" || !navOpen || event.defaultPrevented) return;
+    if (!(event.target instanceof Node) || !nav?.contains(event.target) || !navToggle?.checkVisibility()) return;
     event.preventDefault();
     navOpen = false;
     navToggle.focus();
@@ -123,6 +125,18 @@
   /** Close the views menu when a click lands outside the bar. */
   function closeNavOutside(event: PointerEvent) {
     if (navOpen && event.target instanceof Node && !nav?.contains(event.target)) navOpen = false;
+  }
+
+  /**
+   * Close the views menu when focus moves to an element outside the bar, so it
+   * never stays open while the view has focus. Focus moving into a dialog,
+   * such as the one Search opens, leaves it open, so closing the dialog can
+   * return focus to the button that opened it. So does focus leaving the page,
+   * which has no `relatedTarget`.
+   */
+  function closeNavOnFocusOut(event: FocusEvent) {
+    const to = event.relatedTarget;
+    if (navOpen && to instanceof Element && !nav?.contains(to) && !to.closest("dialog")) navOpen = false;
   }
 
   // Store the token before any view mounts and reads data. Drop it from the
@@ -142,7 +156,7 @@
 <svelte:window {onkeydown} onkeydowncapture={closeNavOnEscape} onpointerdown={closeNavOutside} />
 
 <div class="shell">
-  <nav class="sidebar" aria-label="Views" bind:this={nav}>
+  <nav class="sidebar" aria-label="Views" bind:this={nav} onfocusout={closeNavOnFocusOut}>
     <div class="bar">
       <a class="brand" href="/">Arc Lightning</a>
       <button type="button" class="menu-toggle" bind:this={navToggle} aria-expanded={navOpen} aria-controls="views-menu" onclick={() => (navOpen = !navOpen)}>

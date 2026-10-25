@@ -59,6 +59,53 @@ test.describe("a 390 px window", () => {
     await expect(menu).toHaveAttribute("aria-expanded", "false");
     await expect(inbox).toBeHidden();
   });
+
+  test("the Menu closes when focus moves into the page", async ({ page }) => {
+    await serveFixtures(page);
+    await open(page, VIEWS[1]);
+    const menu = page.getByRole("navigation", { name: "Views" }).getByRole("button", { name: "Menu" });
+    await menu.click();
+    await expect(menu).toHaveAttribute("aria-expanded", "true");
+    await page.getByRole("combobox", { name: "Status" }).focus();
+    await expect(menu).toHaveAttribute("aria-expanded", "false");
+  });
+
+  // A click event that moves no focus opens the Menu while focus stays in the
+  // view, so these check the Escape handler apart from the focus one.
+  test("Escape in the Task editor with the Menu open leaves the editor to its frame", async ({ page }) => {
+    await serveFixtures(page);
+    await open(page, VIEWS[3]);
+    const menu = page.getByRole("navigation", { name: "Views" }).getByRole("button", { name: "Menu" });
+    await page.getByRole("button", { name: "Edit" }).click();
+    const form = page.getByRole("form", { name: "Edit task" });
+    const editor = form.getByRole("textbox", { name: "Description Markdown" });
+    await editor.click();
+    await expect(editor).toBeFocused();
+    await menu.dispatchEvent("click");
+    await expect(menu).toHaveAttribute("aria-expanded", "true");
+
+    await page.keyboard.press("Escape");
+    // CodeMirror's Escape moves focus out to the editor's frame.
+    await expect(form.locator(".arcl-markdown-editor")).toBeFocused();
+    await expect(menu).not.toBeFocused();
+    await expect(form).toBeVisible();
+  });
+
+  test("Escape in an open Status menu with the Menu open closes the listbox only", async ({ page }) => {
+    await serveFixtures(page);
+    await open(page, VIEWS[1]);
+    const menu = page.getByRole("navigation", { name: "Views" }).getByRole("button", { name: "Menu" });
+    const status = page.getByRole("combobox", { name: "Status" });
+    await status.click();
+    await expect(page.getByRole("listbox", { name: "Status" })).toBeVisible();
+    await menu.dispatchEvent("click");
+    await expect(menu).toHaveAttribute("aria-expanded", "true");
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("listbox", { name: "Status" })).toBeHidden();
+    await expect(status).toHaveAttribute("aria-expanded", "false");
+    await expect(status).toBeFocused();
+  });
 });
 
 test.describe("a 390 by 260 px window", () => {

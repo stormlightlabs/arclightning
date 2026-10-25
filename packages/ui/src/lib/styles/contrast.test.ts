@@ -16,9 +16,7 @@ const PAIRS: [string, string, number][] = [
   ...["info", "success", "warning", "danger"].flatMap((tone) =>
     [`${tone}-surface`, "surface", "canvas"].map((bg): [string, string, number] => [tone, bg, TEXT]),
   ),
-  ...["border", "border-strong", "focus", "accent"].flatMap((fg) =>
-    ["canvas", "surface", "surface-subtle"].map((bg): [string, string, number] => [fg, bg, UI]),
-  ),
+  ...["border", "border-strong", "focus", "accent"].flatMap((fg) => SURFACES.map((bg): [string, string, number] => [fg, bg, UI])),
 ];
 
 const css = readFileSync(new URL("./tokens.css", import.meta.url), "utf8");
