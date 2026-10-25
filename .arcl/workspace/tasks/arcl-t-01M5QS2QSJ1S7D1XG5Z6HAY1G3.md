@@ -6,7 +6,7 @@ status = "completed"
 priority = "normal"
 position = 6
 blocked-by = ["arcl-t-01M5QS2QP9TNCV3A88EHX375D9"]
-evidence = "Delivered by #PR: the Inbox lists open captures and promotes or discards them (1, 2, 3, Backspace); Planning shows milestones with progress and ready counts, opens their task trees, and creates specs and plans and applies plan documents. arcl serve adds GET /api/tree and POSTs for capture promote and discard, spec create, plan create and plan apply. Verified capture -> task and capture -> spec -> plan -> task in the browser against arcl show and arcl tree."
+evidence = "Delivered by #43: the Inbox lists open captures and promotes or discards them (1, 2, 3, Backspace); Planning shows milestones with progress and ready counts, opens their task trees, and creates specs and plans and applies plan documents. arcl serve adds GET /api/tree and POSTs for capture promote and discard, spec create, plan create and plan apply. Verified capture -> task and capture -> spec -> plan -> task in the browser against arcl show and arcl tree."
 +++
 
 Build the Inbox and Planning views, so captures become planned work in the
