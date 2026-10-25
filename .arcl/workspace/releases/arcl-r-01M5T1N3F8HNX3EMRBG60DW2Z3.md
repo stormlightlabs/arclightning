@@ -1,7 +1,7 @@
 +++
 id = "arcl-r-01M5T1N3F8HNX3EMRBG60DW2Z3"
 title = "v0.2.0"
-status = "open"
+status = "completed"
 
 [[members]]
 kind = "task"
@@ -24,4 +24,4 @@ kind = "task"
 id = "arcl-t-01M5T1MS30EM1YWC4X75ZJE14J"
 +++
 
-Ships the claude.ai artifact build of the web app with `arcl web export` and `arcl web apply` (T20), the web app polish and faster tests (T23), the board view and raw record editing, and raw edits queued from the artifact build. "Prepare and tag v0.2.0" covers the release work itself. Install with `cargo install --git https://github.com/stormlightlabs/arclightning --tag v0.2.0 arcl-cli`. The release completes once `v0.2.0` is tagged on main.
+Ships the claude.ai artifact build of the web app with `arcl web export` and `arcl web apply` (T20), the web app polish and faster tests (T23), the board view and raw record editing, and raw edits queued from the artifact build. "Prepare and tag v0.2.0" covers the release work itself. Tagged `v0.2.0` on d3e04fe (#52). Install with `cargo install --git https://github.com/stormlightlabs/arclightning --tag v0.2.0 arcl-cli`.
