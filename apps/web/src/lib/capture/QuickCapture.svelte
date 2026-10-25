@@ -103,7 +103,7 @@
 
 <style>
   .capture { display: grid; gap: var(--arcl-space-3); }
-  textarea { width: 100%; box-sizing: border-box; padding: var(--arcl-space-2) var(--arcl-space-3); border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-md); color: var(--arcl-text); background: var(--arcl-surface); font: var(--arcl-type-base) / 1.5 var(--arcl-font-body); resize: vertical; }
+  textarea { width: 100%; box-sizing: border-box; padding: var(--arcl-space-2) var(--arcl-space-3); border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-control); color: var(--arcl-text); background: var(--arcl-surface); font: var(--arcl-type-base) / 1.5 var(--arcl-font-body); resize: vertical; }
   textarea:focus { border-color: var(--arcl-focus); outline: var(--arcl-focus-width) solid color-mix(in srgb, var(--arcl-focus) 30%, transparent); }
   .tokens { margin: 0; color: var(--arcl-text-muted); font-size: var(--arcl-type-sm); }
   .tokens code { padding: 0 0.25rem; border-radius: 4px; background: var(--arcl-surface-subtle); font: var(--arcl-type-xs) var(--arcl-font-code); }

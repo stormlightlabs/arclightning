@@ -6,6 +6,9 @@ const PORT = Number(process.env.WEB_E2E_PORT ?? 4174);
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
+  // Most tests answer the API from fixtures and wait on the browser, so more
+  // workers than Playwright's default of half the cores finish sooner.
+  workers: "75%",
   forbidOnly: Boolean(process.env.CI),
   reporter: "list",
   expect: { toHaveScreenshot: { animations: "disabled", caret: "hide" } },

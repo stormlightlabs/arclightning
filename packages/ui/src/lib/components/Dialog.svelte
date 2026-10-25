@@ -129,7 +129,7 @@
   h2, p { margin: 0; }
   h2 { color: var(--arcl-heading); font: 650 var(--arcl-type-lg) / 1.25 var(--arcl-font-ui); }
   p { margin-top: var(--arcl-space-1); color: var(--arcl-text-muted); }
-  header button { display: grid; width: 2.75rem; height: 2.75rem; place-items: center; border: 0; border-radius: var(--arcl-radius-md); color: var(--arcl-text); background: transparent; font-size: 1.5rem; cursor: pointer; }
+  header button { display: grid; width: 2.75rem; height: 2.75rem; place-items: center; border: 0; border-radius: var(--arcl-radius-control); color: var(--arcl-text); background: transparent; font-size: 1.5rem; cursor: pointer; }
   header button:hover { background: var(--arcl-surface-hover); }
   .arcl-dialog__body { padding: var(--arcl-space-5); }
   .arcl-dialog[data-bare] { width: min(40rem, calc(100% - 2rem)); margin-top: min(12vh, 7.5rem); }

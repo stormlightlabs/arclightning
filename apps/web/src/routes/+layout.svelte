@@ -5,6 +5,7 @@
   import { Button, CommandMenu, EmptyState, Feedback, Icon, type IconName } from "@arclightning/ui";
   import { afterNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
+  import { MediaQuery } from "svelte/reactivity";
   import QuickCapture from "$lib/capture/QuickCapture.svelte";
   import {
     SEQUENCE_TIMEOUT,
@@ -23,6 +24,7 @@
   } from "$lib/commands";
   import { ARTIFACT_BUILD, OPEN_IN_CLAUDE, connectArtifact, dataSource, type ChangeWarning, type SyncStatus as Sync, type TaskSummary } from "$lib/data";
   import { appHref, appUrl } from "$lib/route";
+  import { SIDEBAR_KEY, rememberSidebar, sidebarCollapsed } from "$lib/sidebar";
   import SyncStatus from "$lib/sync/SyncStatus.svelte";
   import { adoptToken } from "$lib/token";
   import { taskHref } from "$lib/work";
@@ -36,6 +38,8 @@
   ];
   const mac = isMac(navigator.platform);
   const menuKeys = formatKeys(["Mod", "k"], mac);
+  /** Whether the window is wide enough for the sidebar, whose toggle narrow windows hide. Matches the styles' breakpoint. */
+  const wide = new MediaQuery("min-width: 48.0625rem");
 
   let menuOpen = $state(false);
   let query = $state("");
@@ -45,6 +49,8 @@
   let captureOpen = $state(false);
   /** Whether the views menu is open. Only narrow windows hide it. */
   let navOpen = $state(false);
+  /** Whether the sidebar shows icons only. Narrow windows show the top bar instead. */
+  let collapsed = $state(sidebarCollapsed(() => window.localStorage));
   /** What the last quick capture filed, announced until the next one. */
   let filed = $state<string | null>(null);
   /** The warnings of the last quick capture, shown until dismissed. */
@@ -71,6 +77,19 @@
   useCommands(() => ({
     commands: [
       { id: "global:capture", label: "Quick capture", scope: "global", group: "Create", keys: ["q"], icon: "capture", run: () => (captureOpen = true) },
+      // Narrow windows show the top bar, where collapsing would change nothing.
+      ...(wide.current
+        ? [
+            {
+              id: "global:sidebar",
+              label: collapsed ? "Expand the sidebar" : "Collapse the sidebar",
+              scope: "global",
+              keys: [SIDEBAR_KEY],
+              icon: collapsed ? "sidebarExpand" : "sidebarCollapse",
+              run: toggleSidebar,
+            } satisfies Command,
+          ]
+        : []),
       ...views.map((view): Command => ({
         id: `global:go-${view.key}`,
         label: view.label,
@@ -93,6 +112,11 @@
       sync = status;
     });
   });
+
+  function toggleSidebar() {
+    collapsed = !collapsed;
+    rememberSidebar(() => window.localStorage, collapsed);
+  }
 
   function reloadView() {
     shownRevision = syncedRevision;
@@ -131,7 +155,7 @@
       openMenu();
       return;
     }
-    if (menuOpen || captureOpen || !takesShortcut(event)) return;
+    if (menuOpen || captureOpen || !takesShortcut(event, mac)) return;
     const step = shortcutStep(pending, event.key, boundCommands(registeredCommands(), registeredContext()));
     pending = step.pending;
     clearTimeout(pendingTimer);
@@ -191,10 +215,20 @@
 
 <svelte:window {onkeydown} onkeydowncapture={closeNavOnEscape} onpointerdown={closeNavOutside} />
 
-<div class="shell">
+<div class="shell" data-collapsed={collapsed || undefined}>
   <nav class="sidebar" aria-label="Views" bind:this={nav} onfocusout={closeNavOnFocusOut}>
     <div class="bar">
       <a class="brand" href={appHref("/")}>Arc Lightning</a>
+      <button
+        type="button"
+        class="collapse-toggle"
+        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        aria-keyshortcuts={SIDEBAR_KEY}
+        title={`${collapsed ? "Expand" : "Collapse"} sidebar (${SIDEBAR_KEY})`}
+        onclick={toggleSidebar}
+      >
+        <Icon name={collapsed ? "sidebarExpand" : "sidebarCollapse"} size="1.125rem" />
+      </button>
       <button type="button" class="menu-toggle" bind:this={navToggle} aria-expanded={navOpen} aria-controls="views-menu" onclick={() => (navOpen = !navOpen)}>
         <Icon name={navOpen ? "close" : "menu"} size="1.125rem" />
         <span>Menu</span>
@@ -202,23 +236,23 @@
     </div>
     <div class="menu" id="views-menu" data-open={navOpen ? "" : undefined}>
       <div class="tools">
-        <button type="button" class="tool" aria-keyshortcuts={mac ? "Meta+K" : "Control+K"} onclick={openMenu}>
+        <button type="button" class="tool" aria-keyshortcuts={mac ? "Meta+K" : "Control+K"} title={collapsed ? `Search (${menuKeys.join("")})` : undefined} onclick={openMenu}>
           <Icon name="search" size="1rem" />
-          <span>Search</span>
+          <span class="label">Search</span>
           <span class="keys" aria-hidden="true">{#each menuKeys as key (key)}<kbd>{key}</kbd>{/each}</span>
         </button>
-        <button type="button" class="tool" aria-keyshortcuts="Q" onclick={() => (captureOpen = true)}>
+        <button type="button" class="tool" aria-keyshortcuts="Q" title={collapsed ? "Capture (Q)" : undefined} onclick={() => (captureOpen = true)}>
           <Icon name="capture" size="1rem" />
-          <span>Capture</span>
+          <span class="label">Capture</span>
           <span class="keys" aria-hidden="true"><kbd>Q</kbd></span>
         </button>
       </div>
       <ul>
         {#each views as view (view.path)}
           <li>
-            <a href={appHref(view.path)} aria-current={appUrl(page.url).pathname === view.path ? "page" : undefined}>
+            <a href={appHref(view.path)} aria-current={appUrl(page.url).pathname === view.path ? "page" : undefined} title={collapsed ? view.label : undefined}>
               <Icon name={view.icon} size="1.125rem" />
-              {view.label}
+              <span class="label">{view.label}</span>
             </a>
           </li>
         {/each}
@@ -277,7 +311,18 @@
   .tools { display: grid; gap: var(--arcl-space-1); }
   .tool { display: flex; align-items: center; gap: var(--arcl-space-2); padding: var(--arcl-space-1) var(--arcl-space-2); border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-sm); color: var(--arcl-text-muted); background: var(--arcl-canvas); font: inherit; font-size: var(--arcl-type-sm); text-align: start; cursor: pointer; }
   .tool:hover { background: var(--arcl-surface-hover); color: var(--arcl-text); }
-  .tool span:not(.keys) { flex: 1; }
+  .tool .label { flex: 1; }
+  .collapse-toggle { display: inline-grid; place-items: center; padding: var(--arcl-space-1); border: 0; border-radius: var(--arcl-radius-control); color: var(--arcl-text-muted); background: transparent; cursor: pointer; }
+  .collapse-toggle:hover { background: var(--arcl-surface-hover); color: var(--arcl-text); }
+  /* A collapsed sidebar is a rail of icons, whose labels stay as the buttons' and links' names. Narrow windows show the top bar instead. */
+  @media (min-width: 48.0625rem) {
+    .shell[data-collapsed] { grid-template-columns: 3.5rem 1fr; }
+    [data-collapsed] .sidebar { padding-inline: var(--arcl-space-2); }
+    [data-collapsed] .bar { justify-content: center; }
+    [data-collapsed] .brand, [data-collapsed] .keys { display: none; }
+    [data-collapsed] .tool, [data-collapsed] li a { justify-content: center; min-height: 2rem; padding-inline: 0; }
+    [data-collapsed] .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  }
   .keys { display: inline-flex; gap: 2px; }
   kbd { display: inline-flex; min-width: 1.125rem; height: 1.125rem; align-items: center; justify-content: center; padding: 0 0.25rem; border: var(--arcl-border-width) solid var(--arcl-border); border-radius: 4px; background: var(--arcl-surface); font: 500 var(--arcl-type-xs) / 1 var(--arcl-font-ui); }
   .connecting { margin: 0; color: var(--arcl-text-muted); }
@@ -287,6 +332,7 @@
     /* The bar's height, border included. The page scrolls focused rows below it. */
     :global(:root) { --shell-bar-height: 3rem; scroll-padding-top: var(--shell-bar-height); }
     .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+    .collapse-toggle { display: none; }
     .sidebar { position: sticky; top: 0; z-index: 1; padding: 0 var(--arcl-space-3); border-right: 0; border-bottom: var(--arcl-border-width) solid var(--arcl-border); }
     .bar { min-height: calc(var(--shell-bar-height) - var(--arcl-border-width)); }
     .menu-toggle { display: inline-flex; }

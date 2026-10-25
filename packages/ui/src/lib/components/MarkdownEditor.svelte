@@ -91,7 +91,7 @@
 <div class="arcl-markdown-editor" tabindex="-1" bind:this={host}></div>
 
 <style>
-  .arcl-markdown-editor { overflow: hidden; border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-md); background: var(--arcl-canvas); }
+  .arcl-markdown-editor { overflow: hidden; border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-control); background: var(--arcl-canvas); }
   .arcl-markdown-editor:focus-visible { outline: var(--arcl-focus-width) solid var(--arcl-focus); outline-offset: 2px; }
   .arcl-markdown-editor :global(.cm-editor) { color: var(--arcl-text); font: var(--arcl-type-sm) / 1.6 var(--arcl-font-code); }
   .arcl-markdown-editor :global(.cm-editor.cm-focused) { outline: var(--arcl-focus-width) solid var(--arcl-focus); outline-offset: -2px; }

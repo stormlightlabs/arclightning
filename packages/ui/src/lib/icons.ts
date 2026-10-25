@@ -16,6 +16,8 @@ export const ICONS = {
   plan: "i-ri-git-branch-line",
   planning: "i-bi-diagram-3",
   search: "i-ri-search-line",
+  sidebarCollapse: "i-ri-sidebar-fold-line",
+  sidebarExpand: "i-ri-sidebar-unfold-line",
   spec: "i-ri-file-text-line",
   sun: "i-ri-sun-line",
   task: "i-ri-checkbox-circle-line",

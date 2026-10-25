@@ -108,6 +108,35 @@ test.describe("a 390 px window", () => {
   });
 });
 
+test.describe("a 1280 px window", () => {
+  test("shows the selected capture beside the Inbox's table, inside its box", async ({ page }) => {
+    await serveFixtures(page);
+    await open(page, VIEWS[0]);
+    const table = await page.getByRole("region", { name: "Captures" }).boundingBox();
+    const triage = await page.getByRole("region", { name: "Triage" }).boundingBox();
+    const box = await page.locator(".columns").boundingBox();
+    expect(triage!.x).toBeGreaterThanOrEqual(table!.x + table!.width - 1);
+    expect(Math.abs(triage!.y - table!.y)).toBeLessThan(2);
+    expect(triage!.x + triage!.width).toBeLessThanOrEqual(box!.x + box!.width);
+  });
+
+  test("[ collapses the sidebar to icons, and a reload keeps it collapsed", async ({ page }) => {
+    await serveFixtures(page);
+    await open(page, VIEWS[1]);
+    const views = page.getByRole("navigation", { name: "Views" });
+    const wide = (await views.boundingBox())!.width;
+    await page.keyboard.press("[");
+    await expect(views.getByRole("button", { name: "Expand sidebar" })).toBeVisible();
+    expect((await views.boundingBox())!.width).toBeLessThan(wide / 3);
+    await page.reload();
+    await expect(views.getByRole("button", { name: "Expand sidebar" })).toBeVisible();
+    await views.getByRole("link", { name: "Inbox" }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "Inbox" })).toBeVisible();
+    await views.getByRole("button", { name: "Expand sidebar" }).click();
+    expect((await views.boundingBox())!.width).toBe(wide);
+  });
+});
+
 test.describe("a 390 by 260 px window", () => {
   test.use({ viewport: { width: 390, height: 260 } });
 

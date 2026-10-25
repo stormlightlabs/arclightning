@@ -12,6 +12,7 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run --project unit",
     "test:browser": "vitest run --project browser",
+    "test:ui": "vitest --project unit --project browser",
     "test:visual": "playwright test",
     "test:visual:update": "playwright test --update-snapshots",
     "preview": "storybook dev -p 6006",
@@ -42,7 +43,8 @@
     "@fontsource-variable/ibm-plex-sans": "catalog:",
     "@fontsource-variable/inter": "catalog:",
     "@lezer/highlight": "^1.2.5",
-    "micromark": "^4.0.2"
+    "micromark": "^4.0.2",
+    "micromark-extension-gfm-task-list-item": "^2.1.0"
   },
   "devDependencies": {
     "@iconify-json/bi": "^1.2.7",

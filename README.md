@@ -84,31 +84,12 @@ pnpm dev:website
 Documentation content lives in `apps/website/src/content/docs/`. Verify the
 site with `pnpm --filter @arclightning/website build`.
 
-The web app's browser tests need Chromium; set
-`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to use one already installed. CI runs
-`just check`, which leaves them out.
+The web app in `apps/web` is the local UI for the workspace's tasks, which
+`arcl serve` serves on 127.0.0.1. [apps/web/README.md](apps/web/README.md)
+covers its tests, including a fast loop for UI work. CI runs `just check`,
+which leaves the browser tests out.
 
-```sh
-pnpm --filter @arclightning/web test:browser  # Svelte components in Chromium
-pnpm --filter @arclightning/web test:e2e      # workflows, fit and themes
-pnpm --filter @arclightning/web test:visual   # screenshots against local baselines
-pnpm --filter @arclightning/web screenshots   # rewrite the README images
-```
-
-`pnpm --filter @arclightning/web build:artifact` builds the claude.ai artifact
-page into `apps/web/build-artifact/index.html`; the manual's "Publishing and
-syncing the artifact" covers publishing it and `arcl web export` and
-`arcl web apply`. Both builds write `apps/web/.svelte-kit/output`, which
-`vite preview` serves, so run `build` after `build:artifact` before previewing.
-
-`test:e2e` builds the web app, the artifact page and `arcl`, then runs a
-keyboard-only workflow against `arcl serve` on a scratch project and checks
-each result with the CLI. It also opens the artifact page against a stand-in
-database recorded with `arcl web export`.
-The other tests answer the API from `apps/web/e2e/fixtures.json`. Set
-`WEB_E2E_PORT` when port 4174 is taken. Screenshot baselines are not
-committed. The first `test:visual` run writes them to `apps/web/e2e/*-snapshots`
-and fails each test as missing a baseline; later runs compare against them.
-After an intended visual change, run `test:visual:update` and review the new
-screenshots. `screenshots` draws the
-README images in `docs/images/` from the same fixtures at twice the density.
+To dogfood the app on claude.ai,
+`pnpm --filter @arclightning/web build:artifact` builds it as an artifact page
+in `apps/web/build-artifact/index.html`. The manual's "Publishing and syncing
+the artifact" covers publishing it and `arcl web export` and `arcl web apply`.

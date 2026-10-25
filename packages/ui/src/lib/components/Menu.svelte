@@ -69,7 +69,7 @@
 
 <style>
   .arcl-menu { position: relative; display: inline-block; }
-  .arcl-menu__trigger { display: inline-flex; min-height: var(--arcl-control-height); align-items: center; gap: var(--arcl-space-2); padding-inline: var(--arcl-space-3); border: 1px solid var(--arcl-border); border-radius: var(--arcl-radius-md); color: var(--arcl-text); background: var(--arcl-surface); font-family: var(--arcl-font-ui); font-weight: 650; cursor: pointer; }
+  .arcl-menu__trigger { display: inline-flex; min-height: var(--arcl-control-height); align-items: center; gap: var(--arcl-space-2); padding-inline: var(--arcl-space-3); border: 1px solid var(--arcl-border); border-radius: var(--arcl-radius-control); color: var(--arcl-text); background: var(--arcl-surface); font-family: var(--arcl-font-ui); font-weight: 650; cursor: pointer; }
   .arcl-menu__trigger:hover { background: var(--arcl-surface-hover); }
   .arcl-menu__items { position: absolute; z-index: 20; top: calc(100% + var(--arcl-space-2)); right: 0; display: grid; min-width: 12rem; padding: var(--arcl-space-2); border: 1px solid var(--arcl-border); border-radius: var(--arcl-radius-md); background: var(--arcl-surface); box-shadow: var(--arcl-shadow-overlay); }
   [role="menuitem"] { min-height: 2.5rem; padding-inline: var(--arcl-space-3); border: 0; border-radius: var(--arcl-radius-sm); color: var(--arcl-text); background: transparent; text-align: left; cursor: pointer; }

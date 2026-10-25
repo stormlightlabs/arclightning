@@ -48,7 +48,7 @@
     gap: var(--arcl-space-2);
     padding-inline: var(--arcl-space-4);
     border: var(--arcl-border-width) solid var(--arcl-border-strong);
-    border-radius: var(--arcl-radius-md);
+    border-radius: var(--arcl-radius-control);
     color: var(--arcl-text);
     background: var(--arcl-surface);
     box-shadow: var(--arcl-shadow-control);

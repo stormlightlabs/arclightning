@@ -1,2 +1,3 @@
-/** The Inbox's triage rules, kept apart from the view. */
+/** The Inbox's triage rules and capture dates, kept apart from the view. */
 export * from "./triage";
+export * from "./created";

@@ -28,5 +28,5 @@
 
 <style>
   .arcl-select { display: grid; gap: var(--arcl-space-2); color: var(--arcl-text); font-family: var(--arcl-font-ui); font-weight: 650; }
-  select { min-height: var(--arcl-control-height); padding-inline: var(--arcl-space-3); border: 1px solid var(--arcl-border); border-radius: var(--arcl-radius-md); color: var(--arcl-text); background: var(--arcl-surface); font-family: var(--arcl-font-body); font-weight: 400; }
+  select { min-height: var(--arcl-control-height); padding-inline: var(--arcl-space-3); border: 1px solid var(--arcl-border); border-radius: var(--arcl-radius-control); color: var(--arcl-text); background: var(--arcl-surface); font-family: var(--arcl-font-body); font-weight: 400; }
 </style>

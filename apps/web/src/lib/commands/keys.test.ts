@@ -42,25 +42,39 @@ describe("opensMenu", () => {
 
 describe("takesShortcut", () => {
   it("answers plain keys outside fields", () => {
-    expect(takesShortcut(press("q"))).toBe(true);
-    expect(takesShortcut(press("q", { target: element("main") }))).toBe(true);
+    expect(takesShortcut(press("q"), false)).toBe(true);
+    expect(takesShortcut(press("q", { target: element("main") }), false)).toBe(true);
   });
 
   it("leaves keys typed into fields, the editor or a dialog alone", () => {
     for (const target of ["input", "textarea", "select", "[contenteditable]", "dialog", "[role=listbox]"]) {
-      expect(takesShortcut(press("q", { target: element(target) })), target).toBe(false);
+      expect(takesShortcut(press("q", { target: element(target) }), false), target).toBe(false);
     }
   });
 
   it("leaves keys held with a modifier, or already handled, alone", () => {
-    expect(takesShortcut(press("q", { metaKey: true }))).toBe(false);
-    expect(takesShortcut(press("q", { ctrlKey: true }))).toBe(false);
-    expect(takesShortcut(press("q", { altKey: true }))).toBe(false);
-    expect(takesShortcut(press("q", { defaultPrevented: true }))).toBe(false);
+    expect(takesShortcut(press("q", { metaKey: true }), false)).toBe(false);
+    expect(takesShortcut(press("q", { ctrlKey: true }), false)).toBe(false);
+    expect(takesShortcut(press("q", { altKey: true }), false)).toBe(false);
+    expect(takesShortcut(press("q", { defaultPrevented: true }), false)).toBe(false);
   });
 
   it("ignores the repeats of a held key", () => {
-    expect(takesShortcut(press("c", { repeat: true }))).toBe(false);
+    expect(takesShortcut(press("c", { repeat: true }), false)).toBe(false);
+  });
+
+  it("takes symbols typed with AltGr, or with Option on macOS, but not letters", () => {
+    const altGraph = (on: boolean) => (name: string) => name === "AltGraph" && on;
+    expect(takesShortcut(press("[", { ctrlKey: true, altKey: true, getModifierState: altGraph(true) }), false)).toBe(true);
+    expect(takesShortcut(press("[", { ctrlKey: true, altKey: true }), false)).toBe(true);
+    expect(takesShortcut(press("[", { altKey: true, getModifierState: altGraph(false) }), true)).toBe(true);
+    expect(takesShortcut(press("[", { altKey: true, getModifierState: altGraph(false) }), false)).toBe(false);
+    expect(takesShortcut(press("[", { ctrlKey: true, altKey: true, getModifierState: altGraph(false) }), false)).toBe(false);
+    expect(takesShortcut(press("[", { altKey: true, metaKey: true }), true)).toBe(false);
+    expect(takesShortcut(press("[", { ctrlKey: true, getModifierState: altGraph(false) }), false)).toBe(false);
+    expect(takesShortcut(press("q", { ctrlKey: true, altKey: true, getModifierState: altGraph(true) }), false)).toBe(false);
+    expect(takesShortcut(press("q", { altKey: true }), true)).toBe(false);
+    expect(takesShortcut(press("Enter", { altKey: true }), true)).toBe(false);
   });
 });
 
