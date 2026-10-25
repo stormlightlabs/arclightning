@@ -134,7 +134,7 @@
               };
             }),
           ]),
-      ...(view === "board" && selectedTask !== null
+      ...(view === "board" && selectedTask !== null && !actionBusy
         ? [{ id: "work:move", label: "Move", scope: "selection", keys: ["m"], icon: "arrowRight", run: () => board?.move(selected ?? "") } satisfies Command]
         : []),
       { id: "work:view", label: view === "board" ? "Show as list" : "Show as board", scope: "view", group: "Work", keys: ["v"], run: () => setView(view === "board" ? "list" : "board") },
@@ -152,6 +152,7 @@
    * takes Markdown opens the Task view with its form instead.
    */
   async function act(id: string, action: TaskAction) {
+    if (actionBusy) return;
     if (ACTION_TEXT[action] !== undefined) {
       await goto(`${taskHref(id)}?action=${action}`);
       return;
@@ -176,9 +177,11 @@
   /**
    * Run the move the board asked for, as the list's action does. The card
    * stays in its column until the reload after the change shows it moved; a
-   * failed or queued move leaves it there.
+   * failed or queued move leaves it there. While a change runs, another
+   * does not start.
    */
   async function move(card: BoardCard, action: TaskAction, text: string) {
+    if (actionBusy) return;
     actionFailure = null;
     actionWarnings = [];
     refused = null;
@@ -340,7 +343,7 @@
     {/snippet}
   </EmptyState>
 {:else if view === "board"}
-  <WorkBoard bind:this={board} {columns} selectedId={selected} busyId={movingId} onselect={(id) => (selectedId = id)} onmove={move} onrefuse={refuse} />
+  <WorkBoard bind:this={board} {columns} selectedId={selected} busyId={movingId} locked={actionBusy} onselect={(id) => (selectedId = id)} onmove={move} onrefuse={refuse} />
 {:else}
   <TaskList {groups} href={taskHref} selectedId={selected} onselect={(id) => (selectedId = id)} label="Work" />
 {/if}

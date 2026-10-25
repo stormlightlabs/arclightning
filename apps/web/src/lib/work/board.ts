@@ -17,9 +17,10 @@ export const VIEW_STORAGE_KEY = "arcl-work-view";
 export const BOARD_STATUSES: readonly TaskStatus[] = ["pending", "in_progress", "parked", "completed", "cancelled"];
 
 /**
- * The action that moves a task from one status to another, for each move a
- * task command allows: `start`, `park`, `unpark` and `complete`. No command
- * cancels a task or reopens a closed one, so those moves have no action.
+ * The action that moves a task from one status to another, for each move the
+ * web app offers: `start`, `park`, `unpark` and `complete`. The web app has
+ * no cancel action, and no command reopens a closed task, so those moves have
+ * no action.
  */
 const MOVES: Partial<Record<TaskStatus, Partial<Record<TaskStatus, TaskAction>>>> = {
   pending: { in_progress: "start", parked: "park", completed: "complete" },
@@ -77,7 +78,7 @@ export function boardOrder(columns: BoardColumn[]): string[] {
   return columns.flatMap((column) => column.cards.map((card) => card.id));
 }
 
-/** The action that moves a task from `from` to `to`, or `null` when no task command makes that move. */
+/** The action that moves a task from `from` to `to`, or `null` when the web app has no action for that move. */
 export function moveAction(from: TaskStatus, to: TaskStatus): TaskAction | null {
   return MOVES[from]?.[to] ?? null;
 }
@@ -87,11 +88,19 @@ export function moveTargets(status: TaskStatus): TaskStatus[] {
   return BOARD_STATUSES.filter((target) => moveAction(status, target) !== null);
 }
 
-/** Why a task in `from` cannot move to `to`, for the message a refused move shows. */
+/**
+ * Why a task in `from` cannot move to `to`, for the message a refused move
+ * shows. `arcl task cancel` cancels an open task, but the web app has no
+ * cancel action, so a move to Cancelled names the command.
+ */
 export function refusal(from: TaskStatus, to: TaskStatus): string {
   const targets = moveTargets(from).map(formatStatus);
   const allowed = targets.length === 0 ? "A task there does not move." : `It can move to ${targets.join(" or ")}.`;
-  return `No task command moves a task from ${formatStatus(from)} to ${formatStatus(to)}. ${allowed}`;
+  const cancellable = to === "cancelled" && from !== "completed" && from !== "cancelled";
+  const reason = cancellable
+    ? "The web app has no cancel action; run `arcl task cancel` to cancel a task."
+    : `No task command moves a task from ${formatStatus(from)} to ${formatStatus(to)}.`;
+  return `${reason} ${allowed}`;
 }
 
 /**

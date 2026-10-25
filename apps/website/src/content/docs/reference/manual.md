@@ -287,7 +287,9 @@ record with `source`, a whole file, and answers with the saved file in the
 same shape. It checks the file as `arcl workspace import` checks one: the TOML
 must parse, the fields must fit the record's kind, the ID must match the
 record, and every relationship and blocker rule must hold for the whole
-graph. The record ID in the path is the only file the request names. When the
+graph. The edit is compared with the database, as the task commands are, so
+a blocker cycle or ancestry rule violation it adds is refused even before the
+first sync; one already in the database loads with a warning. The record ID in the path is the only file the request names. When the
 file's revision is no longer `revision`, such as after an edit in Git or
 another change, the edit fails with `conflict`, status 409. A refused edit
 changes nothing. A saved edit reaches the workspace file through the sync
@@ -339,9 +341,12 @@ move:
 | Parked               | Pending     | `arcl task unpark`   |
 | Pending, In progress | Completed   | `arcl task complete` |
 
-A move to Completed first asks for optional evidence. No command cancels a
-task or reopens a closed one, so any other drop is refused with a message
-and the card stays in its column. A card moves once its command succeeds; a
+A move to Completed first asks for optional evidence. The web app has no
+cancel action, so a drop on Cancelled is refused with a message that names
+`arcl task cancel`. No command reopens a closed task. Any other drop the
+table leaves out is refused with a message too, and the card stays in its
+column. While a move runs,
+no other card moves. A card moves once its command succeeds; a
 refused change shows the CLI's message. Each card's **Move** button, or `m`
 on the selected card, opens a dialog with the moves it allows, so the
 keyboard reaches every move.

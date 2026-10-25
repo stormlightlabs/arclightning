@@ -15,7 +15,7 @@ use thiserror::Error;
 
 use arcl_store::{ConnectedGraph, Database, StorageError};
 
-use super::import::{comparison_graph, validate_candidate};
+use super::import::validate_candidate;
 use super::{RecordKind, WorkspaceExportError, WorkspaceFile, WorkspaceImportError, decode_record, project_graph};
 
 /// A failure to read or save one record's file.
@@ -132,10 +132,12 @@ pub fn record_source(graph: &ConnectedGraph, id: &str) -> Result<Option<RecordSo
 ///
 /// The file is decoded at the record's own path, so its kind and ID cannot
 /// change, and the graph with the edit in place passes the same checks as a
-/// workspace import before the database changes. Blocker rule violations the
-/// edit introduces are refused; ones already in the database load with a
-/// warning. The workspace base is left as it was, so the next sync exports
-/// the change to the workspace. A failure changes nothing.
+/// workspace import before the database changes. The edit is compared with
+/// the database graph whether or not a workspace base exists, so blocker rule
+/// violations it introduces are refused as `add_planning_dependency` refuses
+/// them; ones already in the database load with a warning. The workspace base
+/// is left as it was, so the next sync exports the change to the workspace. A
+/// failure changes nothing.
 pub fn edit_record(
     database: &mut Database, id: &str, content: &str, revision: &str,
 ) -> Result<RecordEdit, RecordEditError> {
@@ -165,7 +167,7 @@ pub fn edit_record(
             .map_err(|source| WorkspaceImportError::Record { path: file.path.clone(), source })?;
         records.insert(file.path.clone(), record);
     }
-    let (graph, warnings) = validate_candidate(records, project, Path::new(""), comparison_graph(&before, &base))?;
+    let (graph, warnings) = validate_candidate(records, project, Path::new(""), Some(&before))?;
     let source = record_source(&graph, id)?.ok_or_else(|| RecordEditError::NotFound { id: id.to_owned() })?;
     database.replace_graph_and_workspace_base(&graph, &base, read)?;
     Ok(RecordEdit { source, warnings })
@@ -282,32 +284,85 @@ mod tests {
         assert_eq!(source(&database, &id), before);
     }
 
-    #[test]
-    fn a_blocker_cycle_the_edit_adds_is_refused() {
-        let mut database = Database::open_in_memory().expect("database opens");
-        let first = task(&mut database, "First");
-        let second = task(&mut database, "Second");
-        database
-            .add_planning_dependency(
-                TaskId::parse(&second).expect("ID parses"),
-                TaskId::parse(&first).expect("ID parses"),
-            )
-            .expect("dependency adds");
-        // With a base, as after a sync, a violation the edit adds is refused
-        // instead of loading with a warning.
-        let base = project_graph(&database.connected_graph().expect("graph reads"))
+    fn base(database: &Database) -> Vec<WorkspaceBaseFile> {
+        project_graph(&database.connected_graph().expect("graph reads"))
             .expect("graph renders")
             .into_iter()
             .map(|file| WorkspaceBaseFile { path: file.path.to_string_lossy().into_owned(), content: file.content })
-            .collect::<Vec<_>>();
-        database.replace_workspace_base(&base).expect("base saves");
-        let before = source(&database, &first);
+            .collect()
+    }
+
+    /// Add `blocked-by = [blocker]` to `id` through a raw edit.
+    fn block(database: &mut Database, id: &str, blocker: &str) -> Result<RecordEdit, RecordEditError> {
+        let before = source(database, id);
         let content = before
             .content
-            .replace("position = 0", &format!("position = 0\nblocked-by = [\"{second}\"]"));
-        let error = edit_record(&mut database, &first, &content, &before.revision).unwrap_err();
+            .replace("position = 0", &format!("position = 0\nblocked-by = [\"{blocker}\"]"));
+        edit_record(database, id, &content, &before.revision)
+    }
+
+    #[test]
+    fn a_blocker_cycle_the_edit_adds_is_refused_with_or_without_a_base() {
+        for synced in [false, true] {
+            let mut database = Database::open_in_memory().expect("database opens");
+            let first = task(&mut database, "First");
+            let second = task(&mut database, "Second");
+            database
+                .add_planning_dependency(
+                    TaskId::parse(&second).expect("ID parses"),
+                    TaskId::parse(&first).expect("ID parses"),
+                )
+                .expect("dependency adds");
+            // Without a base, as after `arcl init` without `--workspace`, the
+            // edit is still compared with the database graph.
+            if synced {
+                let base = base(&database);
+                database.replace_workspace_base(&base).expect("base saves");
+            }
+            let before = source(&database, &first);
+            let error = block(&mut database, &first, &second).unwrap_err();
+            assert_eq!(error.exit_code(), 3, "{error}");
+            assert!(error.to_string().contains("blocked-by"), "{error}");
+            assert_eq!(source(&database, &first), before);
+        }
+    }
+
+    #[test]
+    fn a_blocker_on_an_ancestor_is_refused_without_a_base() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let parent = task(&mut database, "Parent");
+        let project = database.project().expect("project exists");
+        let child = database
+            .create_planning_task(PlanningTaskCreate {
+                project_id: project.id,
+                spec_id: None,
+                plan_id: None,
+                phase_id: None,
+                parent_id: Some(TaskId::parse(&parent).expect("ID parses")),
+                title: "Child".to_owned(),
+                body: "Body".to_owned(),
+                priority: TaskPriority::Normal,
+                position: 0,
+            })
+            .expect("child creates")
+            .id
+            .to_string();
+        assert!(database.workspace_base().expect("base reads").is_empty());
+        let before = source(&database, &child);
+        let error = block(&mut database, &child, &parent).unwrap_err();
         assert_eq!(error.exit_code(), 3, "{error}");
-        assert_eq!(source(&database, &first), before);
+        assert!(error.to_string().contains("blocked-by"), "{error}");
+        assert_eq!(source(&database, &child), before);
+    }
+
+    #[test]
+    fn a_blocker_without_a_violation_saves_without_a_base() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let first = task(&mut database, "First");
+        let second = task(&mut database, "Second");
+        let edit = block(&mut database, &first, &second).expect("edit saves");
+        assert!(edit.warnings.is_empty(), "{:?}", edit.warnings);
+        assert!(edit.source.content.contains(&second));
     }
 
     #[test]

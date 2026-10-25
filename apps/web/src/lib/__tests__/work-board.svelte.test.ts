@@ -146,6 +146,35 @@ describe("Work board", () => {
     expect(calls).toContainEqual(["parkTask", "t-5"]);
   });
 
+  it("blocks every other move while one runs", async () => {
+    let finish = () => {};
+    const { calls } = source(sampleList(), {
+      startTask: (id) =>
+        new Promise((resolve) => {
+          finish = () => resolve({ value: { ...task(id), status: "in_progress" }, warnings: [] });
+        }),
+    });
+    show("/?view=board&selected=t-5");
+    await render(WorkRoute);
+    await screen.getByRole("button", { name: "Move Task t-7" }).click();
+    await screen.getByRole("dialog").getByRole("button", { name: "In progress" }).click();
+    await expect.element(column("Pending").getByRole("listitem").filter({ hasText: "Task t-7" })).toHaveAttribute("aria-busy", "true");
+
+    await expect.element(screen.getByRole("button", { name: "Move Task t-2" })).toBeDisabled();
+    const other = column("Pending").getByRole("listitem").filter({ hasText: "Task t-5" });
+    await expect.element(other).toHaveAttribute("draggable", "false");
+    await userEvent.dragAndDrop(other, column("Parked"));
+    const ids = () => registeredCommands().map((command) => command.id);
+    await expect.poll(ids).toContain("work:open");
+    expect(ids()).not.toContain("work:move");
+    expect(ids()).not.toContain("work:park");
+    expect(calls.filter(([name]) => name !== "work")).toEqual([["startTask", "t-7"]]);
+
+    finish();
+    await expect.element(screen.getByRole("button", { name: "Move Task t-2" })).toBeEnabled();
+    await expect.poll(ids).toContain("work:move");
+  });
+
   it("keeps a card in place when its move fails or queues", async () => {
     source(sampleList(), { startTask: () => Promise.reject(new DataError(QUEUED, "An agent applies this edit with arcl on the next sync.")) });
     show("/?view=board");

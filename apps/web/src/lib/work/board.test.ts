@@ -62,6 +62,10 @@ describe("moves", () => {
   it("says why a move is refused and where the task can go", () => {
     expect(refusal("parked", "completed")).toBe("No task command moves a task from Parked to Completed. It can move to Pending.");
     expect(refusal("completed", "pending")).toBe("No task command moves a task from Completed to Pending. A task there does not move.");
+    expect(refusal("pending", "cancelled")).toBe(
+      "The web app has no cancel action; run `arcl task cancel` to cancel a task. It can move to In progress or Parked or Completed.",
+    );
+    expect(refusal("completed", "cancelled")).toBe("No task command moves a task from Completed to Cancelled. A task there does not move.");
   });
 });
 

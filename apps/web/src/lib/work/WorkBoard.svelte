@@ -9,6 +9,12 @@
     selectedId?: string | null;
     /** The card whose move is running, shown busy. */
     busyId?: string | null;
+    /**
+     * Whether a task change is running. While one is, no card moves: drags,
+     * drops, Move buttons and `move` do nothing, so a second change cannot
+     * start before the first one's reply.
+     */
+    locked?: boolean;
     onselect?: (id: string) => void;
     /**
      * Run `action` on `card`, with the completion evidence in `text`. The
@@ -26,7 +32,7 @@
   import { moveAction, moveTargets } from "./board";
   import { taskHref } from "./links";
 
-  let { columns, selectedId = null, busyId = null, onselect, onmove, onrefuse }: WorkBoardProps = $props();
+  let { columns, selectedId = null, busyId = null, locked = false, onselect, onmove, onrefuse }: WorkBoardProps = $props();
   const baseId = $props.id();
   let root: HTMLDivElement;
 
@@ -55,7 +61,7 @@
 
   /** Move `card` to the `to` column: run the command, ask for evidence first, or refuse. */
   function moveTo(card: BoardCard, to: TaskStatus) {
-    if (card.status === to) return;
+    if (locked || card.status === to) return;
     const action = moveAction(card.status, to);
     if (action === null) {
       onrefuse(card, to);
@@ -70,6 +76,7 @@
   }
 
   async function openMove(card: BoardCard, completing: boolean) {
+    if (locked) return;
     moving = { card, completing };
     evidence = "";
     dialogOpen = true;
@@ -81,20 +88,24 @@
 
   function complete(event: SubmitEvent) {
     event.preventDefault();
-    if (moving === null) return;
+    if (moving === null || locked) return;
     const { card } = moving;
     dialogOpen = false;
     void onmove(card, "complete", evidence);
   }
 
   function ondragstart(event: DragEvent, card: BoardCard) {
+    if (locked) {
+      event.preventDefault();
+      return;
+    }
     dragging = card;
     event.dataTransfer?.setData("text/plain", card.id);
     if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
   }
 
   function ondragover(event: DragEvent, status: TaskStatus) {
-    if (dragging === null) return;
+    if (dragging === null || locked) return;
     // Every column takes the drop, so a move no command makes is refused
     // with a message rather than ignored.
     event.preventDefault();
@@ -137,7 +148,7 @@
             data-task-id={card.id}
             data-selected={card.id === selectedId || undefined}
             aria-busy={card.id === busyId}
-            draggable={card.id !== busyId}
+            draggable={!locked}
             ondragstart={(event) => ondragstart(event, card)}
             ondragend={() => ((dragging = null), (over = null))}
           >
@@ -158,6 +169,7 @@
                 aria-label={`Move ${card.title}`}
                 aria-haspopup="dialog"
                 busy={card.id === busyId}
+                disabled={locked}
                 onclick={() => openMove(card, false)}
               />
             </div>
