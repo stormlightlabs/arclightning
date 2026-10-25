@@ -14,8 +14,9 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
-  import { dataSource, latestRead, type NewTask, type TaskPriority, type WorkList } from "$lib/data";
-  import { failureOf, type ActionFailure } from "$lib/task";
+  import { useCommands, type Command } from "$lib/commands";
+  import { dataSource, latestRead, type ChangeWarning, type NewTask, type TaskPriority, type WorkList } from "$lib/data";
+  import { ACTION_KEYS, ACTION_LABELS, ACTION_TEXT, actionsFor, failureOf, runAction, type ActionFailure, type TaskAction } from "$lib/task";
   import {
     NO_MILESTONE,
     PRIORITIES,
@@ -65,6 +66,14 @@
   let createBusy = $state(false);
   let createFailure = $state<ActionFailure | null>(null);
 
+  /** The selected task's lifecycle action that last failed, shown above the list. */
+  let actionFailure = $state<{ title: string; action: TaskAction; failure: ActionFailure } | null>(null);
+  /** The warnings of the last action run from the list, shown until dismissed. */
+  let actionWarnings = $state<ChangeWarning[]>([]);
+  let actionBusy = $state(false);
+  // Shortcuts and the menu act on the selected row only while the filters show it.
+  let selectedTask = $derived(list?.items.find((item) => item.task.id === selected)?.task ?? null);
+
   const read = latestRead((signal) => dataSource().work(signal), {
     loaded: (loaded) => (list = loaded),
     failed: (error) => (failure = error instanceof Error ? error.message : String(error)),
@@ -82,6 +91,59 @@
     const shown = withKnownMilestone(filters, list.milestones.map((milestone) => milestone.id));
     if (writeFilters(shown, page.url.searchParams).toString() !== page.url.searchParams.toString()) showFilters(shown);
   });
+
+  useCommands(() => ({
+    context: selectedTask && { id: selectedTask.id, label: selectedTask.title },
+    commands: [
+      ...(selectedTask === null
+        ? []
+        : [
+            { id: "work:open", label: "Open task", scope: "selection", keys: ["Enter"], viewKeys: true, icon: "arrowRight", run: () => goto(taskHref(selectedTask.id)) } satisfies Command,
+            ...(actionBusy ? [] : actionsFor(selectedTask.status)).map((action): Command => {
+              const id = selectedTask.id;
+              return {
+                id: `work:${action}`,
+                label: ACTION_LABELS[action],
+                scope: "selection",
+                keys: [ACTION_KEYS[action]],
+                icon: action === "complete" ? "check" : "task",
+                run: () => act(id, action),
+              };
+            }),
+          ]),
+      { id: "work:new", label: "New task", scope: "view", group: "Work", keys: ["n"], icon: "capture", run: openCreate },
+      { id: "work:next", label: "Select the next task", scope: "view", group: "Work", keys: ["j"], viewKeys: true, run: () => (selectedId = moveSelection(order, selectedId, 1)) },
+      { id: "work:previous", label: "Select the previous task", scope: "view", group: "Work", keys: ["k"], viewKeys: true, run: () => (selectedId = moveSelection(order, selectedId, -1)) },
+      ...(isFiltered(filters)
+        ? [{ id: "work:clear", label: "Clear filters", scope: "view", group: "Work", run: () => showFilters({ status: [], readiness: [], priority: [], milestone: [] }) } satisfies Command]
+        : []),
+    ],
+  }));
+
+  /**
+   * Run `action` on task `id` as the Task view's button does. An action that
+   * takes Markdown opens the Task view with its form instead.
+   */
+  async function act(id: string, action: TaskAction) {
+    if (ACTION_TEXT[action] !== undefined) {
+      await goto(`${taskHref(id)}?action=${action}`);
+      return;
+    }
+    const title = list?.items.find((item) => item.task.id === id)?.task.title ?? id;
+    actionFailure = null;
+    actionWarnings = [];
+    actionBusy = true;
+    try {
+      actionWarnings = (await runAction(dataSource(), id, action)).warnings;
+    } catch (error) {
+      actionFailure = { title, action, failure: failureOf(error) };
+      return;
+    } finally {
+      actionBusy = false;
+    }
+    // Reload in place, so the list and its selection stay on screen.
+    read.start();
+  }
 
   function openCreate() {
     creating = { title: "", body: "", priority: "normal" };
@@ -173,6 +235,21 @@
     {/if}
   </form>
 {/if}
+
+{#if actionFailure !== null}
+  <Feedback
+    tone="danger"
+    title={`Could not ${ACTION_LABELS[actionFailure.action].toLowerCase()} ${actionFailure.title}`}
+    message={`${actionFailure.failure.message} (${actionFailure.failure.code})`}
+  />
+{/if}
+{#each actionWarnings as warning, index (index)}
+  <Feedback tone="warning" title="The change is saved, with a warning" message={`${warning.message} (${warning.code})`}>
+    {#snippet actions()}
+      <Button label="Dismiss" variant="ghost" onclick={() => (actionWarnings = actionWarnings.filter((_, other) => other !== index))} />
+    {/snippet}
+  </Feedback>
+{/each}
 
 {#if failure !== null}
   <Feedback tone="danger" title="Could not load tasks" message={failure}>

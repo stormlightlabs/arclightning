@@ -226,6 +226,7 @@ images from other hosts. The server runs until interrupted.
 | `POST /api/tasks/<id>/unpark`   | `arcl task unpark`       |
 | `POST /api/tasks/<id>/handoff`  | `arcl task handoff`      |
 | `POST /api/tasks/<id>/complete` | `arcl task complete`     |
+| `POST /api/captures`            | `arcl capture create`    |
 
 `/api/records` and `/api/ready` take the command's flags as query parameters,
 such as `?kind=task&status=pending&status=parked`. `/api/work` takes none and
@@ -237,13 +238,16 @@ task has none, and every phase. Its envelope is
 A POST takes a JSON object of the command's options, named like its flags
 with `_` for `-`:
 
-| Endpoint   | Options                                                                   |
-| ---------- | ------------------------------------------------------------------------- |
-| `tasks`    | `title` (required), `body`, `priority`, `parent`, `spec`, `plan`, `phase` |
-| `update`   | `title`, `body`, `priority`                                               |
-| `start`    | `force`                                                                   |
-| `handoff`  | `note`                                                                    |
-| `complete` | `evidence`, `allow_open_children`, `with_subtasks`                        |
+| Endpoint   | Options                                                                                 |
+| ---------- | --------------------------------------------------------------------------------------- |
+| `tasks`    | `title` (required), `body`, `priority`, `parent`, `spec`, `plan`, `phase`, `blocked_by` |
+| `update`   | `title`, `body`, `priority`                                                             |
+| `start`    | `force`                                                                                 |
+| `handoff`  | `note`                                                                                  |
+| `complete` | `evidence`, `allow_open_children`, `with_subtasks`                                      |
+| `captures` | `title` (required), `body`                                                              |
+
+`blocked_by` is a list of task IDs.
 
 `park` and `unpark` take an empty body or `{}`. An unknown option, a body that
 is not JSON, or a body over 1 MiB is refused. The server reads a body only
@@ -295,6 +299,62 @@ validation applies. A refused change shows the CLI's message and error code
 next to its button. A saved change whose sync or export warned shows the
 warnings in a notice. After a change the view reloads the task, and after a
 completion it lists the tasks the completion made ready.
+
+`⌘K`, or `Ctrl+K` off macOS, opens the command menu; so does **Search** in the
+sidebar. The menu lists the actions on the selected task first: the row
+selected in the Work list, or the task the Task view shows. The open view's
+commands, Quick capture and Go to follow, and once you type, the tasks whose
+titles match. Each command shows its shortcut. Typing filters the list, the
+arrow keys move, `Enter` runs the command and `Escape` closes the menu.
+`Backspace` in an empty search drops the selected task from the menu. A
+command runs the same change as its button; from the Work list, Complete and
+Hand off open the Task view with their form.
+
+| Keys          | Command                                       |
+| ------------- | --------------------------------------------- |
+| `⌘K` `Ctrl+K` | Open the command menu                         |
+| `q`           | Quick capture                                 |
+| `g` `i`       | Go to Inbox                                   |
+| `g` `w`       | Go to Work                                    |
+| `g` `p`       | Go to Planning                                |
+| `n`           | New task, in the Work list                    |
+| `s`           | Start the selected task                       |
+| `c`           | Complete the selected task                    |
+| `h`           | Hand off the selected task                    |
+| `p`           | Park the selected task                        |
+| `u`           | Unpark the selected task                      |
+| `e`           | Edit the task, in the Task view               |
+| `j` `k`       | Select the next or previous task, in Work     |
+| `Enter`       | Open the selected task, in Work               |
+| `]`           | Collapse or expand properties, in a task      |
+| `Escape`      | Return to Work, in a task                     |
+
+Shortcuts do nothing while you type in a field, the editor or a dialog, or
+hold `Ctrl`, `⌘` or `Alt`. Press `g` and its second key within a second.
+
+`q`, or **Capture** in the sidebar, opens quick capture from any view. The
+first line is the title, and `Shift+Enter` starts the body. `Enter` files the
+text with `arcl capture create`. `⌘Enter`, or `Ctrl+Enter` off macOS, files it
+as a task with `arcl task create` and opens it; tokens in the first line then
+set the task's fields:
+
+| Token       | Sets                                                       |
+| ----------- | ---------------------------------------------------------- |
+| `!high`     | The priority, from `!critical`, `!high`, `!normal`, `!low` |
+| `^REF`      | The parent task                                            |
+| `after:REF` | A blocker; repeat it for more than one                     |
+
+`REF` is a task ID, such as `arcl-t-01M5…`, or a task number, such as `T18.4`
+for `T18.4: Add task mutations`. A reference that names no task or several
+stops the task with an error. With two `^REF`, only the last is looked up.
+Only a whole word is a token, so `!later`, `^C` and `after:lunch` stay text,
+and the body is never read for tokens. A leading backslash keeps a token as
+text: `\!high` puts `!high` in the title. A capture holds only a title and a
+body, so `Enter` keeps the first line as typed, tokens and backslashes
+included.
+
+A change from the menu or quick capture whose sync warned shows the warnings in
+a notice, as the Task view does.
 
 `arcl` embeds the web app from `apps/web/build` when it compiles. That build is
 not committed, so `cargo install --git` produces an `arcl` whose `serve` shows

@@ -125,6 +125,8 @@ export interface NewTask {
   spec?: string;
   plan?: string;
   phase?: string;
+  /** The IDs of the tasks that must complete first. */
+  blocked_by?: string[];
 }
 
 /** The options of `arcl task update`. A field left out keeps its value. */
@@ -153,6 +155,31 @@ export interface TaskCompletion {
   unblocked: string[];
 }
 
+/** A task as `arcl list --json` names it, for search and references. */
+export interface TaskSummary {
+  id: string;
+  title: string;
+  status: TaskStatus;
+}
+
+/** A capture's state in the inbox. */
+export type CaptureStatus = "captured" | "promoted" | "discarded";
+
+/** A capture record, as `arcl capture create --json` returns it. */
+export interface Capture {
+  id: string;
+  title: string;
+  body: string;
+  status: CaptureStatus;
+  created_at: string;
+}
+
+/** The options of `arcl capture create`. */
+export interface NewCapture {
+  title: string;
+  body?: string;
+}
+
 /**
  * A warning from the workspace sync around a saved change, as the CLI
  * prints it under `--json`: `blocker_edge`, or `workspace_sync` when the
@@ -173,8 +200,8 @@ export interface Changed<T> {
  * Where views read and change records. `arcl serve` backs it locally; another
  * backend, such as a claude.ai artifact's database, can stand in for it.
  *
- * Each change runs the `arcl task` command of the same name, with its
- * validation, and fails with a {@link DataError} carrying the CLI's error
+ * Each change runs the `arcl task` or `arcl capture` command of the same
+ * name, with its validation, and fails with a {@link DataError} carrying the CLI's error
  * code and message. A saved change can still carry warnings.
  */
 export interface DataSource {
@@ -182,6 +209,8 @@ export interface DataSource {
   work(signal?: AbortSignal): Promise<WorkList>;
   /** One task with its readiness, relations, handoff and evidence. Aborting `signal` stops the read. */
   task(id: string, signal?: AbortSignal): Promise<TaskDetail>;
+  /** Every task's ID, title and status, as `arcl list --kind task` lists them. */
+  taskIndex(): Promise<TaskSummary[]>;
   /** `arcl task create`. */
   createTask(input: NewTask): Promise<Changed<Task>>;
   /** `arcl task update <id>`. */
@@ -196,6 +225,8 @@ export interface DataSource {
   handOffTask(id: string, note: string): Promise<Changed<Task>>;
   /** `arcl task complete <id>`. */
   completeTask(id: string, options?: CompleteOptions): Promise<Changed<TaskCompletion>>;
+  /** `arcl capture create`. */
+  createCapture(input: NewCapture): Promise<Changed<Capture>>;
 }
 
 /** A failed read or change, with the CLI's error code and message. */

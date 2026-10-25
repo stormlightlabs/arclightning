@@ -2,12 +2,14 @@ import { tokenHeaders } from "$lib/token";
 import {
   type Changed,
   DataError,
+  type Capture,
   type DataSource,
   type Milestone,
   type Readiness,
   type Task,
   type TaskCompletion,
   type TaskDetail,
+  type TaskStatus,
   type WorkItem,
 } from "./types";
 
@@ -16,6 +18,14 @@ export interface ServeOptions {
   fetch?: typeof fetch;
   /** The headers that authenticate each request. */
   headers?: () => Record<string, string>;
+}
+
+/** A record as `arcl list --json` lists it. */
+interface ListedRecord {
+  id: string;
+  kind: string;
+  status: string;
+  title: string;
 }
 
 /** A phase as `arcl serve` returns it. */
@@ -95,6 +105,11 @@ export function serveSource(options: ServeOptions = {}): DataSource {
       return detail as TaskDetail;
     },
 
+    async taskIndex() {
+      const { records } = await get<{ records: ListedRecord[] }>("/api/records?kind=task");
+      return records.map(({ id, title, status }) => ({ id, title, status: status as TaskStatus }));
+    },
+
     async createTask(input) {
       const { value, warnings } = await post<{ task: Task }>("/api/tasks", input);
       return { value: value.task, warnings };
@@ -108,6 +123,10 @@ export function serveSource(options: ServeOptions = {}): DataSource {
       const { value, warnings } = await post<TaskCompletion>(`${taskPath(id)}/complete`, options);
       const { task, completed_subtasks, unblocked } = value;
       return { value: { task, completed_subtasks, unblocked }, warnings };
+    },
+    async createCapture(input) {
+      const { value, warnings } = await post<{ capture: Capture }>("/api/captures", input);
+      return { value: value.capture, warnings };
     },
   };
 }

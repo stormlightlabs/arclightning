@@ -46,6 +46,8 @@ function slowSource() {
     unparkTask: unused,
     handOffTask: unused,
     completeTask: unused,
+    taskIndex: async () => [],
+    createCapture: unused,
   };
   return { source, reads };
 }

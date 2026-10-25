@@ -24,6 +24,14 @@
   const access = new Compartment();
   // Marks the transactions that copy `value` in, so they do not report an edit.
   const fromProps = Annotation.define<boolean>();
+  /** Whether {@link focus} ran before the editor existed. */
+  let focusOnMount = false;
+
+  /** Move focus into the editor's text, such as when a form opens for it. */
+  export function focus() {
+    if (view) view.focus();
+    else focusOnMount = true;
+  }
 
   // Colours come from the theme tokens, so the editor follows light and dark.
   const highlight = HighlightStyle.define([
@@ -65,6 +73,7 @@
         ],
       }),
     });
+    if (focusOnMount) view.focus();
     return () => view?.destroy();
   });
 

@@ -2,10 +2,11 @@
 //!
 //! Each read opens the database and runs the same read as the CLI, with no
 //! workspace sync. A read never changes records, though opening the database
-//! can run its migrations. Each mutation runs the same `arcl task` command
-//! as the CLI, with the same sync around it: it takes the sync lock, syncs,
-//! changes the record and syncs again to export it. The server holds the lock
-//! only during a mutation, so other arcl commands run while it serves.
+//! can run its migrations. Each mutation runs the same `arcl task` or
+//! `arcl capture` command as the CLI, with the same sync around it: it takes
+//! the sync lock, syncs, changes the record and syncs again to export it. The
+//! server holds the lock only during a mutation, so other arcl commands run
+//! while it serves.
 //!
 //! A mutation waits at most [`LOCK_WAIT`] for the lock. When another command
 //! holds it longer, the mutation fails with `application_error`, exit code 1,
@@ -13,7 +14,7 @@
 //! lists the warnings its syncs gave in `warnings`, as objects with the
 //! `code` and `message` the CLI prints to stderr under `--json`.
 
-use arcl_serve::{Completion, Handoff, Mutations, NewTask, Reads, Reply, Server, TaskEdit, TaskStart};
+use arcl_serve::{Completion, Handoff, Mutations, NewCapture, NewTask, Reads, Reply, Server, TaskEdit, TaskStart};
 
 use super::reads::*;
 use super::*;
@@ -30,10 +31,15 @@ struct ServeApp {
 }
 
 impl ServeApp {
-    /// Run a task command as the CLI runs a write. The warnings its syncs
-    /// give go in the reply and to the server's stderr.
-    fn write(&self, command: TaskCommand) -> Reply {
-        match synced_write(LOCK_WAIT, || run_task(command, &self.renderer)) {
+    /// Run a task command as the CLI runs a write.
+    fn task(&self, command: TaskCommand) -> Reply {
+        self.write(|| run_task(command, &self.renderer))
+    }
+
+    /// Run `command` as the CLI runs a write. The warnings its syncs give go
+    /// in the reply and to the server's stderr.
+    fn write(&self, command: impl FnOnce() -> Result<Option<String>, ApplicationError>) -> Reply {
+        match synced_write(LOCK_WAIT, command) {
             Ok((body, warnings)) => {
                 let body = with_warnings(body.unwrap_or_default(), &warnings);
                 write_warnings(self.mode, warnings);
@@ -79,7 +85,7 @@ impl Reads for ServeApp {
 
 impl Mutations for ServeApp {
     fn create_task(&self, input: NewTask) -> Reply {
-        self.write(TaskCommand::Create {
+        self.task(TaskCommand::Create {
             title: input.title,
             spec: input.spec,
             plan: input.plan,
@@ -87,13 +93,13 @@ impl Mutations for ServeApp {
             parent: input.parent,
             priority: input.priority.unwrap_or_else(|| "normal".to_owned()),
             position: 0,
-            blocked_by: Vec::new(),
+            blocked_by: input.blocked_by,
             body: MarkdownArgs { body: input.body, body_file: None },
         })
     }
 
     fn update_task(&self, id: &str, input: TaskEdit) -> Reply {
-        self.write(TaskCommand::Update {
+        self.task(TaskCommand::Update {
             id: id.to_owned(),
             title: input.title,
             body: MarkdownArgs { body: input.body, body_file: None },
@@ -111,32 +117,38 @@ impl Mutations for ServeApp {
     }
 
     fn start_task(&self, id: &str, input: TaskStart) -> Reply {
-        self.write(TaskCommand::Start { id: id.to_owned(), force: input.force })
+        self.task(TaskCommand::Start { id: id.to_owned(), force: input.force })
     }
 
     fn park_task(&self, id: &str) -> Reply {
-        self.write(TaskCommand::Park { id: id.to_owned() })
+        self.task(TaskCommand::Park { id: id.to_owned() })
     }
 
     fn unpark_task(&self, id: &str) -> Reply {
-        self.write(TaskCommand::Unpark { id: id.to_owned() })
+        self.task(TaskCommand::Unpark { id: id.to_owned() })
     }
 
     fn hand_off_task(&self, id: &str, input: Handoff) -> Reply {
-        self.write(TaskCommand::Handoff { id: id.to_owned(), note: input.note, note_file: None })
+        self.task(TaskCommand::Handoff { id: id.to_owned(), note: input.note, note_file: None })
     }
 
     fn complete_task(&self, id: &str, input: Completion) -> Reply {
         if input.allow_open_children && input.with_subtasks {
             return Reply::invalid_request("`allow_open_children` and `with_subtasks` cannot be used together");
         }
-        self.write(TaskCommand::Complete {
+        self.task(TaskCommand::Complete {
             id: id.to_owned(),
             allow_open_children: input.allow_open_children,
             with_subtasks: input.with_subtasks,
             evidence: input.evidence,
             evidence_file: None,
         })
+    }
+
+    fn create_capture(&self, input: NewCapture) -> Reply {
+        let command =
+            CaptureCommand::Create { title: input.title, body: MarkdownArgs { body: input.body, body_file: None } };
+        self.write(|| run_capture(command, &self.renderer))
     }
 }
 

@@ -1,5 +1,6 @@
 <script module lang="ts">
   import type { ChangeWarning, TaskDetail } from "$lib/data";
+  import type { TaskAction } from "./actions";
 
   /** Props for the body of the Task view, once its task has loaded. */
   export interface TaskDetailProps {
@@ -10,6 +11,11 @@
     panelOpen?: boolean;
     /** Reload `detail` after a change; the view waits for it before it shows the result. */
     onchanged?: () => Promise<void>;
+    /**
+     * An action whose form opens once the view shows, such as one the Work
+     * list's menu asked for. An action without a form is ignored.
+     */
+    initialAction?: TaskAction | null;
     /**
      * Set by the view: whether an open form holds input that leaving would
      * lose, such as a typed handoff note or a changed field.
@@ -25,12 +31,16 @@
 </script>
 
 <script lang="ts">
+  import { tick, untrack } from "svelte";
   import { Button, Feedback, Field, Markdown, MarkdownEditor, PropertiesPanel, SelectMenu, StatusBadge } from "@arclightning/ui";
+  import { useCommands, type Command } from "$lib/commands";
   import { dataSource, type Task } from "$lib/data";
   import { PRIORITIES, taskHref } from "$lib/work";
   import {
+    ACTION_KEYS,
     ACTION_LABELS,
     ACTION_TEXT,
+    EDIT_KEY,
     actionsFor,
     draftOf,
     editOf,
@@ -38,7 +48,6 @@
     runAction,
     unblockedTasks,
     type ActionFailure,
-    type TaskAction,
     type TaskDraft,
   } from "./actions";
   import { blockersOf, propertiesOf, reasonSegments, titlesOf, type DoneBlocker } from "./view";
@@ -48,6 +57,7 @@
     workHref,
     panelOpen = $bindable(true),
     onchanged,
+    initialAction = null,
     unsaved = $bindable(false),
     warnings = $bindable([]),
   }: TaskDetailProps = $props();
@@ -58,6 +68,8 @@
   /** The action whose Markdown form is open. */
   let asking = $state<TaskAction | null>(null);
   let text = $state("");
+  /** The open form's editor, which takes focus when the form opens. */
+  let askEditor = $state<ReturnType<typeof MarkdownEditor>>();
   /** The last failed action and how it failed, shown next to that action. */
   let failure = $state<{ action: TaskAction | "edit"; failure: ActionFailure } | null>(null);
   /** The tasks the last completion unblocked, by ID. */
@@ -80,15 +92,70 @@
     unsaved = (asking !== null && text.trim() !== "") || Object.keys(edit).length > 0;
   });
 
-  /** Run `action`, or open its Markdown form first when it takes text. */
-  function choose(action: TaskAction) {
+  // The menu and the shortcuts run the same `choose` as the buttons.
+  useCommands(() => ({
+    context: { id: task.id, label: task.title },
+    commands: busy !== null ? [] : [
+      ...actions.map((action): Command => ({
+        id: `task:${action}`,
+        label: ACTION_LABELS[action],
+        scope: "selection",
+        keys: [ACTION_KEYS[action]],
+        icon: action === "complete" ? "check" : "task",
+        run: () => choose(action),
+      })),
+      ...(draft === null ? [{ id: "task:edit", label: "Edit", scope: "selection", keys: [EDIT_KEY], icon: "markdown", run: openEdit } satisfies Command] : []),
+    ],
+  }));
+
+  // Only open the form: an initial action never runs a change by itself.
+  $effect(() => {
+    if (initialAction === null || ACTION_TEXT[initialAction] === undefined) return;
+    if (!untrack(() => actions).includes(initialAction)) return;
+    const action = initialAction;
+    untrack(() => void ask(action));
+  });
+
+  function openEdit() {
+    draft = draftOf(task);
     failure = null;
     unblocked = null;
-    if (ACTION_TEXT[action] !== undefined && asking !== action) {
-      asking = action;
-      text = "";
+  }
+
+  /**
+   * Run `action`, or open its Markdown form when it takes text. Choosing an
+   * action whose form is open, by button, shortcut or menu, only refocuses
+   * the form's editor: the form's own submit button sends the change.
+   */
+  function choose(action: TaskAction) {
+    if (ACTION_TEXT[action] !== undefined) {
+      void ask(action);
       return;
     }
+    failure = null;
+    unblocked = null;
+    void perform(action, () => runAction(dataSource(), task.id, action), () => (asking = null));
+  }
+
+  /** Open `action`'s Markdown form, or keep the one open, and focus its editor. */
+  async function ask(action: TaskAction) {
+    if (asking !== action) {
+      asking = action;
+      text = "";
+      failure = null;
+      unblocked = null;
+    }
+    await tick();
+    askEditor?.focus();
+  }
+
+  /** Send the open form's action with its text. */
+  function submitAsk(event: SubmitEvent) {
+    event.preventDefault();
+    const action = asking;
+    if (action === null || busy !== null) return;
+    failure = null;
+    unblocked = null;
     void perform(action, () => runAction(dataSource(), task.id, action, text), (result) => {
       asking = null;
       if (action === "complete") unblocked = result.unblocked;
@@ -184,13 +251,13 @@
           />
         {/each}
         {#if draft === null}
-          <Button label="Edit" variant="ghost" disabled={busy !== null} onclick={() => ((draft = draftOf(task)), (failure = null), (unblocked = null))} />
+          <Button label="Edit" variant="ghost" disabled={busy !== null} onclick={openEdit} />
         {/if}
       </div>
       {#if asking !== null}
         {@const label = ACTION_TEXT[asking] ?? ""}
-        <form class="ask" aria-label={ACTION_LABELS[asking]} onsubmit={(event) => (event.preventDefault(), choose(asking!))}>
-          <MarkdownEditor value={text} label={`${label} Markdown`} readonly={false} onchange={(value) => (text = value)} />
+        <form class="ask" aria-label={ACTION_LABELS[asking]} onsubmit={submitAsk}>
+          <MarkdownEditor bind:this={askEditor} value={text} label={`${label} Markdown`} readonly={false} onchange={(value) => (text = value)} />
           <div class="buttons">
             <Button type="submit" variant="primary" label={ACTION_LABELS[asking]} busy={busy === asking} disabled={busy !== null} />
             <Button label="Cancel" variant="ghost" disabled={busy !== null} onclick={() => ((asking = null), (failure = null))} />

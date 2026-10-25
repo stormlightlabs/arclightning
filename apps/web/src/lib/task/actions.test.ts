@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DataError, type DataSource } from "$lib/data";
 import { task } from "$lib/work/fixtures";
-import { actionsFor, draftOf, editOf, failureOf, runAction, unblockedTasks } from "./actions";
+import { actionsFor, draftOf, editOf, failureOf, formAction, runAction, unblockedTasks } from "./actions";
 import { blockedDetail } from "./fixtures";
 
 /** The warning each recorded change carries. */
@@ -26,7 +26,9 @@ function recorder() {
       calls.push(["completeTask", ...args]),
       { value: { task: task("t-1"), completed_subtasks: [], unblocked: ["t-10.5"] }, warnings: [] }
     ),
-  } as DataSource;
+    taskIndex: async () => [],
+    createCapture: answer("createCapture"),
+  } as unknown as DataSource;
   return { source, calls };
 }
 
@@ -88,5 +90,16 @@ describe("unblockedTasks", () => {
       { id: "t-10.5", title: "T10.5: Document the MCP tools" },
       { id: "t-99", title: "t-99" },
     ]);
+  });
+});
+
+describe("formAction", () => {
+  it("names the actions that open a form", () => {
+    expect(formAction("complete")).toBe("complete");
+    expect(formAction("handoff")).toBe("handoff");
+  });
+
+  it("refuses actions that run at once, and anything else", () => {
+    for (const value of ["start", "park", "unpark", "toString", "", null]) expect(formAction(value)).toBeNull();
   });
 });

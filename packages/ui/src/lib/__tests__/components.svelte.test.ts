@@ -2,6 +2,8 @@ import { page, userEvent } from "vitest/browser";
 import { describe, expect, it } from "vitest";
 import { render } from "vitest-browser-svelte";
 import "../styles/index.css";
+import DialogHarness from "./DialogHarness.svelte";
+import HeldKeyHarness from "./HeldKeyHarness.svelte";
 import InteractionHarness from "./InteractionHarness.svelte";
 
 describe("shared interactions", () => {
@@ -36,6 +38,33 @@ describe("shared interactions", () => {
     await userEvent.keyboard("{Escape}");
     await expect.element(page.getByRole("dialog", { name: "Confirm promotion" })).not.toBeInTheDocument();
     expect(document.activeElement).toBe(trigger.element());
+  });
+
+  it("moves focus out at once on Escape when nothing focusable opened it", async () => {
+    await render(DialogHarness);
+    const input = page.getByRole("textbox", { name: "Inside" });
+    await expect.element(input).toHaveFocus();
+    const dialog = page.getByRole("dialog", { name: "Opened by a shortcut" }).element();
+    // The next key press must reach the page, before the `close` event's task runs.
+    input.element().dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    expect(dialog.contains(document.activeElement)).toBe(false);
+    await expect.element(page.getByText("closed")).toBeInTheDocument();
+  });
+
+  it("does not press the opener with an Enter held through the close", async () => {
+    await render(HeldKeyHarness);
+    const opener = page.getByRole("button", { name: "Open" });
+    await opener.click();
+    await expect.element(page.getByRole("button", { name: "Choose" })).toHaveFocus();
+    // Four keydowns, the last three repeats, then the keyup.
+    await userEvent.keyboard("{Enter>4}");
+    await expect.element(opener).toHaveFocus();
+    await expect.element(page.getByText("1 presses")).toBeInTheDocument();
+    expect(page.getByRole("dialog").query()).toBeNull();
+
+    // A fresh press after the keyup reaches the opener as usual.
+    await userEvent.keyboard("{Enter}");
+    await expect.element(page.getByText("2 presses")).toBeInTheDocument();
   });
 
   it("applies theme tokens and visible focus styling", async () => {
