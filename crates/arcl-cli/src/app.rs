@@ -34,12 +34,15 @@ mod skill;
 mod support;
 mod workspace;
 
-use commands::{exec_dependency, exec_note, exec_plan, exec_release, exec_spec, exec_task, run_capture, run_task};
+use commands::{
+    apply_plan_document, exec_dependency, exec_note, exec_plan, exec_release, exec_spec, exec_task, run_capture,
+    run_plan, run_spec, run_task,
+};
 pub use error::ApplicationError;
 use error::{CResult, CommandError};
 use init::initialize;
-use query::{connected_tree, resolve_ready_filter};
-use reads::{read_context, read_explain, read_list, read_ready, read_show};
+use query::resolve_ready_filter;
+use reads::{read_context, read_explain, read_list, read_ready, read_show, read_tree};
 use serve::exec_serve;
 use skill::exec_skill;
 use support::{open_database, write_output};
@@ -167,12 +170,7 @@ fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Wa
         Some(Command::Skill { command }) => exec_skill(command, renderer),
         Some(Command::Show { id }) => write_output(read_show(&id, renderer)?),
         Some(Command::List { filters }) => write_output(read_list(filters, renderer)?),
-        Some(Command::Tree { id }) => {
-            let database = open_database().map_err(ApplicationError::from_command)?;
-            let graph = database.connected_graph().map_err(ApplicationError::from_command)?;
-            let nodes = connected_tree(&graph, id.as_deref()).map_err(ApplicationError::from_command)?;
-            write_output(renderer.render_connected_tree(&nodes)?)
-        }
+        Some(Command::Tree { id }) => write_output(read_tree(id.as_deref(), renderer)?),
         Some(Command::Explain { task_id }) => write_output(read_explain(&task_id, renderer)?),
         Some(Command::Context { task_id }) => write_output(read_context(&task_id, renderer)?),
         Some(Command::Check) => {

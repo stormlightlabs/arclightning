@@ -3,14 +3,21 @@ import {
   type Changed,
   DataError,
   type Capture,
+  type CaptureStatus,
   type DataSource,
   type Milestone,
+  type Plan,
+  type PlanApplied,
+  type PromotionTarget,
   type Readiness,
+  type Spec,
   type Task,
   type TaskCompletion,
   type TaskDetail,
   type TaskStatus,
+  type TreeNode,
   type WorkItem,
+  type WorkList,
 } from "./types";
 
 /** Options for {@link serveSource}; tests pass their own. */
@@ -83,20 +90,27 @@ export function serveSource(options: ServeOptions = {}): DataSource {
     return { value: envelope.data as T, warnings: Array.isArray(envelope.warnings) ? envelope.warnings : [] };
   }
 
+  async function work(signal?: AbortSignal): Promise<WorkList> {
+    const work = await get<Work>("/api/work", signal);
+    const milestones = work.phases.map(milestoneOf);
+    const byId = new Map(milestones.map((milestone) => [milestone.id, milestone]));
+    const items = work.tasks.map(
+      ({ task, readiness, phase_id }): WorkItem => ({
+        task,
+        readiness,
+        milestone: phase_id === null ? null : (byId.get(phase_id) ?? null),
+      }),
+    );
+    return { milestones, items };
+  }
+
+  /** `post` to one capture's action. */
+  function captureChange<T>(id: string, action: string, body: object): Promise<Changed<T>> {
+    return post<T>(`/api/captures/${encodeURIComponent(id)}/${action}`, body);
+  }
+
   return {
-    async work(signal) {
-      const work = await get<Work>("/api/work", signal);
-      const milestones = work.phases.map(milestoneOf);
-      const byId = new Map(milestones.map((milestone) => [milestone.id, milestone]));
-      const items = work.tasks.map(
-        ({ task, readiness, phase_id }): WorkItem => ({
-          task,
-          readiness,
-          milestone: phase_id === null ? null : (byId.get(phase_id) ?? null),
-        }),
-      );
-      return { milestones, items };
-    },
+    work,
 
     async task(id, signal) {
       const detail = await get<Partial<TaskDetail>>(`/api/records/${encodeURIComponent(id)}`, signal);
@@ -127,6 +141,51 @@ export function serveSource(options: ServeOptions = {}): DataSource {
     async createCapture(input) {
       const { value, warnings } = await post<{ capture: Capture }>("/api/captures", input);
       return { value: value.capture, warnings };
+    },
+
+    async captures(signal) {
+      const { records } = await get<{ records: ListedRecord[] }>("/api/records?kind=capture&status=captured", signal);
+      return records.map(({ id, title, status }) => ({ id, title, status: status as CaptureStatus }));
+    },
+
+    async capture(id, signal) {
+      const shown = await get<{ capture?: Capture }>(`/api/records/${encodeURIComponent(id)}`, signal);
+      if (shown.capture === undefined) throw new DataError("not_a_capture", `\`${id}\` is not a capture`);
+      return shown.capture;
+    },
+
+    async promoteCapture(id, input) {
+      // The reply names the new record by its kind: `task`, `spec` or `note`.
+      const { value, warnings } = await captureChange<Partial<Record<PromotionTarget, { id: string; title: string }>>>(id, "promote", input);
+      const kind = (["task", "spec", "note"] as const).find((target) => value[target] !== undefined) ?? input.to;
+      const record = value[kind];
+      return { value: { kind, id: record?.id ?? "", title: record?.title ?? "" }, warnings };
+    },
+
+    async discardCapture(id) {
+      const { value, warnings } = await captureChange<{ capture: Capture }>(id, "discard", {});
+      return { value: value.capture, warnings };
+    },
+
+    async planning(signal) {
+      const [tree, list] = await Promise.all([get<{ nodes: TreeNode[] }>("/api/tree", signal), work(signal)]);
+      return { tree: tree.nodes, work: list };
+    },
+
+    async createSpec(input) {
+      const { value, warnings } = await post<{ spec: Spec }>("/api/specs", input);
+      return { value: value.spec, warnings };
+    },
+
+    async createPlan(input) {
+      const { value, warnings } = await post<{ plan: Plan }>("/api/plans", input);
+      return { value: value.plan, warnings };
+    },
+
+    async applyPlan(id, document) {
+      const { value, warnings } = await post<PlanApplied>(`/api/plans/${encodeURIComponent(id)}/apply`, { document });
+      const { plan, phases, tasks } = value;
+      return { value: { plan, phases: phases.map(milestoneOf), tasks }, warnings };
     },
   };
 }

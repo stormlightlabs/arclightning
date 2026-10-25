@@ -1,7 +1,7 @@
 //! Read commands shared by the CLI and `arcl serve`, so both return the same
 //! envelopes and errors.
 
-use super::query::{list_connected, resolve_ready_filter, show_record};
+use super::query::{connected_tree, list_connected, resolve_ready_filter, show_record};
 use super::support::*;
 use super::*;
 
@@ -52,4 +52,12 @@ pub(super) fn read_work(renderer: &Renderer) -> anyhow::Result<Option<String>> {
     let database = open_database().map_err(ApplicationError::from_command)?;
     let work = database.planning_work().map_err(ApplicationError::from_command)?;
     Ok(renderer.render_planning_work(&work)?)
+}
+
+/// `arcl tree`, from the record `root` names or of every record.
+pub(super) fn read_tree(root: Option<&str>, renderer: &Renderer) -> anyhow::Result<Option<String>> {
+    let database = open_database().map_err(ApplicationError::from_command)?;
+    let graph = database.connected_graph().map_err(ApplicationError::from_command)?;
+    let nodes = connected_tree(&graph, root).map_err(ApplicationError::from_command)?;
+    Ok(renderer.render_connected_tree(&nodes)?)
 }

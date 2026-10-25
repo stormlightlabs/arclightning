@@ -33,6 +33,7 @@
 //! | `GET /api/ready`                 | `arcl ready`             |
 //! | `GET /api/tasks/{id}/explain`    | `arcl explain <task-id>` |
 //! | `GET /api/tasks/{id}/context`    | `arcl context <task-id>` |
+//! | `GET /api/tree`                  | `arcl tree`              |
 //! | `GET /api/work`                  | none; see below          |
 //! | `POST /api/tasks`                | `arcl task create`       |
 //! | `POST /api/tasks/{id}/update`    | `arcl task update`       |
@@ -42,9 +43,17 @@
 //! | `POST /api/tasks/{id}/handoff`   | `arcl task handoff`      |
 //! | `POST /api/tasks/{id}/complete`  | `arcl task complete`     |
 //! | `POST /api/captures`             | `arcl capture create`    |
+//! | `POST /api/captures/{id}/promote`| `arcl capture promote`   |
+//! | `POST /api/captures/{id}/discard`| `arcl capture discard`   |
+//! | `POST /api/specs`                | `arcl spec create`       |
+//! | `POST /api/plans`                | `arcl plan create`       |
+//! | `POST /api/plans/{id}/apply`     | `arcl plan apply`        |
 //!
 //! `/api/records` and `/api/ready` take the CLI's filter flags as query
 //! parameters, such as `?kind=task&status=pending&status=parked`.
+//!
+//! `/api/tree` answers `arcl tree --json` for every record and takes no query
+//! parameters.
 //!
 //! `/api/work` answers the web app's Work list in one request: every task
 //! with the readiness `arcl explain` reports and its effective phase ID, and
@@ -54,7 +63,10 @@
 //!
 //! A mutation takes a JSON object of the command's options, such as
 //! `{"evidence": "Delivered by #41."}`; see [`NewTask`], [`TaskEdit`],
-//! [`TaskStart`], [`Handoff`], [`Completion`] and [`NewCapture`].
+//! [`TaskStart`], [`Handoff`], [`Completion`], [`NewCapture`],
+//! [`CapturePromotion`], [`NewSpec`], [`NewPlan`] and [`PlanInput`]. A plan
+//! applies from the TOML document `arcl plan apply --file` reads, sent as the
+//! `document` string.
 
 use std::collections::VecDeque;
 use std::io::{self, Cursor, Read};
@@ -141,6 +153,9 @@ enum Route {
     Explain(String),
     /// `arcl context <task-id>`.
     Context(String),
+    /// `arcl tree`, of every record. Holds whether the request carried query
+    /// parameters, which it refuses.
+    Tree { has_query: bool },
     /// Every task with its readiness and phase, and every phase. Holds
     /// whether the request carried query parameters, which it refuses.
     Work { has_query: bool },
@@ -172,6 +187,16 @@ enum Write {
     Complete(String),
     /// `arcl capture create`.
     CreateCapture,
+    /// `arcl capture promote <id>`.
+    PromoteCapture(String),
+    /// `arcl capture discard <id>`.
+    DiscardCapture(String),
+    /// `arcl spec create`.
+    CreateSpec,
+    /// `arcl plan create`.
+    CreatePlan,
+    /// `arcl plan apply <id>`.
+    ApplyPlan(String),
 }
 
 /// The JSON answer to an API request: an HTTP status and a body.
@@ -330,6 +355,78 @@ pub struct NewCapture {
     /// The Markdown body.
     #[serde(default)]
     pub body: Option<String>,
+}
+
+/// The options of `arcl capture promote <id>`, as the body of
+/// `POST /api/captures/{id}/promote`. A title or body left out is the
+/// capture's. `acceptance_criteria` applies to a spec; `spec`, `plan`,
+/// `phase`, `parent` and `priority` apply to a task, whose priority defaults
+/// to `normal`.
+#[derive(Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CapturePromotion {
+    /// What the capture becomes: `task`, `spec` or `note`.
+    pub to: String,
+    /// The new record's title.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// The new record's Markdown body.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// A spec's Markdown acceptance criteria.
+    #[serde(default)]
+    pub acceptance_criteria: Option<String>,
+    /// A task's spec ID.
+    #[serde(default)]
+    pub spec: Option<String>,
+    /// A task's plan ID.
+    #[serde(default)]
+    pub plan: Option<String>,
+    /// A task's phase ID.
+    #[serde(default)]
+    pub phase: Option<String>,
+    /// A task's parent task ID.
+    #[serde(default)]
+    pub parent: Option<String>,
+    /// A task's priority.
+    #[serde(default)]
+    pub priority: Option<String>,
+}
+
+/// The options of `arcl spec create`, as the body of `POST /api/specs`.
+#[derive(Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct NewSpec {
+    /// The spec title.
+    pub title: String,
+    /// The Markdown body.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// The Markdown acceptance criteria.
+    #[serde(default)]
+    pub acceptance_criteria: Option<String>,
+}
+
+/// The options of `arcl plan create`, as the body of `POST /api/plans`.
+#[derive(Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct NewPlan {
+    /// The plan title.
+    pub title: String,
+    /// The ID of the spec that owns the plan.
+    pub spec: String,
+    /// The Markdown body.
+    #[serde(default)]
+    pub body: Option<String>,
+}
+
+/// The input of `arcl plan apply <id>`, as the body of
+/// `POST /api/plans/{id}/apply`.
+#[derive(Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PlanInput {
+    /// The structured plan as TOML, as `--file` holds it.
+    pub document: String,
 }
 
 /// A local server for the web app and its endpoints.
@@ -677,6 +774,8 @@ pub trait Reads {
     fn explain(&self, task_id: &str) -> Reply;
     /// `arcl context <task-id>`.
     fn context(&self, task_id: &str) -> Reply;
+    /// `arcl tree`.
+    fn tree(&self) -> Reply;
     /// Every task with its readiness and effective phase, and every phase,
     /// for the Work list.
     fn work(&self) -> Reply;
@@ -702,6 +801,16 @@ pub trait Mutations {
     fn complete_task(&self, id: &str, input: Completion) -> Reply;
     /// `arcl capture create`.
     fn create_capture(&self, input: NewCapture) -> Reply;
+    /// `arcl capture promote <id>`.
+    fn promote_capture(&self, id: &str, input: CapturePromotion) -> Reply;
+    /// `arcl capture discard <id>`.
+    fn discard_capture(&self, id: &str) -> Reply;
+    /// `arcl spec create`.
+    fn create_spec(&self, input: NewSpec) -> Reply;
+    /// `arcl plan create`, without structured input.
+    fn create_plan(&self, input: NewPlan) -> Reply;
+    /// `arcl plan apply <id>`.
+    fn apply_plan(&self, id: &str, input: PlanInput) -> Reply;
 }
 
 /// Answer an admitted read or page request.
@@ -712,6 +821,10 @@ fn dispatch(route: Route, reads: &dyn Reads) -> Answer {
         Route::Ready(query) => Answer::json(reads.ready(&query)),
         Route::Explain(id) => Answer::json(reads.explain(&id)),
         Route::Context(id) => Answer::json(reads.context(&id)),
+        Route::Tree { has_query: true } => {
+            Answer::json(Reply::invalid_request("`/api/tree` takes no query parameters"))
+        }
+        Route::Tree { has_query: false } => Answer::json(reads.tree()),
         Route::Work { has_query: true } => {
             Answer::json(Reply::invalid_request("`/api/work` takes no query parameters"))
         }
@@ -782,6 +895,11 @@ fn mutate(write: Write, body: Option<&[u8]>, mutations: &dyn Mutations) -> Reply
         Write::Handoff(id) => with_input(body, |input| mutations.hand_off_task(&id, input)),
         Write::Complete(id) => with_input(body, |input| mutations.complete_task(&id, input)),
         Write::CreateCapture => with_input(body, |input| mutations.create_capture(input)),
+        Write::PromoteCapture(id) => with_input(body, |input| mutations.promote_capture(&id, input)),
+        Write::DiscardCapture(id) => with_input(body, |NoOptions {}| mutations.discard_capture(&id)),
+        Write::CreateSpec => with_input(body, |input| mutations.create_spec(input)),
+        Write::CreatePlan => with_input(body, |input| mutations.create_plan(input)),
+        Write::ApplyPlan(id) => with_input(body, |input| mutations.apply_plan(&id, input)),
     }
 }
 
@@ -867,9 +985,15 @@ fn route(path: &str, query: Vec<(String, String)>) -> Route {
         ["api", "ready"] => Route::Ready(query),
         ["api", "tasks", id, "explain"] if !id.is_empty() => Route::Explain((*id).to_owned()),
         ["api", "tasks", id, "context"] if !id.is_empty() => Route::Context((*id).to_owned()),
+        ["api", "tree"] => Route::Tree { has_query: !query.is_empty() },
         ["api", "work"] => Route::Work { has_query: !query.is_empty() },
         ["api", "tasks"] => Route::Write(Write::Create),
         ["api", "captures"] => Route::Write(Write::CreateCapture),
+        ["api", "captures", id, "promote"] if !id.is_empty() => Route::Write(Write::PromoteCapture((*id).to_owned())),
+        ["api", "captures", id, "discard"] if !id.is_empty() => Route::Write(Write::DiscardCapture((*id).to_owned())),
+        ["api", "specs"] => Route::Write(Write::CreateSpec),
+        ["api", "plans"] => Route::Write(Write::CreatePlan),
+        ["api", "plans", id, "apply"] if !id.is_empty() => Route::Write(Write::ApplyPlan((*id).to_owned())),
         ["api", "tasks", id, action] if !id.is_empty() => {
             let id = (*id).to_owned();
             match *action {
@@ -929,6 +1053,9 @@ mod tests {
         fn context(&self, task_id: &str) -> Reply {
             Reply::failure(5, format!("context {task_id}"))
         }
+        fn tree(&self) -> Reply {
+            Reply::success("tree".to_owned())
+        }
         fn work(&self) -> Reply {
             Reply::success("work".to_owned())
         }
@@ -958,6 +1085,21 @@ mod tests {
         }
         fn create_capture(&self, input: NewCapture) -> Reply {
             Reply::success(format!("capture {input:?}"))
+        }
+        fn promote_capture(&self, id: &str, input: CapturePromotion) -> Reply {
+            Reply::success(format!("promote {id} {input:?}"))
+        }
+        fn discard_capture(&self, id: &str) -> Reply {
+            Reply::success(format!("discard {id}"))
+        }
+        fn create_spec(&self, input: NewSpec) -> Reply {
+            Reply::success(format!("spec {input:?}"))
+        }
+        fn create_plan(&self, input: NewPlan) -> Reply {
+            Reply::success(format!("plan {input:?}"))
+        }
+        fn apply_plan(&self, id: &str, input: PlanInput) -> Reply {
+            Reply::success(format!("apply {id} {input:?}"))
         }
     }
 
@@ -1143,6 +1285,11 @@ mod tests {
             "/api/tasks/arcl-t-1/start",
             "/api/tasks/arcl-t-1/complete",
             "/api/captures",
+            "/api/captures/arcl-c-1/promote",
+            "/api/captures/arcl-c-1/discard",
+            "/api/specs",
+            "/api/plans",
+            "/api/plans/arcl-pl-1/apply",
         ] {
             for method in ["GET", "PUT", "DELETE", "OPTIONS"] {
                 let incoming = Incoming { method: method.to_owned(), ..post(url) };
@@ -1163,7 +1310,12 @@ mod tests {
             Some("https://127.0.0.1:4321"),
             Some("null"),
         ] {
-            for url in ["/api/tasks/arcl-t-1/park", "/api/captures"] {
+            for url in [
+                "/api/tasks/arcl-t-1/park",
+                "/api/captures",
+                "/api/captures/arcl-c-1/discard",
+                "/api/specs",
+            ] {
                 let incoming = Incoming { origin: origin.map(str::to_owned), ..post(url) };
                 let answer = answered_with(&mut gate(), &incoming, Some(br#"{"title":"T"}"#));
                 assert_eq!(answer.status, 403, "{origin:?} {url}");
@@ -1247,6 +1399,46 @@ mod tests {
     }
 
     #[test]
+    fn serve_routes_the_planning_mutations() {
+        let routed = |url: &str, body: &str| text(answered_with(&mut gate(), &post(url), Some(body.as_bytes())));
+        assert_eq!(
+            routed("/api/captures/arcl-c-1/promote", r#"{"to":"task","priority":"high","phase":"arcl-ph-1"}"#),
+            (
+                200,
+                r#"promote arcl-c-1 CapturePromotion { to: "task", title: None, body: None, acceptance_criteria: None, spec: None, plan: None, phase: Some("arcl-ph-1"), parent: None, priority: Some("high") }"#.to_owned()
+            )
+        );
+        assert_eq!(
+            routed("/api/captures/arcl-c-1/discard", ""),
+            (200, "discard arcl-c-1".to_owned())
+        );
+        assert_eq!(
+            routed("/api/specs", r#"{"title":"Spec","acceptance_criteria":"- works"}"#),
+            (
+                200,
+                r#"spec NewSpec { title: "Spec", body: None, acceptance_criteria: Some("- works") }"#.to_owned()
+            )
+        );
+        assert_eq!(
+            routed("/api/plans", r#"{"title":"Plan","spec":"arcl-s-1"}"#),
+            (
+                200,
+                r#"plan NewPlan { title: "Plan", spec: "arcl-s-1", body: None }"#.to_owned()
+            )
+        );
+        assert_eq!(
+            routed("/api/plans/arcl-pl-1/apply", r#"{"document":"format-version = 1"}"#),
+            (
+                200,
+                r#"apply arcl-pl-1 PlanInput { document: "format-version = 1" }"#.to_owned()
+            )
+        );
+        assert_eq!(routed("/api/captures/arcl-c-1/update", "").0, 404);
+        assert_eq!(routed("/api/plans/arcl-pl-1/check", "").0, 404);
+        assert_eq!(routed("/api/specs/arcl-s-1", "").0, 404);
+    }
+
+    #[test]
     fn serve_refuses_malformed_mutation_bodies() {
         let with_body = |url: &str, body: &[u8]| answered_with(&mut gate(), &post(url), Some(body));
         for (url, body) in [
@@ -1257,6 +1449,20 @@ mod tests {
             ("/api/tasks/arcl-t-1/start", br#"{"force":"yes"}"#),
             ("/api/captures", b"{}"),
             ("/api/captures", br#"{"title":"Idea","priority":"high"}"#),
+            ("/api/captures/arcl-c-1/promote", b"{}"),
+            ("/api/captures/arcl-c-1/promote", br#"{"to":"task","position":3}"#),
+            ("/api/captures/arcl-c-1/discard", br#"{"force":true}"#),
+            (
+                "/api/specs",
+                br#"{"title":"S","acceptance_criteria_file":"/etc/passwd"}"#,
+            ),
+            ("/api/plans", br#"{"title":"P"}"#),
+            (
+                "/api/plans",
+                br#"{"title":"P","spec":"arcl-s-1","input":"/etc/passwd"}"#,
+            ),
+            ("/api/plans/arcl-pl-1/apply", br#"{"file":"/etc/passwd"}"#),
+            ("/api/plans/arcl-pl-1/apply", b""),
         ] {
             let refused = with_body(url, body);
             assert_eq!(refused.status, 400, "{url} {body:?}");
@@ -1308,6 +1514,8 @@ mod tests {
             (404, "context arcl-t-1".to_owned())
         );
         assert_eq!(body("/api/work"), (200, "work".to_owned()));
+        assert_eq!(body("/api/tree"), (200, "tree".to_owned()));
+        assert_eq!(body("/api/tree?id=arcl-s-1").0, 400);
         let (status, refused) = body("/api/work?status=pending");
         assert_eq!(status, 400);
         assert!(refused.contains("invalid_request"), "{refused}");

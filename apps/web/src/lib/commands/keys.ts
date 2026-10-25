@@ -66,7 +66,7 @@ export function shortcutStep<T extends Bound>(pending: string[], key: string, co
 
 /** `keys` as the menu shows them, with `Mod` as `⌘` on macOS and `Ctrl` elsewhere. */
 export function formatKeys(keys: string[], mac: boolean): string[] {
-  const names: Record<string, string> = { Mod: mac ? "⌘" : "Ctrl", Enter: "↵", Escape: "Esc", Shift: "⇧" };
+  const names: Record<string, string> = { Mod: mac ? "⌘" : "Ctrl", Enter: "↵", Escape: "Esc", Shift: "⇧", Backspace: "⌫" };
   return keys.map((key) => names[key] ?? (key.length === 1 ? key.toUpperCase() : key));
 }
 

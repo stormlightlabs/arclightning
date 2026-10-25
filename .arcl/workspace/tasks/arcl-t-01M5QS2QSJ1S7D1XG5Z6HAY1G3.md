@@ -2,7 +2,7 @@
 id = "arcl-t-01M5QS2QSJ1S7D1XG5Z6HAY1G3"
 parent = "arcl-t-01M5NE5P6XHRR4Q84820YACQ07"
 title = "T18.6: Build the Inbox and Planning views"
-status = "pending"
+status = "in_progress"
 priority = "normal"
 position = 6
 blocked-by = ["arcl-t-01M5QS2QP9TNCV3A88EHX375D9"]

@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { TRIAGE_KEYS } from "$lib/inbox";
+import { PLANNING_KEYS } from "$lib/planning";
 import { ACTION_KEYS, EDIT_KEY } from "$lib/task";
 import { TASK_RESULT_PREFIX, boundCommands, clashes, menuGroups, type Command, type MenuInput } from "./menu";
 
@@ -80,5 +82,13 @@ describe("shortcuts", () => {
     expect(new Set(keys).size).toBe(keys.length);
     // Quick capture, Go to, New task, the Work list's moves and the Task view's panel.
     for (const taken of ["q", "g", "n", "j", "k", "]"]) expect(keys).not.toContain(taken);
+  });
+
+  it("keeps the Inbox's and Planning's keys apart from the app's and the list moves", () => {
+    for (const keys of [Object.values(TRIAGE_KEYS), Object.values(PLANNING_KEYS)]) {
+      expect(new Set(keys).size).toBe(keys.length);
+      // Quick capture, Go to, and the moves and Enter every list answers.
+      for (const taken of ["q", "g", "j", "k", "Enter", "ArrowUp", "ArrowDown"]) expect(keys).not.toContain(taken);
+    }
   });
 });

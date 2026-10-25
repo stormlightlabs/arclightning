@@ -192,6 +192,12 @@ pub(super) fn exec_release(command: ReleaseCommand, renderer: &Renderer) -> anyh
 }
 
 pub(super) fn exec_spec(command: SpecCommand, renderer: &Renderer) -> anyhow::Result<()> {
+    write_output(run_spec(command, renderer)?)
+}
+
+/// Run one `arcl spec` command and return what it prints, so `arcl serve`
+/// can answer with the same output and errors.
+pub(super) fn run_spec(command: SpecCommand, renderer: &Renderer) -> Result<Option<String>, ApplicationError> {
     let message = match command {
         SpecCommand::Create { title, body, acceptance } => {
             validate_title(&title).map_err(|error| ApplicationError::from_command(CommandError::Domain(error)))?;
@@ -254,10 +260,16 @@ pub(super) fn exec_spec(command: SpecCommand, renderer: &Renderer) -> anyhow::Re
             transition_spec(id, ContainerAction::Cancel, allow_open_children, renderer)?
         }
     };
-    write_output(message)
+    Ok(message)
 }
 
 pub(super) fn exec_plan(command: PlanCommand, renderer: &Renderer) -> anyhow::Result<()> {
+    write_output(run_plan(command, renderer)?)
+}
+
+/// Run one `arcl plan` command and return what it prints, so `arcl serve`
+/// can answer with the same output and errors.
+pub(super) fn run_plan(command: PlanCommand, renderer: &Renderer) -> Result<Option<String>, ApplicationError> {
     let result = match command {
         PlanCommand::Create { title, spec, body, input, no_input: _ } => {
             validate_title(&title).map_err(|error| ApplicationError::from_command(CommandError::Domain(error)))?;
@@ -301,7 +313,8 @@ pub(super) fn exec_plan(command: PlanCommand, renderer: &Renderer) -> anyhow::Re
                 .map(|task| {
                     task_ancestry(&graph, task.id).map(|(_, plan_id, _)| (plan_id == Some(id)).then(|| task.clone()))
                 })
-                .collect::<CResult<Vec<_>>>()?
+                .collect::<CResult<Vec<_>>>()
+                .map_err(ApplicationError::from_command)?
                 .into_iter()
                 .flatten()
                 .collect::<Vec<_>>();
@@ -361,12 +374,7 @@ pub(super) fn exec_plan(command: PlanCommand, renderer: &Renderer) -> anyhow::Re
         PlanCommand::Apply { id, file } => {
             let id = parse_plan_id(&id).map_err(ApplicationError::from_command)?;
             let document = read_plan_document(&file).map_err(ApplicationError::from_command)?;
-            let mut database = open_database().map_err(ApplicationError::from_command)?;
-            PlanResult::Applied(
-                database
-                    .apply_plan(id, &document)
-                    .map_err(ApplicationError::from_command)?,
-            )
+            return apply_plan_document(id, &document, renderer);
         }
         PlanCommand::Complete { id, allow_open_children } => {
             let id = parse_plan_id(&id).map_err(ApplicationError::from_command)?;
@@ -388,7 +396,7 @@ pub(super) fn exec_plan(command: PlanCommand, renderer: &Renderer) -> anyhow::Re
                     .map_err(ApplicationError::from_command)?,
             }
         }
-        PlanCommand::Phase { command } => return exec_phase(command, renderer),
+        PlanCommand::Phase { command } => return run_phase(command, renderer),
     };
     let message = match result {
         PlanResult::Mutation { action, plan } => renderer.render_plan(action, &plan),
@@ -396,9 +404,20 @@ pub(super) fn exec_plan(command: PlanCommand, renderer: &Renderer) -> anyhow::Re
         PlanResult::Diff(diff) => renderer.render_plan_diff(&diff),
         PlanResult::Applied(result) => renderer.render_plan_apply(&result),
         PlanResult::List(plans) => renderer.render_plans(&plans),
-    }
-    .map_err(|error| ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() }))?;
-    write_output(message)
+    };
+    render_output(message)
+}
+
+/// `arcl plan apply`: apply `document` to plan `id` in one transaction. The
+/// CLI reads the document from `--file`; `arcl serve` from the request.
+pub(super) fn apply_plan_document(
+    id: PlanId, document: &arcl_core::plan::PlanDocument, renderer: &Renderer,
+) -> Result<Option<String>, ApplicationError> {
+    let mut database = open_database().map_err(ApplicationError::from_command)?;
+    let result = database
+        .apply_plan(id, document)
+        .map_err(ApplicationError::from_command)?;
+    render_output(renderer.render_plan_apply(&result))
 }
 
 pub(super) fn exec_task(command: TaskCommand, renderer: &Renderer) -> anyhow::Result<()> {
@@ -777,8 +796,8 @@ fn transition_spec(
         .map_err(|error| ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() }))
 }
 
-fn exec_phase(command: PhaseCommand, renderer: &Renderer) -> anyhow::Result<()> {
-    let message = match command {
+fn run_phase(command: PhaseCommand, renderer: &Renderer) -> Result<Option<String>, ApplicationError> {
+    match command {
         PhaseCommand::Create { title, plan, position, body } => {
             validate_title(&title).map_err(|error| ApplicationError::from_command(CommandError::Domain(error)))?;
             let plan_id = parse_plan_id(&plan).map_err(ApplicationError::from_command)?;
@@ -830,8 +849,7 @@ fn exec_phase(command: PhaseCommand, renderer: &Renderer) -> anyhow::Result<()> 
         PhaseCommand::Cancel { id, allow_open_children } => {
             transition_phase(id, ContainerAction::Cancel, allow_open_children, renderer)
         }
-    }?;
-    write_output(message)
+    }
 }
 
 fn transition_phase(
