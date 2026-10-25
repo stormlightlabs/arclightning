@@ -6,7 +6,7 @@ status = "completed"
 priority = "normal"
 position = 6
 blocked-by = ["arcl-t-01M5STHSRRT2ADFN3Y9YAC2N7A"]
-evidence = "Delivered by #PR: the artifact build queues raw record edits as `update_source`, which `arcl web apply` runs as `POST /api/records/<id>/edit`; `arcl web export` writes `sources/<id>`."
+evidence = "Delivered by #51: the artifact build queues raw record edits as `update_source`, which `arcl web apply` runs as `POST /api/records/<id>/edit`; `arcl web export` writes `sources/<id>`."
 +++
 
 Let the artifact build queue a raw record edit, so a person on claude.ai can
