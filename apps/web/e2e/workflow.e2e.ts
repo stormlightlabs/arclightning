@@ -9,22 +9,24 @@ interface Listed {
   [field: string]: unknown;
 }
 
-let served: Served;
+let served: Served | undefined;
 
 test.beforeEach(async ({ page }) => {
+  served = undefined;
   served = await serveScratch();
   page.on("pageerror", (error) => {
     throw error;
   });
 });
 
+// `served` stays unset when `serveScratch` fails, and it cleans up after itself then.
 test.afterEach(async () => {
-  await served.stop();
+  await served?.stop();
 });
 
 /** The records of `kind` the CLI lists, such as `task` or `spec`. */
 function listed(kind: string): Listed[] {
-  return served.cli(kind, "list")[`${kind}s`];
+  return served!.cli(kind, "list")[`${kind}s`];
 }
 
 /** Press each key in turn, like `g` then `i`. */
@@ -47,7 +49,7 @@ async function capture(page: Page, title: string) {
 }
 
 test("keyboard alone takes captures to tasks through the Inbox and Planning, then starts and completes one", async ({ page }) => {
-  await page.goto(served.url);
+  await page.goto(served!.url);
   await expect(page.getByRole("heading", { level: 1, name: "Work" })).toBeVisible();
 
   // Capture -> task.
@@ -103,7 +105,7 @@ test("keyboard alone takes captures to tasks through the Inbox and Planning, the
   await expect(page.getByRole("heading", { level: 1, name: "First task" })).toBeVisible();
   await page.keyboard.press("s");
   await expect(page.getByRole("button", { name: "Complete" })).toBeVisible();
-  await expect.poll(() => served.cli("task", "show", planned!.id).task.status).toBe("in_progress");
+  await expect.poll(() => served!.cli("task", "show", planned!.id).task.status).toBe("in_progress");
 
   await page.keyboard.press("c");
   const complete = page.getByRole("form", { name: "Complete" });
@@ -113,6 +115,6 @@ test("keyboard alone takes captures to tasks through the Inbox and Planning, the
   await expect(complete.getByRole("button", { name: "Complete" })).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(complete).toBeHidden();
-  const done = served.cli("task", "show", planned!.id).task;
+  const done = served!.cli("task", "show", planned!.id).task;
   expect(done).toMatchObject({ status: "completed", evidence: "Shipped in the scratch project." });
 });

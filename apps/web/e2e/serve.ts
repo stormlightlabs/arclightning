@@ -28,20 +28,27 @@ export async function serveScratch(): Promise<Served> {
   if (!existsSync(ARCL)) throw new Error(`${ARCL} does not exist: run \`cargo build -p arcl-cli\` or set ARCL_BIN`);
   const dir = mkdtempSync(join(tmpdir(), "arcl-e2e-"));
   const cli = (...args: string[]) => JSON.parse(execFileSync(ARCL, [...args, "--json"], { cwd: dir, encoding: "utf8" })).data;
-  cli("init");
-  const server: ChildProcess = spawn(ARCL, ["serve", "--json"], { cwd: dir, stdio: ["ignore", "pipe", "inherit"] });
-  const exited = new Promise<void>((done) => server.once("exit", () => done()));
-  const line = await new Promise<string>((done, fail) => {
-    server.once("exit", (code: number | null) => fail(new Error(`arcl serve exited with ${code} before printing its URL`)));
-    createInterface({ input: server.stdout! }).once("line", done);
-  });
-  return {
-    url: JSON.parse(line).data.url,
-    cli,
-    stop: async () => {
-      server.kill();
-      await exited;
-      rmSync(dir, { recursive: true, force: true });
-    },
+  let server: ChildProcess | undefined;
+  let exited: Promise<void> = Promise.resolve();
+  const stop = async () => {
+    if (server && server.exitCode === null && server.signalCode === null) server.kill();
+    await exited;
+    rmSync(dir, { recursive: true, force: true });
   };
+  // Clean up when setup fails partway, since the caller gets no `stop` then.
+  try {
+    cli("init");
+    const child = spawn(ARCL, ["serve", "--json"], { cwd: dir, stdio: ["ignore", "pipe", "inherit"] });
+    server = child;
+    exited = new Promise<void>((done) => child.once("exit", () => done()));
+    const line = await new Promise<string>((done, fail) => {
+      child.once("error", fail);
+      child.once("exit", (code: number | null) => fail(new Error(`arcl serve exited with ${code} before printing its URL`)));
+      createInterface({ input: child.stdout! }).once("line", done);
+    });
+    return { url: JSON.parse(line).data.url, cli, stop };
+  } catch (error) {
+    await stop();
+    throw error;
+  }
 }
