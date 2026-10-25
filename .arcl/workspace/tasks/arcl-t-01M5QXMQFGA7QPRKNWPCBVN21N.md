@@ -6,7 +6,7 @@ status = "completed"
 priority = "normal"
 position = 1
 blocked-by = ["arcl-t-01M5NE5P6XHRR4Q84820YACQ07"]
-evidence = "Delivered by #PR: `pnpm --filter @arclightning/web build:artifact` builds the views into one `index.html` over an artifact backend that reads the `arcl serve` envelopes from the database and queues edits. `arcl web export` and `arcl web apply` run the same Reads and Mutations as `arcl serve`. Verified by cargo, vitest and Playwright tests against a stand-in database recorded with `arcl web export`. Not verified yet: publishing on claude.ai, syncing this workspace and triaging a capture there."
+evidence = "Delivered by #48: `pnpm --filter @arclightning/web build:artifact` builds the views into one `index.html` over an artifact backend that reads the `arcl serve` envelopes from the database and queues edits. `arcl web export` and `arcl web apply` run the same Reads and Mutations as `arcl serve`. Verified by cargo, vitest and Playwright tests against a stand-in database recorded with `arcl web export`. Not verified yet: publishing on claude.ai, syncing this workspace and triaging a capture there."
 +++
 
 Publish the web app as a claude.ai artifact, so a person can browse and
