@@ -5,7 +5,7 @@ title = "T22: Update fabrial and tag v0.1.0"
 status = "completed"
 priority = "normal"
 position = 2
-evidence = "Delivered by #PR: fabrial 0.3.3 with no drift, release v0.1.0 (arcl-r-01M5RRJ1FC0B5XAHJXPGCYRVPA) listing T10, T18, T21 and T22, and the quick start's install at --tag v0.1.0. The tag follows the merge."
+evidence = "Delivered by #46: fabrial 0.3.3 with no drift, release v0.1.0 (arcl-r-01M5RRJ1FC0B5XAHJXPGCYRVPA) listing T10, T18, T21 and T22, and the quick start's install at --tag v0.1.0. The tag follows the merge."
 +++
 
 Update the repository to fabrial 0.3.3 and tag `v0.1.0`, the first release
