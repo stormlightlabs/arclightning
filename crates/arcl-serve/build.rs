@@ -5,9 +5,18 @@
 //! no other file. The script writes `assets.rs` into `OUT_DIR`. When the web
 //! app is not built, `INDEX_HTML` is `None` and the server answers page
 //! requests with a page that says how to build it.
+//!
+//! `INDEX_SCRIPT_HASHES` lists the CSP source of each inline `<script>` in
+//! the page, such as `'sha256-…'`, so the server's Content-Security-Policy
+//! allows the app's own scripts and no others.
 
 use std::path::PathBuf;
 use std::{env, fs, io};
+
+use sha2::{Digest, Sha256};
+
+/// The standard base64 alphabet, which CSP hash sources use.
+const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 fn main() -> io::Result<()> {
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));
@@ -22,18 +31,63 @@ fn main() -> io::Result<()> {
         .unwrap_or_else(|| manifest.join("build.rs"));
     println!("cargo::rerun-if-changed={}", watched.display());
 
-    let value = if index.is_file() {
-        format!(
+    let (value, hashes) = if index.is_file() {
+        let html = fs::read_to_string(&index)?;
+        let hashes = inline_scripts(&html)
+            .map(|script| format!("'sha256-{}'", base64(&Sha256::digest(script.as_bytes()))))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let value = format!(
             "Some(include_bytes!({:?}))",
             fs::canonicalize(&index)?.display().to_string()
-        )
+        );
+        (value, hashes)
     } else {
-        "None".to_owned()
+        ("None".to_owned(), String::new())
     };
     let source = format!(
         "/// The built web app's `index.html`, or `None` when `apps/web` was not built.\n\
-         static INDEX_HTML: Option<&[u8]> = {value};\n"
+         static INDEX_HTML: Option<&[u8]> = {value};\n\
+         /// The CSP hash source of each inline script in `INDEX_HTML`, separated by spaces.\n\
+         static INDEX_SCRIPT_HASHES: &str = {hashes:?};\n"
     );
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("cargo sets OUT_DIR"));
     fs::write(out.join("assets.rs"), source)
+}
+
+/// The text of each `<script>` element in `html` that has no `src`.
+fn inline_scripts(html: &str) -> impl Iterator<Item = &str> {
+    let mut rest = html;
+    std::iter::from_fn(move || {
+        loop {
+            let start = rest.find("<script")?;
+            let open_end = start + rest[start..].find('>')? + 1;
+            let close = open_end + rest[open_end..].find("</script>")?;
+            let tag = &rest[start..open_end];
+            let text = &rest[open_end..close];
+            rest = &rest[close..];
+            if !tag.contains(" src=") {
+                return Some(text);
+            }
+        }
+    })
+}
+
+/// `bytes` in padded standard base64.
+fn base64(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let word = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |word, (i, byte)| word | u32::from(*byte) << (16 - 8 * i));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(char::from(BASE64[(word >> (18 - 6 * i)) as usize & 63]));
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
 }

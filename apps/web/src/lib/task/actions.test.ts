@@ -4,10 +4,15 @@ import { task } from "$lib/work/fixtures";
 import { actionsFor, draftOf, editOf, failureOf, formAction, runAction, unblockedTasks } from "./actions";
 import { blockedDetail } from "./fixtures";
 
-/** A data source that records each change and answers with `task("t-1")`. */
+/** The warning each recorded change carries. */
+const warned = { code: "workspace_sync", message: "the change is saved, but the workspace was not updated" };
+
+/** A data source that records each change and answers with `task("t-1")` and one warning. */
 function recorder() {
   const calls: unknown[][] = [];
-  const answer = (name: string) => async (...args: unknown[]) => (calls.push([name, ...args]), task("t-1"));
+  const answer =
+    (name: string) =>
+    async (...args: unknown[]) => (calls.push([name, ...args]), { value: task("t-1"), warnings: [warned] });
   const source = {
     work: async () => ({ milestones: [], items: [] }),
     task: async () => blockedDetail(),
@@ -18,7 +23,8 @@ function recorder() {
     unparkTask: answer("unparkTask"),
     handOffTask: answer("handOffTask"),
     completeTask: async (...args: unknown[]) => (
-      calls.push(["completeTask", ...args]), { task: task("t-1"), completed_subtasks: [], unblocked: ["t-10.5"] }
+      calls.push(["completeTask", ...args]),
+      { value: { task: task("t-1"), completed_subtasks: [], unblocked: ["t-10.5"] }, warnings: [] }
     ),
     taskIndex: async () => [],
     createCapture: answer("createCapture"),
@@ -39,12 +45,12 @@ describe("actionsFor", () => {
 describe("runAction", () => {
   it("runs each action through the data source with its text", async () => {
     const { source, calls } = recorder();
-    await runAction(source, "t-1", "start");
+    expect(await runAction(source, "t-1", "start")).toEqual({ unblocked: [], warnings: [warned] });
     await runAction(source, "t-1", "park");
     await runAction(source, "t-1", "unpark");
     await runAction(source, "t-1", "handoff", "Resume at the tests");
-    expect(await runAction(source, "t-1", "complete", "Delivered by #41.")).toEqual({ unblocked: ["t-10.5"] });
-    expect(await runAction(source, "t-1", "complete", "  \n")).toEqual({ unblocked: ["t-10.5"] });
+    expect(await runAction(source, "t-1", "complete", "Delivered by #41.")).toEqual({ unblocked: ["t-10.5"], warnings: [] });
+    expect(await runAction(source, "t-1", "complete", "  \n")).toEqual({ unblocked: ["t-10.5"], warnings: [] });
     expect(calls).toEqual([
       ["startTask", "t-1"],
       ["parkTask", "t-1"],

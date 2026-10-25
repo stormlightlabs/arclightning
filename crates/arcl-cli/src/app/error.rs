@@ -9,12 +9,20 @@ pub(super) type IResult<T> = Result<T, InitError>;
 pub struct ApplicationError {
     message: String,
     exit_code: u8,
+    /// Whether another process held the project's sync lock past the wait.
+    lock_busy: bool,
 }
 
 impl ApplicationError {
     /// Return the stable process exit category for this failure.
     pub const fn exit_code(&self) -> u8 {
         self.exit_code
+    }
+
+    /// Whether the command gave up waiting for the project's sync lock, which
+    /// another `arcl` command held. Trying again later may succeed.
+    pub const fn lock_busy(&self) -> bool {
+        self.lock_busy
     }
 
     /// Render a stable machine-readable error envelope.
@@ -38,7 +46,7 @@ impl ApplicationError {
     pub(super) fn from_init(error: InitError) -> Self {
         let exit_code = error.exit_code();
         let message = if exit_code == 3 { format!("invalid project: {error}") } else { error.to_string() };
-        Self { message, exit_code }
+        Self { message, exit_code, lock_busy: false }
     }
 
     pub(super) fn from_command<E>(error: E) -> Self
@@ -47,8 +55,9 @@ impl ApplicationError {
     {
         let error: CommandError = error.into();
         let exit_code = error.exit_code();
+        let lock_busy = matches!(error, CommandError::SyncLockBusy { .. });
         let message = if exit_code == 3 { format!("invalid project or record: {error}") } else { error.to_string() };
-        Self { message, exit_code }
+        Self { message, exit_code, lock_busy }
     }
 }
 
@@ -121,6 +130,11 @@ pub(super) enum CommandError {
     AutoSync(Box<WorkspaceSyncError>),
     #[error("could not lock `{path}`: {source}")]
     SyncLock { path: PathBuf, source: io::Error },
+    #[error(
+        "another `arcl` command held the sync lock `{path}` for more than {} s; try again when it finishes",
+        waited.as_secs_f64()
+    )]
+    SyncLockBusy { path: PathBuf, waited: Duration },
     #[error(transparent)]
     Domain(#[from] DomainError),
     #[error(transparent)]
@@ -198,6 +212,7 @@ impl CommandError {
             | Self::OpenDatabase { source: StorageError::Sqlite(_), .. }
             | Self::CurrentDirectory { .. }
             | Self::SyncLock { .. }
+            | Self::SyncLockBusy { .. }
             | Self::ReadSkill { .. }
             | Self::WriteSkill { .. } => 1,
             Self::SkillDrift { .. } => 4,

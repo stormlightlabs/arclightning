@@ -35,6 +35,18 @@ export function blockedDetail(): TaskDetail {
   };
 }
 
+/**
+ * {@link blockedDetail} with two completed blockers as `arcl show` lists
+ * them: T10.2 directly, with evidence, and T9 through T10, without.
+ */
+export function doneBlockersDetail(): TaskDetail {
+  const detail = blockedDetail();
+  const done = (id: string, title: string) => task(id, { title, status: "completed" });
+  detail.blockers.push({ task: done("t-10.2", "T10.2: Define the tool schema"), completed: true, evidence: "Landed in **#38**." });
+  detail.inherited_blockers.push({ task: done("t-9", "T9: Ship the store"), completed: true, evidence: "", ancestor: "t-10" });
+  return detail;
+}
+
 /** A ready task with no relations, handoff or evidence. */
 export function bareDetail(): TaskDetail {
   return {

@@ -669,6 +669,13 @@ impl Database {
         connected::planning_task_view(&self.connection, id)
     }
 
+    /// Read every connected-model task with its readiness and effective
+    /// phase, and every phase, in one pass.
+    pub fn planning_work(&self) -> Result<PlanningWork> {
+        let project = self.project()?;
+        connected::planning_work(&self.connection, project.id)
+    }
+
     /// Build the focused context packet for a connected-model task.
     pub fn planning_context(&self, id: TaskId) -> Result<PlanningContext> {
         connected::context(&self.connection, id)

@@ -1,6 +1,6 @@
 import { render } from "svelte/server";
 import { describe, expect, it } from "vitest";
-import { bareDetail, blockedDetail } from "./fixtures";
+import { bareDetail, blockedDetail, doneBlockersDetail } from "./fixtures";
 import TaskDetail from "./TaskDetail.svelte";
 
 /** The view's HTML without class attributes and hydration comments, which vary by build. */
@@ -36,6 +36,18 @@ describe("TaskDetail", () => {
     expect(slice(blockers, 'aria-label="Inherited from T10: Add the MCP server"', "</ul>")).toContain('href="/tasks/t-17"');
   });
 
+  it("lists completed blockers apart, as done, with their evidence as Markdown", () => {
+    const body = show({}, doneBlockersDetail());
+    const blocking = slice(body, 'id="task-blockers"', "</section>");
+    expect(blocking).not.toContain("t-10.2");
+    expect(blocking).not.toContain("t-9");
+    const done = slice(body, 'id="task-done-blockers"', "</section>");
+    expect(done).toMatch(/href="\/tasks\/t-10\.2">T10\.2: Define the tool schema<\/a>/);
+    expect(done).toContain(">Completed<");
+    expect(done).toContain("Landed in <strong>#38</strong>.");
+    expect(done).toMatch(/T9: Ship the store[^]*Inherited from <a href="\/tasks\/t-10">T10: Add the MCP server<\/a>[^]*No evidence recorded\./);
+  });
+
   it("shows the latest handoff and the evidence as Markdown", () => {
     const activity = slice(show(), 'id="task-activity"', "</section>");
     expect(activity).toContain("Mutations still need the <strong>authorization</strong> check.");
@@ -49,6 +61,7 @@ describe("TaskDetail", () => {
     expect(body).toContain("No evidence recorded.");
     expect(body).toContain("No other task waits on this one.");
     expect(body).not.toContain('id="task-blockers"');
+    expect(body).not.toContain('id="task-done-blockers"');
   });
 
   it("renders the body as Markdown with a way to open its source", () => {

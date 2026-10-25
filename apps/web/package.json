@@ -9,7 +9,8 @@
     "build": "pnpm --filter @arclightning/ui exec svelte-kit sync && vite build",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-    "test": "vitest run",
+    "test": "vitest run --project unit --project dom",
+    "test:browser": "vitest run --project browser",
     "test:e2e": "playwright test --project e2e",
     "test:visual": "playwright test --project visual",
     "test:visual:update": "playwright test --project visual --update-snapshots"
@@ -23,11 +24,14 @@
     "@sveltejs/adapter-static": "catalog:",
     "@sveltejs/kit": "catalog:",
     "@sveltejs/vite-plugin-svelte": "catalog:",
+    "@vitest/browser-playwright": "catalog:",
+    "happy-dom": "catalog:",
     "svelte": "catalog:",
     "svelte-check": "catalog:",
     "typescript": "catalog:",
     "unocss": "^66.8.1",
     "vite": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "vitest-browser-svelte": "catalog:"
   }
 }

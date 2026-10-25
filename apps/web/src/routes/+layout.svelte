@@ -2,7 +2,7 @@
   import "@arclightning/ui/styles.css";
   import "@arclightning/ui/inter.css";
   import "virtual:uno.css";
-  import { CommandMenu, Icon, type IconName } from "@arclightning/ui";
+  import { Button, CommandMenu, Feedback, Icon, type IconName } from "@arclightning/ui";
   import { afterNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
   import QuickCapture from "$lib/capture/QuickCapture.svelte";
@@ -21,7 +21,7 @@
     useCommands,
     type Command,
   } from "$lib/commands";
-  import { dataSource, type TaskSummary } from "$lib/data";
+  import { dataSource, type ChangeWarning, type TaskSummary } from "$lib/data";
   import { adoptToken } from "$lib/token";
   import { taskHref } from "$lib/work";
 
@@ -43,6 +43,8 @@
   let captureOpen = $state(false);
   /** What the last quick capture filed, announced until the next one. */
   let filed = $state<string | null>(null);
+  /** The warnings of the last quick capture, shown until dismissed. */
+  let captureWarnings = $state<ChangeWarning[]>([]);
   let pending: string[] = [];
   let pendingTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -142,6 +144,13 @@
   </nav>
   <main>
     {#if filed !== null}<p class="filed" role="status">{filed}</p>{/if}
+    {#each captureWarnings as warning, index (index)}
+      <Feedback tone="warning" title="The capture is saved, with a warning" message={`${warning.message} (${warning.code})`}>
+        {#snippet actions()}
+          <Button label="Dismiss" variant="ghost" onclick={() => (captureWarnings = captureWarnings.filter((_, other) => other !== index))} />
+        {/snippet}
+      </Feedback>
+    {/each}
     {@render children()}
   </main>
 </div>
@@ -157,8 +166,8 @@
 <QuickCapture
   bind:open={captureOpen}
   {mac}
-  oncaptured={(capture) => (filed = `Captured “${capture.title}” in the Inbox.`)}
-  oncreated={(task) => ((filed = `Created “${task.title}”.`), goto(taskHref(task.id)))}
+  oncaptured={(capture, warnings) => ((filed = `Captured “${capture.title}” in the Inbox.`), (captureWarnings = warnings))}
+  oncreated={(task, warnings) => ((filed = `Created “${task.title}”.`), (captureWarnings = []), goto(taskHref(task.id), { state: { warnings } }))}
 />
 
 <style>

@@ -68,7 +68,6 @@ pub(super) fn exec_capture(command: CaptureCommand) -> CResult<CaptureResult> {
             let target = target.or(to).ok_or_else(|| CommandError::InvalidFilter {
                 message: "capture promotion requires a target: spec, task, or note".to_owned(),
             })?;
-            let target = target.to_ascii_lowercase();
             let mut database = open_database()?;
             let capture = database
                 .capture(id)?
@@ -77,12 +76,12 @@ pub(super) fn exec_capture(command: CaptureCommand) -> CResult<CaptureResult> {
             let body = resolve_markdown(body)?.unwrap_or_else(|| capture.body.clone());
             let acceptance_criteria =
                 resolve_optional_value(acceptance_criteria, acceptance_criteria_file)?.unwrap_or_default();
-            let result = match target.as_str() {
-                "spec" => {
+            let result = match CapturePromotionKind::parse(&target) {
+                Some(CapturePromotionKind::Spec) => {
                     reject_promotion_task_fields(spec, plan, phase, parent)?;
                     database.promote_capture_to_spec(id, title, body, acceptance_criteria)?
                 }
-                "task" => {
+                Some(CapturePromotionKind::Task) => {
                     let priority = TaskPriority::parse(&priority)?;
                     let input = CaptureTaskPromotion {
                         spec_id: parse_optional_id(spec, SpecId::parse)?,
@@ -96,13 +95,16 @@ pub(super) fn exec_capture(command: CaptureCommand) -> CResult<CaptureResult> {
                     };
                     database.promote_capture_to_task(id, input)?
                 }
-                "note" => {
+                Some(CapturePromotionKind::Note) => {
                     reject_promotion_task_fields(spec, plan, phase, parent)?;
                     database.promote_capture_to_note(id, title, body)?
                 }
-                _ => {
+                None => {
                     return Err(CommandError::InvalidFilter {
-                        message: format!("unknown capture promotion target `{target}`; use spec, task, or note"),
+                        message: format!(
+                            "unknown capture promotion target `{}`; use spec, task, or note",
+                            target.to_ascii_lowercase()
+                        ),
                     });
                 }
             };

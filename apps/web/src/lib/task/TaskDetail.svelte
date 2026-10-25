@@ -1,5 +1,5 @@
 <script module lang="ts">
-  import type { TaskDetail } from "$lib/data";
+  import type { ChangeWarning, TaskDetail } from "$lib/data";
   import type { TaskAction } from "./actions";
 
   /** Props for the body of the Task view, once its task has loaded. */
@@ -16,6 +16,17 @@
      * list's menu asked for. An action without a form is ignored.
      */
     initialAction?: TaskAction | null;
+    /**
+     * Set by the view: whether an open form holds input that leaving would
+     * lose, such as a typed handoff note or a changed field.
+     */
+    unsaved?: boolean;
+    /**
+     * The warnings the last saved change gave, shown until dismissed. The
+     * view sets them after each change; a caller may pass a change's
+     * warnings in, such as those of the create that opened the view.
+     */
+    warnings?: ChangeWarning[];
   }
 </script>
 
@@ -39,9 +50,17 @@
     type ActionFailure,
     type TaskDraft,
   } from "./actions";
-  import { inheritedGroups, propertiesOf, reasonSegments, titlesOf } from "./view";
+  import { blockersOf, propertiesOf, reasonSegments, titlesOf, type DoneBlocker } from "./view";
 
-  let { detail, workHref, panelOpen = $bindable(true), onchanged, initialAction = null }: TaskDetailProps = $props();
+  let {
+    detail,
+    workHref,
+    panelOpen = $bindable(true),
+    onchanged,
+    initialAction = null,
+    unsaved = $bindable(false),
+    warnings = $bindable([]),
+  }: TaskDetailProps = $props();
   let showSource = $state(false);
 
   /** The action running now, or `"edit"` while an edit saves. */
@@ -61,11 +80,15 @@
 
   let task = $derived(detail.task);
   let titles = $derived(titlesOf(detail));
-  let inherited = $derived(inheritedGroups(detail));
+  let blockers = $derived(blockersOf(detail));
   let reasons = $derived(detail.readiness.reasons);
   let reasonCount = $derived(reasons.length === 1 ? "1 reason" : `${reasons.length} reasons`);
   let actions = $derived(actionsFor(task.status));
   let edit = $derived(draft === null ? {} : editOf(task, draft));
+
+  $effect(() => {
+    unsaved = (asking !== null && text.trim() !== "") || Object.keys(edit).length > 0;
+  });
 
   // The menu and the shortcuts run the same `choose` as the buttons.
   useCommands(() => ({
@@ -126,11 +149,17 @@
    * Run `change`, reload the task, then call `done`. A failed change stays
    * next to `action`; a failed reload after a saved change says so.
    */
-  async function perform<T>(action: TaskAction | "edit", change: () => Promise<T>, done: (result: T) => void) {
+  async function perform<T extends { warnings: ChangeWarning[] }>(
+    action: TaskAction | "edit",
+    change: () => Promise<T>,
+    done: (result: T) => void,
+  ) {
     busy = action;
     stale = null;
+    warnings = [];
     try {
       const result = await change();
+      warnings = result.warnings;
       await onchanged?.().catch((error: unknown) => (stale = failureOf(error)));
       done(result);
     } catch (error) {
@@ -152,6 +181,22 @@
     <a href={taskHref(related.id)}>{related.title}</a>
     <code>{related.id}</code>
     <StatusBadge status={related.status} />
+  </li>
+{/snippet}
+
+{#snippet done({ blocker, ancestor }: DoneBlocker)}
+  <li>
+    <div class="row">
+      <a href={taskHref(blocker.task.id)}>{blocker.task.title}</a>
+      <code>{blocker.task.id}</code>
+      <StatusBadge status={blocker.task.status} />
+    </div>
+    {#if ancestor}<p class="muted via">Inherited from <a href={taskHref(ancestor.id)}>{ancestor.title}</a></p>{/if}
+    {#if blocker.evidence}
+      <Markdown source={blocker.evidence} label={`Evidence for ${blocker.task.title}`} />
+    {:else}
+      <p class="muted">No evidence recorded.</p>
+    {/if}
   </li>
 {/snippet}
 
@@ -195,6 +240,13 @@
           </div>
         </form>
       {/if}
+      {#each warnings as warning, index (index)}
+        <Feedback tone="warning" title="The change is saved, with a warning" message={`${warning.message} (${warning.code})`}>
+          {#snippet actions()}
+            <Button label="Dismiss" variant="ghost" onclick={() => (warnings = warnings.filter((_, other) => other !== index))} />
+          {/snippet}
+        </Feedback>
+      {/each}
       {#if stale !== null}
         <Feedback tone="warning" title="The change is saved, but this view did not reload" message={`${stale.message} (${stale.code})`} />
       {/if}
@@ -223,7 +275,7 @@
       </p>
       {#if reasons.length}
         <ul>
-          {#each reasons as reason, index (index)}
+          {#each reasons as reason}
             <li data-kind={reason.kind}>
               {#each reasonSegments(reason, titles) as segment, part (part)}
                 {#if "href" in segment}<a href={segment.href} title={segment.id}>{segment.label}</a>{:else}{segment.text}{/if}
@@ -268,20 +320,29 @@
       </section>
     {/if}
 
-    {#if detail.blockers.length || inherited.length}
+    {#if blockers.direct.length || blockers.inherited.length}
       <section aria-labelledby="task-blockers">
         <h2 id="task-blockers">Blocked by</h2>
-        {#if detail.blockers.length}
+        {#if blockers.direct.length}
           <ul class="relations" aria-label="Direct blockers">
-            {#each detail.blockers as blocker (blocker.task.id)}{@render relation(blocker.task)}{/each}
+            {#each blockers.direct as blocker (blocker.task.id)}{@render relation(blocker.task)}{/each}
           </ul>
         {/if}
-        {#each inherited as group (group.ancestor.id)}
+        {#each blockers.inherited as group (group.ancestor.id)}
           <h3>Inherited from <a href={taskHref(group.ancestor.id)}>{group.ancestor.title}</a></h3>
           <ul class="relations" aria-label={`Inherited from ${group.ancestor.title}`}>
             {#each group.blockers as blocker (blocker.task.id)}{@render relation(blocker.task)}{/each}
           </ul>
         {/each}
+      </section>
+    {/if}
+
+    {#if blockers.done.length}
+      <section aria-labelledby="task-done-blockers">
+        <h2 id="task-done-blockers">Completed blockers</h2>
+        <ul class="relations done">
+          {#each blockers.done as entry (`${entry.ancestor?.id ?? ""}/${entry.blocker.task.id}`)}{@render done(entry)}{/each}
+        </ul>
       </section>
     {/if}
 
@@ -356,6 +417,10 @@
   .relations li + li { border-top: var(--arcl-border-width) solid var(--arcl-surface-subtle); }
   .relations a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .relations code { color: var(--arcl-text-muted); font: var(--arcl-type-xs) var(--arcl-font-code); }
+  .done li { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--arcl-space-1); padding: var(--arcl-space-2) var(--arcl-space-3); }
+  .done .row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--arcl-space-3); }
+  .done .via { font-size: var(--arcl-type-xs); }
+  .done .via a { color: var(--arcl-link); text-decoration: none; }
   .entry + .entry { margin-top: var(--arcl-space-2); }
   .actions, .buttons { display: flex; flex-wrap: wrap; gap: var(--arcl-space-2); margin-top: var(--arcl-space-2); }
   .ask, .edit { display: grid; gap: var(--arcl-space-3); margin-top: var(--arcl-space-2); }

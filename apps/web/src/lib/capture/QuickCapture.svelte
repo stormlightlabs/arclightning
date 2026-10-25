@@ -1,15 +1,15 @@
 <script module lang="ts">
-  import type { Capture, Task } from "$lib/data";
+  import type { Capture, ChangeWarning, Task } from "$lib/data";
 
   /** Props for the quick capture dialog. */
   export interface QuickCaptureProps {
     open?: boolean;
     /** Whether `Mod` is `⌘`, for the key hints. */
     mac?: boolean;
-    /** Called after `Enter` files a capture. */
-    oncaptured?: (capture: Capture) => void;
-    /** Called after `Mod+Enter` files a task. */
-    oncreated?: (task: Task) => void;
+    /** Called after `Enter` files a capture, with the warnings its syncs gave. */
+    oncaptured?: (capture: Capture, warnings: ChangeWarning[]) => void;
+    /** Called after `Mod+Enter` files a task, with the warnings its syncs gave. */
+    oncreated?: (task: Task, warnings: ChangeWarning[]) => void;
   }
 </script>
 
@@ -48,13 +48,13 @@
           failure = { code: "invalid_reference", message: names.join("; ") };
           return;
         }
-        const task = await dataSource().createTask(result.task);
+        const { value: task, warnings } = await dataSource().createTask(result.task);
         open = false;
-        oncreated?.(task);
+        oncreated?.(task, warnings);
       } else {
-        const capture = await dataSource().createCapture(captureOf(parsed));
+        const { value: capture, warnings } = await dataSource().createCapture(captureOf(parsed));
         open = false;
-        oncaptured?.(capture);
+        oncaptured?.(capture, warnings);
       }
     } catch (error) {
       failure = failureOf(error);

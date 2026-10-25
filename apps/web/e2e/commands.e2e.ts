@@ -42,8 +42,7 @@ async function serve(page: Page, status = "pending"): Promise<string[]> {
       return route.fulfill({ body: envelope({ action: "started", task: { ...task, status: "in_progress" } }) });
     }
     if (path === "/api/records?kind=task") return route.fulfill({ body: envelope({ records: [{ id: task.id, kind: "task", status, title: task.title }] }) });
-    if (path === "/api/records?kind=phase") return route.fulfill({ body: envelope({ records: [] }) });
-    if (path === `/api/tasks/${task.id}/explain`) return route.fulfill({ body: envelope({ task: shown, readiness, phase: null }) });
+    if (path === "/api/work") return route.fulfill({ body: envelope({ tasks: [{ task: shown, readiness, phase_id: null }], phases: [] }) });
     if (path.startsWith("/api/records/arcl-t-")) return route.fulfill({ body: envelope({ ...detail, task: shown }) });
     return route.fulfill({ status: 404, body: "{}" });
   });

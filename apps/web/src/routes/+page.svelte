@@ -15,7 +15,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { useCommands, type Command } from "$lib/commands";
-  import { dataSource, type NewTask, type TaskPriority, type WorkList } from "$lib/data";
+  import { dataSource, latestRead, type ChangeWarning, type NewTask, type TaskPriority, type WorkList } from "$lib/data";
   import { ACTION_KEYS, ACTION_LABELS, ACTION_TEXT, actionsFor, failureOf, runAction, type ActionFailure, type TaskAction } from "$lib/task";
   import {
     NO_MILESTONE,
@@ -29,6 +29,7 @@
     selectedOf,
     taskHref,
     visibleSelection,
+    withKnownMilestone,
     workKeyAction,
     writeFilters,
     type WorkFilters,
@@ -44,6 +45,8 @@
   let filters = $derived(parseFilters(page.url.searchParams));
   let groups = $derived(list ? groupWork(list, filters) : []);
   let order = $derived(rowOrder(groups));
+  // A selected task the filters hide is not selected.
+  let selected = $derived(visibleSelection(order, selectedId));
 
   const capitalize = (value: string) => value[0].toUpperCase() + value.slice(1);
   const any: SelectOption = { value: "", label: "Any" };
@@ -65,22 +68,39 @@
 
   /** The selected task's lifecycle action that last failed, shown above the list. */
   let actionFailure = $state<{ title: string; action: TaskAction; failure: ActionFailure } | null>(null);
+  /** The warnings of the last action run from the list, shown until dismissed. */
+  let actionWarnings = $state<ChangeWarning[]>([]);
   let actionBusy = $state(false);
   // Shortcuts and the menu act on the selected row only while the filters show it.
-  let visibleId = $derived(visibleSelection(order, selectedId));
-  let selected = $derived(list?.items.find((item) => item.task.id === visibleId)?.task ?? null);
+  let selectedTask = $derived(list?.items.find((item) => item.task.id === selected)?.task ?? null);
 
-  onMount(load);
+  const read = latestRead((signal) => dataSource().work(signal), {
+    loaded: (loaded) => (list = loaded),
+    failed: (error) => (failure = error instanceof Error ? error.message : String(error)),
+  });
+
+  onMount(() => {
+    load();
+    return read.stop;
+  });
+
+  // Once the list loads, and the router with it, keep the URL to the filters
+  // the menus show: one value each, and no milestone the list does not have.
+  $effect(() => {
+    if (list === null) return;
+    const shown = withKnownMilestone(filters, list.milestones.map((milestone) => milestone.id));
+    if (writeFilters(shown, page.url.searchParams).toString() !== page.url.searchParams.toString()) showFilters(shown);
+  });
 
   useCommands(() => ({
-    context: selected && { id: selected.id, label: selected.title },
+    context: selectedTask && { id: selectedTask.id, label: selectedTask.title },
     commands: [
-      ...(selected === null
+      ...(selectedTask === null
         ? []
         : [
-            { id: "work:open", label: "Open task", scope: "selection", keys: ["Enter"], viewKeys: true, icon: "arrowRight", run: () => goto(taskHref(selected.id)) } satisfies Command,
-            ...(actionBusy ? [] : actionsFor(selected.status)).map((action): Command => {
-              const id = selected.id;
+            { id: "work:open", label: "Open task", scope: "selection", keys: ["Enter"], viewKeys: true, icon: "arrowRight", run: () => goto(taskHref(selectedTask.id)) } satisfies Command,
+            ...(actionBusy ? [] : actionsFor(selectedTask.status)).map((action): Command => {
+              const id = selectedTask.id;
               return {
                 id: `work:${action}`,
                 label: ACTION_LABELS[action],
@@ -111,20 +131,18 @@
     }
     const title = list?.items.find((item) => item.task.id === id)?.task.title ?? id;
     actionFailure = null;
+    actionWarnings = [];
     actionBusy = true;
     try {
-      await runAction(dataSource(), id, action);
+      actionWarnings = (await runAction(dataSource(), id, action)).warnings;
     } catch (error) {
       actionFailure = { title, action, failure: failureOf(error) };
       return;
     } finally {
       actionBusy = false;
     }
-    try {
-      list = await dataSource().work();
-    } catch (error) {
-      failure = error instanceof Error ? error.message : String(error);
-    }
+    // Reload in place, so the list and its selection stay on screen.
+    read.start();
   }
 
   function openCreate() {
@@ -140,9 +158,10 @@
     createBusy = true;
     createFailure = null;
     try {
-      const task = await dataSource().createTask(body === "" ? { title, priority } : { title, body, priority });
+      const { value: task, warnings } = await dataSource().createTask(body === "" ? { title, priority } : { title, body, priority });
       creating = null;
-      await goto(taskHref(task.id));
+      // The Task view shows the create's warnings.
+      await goto(taskHref(task.id), { state: { warnings } });
     } catch (error) {
       createFailure = failureOf(error);
     } finally {
@@ -153,10 +172,7 @@
   function load() {
     failure = null;
     list = null;
-    dataSource()
-      .work()
-      .then((loaded) => (list = loaded))
-      .catch((error: unknown) => (failure = error instanceof Error ? error.message : String(error)));
+    read.start();
   }
 
   function setFilter(name: FilterName, value: string) {
@@ -174,10 +190,10 @@
     const action = workKeyAction(event);
     if (action === null) return;
     if (action === "open") {
-      if (visibleId === null) return;
-      goto(taskHref(visibleId));
+      if (selected === null) return;
+      goto(taskHref(selected));
     } else {
-      selectedId = moveSelection(order, selectedId, action === "next" ? 1 : -1);
+      selectedId = moveSelection(order, selected, action === "next" ? 1 : -1);
     }
     event.preventDefault();
   }
@@ -227,6 +243,13 @@
     message={`${actionFailure.failure.message} (${actionFailure.failure.code})`}
   />
 {/if}
+{#each actionWarnings as warning, index (index)}
+  <Feedback tone="warning" title="The change is saved, with a warning" message={`${warning.message} (${warning.code})`}>
+    {#snippet actions()}
+      <Button label="Dismiss" variant="ghost" onclick={() => (actionWarnings = actionWarnings.filter((_, other) => other !== index))} />
+    {/snippet}
+  </Feedback>
+{/each}
 
 {#if failure !== null}
   <Feedback tone="danger" title="Could not load tasks" message={failure}>
@@ -245,7 +268,7 @@
     {/snippet}
   </EmptyState>
 {:else}
-  <TaskList {groups} href={taskHref} {selectedId} onselect={(id) => (selectedId = id)} label="Work" />
+  <TaskList {groups} href={taskHref} selectedId={selected} onselect={(id) => (selectedId = id)} label="Work" />
 {/if}
 
 <style>

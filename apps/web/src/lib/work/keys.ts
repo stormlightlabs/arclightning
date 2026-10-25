@@ -48,14 +48,6 @@ export function moveSelection(order: string[], current: string | null, step: 1 |
 }
 
 /**
- * `current` when `order` shows it, else `null`. A selection the filters hide
- * stays in the URL but is not the task that shortcuts and the menu act on.
- */
-export function visibleSelection(order: string[], current: string | null): string | null {
-  return current !== null && order.includes(current) ? current : null;
-}
-
-/**
  * Whether `target` is in a form field or editable text, where keys type, or
  * in a dialog, which takes the keys while it is open.
  */
@@ -63,6 +55,11 @@ export function inField(target: EventTarget | null): boolean {
   return Boolean(
     closestOf(target)?.closest("input, textarea, select, dialog, [role=combobox], [role=listbox], [contenteditable]:not([contenteditable='false'])"),
   );
+}
+
+/** `selected` when the list shows it in `order`, otherwise `null`. */
+export function visibleSelection(order: string[], selected: string | null): string | null {
+  return selected !== null && order.includes(selected) ? selected : null;
 }
 
 /** `target` as something with `closest`, which every element has. */

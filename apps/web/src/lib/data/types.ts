@@ -181,36 +181,52 @@ export interface NewCapture {
 }
 
 /**
+ * A warning from the workspace sync around a saved change, as the CLI
+ * prints it under `--json`: `blocker_edge`, or `workspace_sync` when the
+ * export after the change failed.
+ */
+export interface ChangeWarning {
+  code: string;
+  message: string;
+}
+
+/** What a saved change returns, with the warnings its syncs gave. */
+export interface Changed<T> {
+  value: T;
+  warnings: ChangeWarning[];
+}
+
+/**
  * Where views read and change records. `arcl serve` backs it locally; another
  * backend, such as a claude.ai artifact's database, can stand in for it.
  *
- * Each change runs the `arcl task` or `arcl capture` command of the same name, with its
- * validation, and fails with a {@link DataError} carrying the CLI's error
- * code and message.
+ * Each change runs the `arcl task` or `arcl capture` command of the same
+ * name, with its validation, and fails with a {@link DataError} carrying the CLI's error
+ * code and message. A saved change can still carry warnings.
  */
 export interface DataSource {
-  /** Every task, with its readiness and milestone. */
-  work(): Promise<WorkList>;
-  /** One task with its readiness, relations, handoff and evidence. */
-  task(id: string): Promise<TaskDetail>;
+  /** Every task, with its readiness and milestone. Aborting `signal` stops the read. */
+  work(signal?: AbortSignal): Promise<WorkList>;
+  /** One task with its readiness, relations, handoff and evidence. Aborting `signal` stops the read. */
+  task(id: string, signal?: AbortSignal): Promise<TaskDetail>;
   /** Every task's ID, title and status, as `arcl list --kind task` lists them. */
   taskIndex(): Promise<TaskSummary[]>;
   /** `arcl task create`. */
-  createTask(input: NewTask): Promise<Task>;
+  createTask(input: NewTask): Promise<Changed<Task>>;
   /** `arcl task update <id>`. */
-  updateTask(id: string, edit: TaskEdit): Promise<Task>;
+  updateTask(id: string, edit: TaskEdit): Promise<Changed<Task>>;
   /** `arcl task start <id>`, with `--force` when `force` is set. */
-  startTask(id: string, options?: { force?: boolean }): Promise<Task>;
+  startTask(id: string, options?: { force?: boolean }): Promise<Changed<Task>>;
   /** `arcl task park <id>`. */
-  parkTask(id: string): Promise<Task>;
+  parkTask(id: string): Promise<Changed<Task>>;
   /** `arcl task unpark <id>`. */
-  unparkTask(id: string): Promise<Task>;
+  unparkTask(id: string): Promise<Changed<Task>>;
   /** `arcl task handoff <id> --note <note>`: record a resume note and park the task. */
-  handOffTask(id: string, note: string): Promise<Task>;
+  handOffTask(id: string, note: string): Promise<Changed<Task>>;
   /** `arcl task complete <id>`. */
-  completeTask(id: string, options?: CompleteOptions): Promise<TaskCompletion>;
+  completeTask(id: string, options?: CompleteOptions): Promise<Changed<TaskCompletion>>;
   /** `arcl capture create`. */
-  createCapture(input: NewCapture): Promise<Capture>;
+  createCapture(input: NewCapture): Promise<Changed<Capture>>;
 }
 
 /** A failed read or change, with the CLI's error code and message. */

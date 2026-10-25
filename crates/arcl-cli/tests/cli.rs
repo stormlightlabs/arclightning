@@ -3159,6 +3159,13 @@ impl Served {
     /// Send a `method` request for `path` with these extra header lines and
     /// `body`, and return the status and body.
     fn send(&self, method: &str, path: &str, headers: &[String], body: &str) -> (u16, String) {
+        let (status, _, body) = self.exchange(method, path, headers, body);
+        (status, body)
+    }
+
+    /// Send a request as [`Served::send`] does, and return the status, the
+    /// response head and the body.
+    fn exchange(&self, method: &str, path: &str, headers: &[String], body: &str) -> (u16, String, String) {
         use std::io::{Read, Write};
 
         let mut stream = std::net::TcpStream::connect(("127.0.0.1", self.port)).expect("arcl serve accepts");
@@ -3189,7 +3196,7 @@ impl Served {
             .expect("a status line")
             .parse()
             .expect("a numeric status");
-        (status, body.to_owned())
+        (status, head.to_owned(), body.to_owned())
     }
 
     /// GET `path` with the right `Host` and token.
@@ -3272,6 +3279,48 @@ fn serve_read_endpoints_match_the_cli_json() {
     let (status, body) = served.read("/api/records?kind=nothing");
     assert_eq!(status, 400);
     assert_eq!(body["error"]["code"], "invalid_request");
+}
+
+#[test]
+fn serve_work_endpoint_matches_explain_for_every_task() {
+    let directory = initialized_directory();
+    let blocker = run_json(directory.path(), ["--json", "task", "create", "Blocker"].as_ref());
+    let blocker = blocker["data"]["task"]["id"].as_str().expect("a task ID").to_owned();
+    let task = run_json(directory.path(), ["--json", "task", "create", "Blocked"].as_ref());
+    let task = task["data"]["task"]["id"].as_str().expect("a task ID").to_owned();
+    run_json(
+        directory.path(),
+        ["--json", "dependency", "add", &task, "--blocked-by", &blocker].as_ref(),
+    );
+
+    let served = Served::start(directory.path());
+    let (status, work) = served.read("/api/work");
+    assert_eq!(status, 200);
+    assert_eq!(work["format_version"], 2);
+    assert_eq!(work["data"]["phases"], serde_json::json!([]));
+    let items = work["data"]["tasks"].as_array().expect("tasks");
+    let listed = run_json(directory.path(), ["--json", "list", "--kind", "task"].as_ref());
+    assert_eq!(
+        items.len(),
+        listed["data"]["records"].as_array().expect("records").len()
+    );
+    for item in items {
+        let id = item["task"]["id"].as_str().expect("a task ID");
+        let explained = run_json(directory.path(), ["--json", "explain", id].as_ref());
+        assert_eq!(item["task"], explained["data"]["task"], "{id}");
+        assert_eq!(item["readiness"], explained["data"]["readiness"], "{id}");
+        assert_eq!(item["phase_id"], Value::Null, "{id}");
+    }
+
+    let (status, body) = served.read("/api/work?kind=task");
+    assert_eq!(status, 400);
+    assert_eq!(body["error"]["code"], "invalid_request");
+    assert_eq!(served.get("/api/work", &[served.host()]).0, 401);
+    let token = format!("X-Arcl-Token: {}", served.token);
+    assert_eq!(
+        served.get("/api/work", &["Host: evil.example".to_owned(), token]).0,
+        403
+    );
 }
 
 #[test]
@@ -3528,6 +3577,107 @@ fn serve_mutations_sync_the_workspace() {
     let (status, started) = served.write(&format!("/api/tasks/{task}/start"), "");
     assert_eq!(status, 200, "{started}");
     assert_eq!(started["data"]["task"]["title"], "Edited in Git");
+}
+
+#[test]
+fn serve_mutations_give_up_on_a_held_sync_lock_while_reads_go_on() {
+    use std::time::{Duration, Instant};
+
+    let directory = tempdir().expect("temporary directory can be created");
+    let dir = directory.path();
+    run_json(dir, ["--json", "init", "--workspace"].as_ref());
+    let task = create_task(dir, "Waits for the lock", None);
+    let served = Served::start(dir);
+    let lock = fs::OpenOptions::new()
+        .write(true)
+        .open(dir.join(".arcl/arcl.db-sync.lock"))
+        .expect("the lock file opens");
+    lock.lock().expect("the test holds the sync lock");
+
+    let started = Instant::now();
+    let (status, head, body) = std::thread::scope(|scope| {
+        let write = scope.spawn(|| {
+            served.exchange(
+                "POST",
+                &format!("/api/tasks/{task}/start"),
+                &served.write_headers(),
+                "{}",
+            )
+        });
+        // Reads take no lock, and run while the mutation waits.
+        std::thread::sleep(Duration::from_millis(300));
+        let read_started = Instant::now();
+        let (status, shown) = served.read(&format!("/api/records/{task}"));
+        assert_eq!(status, 200, "{shown}");
+        assert_eq!(shown["data"]["task"]["status"], "pending");
+        assert!(
+            read_started.elapsed() < Duration::from_secs(1),
+            "the read waited {:?}",
+            read_started.elapsed()
+        );
+        write.join().expect("the mutation answers")
+    });
+    let waited = started.elapsed();
+    assert!(
+        waited >= Duration::from_secs(3) && waited < Duration::from_secs(5),
+        "waited {waited:?}"
+    );
+    assert_eq!(status, 503, "{body}");
+    assert!(head.to_ascii_lowercase().contains("\r\nretry-after: 1"), "{head}");
+    let envelope: Value = serde_json::from_str(&body).expect("the body is JSON");
+    assert_eq!(envelope["error"]["code"], "application_error");
+    assert_eq!(envelope["error"]["exit_code"], 1);
+    assert!(
+        envelope["error"]["message"]
+            .as_str()
+            .expect("a message")
+            .contains("sync lock"),
+        "{body}"
+    );
+    // `arcl task show` would wait for the lock, so read through the server.
+    let (_, shown) = served.read(&format!("/api/records/{task}"));
+    assert_eq!(shown["data"]["task"]["status"], "pending");
+
+    lock.unlock().expect("the test releases the sync lock");
+    let (status, started) = served.write(&format!("/api/tasks/{task}/start"), "{}");
+    assert_eq!(status, 200, "{started}");
+    assert_eq!(task_field(dir, &task, "status"), "in_progress");
+}
+
+#[test]
+fn serve_mutation_replies_carry_sync_warnings() {
+    let directory = git_project();
+    let path = directory.path();
+    let root = create_task(path, "Root", None);
+    let child = create_task(path, "Child", Some(&root));
+    let other = create_task(path, "Other", None);
+    store_raw_edge(path, &root, &child);
+    assert_success(
+        &arcl_in(path)
+            .args(["workspace", "sync"])
+            .output()
+            .expect("command runs"),
+    );
+    commit_all(path, "base");
+    // An unrelated workspace edit makes the next mutation import.
+    edit_task_record(path, &other, "title = \"Other\"", "title = \"Other edited\"");
+    let served = Served::start(path);
+
+    let (status, created) = served.write("/api/tasks", r#"{"title":"New"}"#);
+    assert_eq!(status, 200, "{created}");
+    assert_eq!(created["data"]["action"], "created");
+    let warnings = created["warnings"].as_array().expect("a warnings array");
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert_eq!(warnings[0]["code"], "blocker_edge");
+    let message = warnings[0]["message"].as_str().expect("a message");
+    assert!(
+        message.contains("it was already in the database, so it loads"),
+        "{message}"
+    );
+
+    let (status, quiet) = served.write(&format!("/api/tasks/{other}/park"), "");
+    assert_eq!(status, 200, "{quiet}");
+    assert!(quiet.get("warnings").is_none(), "{quiet}");
 }
 
 #[test]

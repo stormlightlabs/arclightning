@@ -139,6 +139,7 @@ dependencies = [
 name = "arcl-mcp"
 version = "0.1.0"
 dependencies = [
+ "arcl-cli",
  "arcl-core",
  "arcl-repo",
  "arcl-store",
@@ -173,6 +174,7 @@ dependencies = [
  "getrandom 0.4.3",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
  "tiny_http",
 ]
@@ -2445,6 +2447,17 @@ checksum = "89f599ac0c323ebb1c6082821a54962b839832b03984598375bff3975b804423"
 dependencies = [
  "digest",
  "sha1",
+]
+
+[[package]]
+name = "sha2"
+version = "0.10.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.2.17",
+ "digest",
 ]
 
 [[package]]
