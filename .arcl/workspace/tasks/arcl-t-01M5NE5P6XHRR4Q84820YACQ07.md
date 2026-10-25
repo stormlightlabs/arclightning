@@ -2,10 +2,11 @@
 id = "arcl-t-01M5NE5P6XHRR4Q84820YACQ07"
 phase = "arcl-ph-01M5NE5P5RE8Y5Y5Y84T36FMEE"
 title = "T18: Serve the local web app"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 0
 blocked-by = ["arcl-t-01M5NE5P2N1AMT731RJBAZ66YT", "arcl-t-01M5NH1N3R9AX3XZH6XG9ZX1QE"]
+evidence = "Delivered by T18.1–T18.7: #35, #36, #39, #40, #41, #42, #43 and #44."
 +++
 
 Serve the Inbox, Work, Planning, and Task workflow in the browser from the
@@ -19,22 +20,22 @@ and look). The PR for T18.7, the last of them, completes T18 as well
 
 Acceptance criteria:
 
-- [ ] Add `arcl serve`, bound to `127.0.0.1` on an ephemeral port by default,
+- [x] Add `arcl serve`, bound to `127.0.0.1` on an ephemeral port by default,
       with `--port` to pin one and the URL printed on start (T18.1)
-- [ ] Check the `Host` header and require the per-run token in a request
+- [x] Check the `Host` header and require the per-run token in a request
       header on every request, never in a cookie or in a query string after
       the first page load (T18.1)
-- [ ] Require a matching `Origin` on mutations, send no CORS headers, and
+- [x] Require a matching `Origin` on mutations, send no CORS headers, and
       never change state on GET (T18.1, T18.4)
-- [ ] Add a thin HTTP adapter over the Rust application layer with the same
+- [x] Add a thin HTTP adapter over the Rust application layer with the same
       validation and errors as the CLI (T18.1, T18.4)
-- [ ] Build Inbox, Work, Planning, and Task views in `apps/web` from the shared
+- [x] Build Inbox, Work, Planning, and Task views in `apps/web` from the shared
       UI package, with CodeMirror 6 for Markdown (T18.1, T18.2, T18.3, T18.6)
-- [ ] Show readiness reasons, blockers, handoff, and evidence on the Task view
+- [x] Show readiness reasons, blockers, handoff, and evidence on the Task view
       (T18.3)
-- [ ] Support keyboard-only use, narrow windows, light and dark themes, and
+- [x] Support keyboard-only use, narrow windows, light and dark themes, and
       reduced motion (T18.2, T18.5, T18.7)
-- [ ] Add Playwright workflow and screenshot coverage for the four views
+- [x] Add Playwright workflow and screenshot coverage for the four views
       (T18.7)
 
 Verification:

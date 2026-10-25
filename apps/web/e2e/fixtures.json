@@ -1,0 +1,411 @@
+{
+  "/api/records/arcl-c-1": {
+    "data": {
+      "action": "shown",
+      "capture": {
+        "body": "A small dot that turns amber while writes wait.",
+        "created_at": "2026-10-20T09:00:00.000Z",
+        "id": "arcl-c-1",
+        "project_id": "arcl-pj-1",
+        "status": "captured",
+        "title": "Show sync status in the sidebar"
+      }
+    },
+    "format_version": 1
+  },
+  "/api/records/arcl-c-2": {
+    "data": {
+      "action": "shown",
+      "capture": {
+        "body": "",
+        "created_at": "2026-10-20T09:00:00.000Z",
+        "id": "arcl-c-2",
+        "project_id": "arcl-pj-1",
+        "status": "captured",
+        "title": "Investigate the flaky reconnect test"
+      }
+    },
+    "format_version": 1
+  },
+  "/api/records/arcl-c-3": {
+    "data": {
+      "action": "shown",
+      "capture": {
+        "body": "",
+        "created_at": "2026-10-20T09:00:00.000Z",
+        "id": "arcl-c-3",
+        "project_id": "arcl-pj-1",
+        "status": "captured",
+        "title": "Ask design about empty states"
+      }
+    },
+    "format_version": 1
+  },
+  "/api/records/arcl-t-2": {
+    "data": {
+      "ancestors": [],
+      "blockers": [],
+      "children": [],
+      "dependents": [
+        {
+          "body": "",
+          "evidence": "",
+          "handoff": "",
+          "id": "arcl-t-1",
+          "parent_id": null,
+          "phase_id": "arcl-ph-2",
+          "plan_id": "arcl-pl-1",
+          "plan_key": "queue/replay",
+          "position": 2,
+          "priority": "normal",
+          "project_id": "arcl-pj-1",
+          "spec_id": "arcl-s-1",
+          "status": "pending",
+          "title": "Replay the queue on reconnect"
+        }
+      ],
+      "inherited_blockers": [],
+      "phase": {
+        "body": "",
+        "id": "arcl-ph-2",
+        "plan_id": "arcl-pl-1",
+        "plan_key": "queue",
+        "position": 1,
+        "project_id": "arcl-pj-1",
+        "status": "open",
+        "title": "Milestone 1: Write queue"
+      },
+      "plan": {
+        "body": "",
+        "id": "arcl-pl-1",
+        "project_id": "arcl-pj-1",
+        "spec_id": "arcl-s-1",
+        "status": "open",
+        "title": "Queue writes while offline"
+      },
+      "readiness": {
+        "blocked": false,
+        "ready": false,
+        "reasons": [
+          {
+            "kind": "status",
+            "message": "task status is `parked`",
+            "task": "arcl-t-2"
+          }
+        ]
+      },
+      "spec": {
+        "acceptance_criteria": "",
+        "body": "Keep working without a network and catch up on reconnect.",
+        "id": "arcl-s-1",
+        "project_id": "arcl-pj-1",
+        "source_capture_id": null,
+        "status": "open",
+        "title": "Offline sync"
+      },
+      "task": {
+        "body": "Keep each write with its record ID and a sequence number, so replay keeps the order.\n\n- one table, `pending_writes`\n- drop a row once the server accepts it",
+        "evidence": "",
+        "handoff": "The table and insert path are in. Next: the drain loop and its test.",
+        "id": "arcl-t-2",
+        "parent_id": null,
+        "phase_id": "arcl-ph-2",
+        "plan_id": "arcl-pl-1",
+        "plan_key": "queue/store",
+        "position": 1,
+        "priority": "high",
+        "project_id": "arcl-pj-1",
+        "spec_id": "arcl-s-1",
+        "status": "parked",
+        "title": "Store pending writes in SQLite"
+      }
+    },
+    "format_version": 2
+  },
+  "/api/records?kind=capture&status=captured": {
+    "data": {
+      "records": [
+        {
+          "id": "arcl-c-1",
+          "kind": "capture",
+          "status": "captured",
+          "title": "Show sync status in the sidebar"
+        },
+        {
+          "id": "arcl-c-2",
+          "kind": "capture",
+          "status": "captured",
+          "title": "Investigate the flaky reconnect test"
+        },
+        {
+          "id": "arcl-c-3",
+          "kind": "capture",
+          "status": "captured",
+          "title": "Ask design about empty states"
+        }
+      ]
+    },
+    "format_version": 1
+  },
+  "/api/records?kind=task": {
+    "data": {
+      "records": [
+        {
+          "id": "arcl-t-1",
+          "kind": "task",
+          "status": "pending",
+          "title": "Replay the queue on reconnect"
+        },
+        {
+          "id": "arcl-t-2",
+          "kind": "task",
+          "status": "parked",
+          "title": "Store pending writes in SQLite"
+        },
+        {
+          "id": "arcl-t-3",
+          "kind": "task",
+          "status": "pending",
+          "title": "Show a sync badge"
+        },
+        {
+          "id": "arcl-t-4",
+          "kind": "task",
+          "status": "completed",
+          "title": "Write the changelog"
+        }
+      ]
+    },
+    "format_version": 1
+  },
+  "/api/tree": {
+    "data": {
+      "nodes": [
+        {
+          "children": [],
+          "id": "arcl-c-1",
+          "kind": "capture",
+          "status": "captured",
+          "title": "Show sync status in the sidebar"
+        },
+        {
+          "children": [],
+          "id": "arcl-c-2",
+          "kind": "capture",
+          "status": "captured",
+          "title": "Investigate the flaky reconnect test"
+        },
+        {
+          "children": [],
+          "id": "arcl-c-3",
+          "kind": "capture",
+          "status": "captured",
+          "title": "Ask design about empty states"
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "id": "arcl-t-2",
+                      "kind": "task",
+                      "status": "parked",
+                      "title": "Store pending writes in SQLite"
+                    },
+                    {
+                      "children": [],
+                      "id": "arcl-t-1",
+                      "kind": "task",
+                      "status": "pending",
+                      "title": "Replay the queue on reconnect"
+                    }
+                  ],
+                  "id": "arcl-ph-2",
+                  "kind": "phase",
+                  "status": "open",
+                  "title": "Milestone 1: Write queue"
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "id": "arcl-t-3",
+                      "kind": "task",
+                      "status": "pending",
+                      "title": "Show a sync badge"
+                    }
+                  ],
+                  "id": "arcl-ph-1",
+                  "kind": "phase",
+                  "status": "open",
+                  "title": "Milestone 2: Status in the app"
+                }
+              ],
+              "id": "arcl-pl-1",
+              "kind": "plan",
+              "status": "open",
+              "title": "Queue writes while offline"
+            }
+          ],
+          "id": "arcl-s-1",
+          "kind": "spec",
+          "status": "open",
+          "title": "Offline sync"
+        },
+        {
+          "children": [],
+          "id": "arcl-t-4",
+          "kind": "task",
+          "status": "completed",
+          "title": "Write the changelog"
+        }
+      ]
+    },
+    "format_version": 1
+  },
+  "/api/work": {
+    "data": {
+      "phases": [
+        {
+          "body": "",
+          "id": "arcl-ph-2",
+          "plan_id": "arcl-pl-1",
+          "plan_key": "queue",
+          "position": 1,
+          "project_id": "arcl-pj-1",
+          "status": "open",
+          "title": "Milestone 1: Write queue"
+        },
+        {
+          "body": "",
+          "id": "arcl-ph-1",
+          "plan_id": "arcl-pl-1",
+          "plan_key": "ui",
+          "position": 2,
+          "project_id": "arcl-pj-1",
+          "status": "open",
+          "title": "Milestone 2: Status in the app"
+        }
+      ],
+      "tasks": [
+        {
+          "phase_id": null,
+          "readiness": {
+            "blocked": false,
+            "ready": false,
+            "reasons": [
+              {
+                "kind": "status",
+                "message": "task status is `completed`",
+                "task": "arcl-t-4"
+              }
+            ]
+          },
+          "task": {
+            "body": "",
+            "evidence": "Delivered in the release notes.",
+            "handoff": "",
+            "id": "arcl-t-4",
+            "parent_id": null,
+            "phase_id": null,
+            "plan_id": null,
+            "position": 0,
+            "priority": "normal",
+            "project_id": "arcl-pj-1",
+            "spec_id": null,
+            "status": "completed",
+            "title": "Write the changelog"
+          }
+        },
+        {
+          "phase_id": "arcl-ph-2",
+          "readiness": {
+            "blocked": false,
+            "ready": false,
+            "reasons": [
+              {
+                "kind": "status",
+                "message": "task status is `parked`",
+                "task": "arcl-t-2"
+              }
+            ]
+          },
+          "task": {
+            "body": "Keep each write with its record ID and a sequence number, so replay keeps the order.\n\n- one table, `pending_writes`\n- drop a row once the server accepts it",
+            "evidence": "",
+            "handoff": "The table and insert path are in. Next: the drain loop and its test.",
+            "id": "arcl-t-2",
+            "parent_id": null,
+            "phase_id": "arcl-ph-2",
+            "plan_id": "arcl-pl-1",
+            "plan_key": "queue/store",
+            "position": 1,
+            "priority": "high",
+            "project_id": "arcl-pj-1",
+            "spec_id": "arcl-s-1",
+            "status": "parked",
+            "title": "Store pending writes in SQLite"
+          }
+        },
+        {
+          "phase_id": "arcl-ph-1",
+          "readiness": {
+            "blocked": false,
+            "ready": true,
+            "reasons": []
+          },
+          "task": {
+            "body": "",
+            "evidence": "",
+            "handoff": "",
+            "id": "arcl-t-3",
+            "parent_id": null,
+            "phase_id": "arcl-ph-1",
+            "plan_id": "arcl-pl-1",
+            "plan_key": "ui/badge",
+            "position": 1,
+            "priority": "normal",
+            "project_id": "arcl-pj-1",
+            "spec_id": "arcl-s-1",
+            "status": "pending",
+            "title": "Show a sync badge"
+          }
+        },
+        {
+          "phase_id": "arcl-ph-2",
+          "readiness": {
+            "blocked": true,
+            "ready": false,
+            "reasons": [
+              {
+                "blocker": "arcl-t-2",
+                "kind": "direct_blocker",
+                "message": "blocked by `arcl-t-2` (parked)"
+              }
+            ]
+          },
+          "task": {
+            "body": "",
+            "evidence": "",
+            "handoff": "",
+            "id": "arcl-t-1",
+            "parent_id": null,
+            "phase_id": "arcl-ph-2",
+            "plan_id": "arcl-pl-1",
+            "plan_key": "queue/replay",
+            "position": 2,
+            "priority": "normal",
+            "project_id": "arcl-pj-1",
+            "spec_id": "arcl-s-1",
+            "status": "pending",
+            "title": "Replay the queue on reconnect"
+          }
+        }
+      ]
+    },
+    "format_version": 2
+  }
+}

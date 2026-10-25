@@ -41,10 +41,16 @@
   let contextCleared = $state(false);
   let tasks = $state<TaskSummary[]>([]);
   let captureOpen = $state(false);
+  /** Whether the views menu is open. Only narrow windows hide it. */
+  let navOpen = $state(false);
   /** What the last quick capture filed, announced until the next one. */
   let filed = $state<string | null>(null);
   /** The warnings of the last quick capture, shown until dismissed. */
   let captureWarnings = $state<ChangeWarning[]>([]);
+  /** The sidebar, which a narrow window shows as the top bar. */
+  let nav = $state<HTMLElement>();
+  /** The Menu button, which Escape returns focus to. */
+  let navToggle = $state<HTMLButtonElement>();
   let pending: string[] = [];
   let pendingTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -101,6 +107,38 @@
     step.match?.run();
   }
 
+  /**
+   * Close the views menu on Escape pressed inside the bar, and return focus to
+   * its toggle. This runs in the capture phase and prevents the default, so the
+   * view's own Escape, such as the Task view's "back", does not run too. Escape
+   * pressed anywhere else, such as in an editor or a select in the view, keeps
+   * its own meaning.
+   */
+  function closeNavOnEscape(event: KeyboardEvent) {
+    if (event.key !== "Escape" || !navOpen || event.defaultPrevented) return;
+    if (!(event.target instanceof Node) || !nav?.contains(event.target) || !navToggle?.checkVisibility()) return;
+    event.preventDefault();
+    navOpen = false;
+    navToggle.focus();
+  }
+
+  /** Close the views menu when a click lands outside the bar. */
+  function closeNavOutside(event: PointerEvent) {
+    if (navOpen && event.target instanceof Node && !nav?.contains(event.target)) navOpen = false;
+  }
+
+  /**
+   * Close the views menu when focus moves to an element outside the bar, so it
+   * never stays open while the view has focus. Focus moving into a dialog,
+   * such as the one Search opens, leaves it open, so closing the dialog can
+   * return focus to the button that opened it. So does focus leaving the page,
+   * which has no `relatedTarget`.
+   */
+  function closeNavOnFocusOut(event: FocusEvent) {
+    const to = event.relatedTarget;
+    if (navOpen && to instanceof Element && !nav?.contains(to) && !to.closest("dialog")) navOpen = false;
+  }
+
   // Store the token before any view mounts and reads data. Drop it from the
   // URL once the first navigation finishes, since the router refuses to
   // navigate before that. A real navigation, unlike shallow `replaceState`,
@@ -108,39 +146,48 @@
   // token back.
   let cleaned = adoptToken(new URL(window.location.href), window.sessionStorage);
   afterNavigate(() => {
+    navOpen = false;
     const target = cleaned;
     cleaned = null;
     if (target) goto(target, { replaceState: true, keepFocus: true, noScroll: true });
   });
 </script>
 
-<svelte:window {onkeydown} />
+<svelte:window {onkeydown} onkeydowncapture={closeNavOnEscape} onpointerdown={closeNavOutside} />
 
 <div class="shell">
-  <nav class="sidebar" aria-label="Views">
-    <a class="brand" href="/">Arc Lightning</a>
-    <div class="tools">
-      <button type="button" class="tool" aria-keyshortcuts={mac ? "Meta+K" : "Control+K"} onclick={openMenu}>
-        <Icon name="search" size="1rem" />
-        <span>Search</span>
-        <span class="keys" aria-hidden="true">{#each menuKeys as key (key)}<kbd>{key}</kbd>{/each}</span>
-      </button>
-      <button type="button" class="tool" aria-keyshortcuts="Q" onclick={() => (captureOpen = true)}>
-        <Icon name="capture" size="1rem" />
-        <span>Capture</span>
-        <span class="keys" aria-hidden="true"><kbd>Q</kbd></span>
+  <nav class="sidebar" aria-label="Views" bind:this={nav} onfocusout={closeNavOnFocusOut}>
+    <div class="bar">
+      <a class="brand" href="/">Arc Lightning</a>
+      <button type="button" class="menu-toggle" bind:this={navToggle} aria-expanded={navOpen} aria-controls="views-menu" onclick={() => (navOpen = !navOpen)}>
+        <Icon name={navOpen ? "close" : "menu"} size="1.125rem" />
+        <span>Menu</span>
       </button>
     </div>
-    <ul>
-      {#each views as view (view.href)}
-        <li>
-          <a href={view.href} aria-current={page.url.pathname === view.href ? "page" : undefined}>
-            <Icon name={view.icon} size="1.125rem" />
-            {view.label}
-          </a>
-        </li>
-      {/each}
-    </ul>
+    <div class="menu" id="views-menu" data-open={navOpen ? "" : undefined}>
+      <div class="tools">
+        <button type="button" class="tool" aria-keyshortcuts={mac ? "Meta+K" : "Control+K"} onclick={openMenu}>
+          <Icon name="search" size="1rem" />
+          <span>Search</span>
+          <span class="keys" aria-hidden="true">{#each menuKeys as key (key)}<kbd>{key}</kbd>{/each}</span>
+        </button>
+        <button type="button" class="tool" aria-keyshortcuts="Q" onclick={() => (captureOpen = true)}>
+          <Icon name="capture" size="1rem" />
+          <span>Capture</span>
+          <span class="keys" aria-hidden="true"><kbd>Q</kbd></span>
+        </button>
+      </div>
+      <ul>
+        {#each views as view (view.href)}
+          <li>
+            <a href={view.href} aria-current={page.url.pathname === view.href ? "page" : undefined}>
+              <Icon name={view.icon} size="1.125rem" />
+              {view.label}
+            </a>
+          </li>
+        {/each}
+      </ul>
+    </div>
   </nav>
   <main>
     {#if filed !== null}<p class="filed" role="status">{filed}</p>{/if}
@@ -173,12 +220,15 @@
 <style>
   .shell { display: grid; grid-template-columns: 15rem 1fr; min-height: 100vh; }
   .sidebar { display: grid; align-content: start; gap: var(--arcl-space-4); padding: var(--arcl-space-4) var(--arcl-space-3); border-right: var(--arcl-border-width) solid var(--arcl-border); background: var(--arcl-surface); font-family: var(--arcl-font-ui); }
+  .bar { display: flex; align-items: center; justify-content: space-between; gap: var(--arcl-space-2); }
+  .menu { display: grid; gap: var(--arcl-space-4); }
+  .menu-toggle { display: none; align-items: center; gap: var(--arcl-space-1); padding: var(--arcl-space-1) var(--arcl-space-2); border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-sm); color: var(--arcl-text); background: var(--arcl-canvas); font: inherit; font-size: var(--arcl-type-sm); cursor: pointer; }
   .brand { padding: 0 var(--arcl-space-2); color: var(--arcl-heading); font-weight: 650; text-decoration: none; }
   ul { display: grid; gap: var(--arcl-space-1); margin: 0; padding: 0; list-style: none; }
   li a { display: flex; align-items: center; gap: var(--arcl-space-2); padding: var(--arcl-space-1) var(--arcl-space-2); border-radius: var(--arcl-radius-sm); color: var(--arcl-text-muted); font-size: var(--arcl-type-sm); text-decoration: none; }
   li a:hover { background: var(--arcl-surface-hover); color: var(--arcl-text); }
   li a[aria-current="page"] { background: var(--arcl-surface-subtle); color: var(--arcl-heading); font-weight: 600; }
-  main { padding: var(--arcl-space-5) var(--arcl-space-6); }
+  main { min-width: 0; padding: var(--arcl-space-5) var(--arcl-space-6); }
   .tools { display: grid; gap: var(--arcl-space-1); }
   .tool { display: flex; align-items: center; gap: var(--arcl-space-2); padding: var(--arcl-space-1) var(--arcl-space-2); border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-sm); color: var(--arcl-text-muted); background: var(--arcl-canvas); font: inherit; font-size: var(--arcl-type-sm); text-align: start; cursor: pointer; }
   .tool:hover { background: var(--arcl-surface-hover); color: var(--arcl-text); }
@@ -186,4 +236,16 @@
   .keys { display: inline-flex; gap: 2px; }
   kbd { display: inline-flex; min-width: 1.125rem; height: 1.125rem; align-items: center; justify-content: center; padding: 0 0.25rem; border: var(--arcl-border-width) solid var(--arcl-border); border-radius: 4px; background: var(--arcl-surface); font: 500 var(--arcl-type-xs) / 1 var(--arcl-font-ui); }
   .filed { margin: 0 0 var(--arcl-space-4); padding: var(--arcl-space-2) var(--arcl-space-3); border-inline-start: 4px solid var(--arcl-success); border-radius: var(--arcl-radius-sm); background: var(--arcl-success-surface); font-size: var(--arcl-type-sm); }
+  /* Narrow windows stack the sidebar above the page as a bar whose Menu button shows the views. */
+  @media (max-width: 48rem) {
+    /* The bar's height, border included. The page scrolls focused rows below it. */
+    :global(:root) { --shell-bar-height: 3rem; scroll-padding-top: var(--shell-bar-height); }
+    .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+    .sidebar { position: sticky; top: 0; z-index: 1; padding: 0 var(--arcl-space-3); border-right: 0; border-bottom: var(--arcl-border-width) solid var(--arcl-border); }
+    .bar { min-height: calc(var(--shell-bar-height) - var(--arcl-border-width)); }
+    .menu-toggle { display: inline-flex; }
+    .menu:not([data-open]) { display: none; }
+    .menu[data-open] { padding-bottom: var(--arcl-space-2); }
+    main { padding: var(--arcl-space-4) var(--arcl-space-3); }
+  }
 </style>
