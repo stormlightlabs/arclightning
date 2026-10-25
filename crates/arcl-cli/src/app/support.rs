@@ -109,7 +109,12 @@ pub(super) fn read_stdin() -> CResult<Option<String>> {
 
 pub(super) fn read_plan_document(path: &Path) -> CResult<arcl_core::plan::PlanDocument> {
     let input = resolve_optional_value(None, Some(path.to_owned()))?.unwrap_or_default();
-    arcl_core::plan::parse(&input).map_err(|error| CommandError::Storage(StorageError::InvalidPlanInput(error)))
+    parse_plan_document(&input)
+}
+
+/// Parse and validate a structured plan from its TOML text.
+pub(super) fn parse_plan_document(input: &str) -> CResult<arcl_core::plan::PlanDocument> {
+    arcl_core::plan::parse(input).map_err(|error| CommandError::Storage(StorageError::InvalidPlanInput(error)))
 }
 
 pub(super) fn open_database() -> CResult<Database> {

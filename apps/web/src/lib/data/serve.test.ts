@@ -248,6 +248,84 @@ describe("serveSource captures and search", () => {
   });
 });
 
+describe("serveSource triage and planning", () => {
+  const auth = () => ({ "X-Arcl-Token": "abc" });
+  const posted = { "X-Arcl-Token": "abc", "Content-Type": "application/json" };
+  const capture = { id: "c 1", title: "Idea !high", body: "More", status: "captured", created_at: "2026-10-24T00:00:00Z", project_id: "pj" };
+
+  it("lists open captures and reads one with its body", async () => {
+    const { fetch, calls } = fakeFetch({
+      "/api/records?kind=capture&status=captured": { body: listing([{ id: "c 1", kind: "capture", status: "captured", title: "Idea !high" }]) },
+      "/api/records/c%201": { body: { format_version: 1, data: { action: "shown", capture } } },
+      "/api/records/t-1": { body: { format_version: 2, data: { task: {} } } },
+    });
+    const source = serveSource({ fetch, headers: auth });
+    expect(await source.captures()).toEqual([{ id: "c 1", title: "Idea !high", status: "captured" }]);
+    expect(await source.capture("c 1")).toEqual(capture);
+    await expect(source.capture("t-1")).rejects.toMatchObject({ code: "not_a_capture" });
+    expect(calls.map((call) => call.path)).toEqual(["/api/records?kind=capture&status=captured", "/api/records/c%201", "/api/records/t-1"]);
+  });
+
+  it("promotes and discards a capture, naming the record a promotion made", async () => {
+    const promoted = (kind: string) => ({
+      body: { format_version: 1, data: { capture: { ...capture, status: "promoted" }, promotion: {}, [kind]: { id: `${kind}-1`, title: "Idea" } } },
+    });
+    const { fetch, calls } = fakeFetch({
+      "/api/captures/c%201/promote": promoted("spec"),
+      "/api/captures/c%201/discard": { body: { format_version: 1, data: { action: "discarded", capture: { ...capture, status: "discarded" } } } },
+    });
+    const source = serveSource({ fetch, headers: auth });
+    expect(await source.promoteCapture("c 1", { to: "spec", acceptance_criteria: "- works" })).toEqual({
+      value: { kind: "spec", id: "spec-1", title: "Idea" },
+      warnings: [],
+    });
+    expect((await source.discardCapture("c 1")).value.status).toBe("discarded");
+    expect(calls).toEqual([
+      { path: "/api/captures/c%201/promote", method: "POST", headers: posted, body: { to: "spec", acceptance_criteria: "- works" } },
+      { path: "/api/captures/c%201/discard", method: "POST", headers: posted, body: {} },
+    ]);
+  });
+
+  it("reads the tree and the Work list together for Planning, both stopped by one signal", async () => {
+    const node = { kind: "spec", id: "s-1", title: "Spec", status: "open", children: [] };
+    const { fetch, calls } = fakeFetch({
+      "/api/tree": { body: { format_version: 1, data: { nodes: [node] } } },
+      "/api/work": { body: { format_version: 2, data: { tasks: [item("t-1", "ph-7")], phases: [phase("ph-7", 7)] } } },
+    });
+    const signal = new AbortController().signal;
+    const planning = await serveSource({ fetch, headers: auth }).planning(signal);
+    expect(planning.tree).toEqual([node]);
+    expect(planning.work.items[0].milestone?.id).toBe("ph-7");
+    expect(calls.map((call) => [call.path, call.signal])).toEqual([
+      ["/api/tree", signal],
+      ["/api/work", signal],
+    ]);
+  });
+
+  it("creates a spec and a plan, and applies a plan document", async () => {
+    const spec = { id: "s-1", title: "Spec", body: "", acceptance_criteria: "", status: "open" };
+    const plan = { id: "pl 1", spec_id: "s-1", title: "Plan", body: "", status: "open" };
+    const { fetch, calls } = fakeFetch({
+      "/api/specs": { body: { format_version: 1, data: { action: "created", spec } } },
+      "/api/plans": { body: { format_version: 1, data: { action: "created", plan } } },
+      "/api/plans/pl%201/apply": { body: { format_version: 1, data: { plan, phases: [phase("ph-1", 1)], tasks: [], dependencies: [], diff: {} } } },
+    });
+    const source = serveSource({ fetch, headers: auth });
+    expect((await source.createSpec({ title: "Spec" })).value).toEqual(spec);
+    expect((await source.createPlan({ title: "Plan", spec: "s-1" })).value).toEqual(plan);
+    expect((await source.applyPlan("pl 1", "format-version = 1")).value).toEqual({
+      plan,
+      phases: [{ id: "ph-1", plan_id: "pl", title: "Milestone 1", status: "open", position: 1 }],
+      tasks: [],
+    });
+    expect(calls.map((call) => [call.path, call.body])).toEqual([
+      ["/api/specs", { title: "Spec" }],
+      ["/api/plans", { title: "Plan", spec: "s-1" }],
+      ["/api/plans/pl%201/apply", { document: "format-version = 1" }],
+    ]);
+  });
+});
+
 describe("dataSource", () => {
   it("returns the source a build set in place of arcl serve", async () => {
     const refuse = async (id: string) => Promise.reject(new DataError("not_found", id));
@@ -263,6 +341,14 @@ describe("dataSource", () => {
       completeTask: refuse,
       taskIndex: async () => [],
       createCapture: async (input) => refuse(input.title),
+      captures: async () => [],
+      capture: refuse,
+      promoteCapture: refuse,
+      discardCapture: refuse,
+      planning: async () => ({ tree: [], work: { milestones: [], items: [] } }),
+      createSpec: async (input) => refuse(input.title),
+      createPlan: async (input) => refuse(input.title),
+      applyPlan: refuse,
     };
     setDataSource(artifact);
     expect(dataSource()).toBe(artifact);

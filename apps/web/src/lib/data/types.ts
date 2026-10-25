@@ -180,6 +180,101 @@ export interface NewCapture {
   body?: string;
 }
 
+/** A capture as `arcl list --kind capture` lists it, without its body. */
+export interface CaptureSummary {
+  id: string;
+  title: string;
+  status: CaptureStatus;
+}
+
+/** What `arcl capture promote` turns a capture into. */
+export type PromotionTarget = "task" | "spec" | "note";
+
+/**
+ * The options of `arcl capture promote`. A title or body left out is the
+ * capture's. `acceptance_criteria` applies to a spec; `spec`, `plan`,
+ * `phase`, `parent` and `priority` apply to a task.
+ */
+export interface CapturePromotion {
+  to: PromotionTarget;
+  title?: string;
+  body?: string;
+  acceptance_criteria?: string;
+  spec?: string;
+  plan?: string;
+  phase?: string;
+  /** The parent task's ID. */
+  parent?: string;
+  priority?: TaskPriority;
+}
+
+/** The record a promotion created. */
+export interface Promoted {
+  kind: PromotionTarget;
+  id: string;
+  title: string;
+}
+
+/** A spec record, as `arcl spec create --json` returns it. */
+export interface Spec {
+  id: string;
+  title: string;
+  body: string;
+  acceptance_criteria: string;
+  status: string;
+}
+
+/** A plan record, as `arcl plan create --json` returns it. */
+export interface Plan {
+  id: string;
+  /** The spec that owns the plan. */
+  spec_id: string;
+  title: string;
+  body: string;
+  status: ContainerStatus;
+}
+
+/** The options of `arcl spec create`. */
+export interface NewSpec {
+  title: string;
+  body?: string;
+  acceptance_criteria?: string;
+}
+
+/** The options of `arcl plan create`. */
+export interface NewPlan {
+  title: string;
+  /** The ID of the spec that owns the plan. */
+  spec: string;
+  body?: string;
+}
+
+/** What `arcl plan apply --json` returns: the plan with every phase and task it owns. */
+export interface PlanApplied {
+  plan: Plan;
+  phases: Milestone[];
+  tasks: Task[];
+}
+
+/** One record in the planning hierarchy, as `arcl tree --json` returns it. */
+export interface TreeNode {
+  /** The record kind, such as `spec`, `plan`, `phase` or `task`. */
+  kind: string;
+  id: string;
+  title: string;
+  status: string;
+  children: TreeNode[];
+}
+
+/**
+ * What the Planning view shows: the planning hierarchy in `arcl tree` order,
+ * and every task's readiness and milestone.
+ */
+export interface Planning {
+  tree: TreeNode[];
+  work: WorkList;
+}
+
 /**
  * A warning from the workspace sync around a saved change, as the CLI
  * prints it under `--json`: `blocker_edge`, or `workspace_sync` when the
@@ -200,8 +295,8 @@ export interface Changed<T> {
  * Where views read and change records. `arcl serve` backs it locally; another
  * backend, such as a claude.ai artifact's database, can stand in for it.
  *
- * Each change runs the `arcl task` or `arcl capture` command of the same
- * name, with its validation, and fails with a {@link DataError} carrying the CLI's error
+ * Each change runs the `arcl task`, `arcl capture`, `arcl spec` or `arcl plan`
+ * command of the same name, with its validation, and fails with a {@link DataError} carrying the CLI's error
  * code and message. A saved change can still carry warnings.
  */
 export interface DataSource {
@@ -227,6 +322,22 @@ export interface DataSource {
   completeTask(id: string, options?: CompleteOptions): Promise<Changed<TaskCompletion>>;
   /** `arcl capture create`. */
   createCapture(input: NewCapture): Promise<Changed<Capture>>;
+  /** The captures not yet promoted or discarded, oldest first. Aborting `signal` stops the read. */
+  captures(signal?: AbortSignal): Promise<CaptureSummary[]>;
+  /** One capture with its body. Aborting `signal` stops the read. */
+  capture(id: string, signal?: AbortSignal): Promise<Capture>;
+  /** `arcl capture promote <id>`. */
+  promoteCapture(id: string, input: CapturePromotion): Promise<Changed<Promoted>>;
+  /** `arcl capture discard <id>`. */
+  discardCapture(id: string): Promise<Changed<Capture>>;
+  /** The planning hierarchy with every task's readiness. Aborting `signal` stops the read. */
+  planning(signal?: AbortSignal): Promise<Planning>;
+  /** `arcl spec create`. */
+  createSpec(input: NewSpec): Promise<Changed<Spec>>;
+  /** `arcl plan create`. */
+  createPlan(input: NewPlan): Promise<Changed<Plan>>;
+  /** `arcl plan apply <id>`, with `document` as the TOML `--file` holds. */
+  applyPlan(id: string, document: string): Promise<Changed<PlanApplied>>;
 }
 
 /** A failed read or change, with the CLI's error code and message. */

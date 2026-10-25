@@ -3,10 +3,10 @@
 //! Each read opens the database and runs the same read as the CLI, with no
 //! workspace sync. A read never changes records, though opening the database
 //! can run its migrations. Each mutation runs the same `arcl task` or
-//! `arcl capture` command as the CLI, with the same sync around it: it takes
-//! the sync lock, syncs, changes the record and syncs again to export it. The
-//! server holds the lock only during a mutation, so other arcl commands run
-//! while it serves.
+//! `arcl capture`, `arcl spec` or `arcl plan` command as the CLI, with the
+//! same sync around it: it takes the sync lock, syncs, changes the record and
+//! syncs again to export it. The server holds the lock only during a
+//! mutation, so other arcl commands run while it serves.
 //!
 //! A mutation waits at most [`LOCK_WAIT`] for the lock. When another command
 //! holds it longer, the mutation fails with `application_error`, exit code 1,
@@ -14,9 +14,13 @@
 //! lists the warnings its syncs gave in `warnings`, as objects with the
 //! `code` and `message` the CLI prints to stderr under `--json`.
 
-use arcl_serve::{Completion, Handoff, Mutations, NewCapture, NewTask, Reads, Reply, Server, TaskEdit, TaskStart};
+use arcl_serve::{
+    CapturePromotion, Completion, Handoff, Mutations, NewCapture, NewPlan, NewSpec, NewTask, PlanInput, Reads, Reply,
+    Server, TaskEdit, TaskStart,
+};
 
 use super::reads::*;
+use super::support::{parse_plan_document, parse_plan_id};
 use super::*;
 
 /// How long a mutation waits for the project's sync lock. The CLI waits as
@@ -76,6 +80,10 @@ impl Reads for ServeApp {
 
     fn context(&self, task_id: &str) -> Reply {
         reply(read_context(task_id, &self.renderer))
+    }
+
+    fn tree(&self) -> Reply {
+        reply(read_tree(None, &self.renderer))
     }
 
     fn work(&self) -> Reply {
@@ -149,6 +157,61 @@ impl Mutations for ServeApp {
         let command =
             CaptureCommand::Create { title: input.title, body: MarkdownArgs { body: input.body, body_file: None } };
         self.write(|| run_capture(command, &self.renderer))
+    }
+
+    fn promote_capture(&self, id: &str, input: CapturePromotion) -> Reply {
+        let command = CaptureCommand::Promote {
+            id: id.to_owned(),
+            target: None,
+            to: Some(input.to),
+            title: input.title,
+            body: MarkdownArgs { body: input.body, body_file: None },
+            acceptance_criteria: input.acceptance_criteria,
+            acceptance_criteria_file: None,
+            spec: input.spec,
+            plan: input.plan,
+            phase: input.phase,
+            parent: input.parent,
+            priority: input.priority.unwrap_or_else(|| "normal".to_owned()),
+            position: 0,
+        };
+        self.write(|| run_capture(command, &self.renderer))
+    }
+
+    fn discard_capture(&self, id: &str) -> Reply {
+        let command = CaptureCommand::Discard { id: id.to_owned() };
+        self.write(|| run_capture(command, &self.renderer))
+    }
+
+    fn create_spec(&self, input: NewSpec) -> Reply {
+        let command = SpecCommand::Create {
+            title: input.title,
+            body: MarkdownArgs { body: input.body, body_file: None },
+            acceptance: AcceptanceArgs {
+                acceptance_criteria: input.acceptance_criteria,
+                acceptance_criteria_file: None,
+            },
+        };
+        self.write(|| run_spec(command, &self.renderer))
+    }
+
+    fn create_plan(&self, input: NewPlan) -> Reply {
+        let command = PlanCommand::Create {
+            title: input.title,
+            spec: input.spec,
+            body: MarkdownArgs { body: input.body, body_file: None },
+            input: None,
+            no_input: true,
+        };
+        self.write(|| run_plan(command, &self.renderer))
+    }
+
+    fn apply_plan(&self, id: &str, input: PlanInput) -> Reply {
+        self.write(|| {
+            let id = parse_plan_id(id).map_err(ApplicationError::from_command)?;
+            let document = parse_plan_document(&input.document).map_err(ApplicationError::from_command)?;
+            apply_plan_document(id, &document, &self.renderer)
+        })
     }
 }
 

@@ -3680,6 +3680,206 @@ fn serve_mutation_replies_carry_sync_warnings() {
     assert!(quiet.get("warnings").is_none(), "{quiet}");
 }
 
+/// A plan document with one phase holding one task with a subtask.
+const SERVED_PLAN: &str = r#"format-version = 1
+
+[[phases]]
+key = "first"
+title = "First phase"
+position = 1
+
+[[phases.tasks]]
+key = "build"
+title = "Build it"
+position = 1
+priority = "high"
+
+[[phases.tasks.subtasks]]
+key = "test"
+title = "Test it"
+position = 1
+"#;
+
+#[test]
+fn serve_promotes_and_discards_captures_as_the_cli_does() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let phase_spec = run_json(dir, ["--json", "spec", "create", "Spec"].as_ref())["data"]["spec"]["id"]
+        .as_str()
+        .expect("a spec ID")
+        .to_owned();
+    let plan = run_json(
+        dir,
+        ["--json", "plan", "create", "Plan", "--spec", &phase_spec].as_ref(),
+    )["data"]["plan"]["id"]
+        .as_str()
+        .expect("a plan ID")
+        .to_owned();
+    let phase = run_json(
+        dir,
+        [
+            "--json",
+            "plan",
+            "phase",
+            "create",
+            "Phase",
+            "--plan",
+            &plan,
+            "--position",
+            "1",
+        ]
+        .as_ref(),
+    )["data"]["phase"]["id"]
+        .as_str()
+        .expect("a phase ID")
+        .to_owned();
+    let to_task = create_capture(dir, "Fix the bug !high", "Details");
+    let to_note = create_capture(dir, "A thought", "More");
+    let to_discard = create_capture(dir, "Never mind", "");
+    let served = Served::start(dir);
+
+    let body = serde_json::json!({ "to": "task", "title": "Fix the bug", "priority": "high", "phase": phase });
+    let (status, promoted) = served.write(&format!("/api/captures/{to_task}/promote"), &body.to_string());
+    assert_eq!(status, 200, "{promoted}");
+    assert_eq!(promoted["data"]["capture"]["status"], "promoted");
+    let task = promoted["data"]["task"]["id"].as_str().expect("a task ID").to_owned();
+    assert_eq!(task_field(dir, &task, "title"), "Fix the bug");
+    assert_eq!(task_field(dir, &task, "body"), "Details");
+    assert_eq!(task_field(dir, &task, "priority"), "high");
+    assert_eq!(task_field(dir, &task, "phase_id"), Value::from(phase));
+
+    let (status, noted) = served.write(&format!("/api/captures/{to_note}/promote"), r#"{"to":"note"}"#);
+    assert_eq!(status, 200, "{noted}");
+    let note = noted["data"]["note"]["id"].as_str().expect("a note ID");
+    let shown = run_json(dir, ["--json", "note", "show", note].as_ref());
+    assert_eq!(shown["data"]["note"]["title"], "A thought");
+
+    let (status, discarded) = served.write(&format!("/api/captures/{to_discard}/discard"), "");
+    assert_eq!(status, 200, "{discarded}");
+    assert_eq!(discarded["data"]["action"], "discarded");
+    let shown = run_json(dir, ["--json", "capture", "show", &to_discard].as_ref());
+    assert_eq!(shown["data"]["capture"]["status"], "discarded");
+
+    let open = create_capture(dir, "Still open", "");
+    for (path, body, args) in [
+        (
+            format!("/api/captures/{open}/promote"),
+            r#"{"to":"milestone"}"#,
+            vec!["capture", "promote", &open, "milestone"],
+        ),
+        (
+            format!("/api/captures/{open}/promote"),
+            r#"{"to":"note","phase":"arcl-ph-00000000000000000000000000"}"#,
+            vec![
+                "capture",
+                "promote",
+                &open,
+                "note",
+                "--phase",
+                "arcl-ph-00000000000000000000000000",
+            ],
+        ),
+        (
+            format!("/api/captures/{to_discard}/promote"),
+            r#"{"to":"task"}"#,
+            vec!["capture", "promote", &to_discard, "task"],
+        ),
+    ] {
+        let (code, expected) = cli_error(dir, &args);
+        let status = match code {
+            Some(2 | 3) => 400,
+            Some(4) => 409,
+            _ => panic!("unexpected exit code {code:?} for {args:?}"),
+        };
+        assert_eq!(served.write(&path, body), (status, expected), "{path} {body}");
+    }
+    let shown = run_json(dir, ["--json", "capture", "show", &open].as_ref());
+    assert_eq!(shown["data"]["capture"]["status"], "captured");
+}
+
+#[test]
+fn serve_turns_a_capture_into_a_spec_plan_and_tasks() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let capture = create_capture(dir, "Planned idea", "Why it matters");
+    let served = Served::start(dir);
+
+    let (status, promoted) = served.write(
+        &format!("/api/captures/{capture}/promote"),
+        r#"{"to":"spec","acceptance_criteria":"- it works"}"#,
+    );
+    assert_eq!(status, 200, "{promoted}");
+    let spec = promoted["data"]["spec"]["id"].as_str().expect("a spec ID").to_owned();
+    let shown = run_json(dir, ["--json", "spec", "show", &spec].as_ref());
+    assert_eq!(shown["data"]["spec"]["title"], "Planned idea");
+    assert_eq!(shown["data"]["spec"]["acceptance_criteria"], "- it works");
+
+    let body = serde_json::json!({ "title": "Delivery", "spec": spec, "body": "How" }).to_string();
+    let (status, created) = served.write("/api/plans", &body);
+    assert_eq!(status, 200, "{created}");
+    assert_eq!(created["data"]["action"], "created");
+    let plan = created["data"]["plan"]["id"].as_str().expect("a plan ID").to_owned();
+
+    let body = serde_json::json!({ "document": SERVED_PLAN }).to_string();
+    let (status, applied) = served.write(&format!("/api/plans/{plan}/apply"), &body);
+    assert_eq!(status, 200, "{applied}");
+    assert_eq!(applied["data"]["plan"]["id"], Value::from(plan.as_str()));
+    assert_eq!(applied["data"]["phases"].as_array().expect("phases").len(), 1);
+    assert_eq!(applied["data"]["tasks"].as_array().expect("tasks").len(), 2);
+
+    let tree = run_json(dir, ["--json", "tree", &spec].as_ref());
+    let plan_node = &tree["data"]["nodes"][0]["children"][0];
+    assert_eq!(plan_node["id"], Value::from(plan.as_str()));
+    let phase_node = &plan_node["children"][0];
+    assert_eq!(phase_node["title"], "First phase");
+    assert_eq!(phase_node["children"][0]["title"], "Build it");
+    assert_eq!(phase_node["children"][0]["children"][0]["title"], "Test it");
+    assert_eq!(
+        served.read("/api/tree"),
+        (200, run_json(dir, ["--json", "tree"].as_ref()))
+    );
+
+    let (status, spec_created) = served.write("/api/specs", r#"{"title":"Fresh spec","acceptance_criteria":"- done"}"#);
+    assert_eq!(status, 200, "{spec_created}");
+    assert_eq!(spec_created["data"]["spec"]["acceptance_criteria"], "- done");
+
+    let bad = dir.join("bad.toml");
+    fs::write(&bad, "format-version = 2\n").expect("the plan file writes");
+    let bad_path = bad.to_str().expect("a UTF-8 path");
+    let failures = [
+        (
+            format!("/api/plans/{plan}/apply"),
+            serde_json::json!({ "document": "format-version = 2\n" }).to_string(),
+            vec!["plan", "apply", plan.as_str(), "--file", bad_path],
+        ),
+        (
+            "/api/plans".to_owned(),
+            r#"{"title":"Orphan","spec":"arcl-s-00000000000000000000000000"}"#.to_owned(),
+            vec![
+                "plan",
+                "create",
+                "Orphan",
+                "--spec",
+                "arcl-s-00000000000000000000000000",
+            ],
+        ),
+        (
+            "/api/specs".to_owned(),
+            r#"{"title":"  "}"#.to_owned(),
+            vec!["spec", "create", "  "],
+        ),
+    ];
+    for (path, body, args) in failures {
+        let (code, expected) = cli_error(dir, &args);
+        let status = match code {
+            Some(2 | 3) => 400,
+            Some(5) => 404,
+            _ => panic!("unexpected exit code {code:?} for {args:?}"),
+        };
+        assert_eq!(served.write(&path, &body), (status, expected), "{path} {body}");
+    }
+}
+
 #[test]
 fn serve_outside_a_project_fails_before_binding() {
     let directory = tempdir().expect("temporary directory can be created");

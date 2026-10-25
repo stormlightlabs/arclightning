@@ -211,25 +211,32 @@ headers. The page's Content-Security-Policy runs only the app's own script and
 loads images only from the server or `data:` URLs, so Markdown cannot pull
 images from other hosts. The server runs until interrupted.
 
-| Endpoint                        | Same JSON as             |
-| ------------------------------- | ------------------------ |
-| `GET /api/records`              | `arcl list`              |
-| `GET /api/records/<id>`         | `arcl show <id>`         |
-| `GET /api/ready`                | `arcl ready`             |
-| `GET /api/tasks/<id>/explain`   | `arcl explain <task-id>` |
-| `GET /api/tasks/<id>/context`   | `arcl context <task-id>` |
-| `GET /api/work`                 | none (see below)         |
-| `POST /api/tasks`               | `arcl task create`       |
-| `POST /api/tasks/<id>/update`   | `arcl task update`       |
-| `POST /api/tasks/<id>/start`    | `arcl task start`        |
-| `POST /api/tasks/<id>/park`     | `arcl task park`         |
-| `POST /api/tasks/<id>/unpark`   | `arcl task unpark`       |
-| `POST /api/tasks/<id>/handoff`  | `arcl task handoff`      |
-| `POST /api/tasks/<id>/complete` | `arcl task complete`     |
-| `POST /api/captures`            | `arcl capture create`    |
+| Endpoint                           | Same JSON as             |
+| ---------------------------------- | ------------------------ |
+| `GET /api/records`                 | `arcl list`              |
+| `GET /api/records/<id>`            | `arcl show <id>`         |
+| `GET /api/ready`                   | `arcl ready`             |
+| `GET /api/tasks/<id>/explain`      | `arcl explain <task-id>` |
+| `GET /api/tasks/<id>/context`      | `arcl context <task-id>` |
+| `GET /api/tree`                    | `arcl tree`              |
+| `GET /api/work`                    | none (see below)         |
+| `POST /api/tasks`                  | `arcl task create`       |
+| `POST /api/tasks/<id>/update`      | `arcl task update`       |
+| `POST /api/tasks/<id>/start`       | `arcl task start`        |
+| `POST /api/tasks/<id>/park`        | `arcl task park`         |
+| `POST /api/tasks/<id>/unpark`      | `arcl task unpark`       |
+| `POST /api/tasks/<id>/handoff`     | `arcl task handoff`      |
+| `POST /api/tasks/<id>/complete`    | `arcl task complete`     |
+| `POST /api/captures`               | `arcl capture create`    |
+| `POST /api/captures/<id>/promote`  | `arcl capture promote`   |
+| `POST /api/captures/<id>/discard`  | `arcl capture discard`   |
+| `POST /api/specs`                  | `arcl spec create`       |
+| `POST /api/plans`                  | `arcl plan create`       |
+| `POST /api/plans/<id>/apply`       | `arcl plan apply`        |
 
 `/api/records` and `/api/ready` take the command's flags as query parameters,
-such as `?kind=task&status=pending&status=parked`. `/api/work` takes none and
+such as `?kind=task&status=pending&status=parked`. `/api/tree` takes none and
+returns the tree of every record. `/api/work` takes none and
 returns the Work list in one request: every task with the readiness
 `arcl explain` reports and its phase ID, inherited from an ancestor where the
 task has none, and every phase. Its envelope is
@@ -246,10 +253,16 @@ with `_` for `-`:
 | `handoff`  | `note`                                                                                  |
 | `complete` | `evidence`, `allow_open_children`, `with_subtasks`                                      |
 | `captures` | `title` (required), `body`                                                              |
+| `promote`  | `to` (required), `title`, `body`, `acceptance_criteria`, `spec`, `plan`, `phase`, `parent`, `priority` |
+| `specs`    | `title` (required), `body`, `acceptance_criteria`                                       |
+| `plans`    | `title` (required), `spec` (required), `body`                                           |
+| `apply`    | `document` (required)                                                                   |
 
-`blocked_by` is a list of task IDs.
+`blocked_by` is a list of task IDs. `to` is `task`, `spec` or `note`, and
+`promote` uses the capture's title and body for any it leaves out. `document`
+is the plan's TOML, as `arcl plan apply --file` reads it.
 
-`park` and `unpark` take an empty body or `{}`. An unknown option, a body that
+`park`, `unpark` and `discard` take an empty body or `{}`. An unknown option, a body that
 is not JSON, or a body over 1 MiB is refused. The server reads a body only
 after the request passes its checks, and gives up on a body that has not
 arrived after 5 seconds; that request gets status 408 once the client sends the
@@ -300,9 +313,36 @@ next to its button. A saved change whose sync or export warned shows the
 warnings in a notice. After a change the view reloads the task, and after a
 completion it lists the tasks the completion made ready.
 
+The Inbox lists the captures not yet promoted or discarded, oldest first, and
+shows the selected one's body. `j` and `k` move the selection. **Promote to
+task**, **Promote to spec** and **Make a note** open a form with the
+capture's title, which runs `arcl capture promote`; the new record gets the
+capture's body. The task form sets the priority, milestone and parent, and
+reads `!priority` and `^REF` from the capture's title. A promotion takes no
+blockers, so the form names each `after:REF` for you to add with
+`arcl dependency add`. The spec form takes optional acceptance criteria.
+**Discard** asks first, then runs `arcl capture discard`. After either, the
+next capture is selected, and a notice links to the new task or to Planning.
+While a form holds edits, or a promotion or discard is running, `j`, `k` and
+clicking another capture keep the selection; with edits, they return focus to
+the form. A capture already promoted or discarded elsewhere, such as from the
+CLI, reloads the list with a notice.
+
+Planning lists each spec with its plans, and each plan with its milestones in
+`arcl tree` order. A milestone row shows whether the phase is open or done,
+how many of its tasks are done, and how many are ready or blocked; subtasks
+count. `j` and `k` move between specs, plans and milestones, and `Enter`
+opens the selected milestone's tasks and subtasks below it, or collapses and
+expands a spec or plan. Closed specs and plans start collapsed. A task in the
+tree opens its Task view. **New spec** runs `arcl spec create`, **New plan**
+on a spec runs `arcl plan create`, and **Apply plan** on a plan takes a TOML
+document and runs `arcl plan apply`. Applying again with the same keys updates
+the plan's phases and tasks. The view reloads in place after each change.
+
 `⌘K`, or `Ctrl+K` off macOS, opens the command menu; so does **Search** in the
-sidebar. The menu lists the actions on the selected task first: the row
-selected in the Work list, or the task the Task view shows. The open view's
+sidebar. The menu lists the actions on the selection first: the row
+selected in the Work list, the Task view's task, the Inbox's capture, or the
+selected spec or plan in Planning. The open view's
 commands, Quick capture and Go to follow, and once you type, the tasks whose
 titles match. Each command shows its shortcut. Typing filters the list, the
 arrow keys move, `Enter` runs the command and `Escape` closes the menu.
@@ -328,6 +368,15 @@ Hand off open the Task view with their form.
 | `Enter`       | Open the selected task, in Work               |
 | `]`           | Collapse or expand properties, in a task      |
 | `Escape`      | Return to Work, in a task                     |
+| `j` `k`       | Select the next or previous row, in Inbox and Planning |
+| `1`           | Promote the capture to a task, in Inbox       |
+| `2`           | Promote the capture to a spec, in Inbox       |
+| `3`           | Make the capture a note, in Inbox             |
+| `Backspace`   | Discard the capture, in Inbox                 |
+| `n`           | New spec, in Planning                         |
+| `a`           | New plan on a spec, or Apply plan on a plan, in Planning |
+| `Enter`       | Open or close the selected row, in Planning   |
+| `Escape`      | Close the open form if it has no edits, in Inbox and Planning |
 
 Shortcuts do nothing while you type in a field, the editor or a dialog, or
 hold `Ctrl`, `⌘` or `Alt`. Press `g` and its second key within a second.

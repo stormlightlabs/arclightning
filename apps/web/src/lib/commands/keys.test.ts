@@ -87,7 +87,7 @@ describe("formatKeys", () => {
   it("names Mod for the platform and capitalizes letters", () => {
     expect(formatKeys(["Mod", "k"], true)).toEqual(["⌘", "K"]);
     expect(formatKeys(["Mod", "k"], false)).toEqual(["Ctrl", "K"]);
-    expect(formatKeys(["g", "w", "Enter", "Escape", "]"], false)).toEqual(["G", "W", "↵", "Esc", "]"]);
+    expect(formatKeys(["g", "w", "Enter", "Escape", "]", "Backspace", "1"], false)).toEqual(["G", "W", "↵", "Esc", "]", "⌫", "1"]);
   });
 
   it("tells macOS by its platform string", () => {

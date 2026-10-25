@@ -48,6 +48,14 @@ function slowSource() {
     completeTask: unused,
     taskIndex: async () => [],
     createCapture: unused,
+    captures: unused,
+    capture: unused,
+    promoteCapture: unused,
+    discardCapture: unused,
+    planning: unused,
+    createSpec: unused,
+    createPlan: unused,
+    applyPlan: unused,
   };
   return { source, reads };
 }
