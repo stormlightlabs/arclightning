@@ -78,3 +78,19 @@ pnpm dev:website
 
 Documentation content lives in `apps/website/src/content/docs/`. Verify the
 site with `pnpm --filter @arclightning/website build`.
+
+The web app's browser tests need Chromium; set
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to use one already installed. CI runs
+`just check`, which leaves them out.
+
+```sh
+pnpm --filter @arclightning/web test:browser  # Svelte components in Chromium
+pnpm --filter @arclightning/web test:e2e      # workflows, fit and themes
+pnpm --filter @arclightning/web test:visual   # screenshots against e2e/*-snapshots
+```
+
+`test:e2e` builds the web app and `arcl`, then runs a keyboard-only workflow
+against `arcl serve` on a scratch project and checks each result with the CLI.
+The other tests answer the API from `apps/web/e2e/fixtures.json`. Set
+`WEB_E2E_PORT` when port 4174 is taken. After an intended visual change, run
+`test:visual:update` and review the new screenshots.

@@ -407,7 +407,8 @@
   .head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--arcl-space-2); padding: var(--arcl-space-1) var(--arcl-space-3); }
   .head.plan { padding-inline-start: var(--arcl-space-6); border-top: var(--arcl-border-width) solid var(--arcl-surface-subtle); background: var(--arcl-canvas); }
   .head[data-selected], .milestone[data-selected] { background: var(--arcl-surface-subtle); box-shadow: inset 2px 0 0 var(--arcl-focus); }
-  .toggle { display: flex; flex: 1; align-items: baseline; gap: var(--arcl-space-2); min-width: 0; padding: var(--arcl-space-2) 0; border: 0; color: var(--arcl-text); background: transparent; font: inherit; text-align: start; cursor: pointer; }
+  /* A head too narrow for its title wraps the badge and buttons below it. */
+  .toggle { display: flex; flex: 1 1 14rem; align-items: baseline; gap: var(--arcl-space-2); min-width: 0; padding: var(--arcl-space-2) 0; border: 0; color: var(--arcl-text); background: transparent; font: inherit; text-align: start; cursor: pointer; }
   .chevron { width: 1rem; color: var(--arcl-text-muted); }
   .title { overflow: hidden; color: var(--arcl-heading); font: 600 var(--arcl-type-sm) / 1.4 var(--arcl-font-ui); text-overflow: ellipsis; }
   .spec-title .title { font-size: var(--arcl-type-base); }

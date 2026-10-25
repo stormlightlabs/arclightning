@@ -41,6 +41,8 @@
   let contextCleared = $state(false);
   let tasks = $state<TaskSummary[]>([]);
   let captureOpen = $state(false);
+  /** Whether the views menu is open. Only narrow windows hide it. */
+  let navOpen = $state(false);
   /** What the last quick capture filed, announced until the next one. */
   let filed = $state<string | null>(null);
   /** The warnings of the last quick capture, shown until dismissed. */
@@ -108,6 +110,7 @@
   // token back.
   let cleaned = adoptToken(new URL(window.location.href), window.sessionStorage);
   afterNavigate(() => {
+    navOpen = false;
     const target = cleaned;
     cleaned = null;
     if (target) goto(target, { replaceState: true, keepFocus: true, noScroll: true });
@@ -118,29 +121,37 @@
 
 <div class="shell">
   <nav class="sidebar" aria-label="Views">
-    <a class="brand" href="/">Arc Lightning</a>
-    <div class="tools">
-      <button type="button" class="tool" aria-keyshortcuts={mac ? "Meta+K" : "Control+K"} onclick={openMenu}>
-        <Icon name="search" size="1rem" />
-        <span>Search</span>
-        <span class="keys" aria-hidden="true">{#each menuKeys as key (key)}<kbd>{key}</kbd>{/each}</span>
-      </button>
-      <button type="button" class="tool" aria-keyshortcuts="Q" onclick={() => (captureOpen = true)}>
-        <Icon name="capture" size="1rem" />
-        <span>Capture</span>
-        <span class="keys" aria-hidden="true"><kbd>Q</kbd></span>
+    <div class="bar">
+      <a class="brand" href="/">Arc Lightning</a>
+      <button type="button" class="menu-toggle" aria-expanded={navOpen} aria-controls="views-menu" onclick={() => (navOpen = !navOpen)}>
+        <Icon name={navOpen ? "close" : "menu"} size="1.125rem" />
+        <span>Menu</span>
       </button>
     </div>
-    <ul>
-      {#each views as view (view.href)}
-        <li>
-          <a href={view.href} aria-current={page.url.pathname === view.href ? "page" : undefined}>
-            <Icon name={view.icon} size="1.125rem" />
-            {view.label}
-          </a>
-        </li>
-      {/each}
-    </ul>
+    <div class="menu" id="views-menu" data-open={navOpen ? "" : undefined}>
+      <div class="tools">
+        <button type="button" class="tool" aria-keyshortcuts={mac ? "Meta+K" : "Control+K"} onclick={openMenu}>
+          <Icon name="search" size="1rem" />
+          <span>Search</span>
+          <span class="keys" aria-hidden="true">{#each menuKeys as key (key)}<kbd>{key}</kbd>{/each}</span>
+        </button>
+        <button type="button" class="tool" aria-keyshortcuts="Q" onclick={() => (captureOpen = true)}>
+          <Icon name="capture" size="1rem" />
+          <span>Capture</span>
+          <span class="keys" aria-hidden="true"><kbd>Q</kbd></span>
+        </button>
+      </div>
+      <ul>
+        {#each views as view (view.href)}
+          <li>
+            <a href={view.href} aria-current={page.url.pathname === view.href ? "page" : undefined}>
+              <Icon name={view.icon} size="1.125rem" />
+              {view.label}
+            </a>
+          </li>
+        {/each}
+      </ul>
+    </div>
   </nav>
   <main>
     {#if filed !== null}<p class="filed" role="status">{filed}</p>{/if}
@@ -173,12 +184,15 @@
 <style>
   .shell { display: grid; grid-template-columns: 15rem 1fr; min-height: 100vh; }
   .sidebar { display: grid; align-content: start; gap: var(--arcl-space-4); padding: var(--arcl-space-4) var(--arcl-space-3); border-right: var(--arcl-border-width) solid var(--arcl-border); background: var(--arcl-surface); font-family: var(--arcl-font-ui); }
+  .bar { display: flex; align-items: center; justify-content: space-between; gap: var(--arcl-space-2); }
+  .menu { display: grid; gap: var(--arcl-space-4); }
+  .menu-toggle { display: none; align-items: center; gap: var(--arcl-space-1); padding: var(--arcl-space-1) var(--arcl-space-2); border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-sm); color: var(--arcl-text); background: var(--arcl-canvas); font: inherit; font-size: var(--arcl-type-sm); cursor: pointer; }
   .brand { padding: 0 var(--arcl-space-2); color: var(--arcl-heading); font-weight: 650; text-decoration: none; }
   ul { display: grid; gap: var(--arcl-space-1); margin: 0; padding: 0; list-style: none; }
   li a { display: flex; align-items: center; gap: var(--arcl-space-2); padding: var(--arcl-space-1) var(--arcl-space-2); border-radius: var(--arcl-radius-sm); color: var(--arcl-text-muted); font-size: var(--arcl-type-sm); text-decoration: none; }
   li a:hover { background: var(--arcl-surface-hover); color: var(--arcl-text); }
   li a[aria-current="page"] { background: var(--arcl-surface-subtle); color: var(--arcl-heading); font-weight: 600; }
-  main { padding: var(--arcl-space-5) var(--arcl-space-6); }
+  main { min-width: 0; padding: var(--arcl-space-5) var(--arcl-space-6); }
   .tools { display: grid; gap: var(--arcl-space-1); }
   .tool { display: flex; align-items: center; gap: var(--arcl-space-2); padding: var(--arcl-space-1) var(--arcl-space-2); border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-sm); color: var(--arcl-text-muted); background: var(--arcl-canvas); font: inherit; font-size: var(--arcl-type-sm); text-align: start; cursor: pointer; }
   .tool:hover { background: var(--arcl-surface-hover); color: var(--arcl-text); }
@@ -186,4 +200,12 @@
   .keys { display: inline-flex; gap: 2px; }
   kbd { display: inline-flex; min-width: 1.125rem; height: 1.125rem; align-items: center; justify-content: center; padding: 0 0.25rem; border: var(--arcl-border-width) solid var(--arcl-border); border-radius: 4px; background: var(--arcl-surface); font: 500 var(--arcl-type-xs) / 1 var(--arcl-font-ui); }
   .filed { margin: 0 0 var(--arcl-space-4); padding: var(--arcl-space-2) var(--arcl-space-3); border-inline-start: 4px solid var(--arcl-success); border-radius: var(--arcl-radius-sm); background: var(--arcl-success-surface); font-size: var(--arcl-type-sm); }
+  /* Narrow windows stack the sidebar above the page as a bar whose Menu button shows the views. */
+  @media (max-width: 48rem) {
+    .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+    .sidebar { position: sticky; top: 0; z-index: 1; padding: var(--arcl-space-2) var(--arcl-space-3); border-right: 0; border-bottom: var(--arcl-border-width) solid var(--arcl-border); }
+    .menu-toggle { display: inline-flex; }
+    .menu:not([data-open]) { display: none; }
+    main { padding: var(--arcl-space-4) var(--arcl-space-3); }
+  }
 </style>

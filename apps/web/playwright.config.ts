@@ -1,6 +1,7 @@
 import { defineConfig } from "@playwright/test";
 
-const PORT = 4174;
+/** The `vite preview` port. Set `WEB_E2E_PORT` to run beside another checkout. */
+const PORT = Number(process.env.WEB_E2E_PORT ?? 4174);
 
 export default defineConfig({
   testDir: "./e2e",
@@ -23,8 +24,10 @@ export default defineConfig({
     { name: "e2e", testMatch: /\.e2e\.ts$/ },
     { name: "visual", testMatch: /\.visual\.ts$/ },
   ],
+  // `pnpm test:e2e` and `pnpm test:visual` build first. The workflow test in
+  // workflow.e2e.ts starts its own `arcl serve` instead of using this server.
   webServer: {
-    command: `pnpm build && pnpm preview --host 127.0.0.1 --port ${PORT} --strictPort`,
+    command: `pnpm preview --host 127.0.0.1 --port ${PORT} --strictPort`,
     port: PORT,
     reuseExistingServer: !process.env.CI,
   },

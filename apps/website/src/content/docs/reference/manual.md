@@ -405,6 +405,12 @@ included.
 A change from the menu or quick capture whose sync warned shows the warnings in
 a notice, as the Task view does.
 
+The theme follows the system's light or dark setting: light grey and blue, or
+black and blue. Text in both themes meets WCAG AA contrast. Animations and
+transitions stop when the system asks for reduced motion. In a window narrower
+than 48rem the sidebar becomes a bar at the top, and **Menu** shows Search,
+Capture and the views; choosing a view closes it.
+
 `arcl` embeds the web app from `apps/web/build` when it compiles. That build is
 not committed, so `cargo install --git` produces an `arcl` whose `serve` shows
 a page saying the web app was not built. To get the web app, run
