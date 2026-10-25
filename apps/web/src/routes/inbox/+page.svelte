@@ -37,8 +37,8 @@
   ];
 
   let captures = $state<CaptureSummary[] | null>(null);
-  /** When the list was read, which the Created column counts from. */
-  let readAt = $state(new Date());
+  /** The time the Created column counts from: when the list was read, then each minute. */
+  let now = $state(new Date());
   let failure = $state<string | null>(null);
   let selectedId = $state<string | null>(null);
   let order = $derived(captures?.map((capture) => capture.id) ?? []);
@@ -81,7 +81,7 @@
 
   const readList = latestRead((signal) => dataSource().captures(signal), {
     loaded: (loaded) => {
-      readAt = new Date();
+      now = new Date();
       captures = loaded;
     },
     failed: (error) => (failure = error instanceof Error ? error.message : String(error)),
@@ -95,7 +95,9 @@
 
   onMount(() => {
     load();
+    const clock = setInterval(() => (now = new Date()), 60_000);
     return () => {
+      clearInterval(clock);
       readList.stop();
       readDetail.stop();
     };
@@ -289,6 +291,8 @@
       event.preventDefault();
       return;
     }
+    // The table moves the selection itself on the arrow keys from a row.
+    if (event.defaultPrevented) return;
     const action = workKeyAction(event);
     if (action === null || action === "open") return;
     move(action === "next" ? 1 : -1);
@@ -344,7 +348,7 @@
           {#if column.id === "title"}
             {capture.title}
           {:else if date !== null}
-            <time datetime={date.toISOString()} title={date.toLocaleString("en-US")}>{shortAge(date, readAt)}</time>
+            <time datetime={date.toISOString()} title={date.toLocaleString("en-US")}>{shortAge(date, now)}</time>
           {/if}
         {/snippet}
       </DataTable>

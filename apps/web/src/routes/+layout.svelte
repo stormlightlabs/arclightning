@@ -5,6 +5,7 @@
   import { Button, CommandMenu, EmptyState, Feedback, Icon, type IconName } from "@arclightning/ui";
   import { afterNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
+  import { MediaQuery } from "svelte/reactivity";
   import QuickCapture from "$lib/capture/QuickCapture.svelte";
   import {
     SEQUENCE_TIMEOUT,
@@ -37,6 +38,8 @@
   ];
   const mac = isMac(navigator.platform);
   const menuKeys = formatKeys(["Mod", "k"], mac);
+  /** Whether the window is wide enough for the sidebar, whose toggle narrow windows hide. Matches the styles' breakpoint. */
+  const wide = new MediaQuery("min-width: 48.0625rem");
 
   let menuOpen = $state(false);
   let query = $state("");
@@ -74,14 +77,19 @@
   useCommands(() => ({
     commands: [
       { id: "global:capture", label: "Quick capture", scope: "global", group: "Create", keys: ["q"], icon: "capture", run: () => (captureOpen = true) },
-      {
-        id: "global:sidebar",
-        label: collapsed ? "Expand the sidebar" : "Collapse the sidebar",
-        scope: "global",
-        keys: [SIDEBAR_KEY],
-        icon: collapsed ? "sidebarExpand" : "sidebarCollapse",
-        run: toggleSidebar,
-      },
+      // Narrow windows show the top bar, where collapsing would change nothing.
+      ...(wide.current
+        ? [
+            {
+              id: "global:sidebar",
+              label: collapsed ? "Expand the sidebar" : "Collapse the sidebar",
+              scope: "global",
+              keys: [SIDEBAR_KEY],
+              icon: collapsed ? "sidebarExpand" : "sidebarCollapse",
+              run: toggleSidebar,
+            } satisfies Command,
+          ]
+        : []),
       ...views.map((view): Command => ({
         id: `global:go-${view.key}`,
         label: view.label,
@@ -147,7 +155,7 @@
       openMenu();
       return;
     }
-    if (menuOpen || captureOpen || !takesShortcut(event)) return;
+    if (menuOpen || captureOpen || !takesShortcut(event, mac)) return;
     const step = shortcutStep(pending, event.key, boundCommands(registeredCommands(), registeredContext()));
     pending = step.pending;
     clearTimeout(pendingTimer);

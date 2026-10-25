@@ -62,4 +62,14 @@ describe("the sidebar", () => {
     await expect.element(sidebar().getByText("Arc Lightning")).toBeVisible();
     expect(Math.round(sidebar().element().getBoundingClientRect().width)).toBe(390);
   });
+
+  it("leaves [ alone in a narrow window, which has no sidebar to collapse", async () => {
+    await screen.viewport(390, 844);
+    await render(Layout, { children });
+    await expect.element(sidebar().getByRole("button", { name: "Menu" })).toBeVisible();
+    await userEvent.keyboard("[[");
+    expect(window.localStorage.getItem(SIDEBAR_STORAGE_KEY)).toBeNull();
+    await screen.viewport(1024, 768);
+    await expect.element(sidebar().getByRole("button", { name: "Collapse sidebar" })).toBeVisible();
+  });
 });

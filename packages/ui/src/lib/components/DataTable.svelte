@@ -16,8 +16,12 @@
   /**
    * Props for a table whose rows the keyboard selects one at a time. Each
    * row's first cell holds the button that selects it, and Tab reaches one
-   * row: the selected one, or the first. The table scrolls inside its own
-   * box, under a sticky header, so give it a height or a `max-height`.
+   * row: the selected one, or the first. From a row, `ArrowDown` and
+   * `ArrowUp` select the next and previous rows and `Home` and `End` the
+   * first and last, through `onselect`, and prevent the key's default so a
+   * page handler that checks `defaultPrevented` does not move again. The
+   * table scrolls inside its own box, under a sticky header, so give it a
+   * height or a `max-height`.
    */
   export interface DataTableProps<Row> {
     rows: Row[];
@@ -40,6 +44,18 @@
   let root: HTMLDivElement;
   let ids = $derived(rows.map(rowId));
   let tabbableId = $derived(selectedId !== null && ids.includes(selectedId) ? selectedId : ids[0]);
+
+  /** Select another row than `from` with the arrow keys, `Home` or `End`. */
+  function onkeydown(event: KeyboardEvent, from: string) {
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const index = ids.indexOf(from);
+    const targets: Record<string, number> = { ArrowDown: index + 1, ArrowUp: index - 1, Home: 0, End: ids.length - 1 };
+    const next = targets[event.key];
+    if (next === undefined) return;
+    event.preventDefault();
+    const id = ids[Math.min(ids.length - 1, Math.max(0, next))];
+    if (id !== from) onselect?.(id);
+  }
 
   // Keep focus on the selected row while focus is in the table or nowhere, so
   // moving the selection moves focus without taking it from a form.
@@ -68,7 +84,7 @@
           {#each columns as column, index (column.id)}
             <td data-hide-narrow={column.hideNarrow || undefined}>
               {#if index === 0}
-                <button type="button" data-row-id={id} aria-current={id === selectedId ? "true" : undefined} tabindex={id === tabbableId ? 0 : -1}>
+                <button type="button" data-row-id={id} aria-current={id === selectedId ? "true" : undefined} tabindex={id === tabbableId ? 0 : -1} onkeydown={(event) => onkeydown(event, id)}>
                   {@render cell(row, column)}
                 </button>
               {:else}

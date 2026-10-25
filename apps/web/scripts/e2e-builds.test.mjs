@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { BUILDS, STAMP, upToDate } from "./e2e-builds.mjs";
+import { BUILDS, INPUTS, STAMP, upToDate } from "./e2e-builds.mjs";
 
 describe("upToDate", () => {
   let web = "";
@@ -56,5 +56,26 @@ describe("upToDate", () => {
     rmSync(join(web, ".svelte-kit"), { recursive: true });
     expect(upToDate(web, BUILDS.web, "abc")).toBe(false);
     expect(upToDate(web, BUILDS.artifact, "abc")).toBe(false);
+  });
+});
+
+describe("INPUTS", () => {
+  it("covers the sources, configs and dependencies both builds read", () => {
+    expect(INPUTS).toEqual(
+      expect.arrayContaining([
+        "apps/web/src",
+        "apps/web/static",
+        "apps/web/package.json",
+        "apps/web/svelte.config.js",
+        "apps/web/tsconfig.json",
+        "apps/web/vite.config.ts",
+        "packages/ui/src",
+        "packages/ui/package.json",
+        "packages/ui/uno.config.mjs",
+        "pnpm-workspace.yaml",
+        "pnpm-lock.yaml",
+        "node_modules/.pnpm/lock.yaml",
+      ]),
+    );
   });
 });

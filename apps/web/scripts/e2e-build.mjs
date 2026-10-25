@@ -21,23 +21,10 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BUILDS, STAMP, upToDate } from "./e2e-builds.mjs";
+import { BUILDS, INPUTS, STAMP, upToDate } from "./e2e-builds.mjs";
 
 const WEB = fileURLToPath(new URL("..", import.meta.url));
 const ROOT = join(WEB, "../..");
-
-/** The files and directories, relative to the repository, that the web builds read. */
-const INPUTS = [
-  "apps/web/src",
-  "apps/web/package.json",
-  "apps/web/svelte.config.js",
-  "apps/web/tsconfig.json",
-  "apps/web/vite.config.ts",
-  "packages/ui/src",
-  "packages/ui/package.json",
-  "packages/ui/uno.config.mjs",
-  "pnpm-lock.yaml",
-];
 
 /** Tests, stories and what failed tests leave behind, which no build reads. */
 const UNREAD = /\.test\.ts$|\.stories\.ts$|\/__tests__\/|\/__screenshots__\/|\/\.vitest-attachments\//;

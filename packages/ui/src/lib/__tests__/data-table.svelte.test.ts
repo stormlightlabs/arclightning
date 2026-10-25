@@ -1,4 +1,4 @@
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 import { describe, expect, it } from "vitest";
 import { render } from "vitest-browser-svelte";
 import "../styles/index.css";
@@ -27,6 +27,22 @@ describe("DataTable", () => {
     // Focus left the table for the outside button, so it stays there.
     await expect.element(page.getByRole("button", { name: "Item 2" })).toHaveAttribute("aria-current", "true");
     await expect.element(page.getByRole("button", { name: "Select second" })).toHaveFocus();
+  });
+
+  it("selects rows with the arrow keys, Home and End, from the focused row", async () => {
+    await render(DataTableHarness, { items });
+    await page.getByRole("button", { name: "Item 1", exact: true }).element().focus();
+    await userEvent.keyboard("{ArrowDown}");
+    await expect.element(page.getByRole("status")).toHaveTextContent("b");
+    await expect.element(page.getByRole("button", { name: "Item 2" })).toHaveFocus();
+    await userEvent.keyboard("{ArrowUp}{ArrowUp}");
+    await expect.element(page.getByRole("status")).toHaveTextContent("a");
+    await userEvent.keyboard("{End}");
+    await expect.element(page.getByRole("status")).toHaveTextContent("l");
+    await expect.element(page.getByRole("button", { name: "Item 12" })).toHaveFocus();
+    await userEvent.keyboard("{ArrowDown}{Home}");
+    await expect.element(page.getByRole("status")).toHaveTextContent("a");
+    await expect.element(page.getByRole("button", { name: "Item 1", exact: true })).toHaveFocus();
   });
 
   it("reaches only the selected row, or the first, with Tab", async () => {

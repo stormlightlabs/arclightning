@@ -51,7 +51,16 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+/** A capture ID whose ULID says it was created at `ms`. */
+function idAt(ms: number): string {
+  const crockford = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+  let time = "";
+  for (let rest = ms, index = 0; index < 10; index++, rest = Math.floor(rest / 32)) time = crockford[rest % 32] + time;
+  return `arcl-c-${time}${"0".repeat(16)}`;
+}
+
 beforeEach(reset);
+afterEach(() => vi.useRealTimers());
 
 describe("Inbox route", () => {
   it("lists open captures, shows the selected one's body, and moves with j and k", async () => {
@@ -66,6 +75,35 @@ describe("Inbox route", () => {
     await expect.element(screen.getByRole("button", { name: "Planned idea" })).toHaveAttribute("aria-current", "true");
     await userEvent.keyboard("k");
     await expect.element(screen.getByText("Body of c-1")).toBeVisible();
+  });
+
+  it("moves one row on ArrowDown from a focused row, and Home and End reach the ends", async () => {
+    source();
+    await render(InboxRoute);
+    await screen.getByRole("button", { name: summaries[0].title }).click();
+    await expect.element(screen.getByText("Body of c-1")).toBeVisible();
+    await userEvent.keyboard("{ArrowDown}");
+    await expect.element(screen.getByRole("button", { name: "Planned idea" })).toHaveAttribute("aria-current", "true");
+    await userEvent.keyboard("{ArrowDown}");
+    await expect.element(screen.getByRole("button", { name: "Stray thought" })).toHaveAttribute("aria-current", "true");
+    await userEvent.keyboard("{ArrowUp}");
+    await expect.element(screen.getByRole("button", { name: "Planned idea" })).toHaveAttribute("aria-current", "true");
+    await expect.element(screen.getByRole("button", { name: "Planned idea" })).toHaveFocus();
+    await userEvent.keyboard("{End}");
+    await expect.element(screen.getByRole("button", { name: "Stray thought" })).toHaveAttribute("aria-current", "true");
+    await userEvent.keyboard("{Home}");
+    await expect.element(screen.getByRole("button", { name: summaries[0].title })).toHaveAttribute("aria-current", "true");
+  });
+
+  it("counts the Created column's ages on from the current time", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date("2026-10-25T12:00:00Z"));
+    const fresh = { id: idAt(Date.now() - 10_000), title: "Fresh idea", status: "captured" as const };
+    source({ captures: async () => [fresh], capture: async () => ({ ...fresh, body: "Body", created_at: new Date().toISOString() }) });
+    await render(InboxRoute);
+    await expect.element(screen.getByRole("cell", { name: "just now" })).toBeVisible();
+    vi.advanceTimersByTime(60_000);
+    await expect.element(screen.getByRole("cell", { name: "1m ago" })).toBeVisible();
   });
 
   it("promotes a capture to a task with the fields its tokens set, then selects the next", async () => {

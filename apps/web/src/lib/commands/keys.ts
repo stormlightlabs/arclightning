@@ -13,6 +13,8 @@ export interface ShortcutKey {
   repeat: boolean;
   defaultPrevented: boolean;
   target: EventTarget | null;
+  /** Absent where the event has no modifier state, as in tests. */
+  getModifierState?: (key: string) => boolean;
 }
 
 /** A command a shortcut can run: the keys pressed one after another. */
@@ -44,12 +46,19 @@ export function opensMenu(event: ShortcutKey, mac: boolean): boolean {
 
 /**
  * Whether single-key shortcuts may act on a key press. Keys typed into a form
- * field, the editor or a dialog, held with `Ctrl`, `⌘` or `Alt`, or already
- * handled are left alone, and so are the repeats of a held key, so holding
- * `c` runs Complete once.
+ * field, the editor or a dialog, held with `Ctrl` or `⌘`, or already handled
+ * are left alone, and so are the repeats of a held key, so holding `c` runs
+ * Complete once. A symbol such as `[` typed with AltGr (reported as `Ctrl`
+ * and `Alt` where the browser lacks the `AltGraph` state), or with Option on
+ * macOS, is taken, since some layouts need it. No layout needs either for a
+ * letter or digit, so those, and `Alt` alone elsewhere, are left alone.
  */
-export function takesShortcut(event: ShortcutKey): boolean {
-  return !(event.repeat || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || inField(event.target));
+export function takesShortcut(event: ShortcutKey, mac: boolean): boolean {
+  if (event.repeat || event.defaultPrevented || event.metaKey || inField(event.target)) return false;
+  if (!event.ctrlKey && !event.altKey) return true;
+  if (event.key.length !== 1 || /^[a-z0-9]$/i.test(event.key)) return false;
+  const altGraph = event.getModifierState?.("AltGraph") ?? (event.ctrlKey && event.altKey);
+  return altGraph || (mac && event.altKey && !event.ctrlKey);
 }
 
 /**
