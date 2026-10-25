@@ -210,12 +210,18 @@ those on other `127.0.0.1` ports, from sending one. Responses carry no CORS
 headers. The page's Content-Security-Policy runs only the app's own script and
 loads images only from the server or `data:` URLs, so Markdown cannot pull
 images from other hosts. The server runs until Ctrl-C, then gives open
-requests up to 5 seconds to finish and exits.
+requests up to 5 seconds to finish and exits. A change that has not started
+by Ctrl-C gets status 503 and does not run; one already running finishes. A
+second Ctrl-C exits at once.
 
 The server closes a connection that takes more than 5 seconds to send a request
-head, idles that long between requests, or leaves a reply unread for 5 seconds.
-A request it refuses for a bad `Host` or token, or for a body over 1 MiB, gets
-`Connection: close` and the connection closes after the reply. It keeps at most
+head or idles that long between requests. It also closes one whose client reads
+replies slower than 64 KiB/s. Each connection starts with 5 seconds of waiting
+for its client to read, spends it while a reply waits, earns back a second per
+64 KiB the client reads, and never holds more than 5 seconds. A request it
+refuses for a bad `Host` or token, for a body over 1 MiB, or for a body that
+does not arrive within 5 seconds gets `Connection: close` and the connection
+closes after the reply. It keeps at most
 128 connections open; a new one waits to be accepted until another closes.
 
 | Endpoint                           | Same JSON as             |

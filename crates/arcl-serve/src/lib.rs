@@ -18,11 +18,14 @@
 //! checks a request's head before it reads any of the body, and reads a body
 //! only for a mutation that passed every check. A request that declares a
 //! body over 1 MiB gets 413 before any check, and its body is never read. A
-//! mutation's body that does not arrive within [`BODY_DEADLINE`] gets 408. A
-//! connection that does not send a request head within [`HEADER_DEADLINE`] is
-//! closed, idle keep-alive connections included, as is one whose replies wait
-//! [`WRITE_DEADLINE`] for the client to read them. A refusal before the token
-//! is accepted (a bad `Host` or token, a bad request target, or 413) carries
+//! mutation's body that does not arrive within [`BODY_DEADLINE`] gets 408,
+//! and one that runs over 1 MiB gets 413. A connection that does not send a
+//! request head within [`HEADER_DEADLINE`] is closed, idle keep-alive
+//! connections included. So is one whose client reads its replies slower
+//! than [`MIN_WRITE_RATE`] once [`WRITE_DEADLINE`] of slack is spent; no
+//! single wait for the client passes [`WRITE_DEADLINE`]. A refusal before the
+//! token is accepted (a bad `Host` or token, a bad request target, or 413),
+//! and a refusal that leaves a mutation's body unread (408 or 413), carries
 //! `Connection: close` and closes the connection. At most
 //! [`MAX_CONNECTIONS`] are open at once; past that, new connections wait to
 //! be accepted.
@@ -31,7 +34,9 @@
 //! the thread that called [`Server::run`], and mutations one at a time on
 //! their own thread, so a mutation that waits for a lock never holds up reads
 //! and page loads. Ctrl-C stops accepting connections, lets open ones finish
-//! for up to [`SHUTDOWN_GRACE`], and returns.
+//! for up to [`SHUTDOWN_GRACE`], and returns; a second Ctrl-C returns at
+//! once. After Ctrl-C, mutations that have not started get 503 without
+//! running, and one already running finishes before the server returns.
 //!
 //! The page's Content-Security-Policy runs only the app's own inline script,
 //! by hash, and lets it load images and fonts from itself or `data:` URLs and
@@ -90,7 +95,7 @@ mod tests;
 
 pub use answer::Reply;
 pub use gate::{TOKEN_HEADER, TOKEN_QUERY};
-pub use limits::{BODY_DEADLINE, HEADER_DEADLINE, MAX_CONNECTIONS, SHUTDOWN_GRACE, WRITE_DEADLINE};
+pub use limits::{BODY_DEADLINE, HEADER_DEADLINE, MAX_CONNECTIONS, MIN_WRITE_RATE, SHUTDOWN_GRACE, WRITE_DEADLINE};
 pub use mutations::{
     CapturePromotion, Completion, Handoff, Mutations, NewCapture, NewPlan, NewSpec, NewTask, PlanInput, TaskEdit,
     TaskStart,

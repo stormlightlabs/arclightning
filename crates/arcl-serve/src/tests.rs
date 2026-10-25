@@ -1,16 +1,18 @@
 use std::io::{Read as _, Write as _};
 use std::net::Ipv4Addr;
 use std::net::{Shutdown, TcpStream};
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use sha2::Digest;
-use tokio::sync::oneshot;
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::sync::Notify;
 
 use crate::answer::{API_CSP, Answer, RETRY_AFTER_SECONDS};
 use crate::gate::{Gate, Incoming, TOKEN_BYTES, new_token};
-use crate::limits::{Limits, MAX_BODY_BYTES};
+use crate::limits::{Limits, MAX_BODY_BYTES, WriteDeadline};
 use crate::mutations::mutate;
 use crate::routes::{Route, dispatch};
 use crate::*;
@@ -118,8 +120,55 @@ fn serve_with(limits: Limits) -> (u16, String) {
     server.limits = limits;
     let port = server.port();
     let token = server.gate.token.clone();
-    thread::spawn(move || server.run_until(&Echo, &Echo, std::future::pending()));
+    thread::spawn(move || server.run_until(&Echo, &Echo, std::future::pending));
     (port, token)
+}
+
+/// A stand-in for Ctrl-C: each `notify_one` on the returned [`Notify`]
+/// completes the next future the signal hands out.
+fn signal() -> (
+    Arc<Notify>,
+    impl FnMut() -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> + Send,
+) {
+    let notify = Arc::new(Notify::new());
+    let handle = Arc::clone(&notify);
+    let signal = move || -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> {
+        let notify = Arc::clone(&handle);
+        Box::pin(async move { notify.notified().await })
+    };
+    (notify, signal)
+}
+
+/// Read a response's head, up to the blank line, on a connection that may
+/// close after it.
+fn response_head(stream: &mut TcpStream) -> String {
+    let mut head = Vec::new();
+    let mut byte = [0_u8];
+    while !head.ends_with(b"\r\n\r\n") {
+        stream
+            .read_exact(&mut byte)
+            .expect("a response head before the read timeout");
+        head.push(byte[0]);
+    }
+    String::from_utf8(head).expect("UTF-8").to_ascii_lowercase()
+}
+
+/// Whether the server closes `stream` before the read timeout, discarding
+/// anything it still sends.
+fn closes(stream: &mut TcpStream) -> bool {
+    let mut buffer = [0_u8; 4096];
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => return true,
+            Ok(_) => {}
+            Err(error) => {
+                return !matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                );
+            }
+        }
+    }
 }
 
 /// Open a connection and send `head` and `body`, then leave it open.
@@ -636,7 +685,10 @@ fn serve_refuses_a_chunked_body_over_the_limit() {
     let over = MAX_BODY_BYTES + 1;
     let body = format!("\r\n{over:x}\r\n{}", " ".repeat(over));
     let mut stream = send(port, &head, &body);
-    assert!(status_line(&mut stream).starts_with("HTTP/1.1 413"));
+    let refused = response_head(&mut stream);
+    assert!(refused.starts_with("http/1.1 413"), "{refused}");
+    assert!(refused.contains("connection: close"), "{refused}");
+    assert!(closes(&mut stream));
     assert!(authorized_get(port, &token).starts_with("HTTP/1.1 200"));
 }
 
@@ -647,7 +699,7 @@ fn serve_times_out_a_stalled_body_while_reads_stay_fast() {
         "POST /api/tasks/arcl-t-1/park HTTP/1.1\r\n{TOKEN_HEADER}: {token}\r\nOrigin: http://127.0.0.1:{port}\r\nContent-Length: 100000"
     );
     let started = Instant::now();
-    let stalled = send(port, &head, "\r\n{        ");
+    let mut stalled = send(port, &head, "\r\n{        ");
     thread::sleep(Duration::from_millis(50));
     // The body read waits on its own task; reads go on meanwhile.
     for _ in 0..3 {
@@ -655,21 +707,27 @@ fn serve_times_out_a_stalled_body_while_reads_stay_fast() {
         assert!(authorized_get(port, &token).starts_with("HTTP/1.1 200"));
         assert!(read.elapsed() < Duration::from_millis(150), "{:?}", read.elapsed());
     }
-    // The 408 arrives at the deadline, with the client still connected.
-    let timed_out = response(stalled);
-    assert!(timed_out.starts_with("HTTP/1.1 408"), "{timed_out}");
-    assert!(timed_out.contains("request_timeout"));
+    // The 408 arrives at the deadline, with the client still connected, and
+    // closes the connection.
+    let timed_out = response_head(&mut stalled);
+    assert!(timed_out.starts_with("http/1.1 408"), "{timed_out}");
+    assert!(timed_out.contains("connection: close"), "{timed_out}");
+    assert!(closes(&mut stalled));
     assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
 }
 
 #[test]
 fn serve_answers_past_many_stalled_connections() {
-    let (port, token) = serve(BODY_DEADLINE);
+    let deadline = Duration::from_millis(300);
+    let limits = Limits { body: deadline, header: deadline, write: deadline, connections: 8, ..Limits::default() };
+    let (port, token) = serve_with(limits);
     let admitted = format!(
         "POST /api/tasks/arcl-t-1/park HTTP/1.1\r\n{TOKEN_HEADER}: {token}\r\nOrigin: http://127.0.0.1:{port}\r\nContent-Length: 100000"
     );
     let refused = "POST /api/tasks HTTP/1.1\r\nContent-Length: 100000";
-    let held: Vec<TcpStream> = (0..96)
+    // Three times the cap, so the request below is answered only if the
+    // deadlines free the stalled connections' places.
+    let held: Vec<TcpStream> = (0..limits.connections * 3)
         .map(|index| match index % 4 {
             // Connected, and nothing sent.
             0 => TcpStream::connect((Ipv4Addr::LOCALHOST, port)).expect("a connection"),
@@ -687,14 +745,9 @@ fn serve_answers_past_many_stalled_connections() {
             _ => send(port, refused, "\r\n{"),
         })
         .collect();
-    thread::sleep(Duration::from_millis(100));
     let started = Instant::now();
     assert!(authorized_get(port, &token).starts_with("HTTP/1.1 200"));
-    assert!(
-        started.elapsed() < Duration::from_millis(500),
-        "{:?}",
-        started.elapsed()
-    );
+    assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
     drop(held);
 }
 
@@ -770,6 +823,41 @@ fn serve_closes_an_admitted_connection_that_never_reads() {
 }
 
 #[test]
+fn serve_closes_a_connection_whose_client_reads_slower_than_the_minimum() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .expect("a runtime");
+    // The client reads 256 bytes every 50 ms, about 5 KiB/s, so every write
+    // makes progress well inside the 300 ms a single wait may last.
+    let write_to_slow_reader = |rate| {
+        runtime.block_on(async move {
+            let (writer, mut reader) = tokio::io::duplex(256);
+            tokio::spawn(async move {
+                let mut buffer = [0_u8; 256];
+                loop {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    if matches!(reader.read(&mut buffer).await, Ok(0) | Err(_)) {
+                        break;
+                    }
+                }
+            });
+            let mut writer = WriteDeadline::new(writer, Duration::from_millis(300), rate);
+            let started = Instant::now();
+            let written = writer.write_all(&[0; 8 * 1024]).await;
+            (written.map_err(|error| error.kind()), started.elapsed())
+        })
+    };
+    // Below a 64 KiB/s minimum, progress does not keep the connection.
+    let (written, elapsed) = write_to_slow_reader(64 * 1024);
+    assert_eq!(written, Err(std::io::ErrorKind::TimedOut));
+    assert!(elapsed < Duration::from_secs(1), "{elapsed:?}");
+    // Above a 4 KiB/s minimum, the same client gets the whole reply.
+    let (written, _) = write_to_slow_reader(4 * 1024);
+    assert_eq!(written, Ok(()));
+}
+
+#[test]
 fn serve_closes_a_connection_that_stalls_its_head() {
     let (port, token) = serve_with(Limits { header: Duration::from_millis(300), ..Limits::default() });
     let mut idle = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).expect("a connection");
@@ -824,17 +912,15 @@ fn serve_caps_open_connections() {
 fn serve_stops_when_shutdown_completes() {
     let server = Server::bind(None).expect("a server");
     let (port, token) = (server.port(), server.gate.token.clone());
-    let (stop, stopped) = oneshot::channel::<()>();
+    let (stop, signal) = signal();
     let (finished, done) = mpsc::channel();
     thread::spawn(move || {
-        let result = server.run_until(&Echo, &Echo, async {
-            let _ = stopped.await;
-        });
+        let result = server.run_until(&Echo, &Echo, signal);
         let _ = finished.send(result.is_ok());
     });
     let _idle = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).expect("a connection");
     assert!(authorized_get(port, &token).starts_with("HTTP/1.1 200"));
-    stop.send(()).expect("a send");
+    stop.notify_one();
     // The idle connection closes at once, so the grace period is not spent.
     let returned = done.recv_timeout(Duration::from_secs(2)).expect("run returns");
     assert!(returned);
@@ -852,4 +938,122 @@ fn serve_reads_an_admitted_body_that_arrives() {
     let answered = response(send(port, &head, &format!("\r\n{body}")));
     assert!(answered.starts_with("HTTP/1.1 200"), "{answered}");
     assert!(answered.contains("handoff arcl-t-1"));
+}
+
+/// Mutations that echo, except that `park` waits for a release and counts
+/// the parks that started.
+struct Held {
+    release: Mutex<mpsc::Receiver<()>>,
+    parks: AtomicUsize,
+}
+
+impl Mutations for Held {
+    fn create_task(&self, input: NewTask) -> Reply {
+        Echo.create_task(input)
+    }
+    fn update_task(&self, id: &str, input: TaskEdit) -> Reply {
+        Echo.update_task(id, input)
+    }
+    fn start_task(&self, id: &str, input: TaskStart) -> Reply {
+        Echo.start_task(id, input)
+    }
+    fn park_task(&self, id: &str) -> Reply {
+        self.parks.fetch_add(1, Ordering::SeqCst);
+        let _ = self.release.lock().expect("the release lock").recv();
+        Echo.park_task(id)
+    }
+    fn unpark_task(&self, id: &str) -> Reply {
+        Echo.unpark_task(id)
+    }
+    fn hand_off_task(&self, id: &str, input: Handoff) -> Reply {
+        Echo.hand_off_task(id, input)
+    }
+    fn complete_task(&self, id: &str, input: Completion) -> Reply {
+        Echo.complete_task(id, input)
+    }
+    fn create_capture(&self, input: NewCapture) -> Reply {
+        Echo.create_capture(input)
+    }
+    fn promote_capture(&self, id: &str, input: CapturePromotion) -> Reply {
+        Echo.promote_capture(id, input)
+    }
+    fn discard_capture(&self, id: &str) -> Reply {
+        Echo.discard_capture(id)
+    }
+    fn create_spec(&self, input: NewSpec) -> Reply {
+        Echo.create_spec(input)
+    }
+    fn create_plan(&self, input: NewPlan) -> Reply {
+        Echo.create_plan(input)
+    }
+    fn apply_plan(&self, id: &str, input: PlanInput) -> Reply {
+        Echo.apply_plan(id, input)
+    }
+}
+
+#[test]
+fn serve_drops_queued_mutations_on_shutdown_and_finishes_the_running_one() {
+    let server = Server::bind(None).expect("a server");
+    let (port, token) = (server.port(), server.gate.token.clone());
+    let (release, released) = mpsc::channel();
+    let held = Arc::new(Held { release: Mutex::new(released), parks: AtomicUsize::new(0) });
+    let (stop, signal) = signal();
+    let (finished, done) = mpsc::channel();
+    let mutations = Arc::clone(&held);
+    thread::spawn(move || {
+        let result = server.run_until(&Echo, &*mutations, signal);
+        let _ = finished.send(result.is_ok());
+    });
+    let head = format!(
+        "POST /api/tasks/arcl-t-1/park HTTP/1.1\r\n{TOKEN_HEADER}: {token}\r\nOrigin: http://127.0.0.1:{port}\r\nContent-Length: 0\r\nConnection: close"
+    );
+    let running = send(port, &head, "\r\n");
+    let started = Instant::now();
+    while held.parks.load(Ordering::SeqCst) == 0 {
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "the first park never started"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    let queued = send(port, &head, "\r\n");
+    thread::sleep(Duration::from_millis(200));
+    stop.notify_one();
+    thread::sleep(Duration::from_millis(100));
+    release.send(()).expect("a release");
+    let finished_park = response(running);
+    assert!(finished_park.starts_with("HTTP/1.1 200"), "{finished_park}");
+    let dropped = response(queued);
+    assert!(dropped.starts_with("HTTP/1.1 503"), "{dropped}");
+    assert!(dropped.contains("server_stopping"), "{dropped}");
+    assert_eq!(held.parks.load(Ordering::SeqCst), 1);
+    assert!(done.recv_timeout(Duration::from_secs(2)).expect("run returns"));
+}
+
+#[test]
+fn serve_returns_at_once_on_a_second_signal() {
+    let mut server = Server::bind(None).expect("a server");
+    server.limits = Limits { body: Duration::from_secs(60), ..Limits::default() };
+    let (port, token) = (server.port(), server.gate.token.clone());
+    let (stop, signal) = signal();
+    let (finished, done) = mpsc::channel();
+    thread::spawn(move || {
+        let result = server.run_until(&Echo, &Echo, signal);
+        let _ = finished.send(result.is_ok());
+    });
+    // An admitted mutation whose body stalls keeps the grace period running.
+    let head = format!(
+        "POST /api/tasks/arcl-t-1/park HTTP/1.1\r\n{TOKEN_HEADER}: {token}\r\nOrigin: http://127.0.0.1:{port}\r\nContent-Length: 100"
+    );
+    let _stalled = send(port, &head, "\r\n{");
+    thread::sleep(Duration::from_millis(100));
+    stop.notify_one();
+    assert!(
+        done.recv_timeout(Duration::from_millis(500)).is_err(),
+        "returned before the grace period"
+    );
+    let started = Instant::now();
+    stop.notify_one();
+    assert!(done.recv_timeout(Duration::from_secs(1)).expect("run returns"));
+    assert!(started.elapsed() < SHUTDOWN_GRACE / 2, "{:?}", started.elapsed());
 }

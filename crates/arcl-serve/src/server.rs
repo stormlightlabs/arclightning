@@ -6,6 +6,7 @@ use std::io;
 use std::net::{Ipv4Addr, TcpListener};
 use std::panic::{self, AssertUnwindSafe};
 use std::pin::pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::Duration;
@@ -76,13 +77,16 @@ impl Server {
     }
 
     /// Serve requests until Ctrl-C, then let open connections finish for up
-    /// to [`SHUTDOWN_GRACE`] and return.
+    /// to [`SHUTDOWN_GRACE`] and return. A second Ctrl-C returns at once.
     ///
     /// Connections are served on a tokio runtime on its own thread. Reads run
     /// on this thread and admitted mutations on a mutation thread, each one at
-    /// a time in the order their requests are ready.
+    /// a time in the order their requests are ready. After Ctrl-C, mutations
+    /// that have not started are answered 503 without running; one already
+    /// running finishes before this returns, so its write and export stay
+    /// together.
     pub fn run(self, reads: &dyn Reads, mutations: &(dyn Mutations + Sync)) -> Result<(), ServeError> {
-        self.run_until(reads, mutations, async {
+        self.run_until(reads, mutations, || async {
             // Without a Ctrl-C handler, the default one ends the process.
             if tokio::signal::ctrl_c().await.is_err() {
                 std::future::pending::<()>().await;
@@ -90,9 +94,11 @@ impl Server {
         })
     }
 
-    /// Serve requests as [`Server::run`] does until `shutdown` completes.
-    pub(crate) fn run_until(
-        self, reads: &dyn Reads, mutations: &(dyn Mutations + Sync), shutdown: impl Future<Output = ()> + Send,
+    /// Serve requests as [`Server::run`] does, with `signal` in place of
+    /// Ctrl-C. The server stops when the first future `signal` returns
+    /// completes, and ends the grace period when the second one does.
+    pub(crate) fn run_until<S: Future<Output = ()> + Send>(
+        self, reads: &dyn Reads, mutations: &(dyn Mutations + Sync), signal: impl FnMut() -> S + Send,
     ) -> Result<(), ServeError> {
         let Self { listener, gate, limits } = self;
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -101,18 +107,29 @@ impl Server {
             .map_err(ServeError::Start)?;
         let (reads_queue, read_jobs) = mpsc::channel::<Job<Route>>();
         let (writes_queue, write_jobs) = mpsc::channel::<Job<(Write, Vec<u8>)>>();
-        let shared = Arc::new(Shared { gate, body_deadline: limits.body, reads: reads_queue, writes: writes_queue });
+        let stopping = Arc::new(AtomicBool::new(false));
+        let shared = Arc::new(Shared {
+            gate,
+            body_deadline: limits.body,
+            stopping: Arc::clone(&stopping),
+            reads: reads_queue,
+            writes: writes_queue,
+        });
         thread::scope(|scope| {
             scope.spawn(move || {
                 for Job { work: (write, body), reply } in write_jobs {
-                    let answer = guarded(|| Answer::json(mutate(write, &body, mutations)));
+                    let answer = if stopping.load(Ordering::SeqCst) {
+                        Answer::json(Reply::stopping())
+                    } else {
+                        guarded(|| Answer::json(mutate(write, &body, mutations)))
+                    };
                     // The client may have gone; the mutation ran either way.
                     let _ = reply.send(answer);
                 }
             });
             // The runtime, and with it every handle on the job queues, drops
             // when this thread ends, which ends both job loops.
-            let serving = scope.spawn(move || runtime.block_on(accept(listener, shared, limits, shutdown)));
+            let serving = scope.spawn(move || runtime.block_on(accept(listener, shared, limits, signal)));
             for Job { work: route, reply } in read_jobs {
                 let _ = reply.send(guarded(|| dispatch(route, reads)));
             }
@@ -126,6 +143,8 @@ impl Server {
 struct Shared {
     gate: Gate,
     body_deadline: Duration,
+    /// Set when the server starts shutting down; mutations no longer run.
+    stopping: Arc<AtomicBool>,
     reads: mpsc::Sender<Job<Route>>,
     writes: mpsc::Sender<Job<(Write, Vec<u8>)>>,
 }
@@ -137,23 +156,25 @@ struct Job<T> {
 }
 
 /// Accept connections on `listener` and serve each on its own task until
-/// `shutdown` completes, then give open connections up to
-/// [`SHUTDOWN_GRACE`] to finish.
+/// the first future from `signal` completes, then give open connections up
+/// to [`SHUTDOWN_GRACE`] to finish, or until the second one completes.
 ///
 /// At most `limits.connections` connections are open at once; the next one
 /// is accepted when one closes. hyper closes a connection that takes longer
 /// than `limits.header` to send a request head, and [`WriteDeadline`] one
-/// whose writes wait longer than `limits.write` without progress.
-async fn accept(
-    listener: TcpListener, shared: Arc<Shared>, limits: Limits, shutdown: impl Future<Output = ()>,
+/// whose client reads its replies slower than `limits.write_rate` once
+/// `limits.write` of slack is spent.
+async fn accept<S: Future<Output = ()>>(
+    listener: TcpListener, shared: Arc<Shared>, limits: Limits, mut signal: impl FnMut() -> S,
 ) -> Result<(), ServeError> {
     let listener = tokio::net::TcpListener::from_std(listener).map_err(ServeError::Start)?;
+    let stopping = Arc::clone(&shared.stopping);
     let service = TowerToHyperService::new(Router::new().fallback(handle).with_state(shared));
     let mut http = http1::Builder::new();
     http.timer(TokioTimer::new()).header_read_timeout(limits.header);
     let connections = Arc::new(Semaphore::new(limits.connections));
     let graceful = GracefulShutdown::new();
-    let mut shutdown = pin!(shutdown);
+    let mut shutdown = pin!(signal());
     loop {
         let permit = tokio::select! {
             () = &mut shutdown => break,
@@ -173,7 +194,7 @@ async fn accept(
                 }
             },
         };
-        let stream = WriteDeadline::new(stream, limits.write);
+        let stream = WriteDeadline::new(stream, limits.write, limits.write_rate);
         let connection = graceful.watch(http.serve_connection(TokioIo::new(stream), service.clone()));
         tokio::spawn(async move {
             // A client that goes away or times out is not the server's failure.
@@ -181,7 +202,12 @@ async fn accept(
             drop(permit);
         });
     }
-    let _ = tokio::time::timeout(SHUTDOWN_GRACE, graceful.shutdown()).await;
+    stopping.store(true, Ordering::SeqCst);
+    let force = signal();
+    tokio::select! {
+        _ = tokio::time::timeout(SHUTDOWN_GRACE, graceful.shutdown()) => {}
+        () = force => {}
+    }
     Ok(())
 }
 
@@ -194,6 +220,7 @@ async fn handle(State(shared): State<Arc<Shared>>, request: Request) -> Response
     }
     let answer = match shared.gate.admit(&Incoming::head(&parts)) {
         Err(answer) => answer,
+        Ok(Route::Write(_)) if shared.stopping.load(Ordering::SeqCst) => Answer::closing(Reply::stopping()),
         Ok(Route::Write(write)) => match read_body(body, shared.body_deadline).await {
             Ok(body) => ask(&shared.writes, (write, body)).await,
             Err(answer) => answer,
@@ -208,7 +235,7 @@ async fn handle(State(shared): State<Arc<Shared>>, request: Request) -> Response
 async fn ask<T>(queue: &mpsc::Sender<Job<T>>, work: T) -> Answer {
     let (reply, answer) = oneshot::channel();
     if queue.send(Job { work, reply }).is_err() {
-        return Answer::json(Reply::internal("the server is stopping"));
+        return Answer::json(Reply::stopping());
     }
     answer
         .await

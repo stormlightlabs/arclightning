@@ -93,6 +93,12 @@ impl Reply {
         Self::refusal(413, "payload_too_large", "the request body is over 1 MiB")
     }
 
+    /// A request that arrived after Ctrl-C, or a mutation still queued when it
+    /// came, which the server drops without running.
+    pub(crate) fn stopping() -> Self {
+        Self::refusal(503, "server_stopping", "the server is stopping")
+    }
+
     /// A failure inside the server, such as a worker that panicked.
     pub(crate) fn internal(message: &str) -> Self {
         Self::refusal(500, "internal_error", message)
@@ -159,9 +165,9 @@ impl Answer {
         }
     }
 
-    /// The answer to a request refused before its token was accepted, which
-    /// closes the connection so a client without the token gets one reply
-    /// per connection.
+    /// An answer that closes the connection after it is sent: a refusal
+    /// before the token is accepted, so a client without the token gets one
+    /// reply per connection, or a refusal that leaves the body unread.
     pub(crate) fn closing(reply: Reply) -> Self {
         Self { close: true, ..Self::json(reply) }
     }
