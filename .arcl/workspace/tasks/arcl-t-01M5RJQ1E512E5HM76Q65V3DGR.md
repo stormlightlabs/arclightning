@@ -5,7 +5,7 @@ title = "T21: Serve the web app with axum"
 status = "completed"
 priority = "high"
 position = 0
-evidence = "Delivered by #PR: arcl-serve runs axum on hyper and tokio in place of tiny_http. A declared Content-Length over 1 MiB gets 413 before any check, with or without the token, and the server keeps serving; on main the same request aborted arcl serve. A stalled body gets 408 after 5 s, request heads time out after 5 s, at most 128 connections are open, and Ctrl-C shuts down with a 5 s grace. Reads and mutations stay sync on their own threads. Verified with cargo fmt, clippy, cargo test --workspace, cargo test --workspace --all-features serve, pnpm check, pnpm test, web test:e2e and a live run against arcl serve."
+evidence = "Delivered by #45: arcl-serve runs axum on hyper and tokio in place of tiny_http. A declared Content-Length over 1 MiB gets 413 before any check, with or without the token, and the server keeps serving; on main the same request aborted arcl serve. A stalled body gets 408 after 5 s, request heads time out after 5 s, at most 128 connections are open, and Ctrl-C shuts down with a 5 s grace. Reads and mutations stay sync on their own threads. Verified with cargo fmt, clippy, cargo test --workspace, cargo test --workspace --all-features serve, pnpm check, pnpm test, web test:e2e and a live run against arcl serve."
 +++
 
 Move `crates/arcl-serve` from tiny_http to axum on hyper and tokio. tiny_http
