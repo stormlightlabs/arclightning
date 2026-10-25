@@ -6,7 +6,7 @@ status = "completed"
 priority = "normal"
 position = 7
 blocked-by = ["arcl-t-01M5QS2QSJ1S7D1XG5Z6HAY1G3"]
-evidence = "Delivered by #44: light grey and blue and black and blue tokens in packages/ui, with a contrast test that checks text at 4.5:1 and borders, focus and accent at 3:1 in both themes; animations and transitions stop under reduced motion; below 48rem the sidebar becomes a top bar with a Menu button. apps/web/e2e adds a keyboard-only workflow against arcl serve on a scratch project, checked through the CLI; fit, theme and motion tests; and 16 screenshot baselines (four views, both themes, 1280 and 390 px) from fixed fixtures. Verified with pnpm check, pnpm test, test:browser, test:e2e, test:visual, cargo fmt, clippy, cargo test --workspace and cargo test --workspace --all-features serve."
+evidence = "Delivered by #44: light grey and blue and black and blue tokens in packages/ui, with a contrast test that checks text at 4.5:1 and borders, focus and accent at 3:1 in both themes; animations and transitions stop under reduced motion; below 48rem the sidebar becomes a top bar with a Menu button. apps/web/e2e adds a keyboard-only workflow against arcl serve on a scratch project, checked through the CLI; fit, theme and motion tests; a screenshot test of the four views in both themes at 1280 and 390 px from fixed fixtures, with local baselines; and two README screenshots in docs/images. Verified with pnpm check, pnpm test, test:browser, test:e2e, test:visual, cargo fmt, clippy, cargo test --workspace and cargo test --workspace --all-features serve."
 +++
 
 Finish the web app's fit and test coverage. This completes T18.

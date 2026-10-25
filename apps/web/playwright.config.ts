@@ -23,9 +23,11 @@ export default defineConfig({
   projects: [
     { name: "e2e", testMatch: /\.e2e\.ts$/ },
     { name: "visual", testMatch: /\.visual\.ts$/ },
+    { name: "screenshots", testMatch: /\.screenshot\.ts$/ },
   ],
-  // `pnpm test:e2e` and `pnpm test:visual` build first. The workflow test in
-  // workflow.e2e.ts starts its own `arcl serve` instead of using this server.
+  // `pnpm test:e2e`, `pnpm test:visual` and `pnpm screenshots` build first.
+  // The workflow test in workflow.e2e.ts starts its own `arcl serve` instead
+  // of using this server.
   webServer: {
     command: `pnpm preview --host 127.0.0.1 --port ${PORT} --strictPort`,
     port: PORT,

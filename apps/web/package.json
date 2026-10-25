@@ -13,7 +13,8 @@
     "test:browser": "vitest run --project browser",
     "test:e2e": "pnpm build && cargo build -p arcl-cli && playwright test --project e2e",
     "test:visual": "pnpm build && playwright test --project visual",
-    "test:visual:update": "pnpm build && playwright test --project visual --update-snapshots"
+    "test:visual:update": "pnpm build && playwright test --project visual --update-snapshots",
+    "screenshots": "pnpm build && playwright test --project screenshots"
   },
   "license": "MIT",
   "dependencies": {
