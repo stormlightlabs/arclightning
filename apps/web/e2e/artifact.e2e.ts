@@ -120,10 +120,10 @@ test("the artifact renders Work, Task, Inbox and Planning from its database and 
   await page.evaluate((capture) => {
     const host = window as unknown as { artifactStore: Map<string, Record<string, unknown>>; artifactWrite: (path: string, body: unknown) => void };
     const meta = host.artifactStore.get("meta/sync") ?? {};
-    for (const path of host.artifactStore.keys()) if (path.startsWith("queue/")) host.artifactWrite(path, null);
     host.artifactWrite(`records/${capture}`, null);
     host.artifactWrite("views/captures", { format_version: 1, data: { records: [] } });
     host.artifactWrite("meta/sync", { ...meta, revision: "after-apply" });
+    for (const path of [...host.artifactStore.keys()]) if (path.startsWith("queue/")) host.artifactWrite(path, null);
   }, CAPTURE);
   await expect(page.getByText("The project synced")).toBeVisible();
   await expect(page.getByRole("heading", { level: 2, name: "Try the artifact" })).toBeVisible();
@@ -173,17 +173,19 @@ test("the artifact queues a raw record edit that arcl web apply saves, and refus
     expect(arcl("show", task).task.title).toBe("Edited in the artifact");
     expect(arcl("web", "apply", file).results[0]).toMatchObject({ status: "failed", error: { code: "conflict" } });
 
-    // The sync deletes the applied entry and writes the new file; Edit file opens it.
+    // The sync writes the new file before it deletes the applied entry, so Edit file stays disabled until
+    // the entry is gone and then opens the new file.
     arcl("web", "export", out);
     const synced = JSON.parse(readFileSync(join(out, `sources/${task}.json`), "utf8"));
     await page.evaluate(
-      ([path, body]) => {
-        const host = window as unknown as { artifactStore: Map<string, unknown>; artifactWrite: (path: string, body: unknown) => void };
-        for (const key of [...host.artifactStore.keys()].filter((key) => key.startsWith("queue/"))) host.artifactWrite(key, null);
-        host.artifactWrite(path, body);
-      },
+      ([path, body]) => (window as unknown as { artifactWrite: (path: string, body: unknown) => void }).artifactWrite(path, body),
       [`sources/${task}`, synced] as const,
     );
+    await expect(page.getByRole("button", { name: "Edit file" })).toBeDisabled();
+    await page.evaluate(() => {
+      const host = window as unknown as { artifactStore: Map<string, unknown>; artifactWrite: (path: string, body: unknown) => void };
+      for (const key of [...host.artifactStore.keys()].filter((key) => key.startsWith("queue/"))) host.artifactWrite(key, null);
+    });
     await page.getByRole("button", { name: "Edit file" }).click();
     await expect(editor).toContainText('title = "Edited in the artifact"');
   } finally {

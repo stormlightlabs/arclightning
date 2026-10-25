@@ -4677,14 +4677,35 @@ fn web_apply_runs_a_queued_raw_edit_as_the_edit_endpoint_does() {
     assert_eq!(saved["id"], task.as_str());
     assert_ne!(saved["revision"], revision.as_str());
 
-    // The page refuses a queue entry over 200 KiB; `apply` takes any size the
-    // edit endpoint takes, so a larger file saves.
+    // The page refuses a queue entry over 200 KiB; `apply` takes an input up
+    // to the edit endpoint's 1 MiB body limit, so a larger file saves. An
+    // input over that limit fails on its own, and the entries after it run.
     let fresh = saved["revision"].as_str().expect("a revision").to_owned();
     assert!(large.len() > 200 * 1024);
     let output = web_apply(dir, &serde_json::json!([entry("q5", &large, &fresh)]));
     let results = json(&output.stdout)["data"]["results"].clone();
     assert_eq!(results[0]["status"], "applied", "{results}");
     assert_eq!(task_field(dir, &task, "title"), "Large raw");
+
+    let fresh = results[0]["data"]["revision"].as_str().expect("a revision").to_owned();
+    let huge = format!("{source}\n{}", "A long line.\n".repeat(90_000));
+    assert!(huge.len() > 1024 * 1024);
+    let small = source.replace("Raw task", "After huge");
+    let output = web_apply(
+        dir,
+        &serde_json::json!([entry("q6", &huge, &fresh), entry("q7", &small, &fresh)]),
+    );
+    let results = json(&output.stdout)["data"]["results"].clone();
+    assert_eq!(results[0]["status"], "failed", "{results}");
+    assert_eq!(results[0]["error"]["code"], "invalid_request");
+    assert!(
+        results[0]["error"]["message"]
+            .as_str()
+            .expect("a message")
+            .contains("over 1 MiB")
+    );
+    assert_eq!(results[1]["status"], "applied", "{results}");
+    assert_eq!(task_field(dir, &task, "title"), "After huge");
 }
 
 #[test]

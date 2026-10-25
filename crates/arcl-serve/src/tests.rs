@@ -650,6 +650,24 @@ fn apply_refuses_unknown_operations_targets_and_options() {
 }
 
 #[test]
+fn apply_takes_an_input_up_to_the_body_limit() {
+    let input = |len: usize| {
+        let frame = r#"{"source":"","revision":"r1"}"#.len();
+        format!(r#"{{"source":"{}","revision":"r1"}}"#, "a".repeat(len - frame))
+    };
+    let fits = input(MAX_BODY_BYTES);
+    assert_eq!(fits.len(), MAX_BODY_BYTES);
+    assert_eq!(
+        apply("update_source", Some("arcl-t-1"), fits.as_bytes(), &Echo).status(),
+        200
+    );
+    let over = input(MAX_BODY_BYTES + 1);
+    let reply = apply("update_source", Some("arcl-t-1"), over.as_bytes(), &Echo);
+    assert_eq!(reply.status(), 400);
+    assert!(reply.body().contains("over 1 MiB"), "{}", reply.body());
+}
+
+#[test]
 fn serve_sends_no_cors_headers() {
     let answer = answered(&gate(), &get("/api/records", Some(TOKEN)));
     assert!(

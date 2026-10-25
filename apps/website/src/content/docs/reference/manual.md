@@ -611,7 +611,8 @@ skipped; the page does not list it either. A file that is not a JSON array
 exits with code 3 and applies nothing. An entry that is not a valid queue
 entry, such as one with a field the page does not write, fails with an
 `invalid_request` error naming its position and `id`, and the other entries
-still run. Under `--json` it prints
+still run. So does an entry whose `input` is over 1 MiB as JSON, the
+endpoints' body limit. Under `--json` it prints
 `{"format_version": 1, "data": {"results": [...]}}`, one result per entry in
 order: `id`, `op`, `target` (each `null` when a malformed entry has no string
 value for it), `status` (`applied`, `failed` or `skipped`), the command's
@@ -625,22 +626,28 @@ To sync, the agent session that owns the artifact:
 
 1. Reads the `queue` collection. An entry whose `status` is `applying` was
    claimed by a sync that stopped before it finished. Check whether its
-   change is in the records: delete the entry if it is, and set `status`
-   back to `queued` if it is not.
+   change is in the records: if it is, delete the entry in step 5 with this
+   sync's applied ones; if it is not, set `status` back to `queued`.
 2. Sets `status` to `applying` on each `queued` entry in the database, then
    writes those entries, with their IDs and `status` still `queued`, to a
    file. An entry claimed this way never runs twice: `apply` skips it if a
    later sync reads it again.
-3. Runs `arcl --json web apply <file>`, then deletes each applied entry and
-   sets `status` to `failed` and `error` to the result's error on each failed
-   one, so the page shows why.
+3. Runs `arcl --json web apply <file>`, then sets `status` to `failed` and
+   `error` to the result's error on each failed entry, so the page shows
+   why. Applied entries stay `applying` for now.
 4. Runs `arcl --json web export <dir>` into the directory of the last sync,
    writes each `changed` document from `<dir>/<path>.json` and deletes each
    `removed` one. If the export fails because the workspace did not sync,
-   resolve that, with `arcl workspace status`, and run it again. If a write fails, or `<dir>` is new, the next sync runs
+   resolve that, with `arcl workspace status`, and run it again. If a write
+   fails, or `<dir>` is new, the next sync runs
    `arcl --json web export --full <dir>`, writes every `changed` document
-   and deletes every document in `views`, `records`, `sources` and `chunks` that
-   `documents` does not list.
+   and deletes every document in `views`, `records`, `sources` and `chunks`
+   that `documents` does not list.
+5. Deletes each applied entry. This comes after the writes, so the page never
+   offers **Edit file** on a `sources/<id>` document older than the edit. If
+   a write in step 4 failed, stop before this step: the applied entries stay
+   `applying`, and step 1 of the next sync finds their changes in the
+   records.
 
 The page follows `meta/sync` and the queue. When `revision` changes, it offers
 to reload the view with the new records. It lists `applying` entries with the

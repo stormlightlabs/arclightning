@@ -4,6 +4,7 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
 use crate::answer::Reply;
+use crate::limits::MAX_BODY_BYTES;
 use crate::routes::Write;
 
 /// The operations a queued change can name, as `arcl web apply` reads them.
@@ -249,8 +250,12 @@ pub trait Mutations {
 /// `input` is what the matching POST endpoint takes as its body, and it is
 /// checked the same way: an unknown option or a missing required one is
 /// refused before the mutation runs. An unknown operation, a missing target
-/// or a target on an operation that takes none is refused too.
+/// or a target on an operation that takes none is refused too, and so is an
+/// `input` over the endpoints' 1 MiB body limit.
 pub fn apply(operation: &str, target: Option<&str>, input: &[u8], mutations: &dyn Mutations) -> Reply {
+    if input.len() > MAX_BODY_BYTES {
+        return Reply::invalid_request("the input is over 1 MiB, the most a mutation's body may hold");
+    }
     let Some(&(_, needs_target, write)) = OPERATIONS.iter().find(|(name, ..)| *name == operation) else {
         return Reply::invalid_request(&format!("unknown operation `{operation}`"));
     };
