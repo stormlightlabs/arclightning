@@ -129,6 +129,33 @@ describe("Inbox route", () => {
     await expect.element(screen.getByRole("heading", { level: 3, name: "Promote to spec" })).not.toBeInTheDocument();
   });
 
+  it.each([
+    { action: "task", field: "Title", other: "inbox:note" },
+    { action: "spec", field: /Acceptance criteria/, other: "inbox:task" },
+    { action: "note", field: "Title", other: "inbox:spec" },
+  ])("keeps the $action form open while it holds edits", async ({ action, field, other }) => {
+    source();
+    await render(InboxRoute);
+    await expect.element(screen.getByText("Body of c-1")).toBeVisible();
+    registeredCommands().find((command) => command.id === `inbox:${action}`)?.run();
+    const heading = screen.getByRole("heading", { level: 3 });
+    await expect.element(heading).toBeVisible();
+    const label = heading.element().textContent ?? "";
+    const input = screen.getByRole("textbox", { name: field });
+    await input.fill("Edited");
+    // Escape with focus in the field leaves the edits in place.
+    await userEvent.keyboard("{Escape}");
+    await expect.element(input).toHaveValue("Edited");
+    // Another triage key takes focus back to the form instead of replacing it.
+    (document.activeElement as HTMLElement).blur();
+    registeredCommands().find((command) => command.id === other)?.run();
+    await expect.element(screen.getByRole("heading", { level: 3 })).toHaveTextContent(label);
+    await expect.element(screen.getByRole("textbox", { name: "Title" })).toHaveFocus();
+    await expect.element(input).toHaveValue("Edited");
+    await screen.getByRole("button", { name: "Cancel" }).click();
+    await expect.element(screen.getByRole("heading", { level: 3 })).not.toBeInTheDocument();
+  });
+
   it("says when the Inbox is empty", async () => {
     source({ captures: async () => [] });
     await render(InboxRoute);

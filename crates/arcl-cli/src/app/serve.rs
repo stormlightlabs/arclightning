@@ -4,10 +4,9 @@
 //! workspace sync. A read never changes records, though opening the database
 //! can run its migrations. Each mutation runs the same `arcl task` or
 //! `arcl capture`, `arcl spec` or `arcl plan` command as the CLI, with the
-//! same sync around it: it takes
-//! the sync lock, syncs, changes the record and syncs again to export it. The
-//! server holds the lock only during a mutation, so other arcl commands run
-//! while it serves.
+//! same sync around it: it takes the sync lock, syncs, changes the record and
+//! syncs again to export it. The server holds the lock only during a
+//! mutation, so other arcl commands run while it serves.
 //!
 //! A mutation waits at most [`LOCK_WAIT`] for the lock. When another command
 //! holds it longer, the mutation fails with `application_error`, exit code 1,

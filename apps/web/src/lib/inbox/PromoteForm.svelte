@@ -11,7 +11,7 @@
     parents?: SelectOption[];
     busy?: boolean;
     onsubmit: () => void;
-    /** Called by Cancel. The view closes the form on Escape too. */
+    /** Called by Cancel. The view closes the form on Escape too, while it holds no edits. */
     oncancel: () => void;
   }
 </script>

@@ -32,6 +32,10 @@
   let detailFailure = $state<string | null>(null);
   /** The open promotion form, or `null`. */
   let form = $state<PromotionForm | null>(null);
+  /** The open form as it opened, to tell whether it holds edits. */
+  let opened = "";
+  /** Whether the open form holds edits, which Escape and the triage keys keep. */
+  let unsaved = $derived(form !== null && JSON.stringify(form) !== opened);
   /** Milestones and tasks for the task form, read when it first opens. */
   let work = $state<WorkList | null>(null);
   let busy = $state(false);
@@ -142,6 +146,11 @@
   async function openForm(to: Exclude<TriageAction, "discard">) {
     const capture = selectedCapture;
     if (capture === null) return;
+    // A form with edits stays open; the key takes focus back to it.
+    if (unsaved) {
+      focusForm();
+      return;
+    }
     notice = null;
     actionFailure = null;
     if (to === "task" && work === null) {
@@ -154,9 +163,17 @@
       if (selected !== capture.id) return;
     }
     const tasks = work?.items.map(({ task }) => ({ id: task.id, title: task.title, status: task.status })) ?? [];
-    form = formFor(to, detail?.title ?? capture.title, tasks);
+    const next = formFor(to, detail?.title ?? capture.title, tasks);
+    opened = JSON.stringify(next);
+    form = next;
     await tick();
-    pane?.querySelector<HTMLElement>(".promote input")?.focus();
+    focusForm();
+  }
+
+  /** Focus the open form's title, unless focus is in the form already. */
+  function focusForm() {
+    const element = pane?.querySelector<HTMLElement>(".promote");
+    if (element && !element.contains(document.activeElement)) element.querySelector<HTMLElement>("input")?.focus();
   }
 
   async function promote() {
@@ -219,8 +236,9 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
-    // Escape closes the form, unless an open listbox or the dialog took it.
-    if (event.key === "Escape" && form !== null && !confirming && !event.defaultPrevented) {
+    // Escape closes the form, unless it holds edits or an open listbox or the
+    // dialog took it.
+    if (event.key === "Escape" && form !== null && !unsaved && !confirming && !event.defaultPrevented) {
       form = null;
       event.preventDefault();
       return;

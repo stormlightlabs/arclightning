@@ -72,9 +72,13 @@ describe("Planning route", () => {
     await expect.element(row).toHaveFocus();
     await userEvent.keyboard("{Enter}");
     await expect.element(row).toHaveAttribute("aria-expanded", "true");
-    // The repeats of a held Enter do not toggle it back.
-    (document.activeElement as HTMLElement).blur();
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", repeat: true, cancelable: true }));
+    // The repeats of a held Enter on the focused row do not toggle it back.
+    await userEvent.keyboard("{Enter>2/}");
+    await expect.element(row).toHaveAttribute("aria-expanded", "false");
+    const repeat = new KeyboardEvent("keydown", { key: "Enter", repeat: true, bubbles: true, cancelable: true });
+    row.element().dispatchEvent(repeat);
+    expect(repeat.defaultPrevented).toBe(true);
+    await userEvent.keyboard("{Enter}");
     await expect.element(row).toHaveAttribute("aria-expanded", "true");
     await userEvent.keyboard("kk");
     await expect.element(screen.getByRole("button", { name: /spec s-1/ })).toHaveFocus();
@@ -122,6 +126,42 @@ describe("Planning route", () => {
     expect(added()).toEqual(["planning:apply"]);
     await userEvent.keyboard("j");
     expect(added()).toEqual([]);
+  });
+
+  it.each([
+    { kind: "spec", heading: "New spec", field: /Acceptance criteria/ },
+    { kind: "plan", heading: "New plan", field: /Description/ },
+    { kind: "apply", heading: "Apply plan", field: /Plan document/ },
+  ])("keeps the $kind form open while it holds edits", async ({ kind, heading, field }) => {
+    source();
+    await render(PlanningRoute);
+    await expect.element(screen.getByRole("button", { name: /spec s-1/ })).toBeVisible();
+    if (kind === "spec") await screen.getByRole("button", { name: "New spec" }).click();
+    else await screen.getByRole("button", { name: kind === "plan" ? "New plan" : "Apply plan" }).first().click();
+    const form = screen.getByRole("form", { name: heading });
+    const input = form.getByRole("textbox", { name: field });
+    await input.fill("Edited");
+    // Escape with focus in the field leaves the edits in place.
+    await userEvent.keyboard("{Escape}");
+    await expect.element(input).toHaveValue("Edited");
+    // n and a take focus back to the form instead of replacing it.
+    // j selects the spec, then the plan, so New plan and then Apply plan are offered.
+    const opens = new Set<string>();
+    for (const step of ["j", "j"]) {
+      (document.activeElement as HTMLElement).blur();
+      await userEvent.keyboard(step);
+      for (const command of registeredCommands().filter(({ id }) => ["planning:new-spec", "planning:new-plan", "planning:apply"].includes(id))) {
+        opens.add(command.id);
+        (document.activeElement as HTMLElement).blur();
+        command.run();
+        await expect.element(form).toBeVisible();
+        await expect.element(form.getByRole("textbox").first()).toHaveFocus();
+      }
+    }
+    expect([...opens].sort()).toEqual(["planning:apply", "planning:new-plan", "planning:new-spec"]);
+    await expect.element(input).toHaveValue("Edited");
+    await form.getByRole("button", { name: "Cancel" }).click();
+    await expect.element(form).not.toBeInTheDocument();
   });
 
   it("says when there is no spec yet", async () => {

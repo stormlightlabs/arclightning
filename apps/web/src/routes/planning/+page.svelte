@@ -41,6 +41,10 @@
   let selectedRow = $derived(rows.find((row) => row.id === selected) ?? null);
 
   let form = $state<PlanningForm | null>(null);
+  /** The open form as it opened, to tell whether it holds edits. */
+  let opened = "";
+  /** Whether the open form holds edits, which Escape and the form keys keep. */
+  let unsaved = $derived(form !== null && JSON.stringify(form) !== opened);
   let busy = $state(false);
   let formFailure = $state<ActionFailure | null>(null);
   let notice = $state<string | null>(null);
@@ -118,11 +122,16 @@
   }
 
   async function openForm(next: PlanningForm) {
-    form = next;
-    formFailure = null;
-    notice = null;
-    await tick();
-    document.querySelector<HTMLElement>("form.planning-form input, form.planning-form textarea")?.focus();
+    // A form with edits stays open; the key takes focus back to it.
+    if (!unsaved) {
+      opened = JSON.stringify(next);
+      form = next;
+      formFailure = null;
+      notice = null;
+      await tick();
+    }
+    const element = document.querySelector<HTMLElement>("form.planning-form");
+    if (element && !element.contains(document.activeElement)) element.querySelector<HTMLElement>("input, textarea")?.focus();
   }
 
   function closeForm() {
@@ -195,9 +204,15 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
-    // Escape closes the form, unless an open listbox or a dialog took it.
-    if (event.key === "Escape" && form !== null && !event.defaultPrevented) {
+    // Escape closes the form, unless it holds edits or an open listbox or a
+    // dialog took it.
+    if (event.key === "Escape" && form !== null && !unsaved && !event.defaultPrevented) {
       closeForm();
+      event.preventDefault();
+      return;
+    }
+    // A held Enter or Space on a row clicks it once, not on each repeat.
+    if (event.repeat && (event.key === "Enter" || event.key === " ") && event.target instanceof Element && event.target.closest("[data-row-id]")) {
       event.preventDefault();
       return;
     }
