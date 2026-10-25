@@ -289,7 +289,24 @@ must parse, the fields must fit the record's kind, the ID must match the
 record, and every relationship and blocker rule must hold for the whole
 graph. The edit is compared with the database, as the task commands are, so
 a blocker cycle or ancestry rule violation it adds is refused even before the
-first sync; one already in the database loads with a warning. The record ID in the path is the only file the request names. When the
+first sync; one already in the database loads with a warning.
+
+An edit may not change a field that only a command changes, since those
+commands check lifecycle rules, readiness and open subtasks that the import
+does not. Such an edit fails with `invalid_request`, status 400, and the
+message names the command. A field left at its value passes, so a closed
+record's other fields stay editable.
+
+| Kind    | Fields only a command changes           | Commands                                                 |
+| ------- | --------------------------------------- | -------------------------------------------------------- |
+| task    | `status`, `handoff`, `evidence`         | `arcl task start`, `park`, `unpark`, `handoff`, `complete`, `cancel` |
+| capture | `status`, `promoted-to`                 | `arcl capture promote`, `discard`                        |
+| spec    | `status`, `source-capture`              | `arcl spec complete`, `cancel`; `arcl capture promote`   |
+| plan    | `status`                                | `arcl plan complete`, `cancel`                           |
+| phase   | `status`                                | `arcl plan phase complete`, `cancel`                     |
+| release | `status`                                | `arcl release complete`, `cancel`                        |
+
+The record ID in the path is the only file the request names. When the
 file's revision is no longer `revision`, such as after an edit in Git or
 another change, the edit fails with `conflict`, status 409. A refused edit
 changes nothing. A saved edit reaches the workspace file through the sync
@@ -376,9 +393,11 @@ completion it lists the tasks the completion made ready.
 **Edit file** opens the task's whole workspace file in an editor, with the
 TOML front matter between the `+++` lines highlighted as TOML and the body as
 Markdown. **Save file** sends it to `POST /api/records/<id>/edit`, so the
-file passes the checks `arcl workspace import` runs. A refused file shows the
-CLI's message and keeps the edit open; when the file changed since it was
-opened, **Reload the file** loads the new version in place of the edit.
+file passes the checks `arcl workspace import` runs. The file cannot change
+the task's status, handoff note or evidence; the buttons and the board do
+that. A refused file shows the CLI's message and keeps the edit open; when
+the file changed since it was opened, **Reload the file** loads the new
+version in place of the edit.
 
 The Inbox lists the captures not yet promoted or discarded, oldest first, and
 shows the selected one's body. `j` and `k` move the selection. **Promote to

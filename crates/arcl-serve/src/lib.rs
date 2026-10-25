@@ -84,7 +84,9 @@
 //! /api/records/{id}/edit` takes `{"source", "revision"}` (see
 //! [`RecordSourceEdit`]) and replaces the record with the file when its
 //! revision still matches, after the checks a workspace import runs on a
-//! file. The record's ID is the only path the client names.
+//! file. It refuses a change to a field only a command changes, such as a
+//! task's `status`, as `arcl_repo::workspace::edit_record` lists. The record's
+//! ID is the only path the client names.
 //!
 //! A mutation takes a JSON object of the command's options, such as
 //! `{"evidence": "Delivered by #41."}`; see [`NewTask`], [`TaskEdit`],

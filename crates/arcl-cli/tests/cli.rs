@@ -3631,6 +3631,13 @@ fn serve_edits_a_record_file_with_the_import_checks() {
         400,
         "workspace file",
     );
+    // A status change skips the task commands' rules, so it is refused.
+    refused(
+        &source.replace("status = \"pending\"", "status = \"completed\""),
+        &revision,
+        400,
+        "field `status`: a task's status changes only through `arcl task start`",
+    );
     refused(&source, "0000", 409, "changed since it was opened");
 
     let edited = source

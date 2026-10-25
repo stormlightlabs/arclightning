@@ -311,6 +311,32 @@ impl RecordIndex {
     }
 }
 
+/// The `plan-key` values one record kind holds, by plan. The database keeps
+/// a key unique within its plan for phases and for tasks, so a duplicate is
+/// refused here as a field error rather than failing the write.
+#[derive(Default)]
+struct PlanKeys(HashMap<(PlanId, String), PathBuf>);
+
+impl PlanKeys {
+    /// Record that `path` holds `key` in `plan`, or fail when another file
+    /// of the same kind already does. A key without a plan is not checked,
+    /// as the database does not check it.
+    fn claim(&mut self, path: &Path, plan: Option<PlanId>, key: Option<&str>) -> Result<()> {
+        let (Some(plan), Some(key)) = (plan, key) else { return Ok(()) };
+        if let Some(first) = self.0.insert((plan, key.to_owned()), path.to_path_buf()) {
+            return Err(field_error(
+                path.to_path_buf(),
+                "plan-key",
+                format!(
+                    "plan key `{key}` is used twice in plan `{plan}`; first declared in `{}`",
+                    first.display()
+                ),
+            ));
+        }
+        Ok(())
+    }
+}
+
 type Result<T> = std::result::Result<T, WorkspaceImportError>;
 
 /// Parse, validate, replace, and canonicalize a workspace using an open database.
@@ -696,24 +722,27 @@ fn validate_plans(records: &BTreeMap<PathBuf, WorkspaceRecord>, index: &RecordIn
 }
 
 fn validate_phases(records: &BTreeMap<PathBuf, WorkspaceRecord>, index: &RecordIndex) -> Result<()> {
+    let mut keys = PlanKeys::default();
     for (path, record) in records {
-        if let WorkspaceRecord::Phase(record) = record
-            && !index.plans.contains_key(&record.plan_id)
-        {
+        let WorkspaceRecord::Phase(record) = record else { continue };
+        if !index.plans.contains_key(&record.plan_id) {
             return Err(relationship_error(
                 path.clone(),
                 "plan",
                 format!("plan `{}` does not exist", record.plan_id),
             ));
         }
+        keys.claim(path, Some(record.plan_id), record.plan_key.as_deref())?;
     }
     Ok(())
 }
 
 fn validate_tasks(records: &BTreeMap<PathBuf, WorkspaceRecord>, index: &RecordIndex) -> Result<Vec<TaskDependency>> {
     let mut dependencies = Vec::new();
+    let mut keys = PlanKeys::default();
     for (path, record) in records {
         let WorkspaceRecord::Task(record) = record else { continue };
+        keys.claim(path, record.plan_id, record.plan_key.as_deref())?;
         if record.spec_id.is_some_and(|id| !index.specs.contains_key(&id)) {
             return Err(relationship_error(
                 path.clone(),
@@ -1172,6 +1201,55 @@ mod tests {
         assert_eq!(graph.tasks[0].body, "Task body");
         assert_eq!(graph.tasks[0].id, task.id);
         assert_eq!(destination.workspace_base().expect("base loads").len(), 4);
+    }
+
+    #[test]
+    fn a_plan_key_used_twice_in_one_plan_is_refused() {
+        let mut source = Database::open_in_memory().expect("database opens");
+        let project = source.project().expect("project exists");
+        let spec = source
+            .create_spec("Spec".to_owned(), String::new(), String::new())
+            .expect("spec creates");
+        let plan = source
+            .create_plan(spec.id, "Plan".to_owned(), String::new())
+            .expect("plan creates");
+        let mut tasks = Vec::new();
+        let mut phases = Vec::new();
+        for position in 0..2 {
+            let task = source
+                .create_planning_task(PlanningTaskCreate {
+                    project_id: project.id,
+                    spec_id: None,
+                    plan_id: Some(plan.id),
+                    phase_id: None,
+                    parent_id: None,
+                    title: format!("Task {position}"),
+                    body: String::new(),
+                    priority: TaskPriority::Normal,
+                    position,
+                })
+                .expect("task creates");
+            tasks.push(format!("tasks/{}.md", task.id));
+            let phase = source
+                .create_phase(plan.id, format!("Phase {position}"), String::new(), position)
+                .expect("phase creates");
+            phases.push(format!("phases/{}.md", phase.id));
+        }
+        for files in [tasks, phases] {
+            let root = tempfile::tempdir().expect("workspace creates");
+            export_graph(root.path(), &source.connected_graph().expect("graph loads")).expect("export succeeds");
+            for file in &files {
+                let path = root.path().join(file);
+                let content = fs::read_to_string(&path).expect("record reads");
+                fs::write(&path, content.replacen("+++\n", "+++\nplan-key = \"dup\"\n", 1)).expect("record writes");
+            }
+            let mut destination = Database::open_in_memory().expect("database opens");
+            let error = import_graph(root.path(), root.path(), &mut destination, None).expect_err("duplicate rejects");
+            assert_eq!(error.exit_code(), 3, "{error}");
+            assert!(error.to_string().contains("field `plan-key`"), "{error}");
+            assert!(files.iter().all(|file| error.to_string().contains(file)), "{error}");
+            assert!(destination.connected_graph().expect("graph loads").tasks.is_empty());
+        }
     }
 
     #[test]
