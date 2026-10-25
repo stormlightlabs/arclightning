@@ -1,4 +1,4 @@
-import { DataError, type DataSource, type Task, type TaskDetail, type TaskEdit, type TaskPriority, type TaskStatus } from "$lib/data";
+import { DataError, type ChangeWarning, type DataSource, type Task, type TaskDetail, type TaskEdit, type TaskPriority, type TaskStatus } from "$lib/data";
 
 /** A lifecycle change the Task view offers. */
 export type TaskAction = "start" | "complete" | "handoff" | "park" | "unpark";
@@ -14,6 +14,8 @@ export interface TaskDraft {
 export interface ActionResult {
   /** The tasks a completion made ready, by ID; empty for other actions. */
   unblocked: string[];
+  /** The warnings the change's syncs gave; the change is saved. */
+  warnings: ChangeWarning[];
 }
 
 /** A failed change, as the view shows it next to the action. */
@@ -64,24 +66,19 @@ export function actionsFor(status: TaskStatus): TaskAction[] {
  * completion, left out when blank, or the note for a handoff.
  */
 export async function runAction(source: DataSource, id: string, action: TaskAction, text = ""): Promise<ActionResult> {
-  const done = { unblocked: [] };
   switch (action) {
     case "start":
-      await source.startTask(id);
-      return done;
+      return { unblocked: [], warnings: (await source.startTask(id)).warnings };
     case "complete": {
-      const completion = await source.completeTask(id, text.trim() === "" ? {} : { evidence: text });
-      return { unblocked: completion.unblocked };
+      const { value, warnings } = await source.completeTask(id, text.trim() === "" ? {} : { evidence: text });
+      return { unblocked: value.unblocked, warnings };
     }
     case "handoff":
-      await source.handOffTask(id, text);
-      return done;
+      return { unblocked: [], warnings: (await source.handOffTask(id, text)).warnings };
     case "park":
-      await source.parkTask(id);
-      return done;
+      return { unblocked: [], warnings: (await source.parkTask(id)).warnings };
     case "unpark":
-      await source.unparkTask(id);
-      return done;
+      return { unblocked: [], warnings: (await source.unparkTask(id)).warnings };
   }
 }
 

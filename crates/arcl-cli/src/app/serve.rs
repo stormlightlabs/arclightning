@@ -6,11 +6,21 @@
 //! as the CLI, with the same sync around it: it takes the sync lock, syncs,
 //! changes the record and syncs again to export it. The server holds the lock
 //! only during a mutation, so other arcl commands run while it serves.
+//!
+//! A mutation waits at most [`LOCK_WAIT`] for the lock. When another command
+//! holds it longer, the mutation fails with `application_error`, exit code 1,
+//! and status 503 with `Retry-After`, and changes nothing. A mutation's reply
+//! lists the warnings its syncs gave in `warnings`, as objects with the
+//! `code` and `message` the CLI prints to stderr under `--json`.
 
 use arcl_serve::{Completion, Handoff, Mutations, NewTask, Reads, Reply, Server, TaskEdit, TaskStart};
 
 use super::reads::*;
 use super::*;
+
+/// How long a mutation waits for the project's sync lock. The CLI waits as
+/// long as it takes; the web app's user is waiting on a button instead.
+const LOCK_WAIT: Duration = Duration::from_secs(3);
 
 /// The endpoints, answering with the CLI's `--json` envelopes.
 struct ServeApp {
@@ -20,14 +30,16 @@ struct ServeApp {
 }
 
 impl ServeApp {
-    /// Run a task command as the CLI runs a write, and print the warnings
-    /// its syncs give to the server's stderr.
+    /// Run a task command as the CLI runs a write. The warnings its syncs
+    /// give go in the reply and to the server's stderr.
     fn write(&self, command: TaskCommand) -> Reply {
-        match synced_write(|| run_task(command, &self.renderer)) {
+        match synced_write(LOCK_WAIT, || run_task(command, &self.renderer)) {
             Ok((body, warnings)) => {
+                let body = with_warnings(body.unwrap_or_default(), &warnings);
                 write_warnings(self.mode, warnings);
-                Reply::success(body.unwrap_or_default())
+                Reply::success(body)
             }
+            Err(error) if error.lock_busy() => Reply::busy(error.json()),
             Err(error) => Reply::failure(error.exit_code(), error.json()),
         }
     }
@@ -138,6 +150,23 @@ pub(super) fn exec_serve(port: Option<u16>, renderer: &Renderer) -> anyhow::Resu
     let app = ServeApp { renderer: Renderer::new(OutputMode::Json, ColorChoice::Never), mode: renderer.mode() };
     server.run(&app, &app).context("the web app server stopped")?;
     Ok(())
+}
+
+/// Add `warnings` to the JSON envelope `body` as a `warnings` array of
+/// `{"code", "message"}` objects. With no warnings, `body` is unchanged.
+fn with_warnings(body: String, warnings: &[Warning]) -> String {
+    if warnings.is_empty() {
+        return body;
+    }
+    let Ok(serde_json::Value::Object(mut envelope)) = serde_json::from_str(&body) else {
+        return body;
+    };
+    let warnings = warnings
+        .iter()
+        .map(|warning| serde_json::json!({ "code": warning.code, "message": warning.message }))
+        .collect();
+    envelope.insert("warnings".to_owned(), serde_json::Value::Array(warnings));
+    serde_json::Value::Object(envelope).to_string()
 }
 
 /// Turn a read's result into a reply, with the error envelope `main` prints

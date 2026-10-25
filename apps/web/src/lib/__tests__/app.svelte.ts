@@ -9,10 +9,14 @@ import { vi } from "vitest";
 const ORIGIN = "http://localhost";
 
 /** The page a route reads from `$app/state`. */
-export const page = $state({ url: new URL("/", ORIGIN), params: {} as Record<string, string> });
+export const page = $state({
+  url: new URL("/", ORIGIN),
+  params: {} as Record<string, string>,
+  state: {} as App.PageState,
+});
 
 /** `goto`, which records where a route sent the browser. */
-export const goto = vi.fn(async (_url: string | URL) => {});
+export const goto = vi.fn(async (_url: string | URL, _options?: { state?: App.PageState }) => {});
 
 let callbacks: ((navigation: AfterNavigate) => void)[] = [];
 
@@ -26,6 +30,7 @@ export function show(path: string): void {
   page.url = new URL(path, ORIGIN);
   const task = /^\/tasks\/([^/]+)$/.exec(page.url.pathname);
   page.params = task ? { id: decodeURIComponent(task[1]) } : {};
+  page.state = {};
 }
 
 /** Run the `afterNavigate` callbacks for arriving at the shown page from `from`. */

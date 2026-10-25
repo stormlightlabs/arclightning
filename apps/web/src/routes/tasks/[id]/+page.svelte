@@ -1,8 +1,9 @@
 <script lang="ts">
   import { Button, Feedback } from "@arclightning/ui";
+  import { untrack } from "svelte";
   import { afterNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
-  import { dataSource, latestRead, type TaskDetail } from "$lib/data";
+  import { dataSource, latestRead, type ChangeWarning, type TaskDetail } from "$lib/data";
   import { taskKeyAction } from "$lib/task";
   import TaskDetailView from "$lib/task/TaskDetail.svelte";
   import { workHref } from "$lib/work";
@@ -13,6 +14,8 @@
   let panelOpen = $state(true);
   /** Whether an open form holds input that leaving would lose. */
   let unsaved = $state(false);
+  /** The warnings of the last saved change, shown until dismissed. */
+  let warnings = $state<ChangeWarning[]>([]);
   // The Work list URL this view was opened from, kept across links to other
   // tasks so Escape brings back its filters.
   let from = $state<URL | null>(null);
@@ -31,6 +34,8 @@
 
   $effect(() => {
     requested = id;
+    // A navigation from a create carries its warnings.
+    warnings = untrack(() => page.state?.warnings ?? []);
     load();
     return read.stop;
   });
@@ -73,7 +78,7 @@
 {:else if detail === null}
   <p class="loading" role="status">Loading task…</p>
 {:else}
-  <TaskDetailView {detail} workHref={workHref(id, from)} bind:panelOpen bind:unsaved onchanged={refresh} />
+  <TaskDetailView {detail} workHref={workHref(id, from)} bind:panelOpen bind:unsaved bind:warnings onchanged={refresh} />
 {/if}
 
 <style>

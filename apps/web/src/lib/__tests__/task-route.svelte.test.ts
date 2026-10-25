@@ -8,7 +8,7 @@ import { DataError, setDataSource, type DataSource, type TaskDetail } from "$lib
 import { taskKeyAction } from "$lib/task";
 import { blockedDetail } from "$lib/task/fixtures";
 import TaskRoute from "../../routes/tasks/[id]/+page.svelte";
-import { arrive, goto, navigate, reset, show } from "./app.svelte";
+import { arrive, goto, navigate, page, reset, show } from "./app.svelte";
 
 vi.mock("$app/state", async () => ({ page: (await import("./app.svelte")).page }));
 vi.mock("$app/navigation", async () => {
@@ -98,6 +98,18 @@ describe("Task route", () => {
     await screen.getByRole("button", { name: "Retry" }).click();
     reads.a[1].answer();
     await expect.element(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Task a");
+  });
+
+  it("shows the warnings of the create that opened it", async () => {
+    const { source, reads } = slowSource();
+    setDataSource(source);
+    show("/tasks/a");
+    page.state = { warnings: [{ code: "workspace_sync", message: "the workspace was not updated" }] };
+    await render(TaskRoute);
+    reads.a[0].answer();
+    await expect.element(screen.getByText("the workspace was not updated (workspace_sync)")).toBeVisible();
+    await screen.getByRole("button", { name: "Dismiss" }).click();
+    await expect.element(screen.getByText("the workspace was not updated (workspace_sync)")).not.toBeInTheDocument();
   });
 
   it("titles the page Task until the task loads, then with its title", async () => {

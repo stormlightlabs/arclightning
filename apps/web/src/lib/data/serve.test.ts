@@ -167,13 +167,16 @@ describe("serveSource changes", () => {
     });
     const source = serveSource({ fetch, headers: auth });
 
-    expect(await source.createTask({ title: "New", priority: "high" })).toMatchObject({ id: "t-3", status: "pending" });
+    expect(await source.createTask({ title: "New", priority: "high" })).toMatchObject({
+      value: { id: "t-3", status: "pending" },
+      warnings: [],
+    });
     await source.updateTask("t 3", { title: "Renamed", body: "Text" });
-    expect(await source.startTask("t 3")).toMatchObject({ status: "in_progress" });
+    expect((await source.startTask("t 3")).value).toMatchObject({ status: "in_progress" });
     await source.startTask("t 3", { force: true });
     await source.parkTask("t 3");
     await source.unparkTask("t 3");
-    expect(await source.handOffTask("t 3", "Resume here")).toMatchObject({ status: "parked" });
+    expect((await source.handOffTask("t 3", "Resume here")).value).toMatchObject({ status: "parked" });
 
     expect(calls).toEqual([
       { path: "/api/tasks", method: "POST", headers: posted, body: { title: "New", priority: "high" } },
@@ -193,8 +196,20 @@ describe("serveSource changes", () => {
       },
     });
     const completion = await serveSource({ fetch, headers: auth }).completeTask("t-1", { evidence: "Delivered by #41." });
-    expect(completion).toEqual({ task: task("t-1", "completed"), completed_subtasks: [], unblocked: ["t-2", "t-4"] });
+    expect(completion).toEqual({
+      value: { task: task("t-1", "completed"), completed_subtasks: [], unblocked: ["t-2", "t-4"] },
+      warnings: [],
+    });
     expect(calls[0].body).toEqual({ evidence: "Delivered by #41." });
+  });
+
+  it("returns the warnings a saved change's syncs gave", async () => {
+    const warning = { code: "workspace_sync", message: "the change is saved, but the workspace was not updated" };
+    const { fetch } = fakeFetch({
+      "/api/tasks/t-1/park": { body: { format_version: 1, data: { action: "parked", task: task("t-1", "parked") }, warnings: [warning] } },
+    });
+    const parked = await serveSource({ fetch, headers: auth }).parkTask("t-1");
+    expect(parked).toEqual({ value: task("t-1", "parked"), warnings: [warning] });
   });
 
   it("raises the CLI's error code and message for a refused change", async () => {

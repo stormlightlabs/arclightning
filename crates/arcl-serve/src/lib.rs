@@ -15,9 +15,12 @@
 //! changes state. Responses carry no CORS headers.
 //!
 //! The server checks a request's head before it reads any of the body, and
-//! reads a body only for a mutation that passed every check. A body that does
-//! not arrive within [`BODY_DEADLINE`] is abandoned, so a slow client cannot
-//! hold the serving thread.
+//! reads a body only for a mutation that passed every check. Mutations run one
+//! at a time on their own thread, so a mutation that waits, for its body or
+//! for a lock, never holds up reads and page loads. A body that does not
+//! arrive within [`BODY_DEADLINE`] is abandoned. At most [`MAX_HELPERS`]
+//! threads wait on the bodies of refused requests, and as many on the bodies
+//! of admitted ones; past that, requests queue for a free thread.
 //!
 //! The page's Content-Security-Policy runs only the app's own inline script,
 //! by hash, and lets it load images and fonts from itself or `data:` URLs and
@@ -52,10 +55,10 @@
 //! `{"evidence": "Delivered by #41."}`; see [`NewTask`], [`TaskEdit`],
 //! [`TaskStart`], [`Handoff`] and [`Completion`].
 
+use std::collections::VecDeque;
 use std::io::{self, Cursor, Read};
 use std::net::{Ipv4Addr, TcpListener};
-use std::sync::mpsc;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock, Mutex, PoisonError, mpsc};
 use std::thread;
 use std::time::Duration;
 
@@ -75,6 +78,14 @@ pub const TOKEN_QUERY: &str = "token";
 /// How long the server waits for a mutation's body. A client that is still
 /// sending when it passes gets a 408 once its connection reads again or closes.
 pub const BODY_DEADLINE: Duration = Duration::from_secs(5);
+
+/// The most threads that wait on unread request bodies, for each of refused
+/// requests and admitted mutations. A thread lives until its client sends the
+/// rest of the body or closes, since tiny_http offers no read timeout.
+pub const MAX_HELPERS: usize = 16;
+
+/// The `Retry-After` value, in seconds, of a [`Reply::busy`] answer.
+const RETRY_AFTER_SECONDS: &str = "1";
 
 /// The number of random bytes in a token, which is printed as hex.
 const TOKEN_BYTES: usize = 32;
@@ -165,12 +176,14 @@ enum Write {
 pub struct Reply {
     status: u16,
     body: String,
+    /// Whether the client may retry soon, sent as a `Retry-After` header.
+    retry: bool,
 }
 
 impl Reply {
     /// A successful read whose body is the CLI's JSON envelope.
     pub fn success(body: String) -> Self {
-        Self { status: 200, body }
+        Self { status: 200, body, retry: false }
     }
 
     /// A failed read. `exit_code` is the CLI's exit code for the failure and
@@ -182,7 +195,14 @@ impl Reply {
             5 => 404,
             _ => 500,
         };
-        Self { status, body }
+        Self { status, body, retry: false }
+    }
+
+    /// A failure because another process holds something the operation
+    /// needs, such as the project's sync lock. `body` is the CLI's JSON error
+    /// envelope. The status is 503, with a `Retry-After` header.
+    pub fn busy(body: String) -> Self {
+        Self { status: 503, body, retry: true }
     }
 
     /// A malformed request, with the envelope the CLI prints for a usage
@@ -192,7 +212,7 @@ impl Reply {
             "format_version": 1,
             "error": { "code": "invalid_request", "message": message, "exit_code": 2 },
         });
-        Self { status: 400, body: body.to_string() }
+        Self { status: 400, body: body.to_string(), retry: false }
     }
 
     /// The HTTP status code.
@@ -216,7 +236,7 @@ impl Reply {
             "format_version": 1,
             "error": { "code": code, "message": message },
         });
-        Self { status, body: body.to_string() }
+        Self { status, body: body.to_string(), retry: false }
     }
 }
 
@@ -326,35 +346,104 @@ impl Server {
         format!("http://127.0.0.1:{}/?{TOKEN_QUERY}={}", self.gate.port, self.gate.token)
     }
 
-    /// Serve requests one at a time until the socket fails.
+    /// Serve requests until the socket fails.
     ///
-    /// A request's head is checked before its body is touched. Only an
-    /// admitted mutation has its body read, on a helper thread, and the serving
-    /// thread waits for it no longer than the body deadline.
-    pub fn run(mut self, reads: &dyn Reads, mutations: &dyn Mutations) -> Result<(), ServeError> {
-        loop {
-            let request = self.http.recv().map_err(ServeError::Accept)?;
-            let mut incoming = Incoming::head(&request);
-            let route = match self.gate.admit(&incoming) {
-                Ok(route) => route,
-                Err(answer) => {
-                    respond(request, &answer, false);
-                    continue;
+    /// A request's head is checked before its body is touched. Reads and
+    /// pages are answered on this thread. Admitted mutations go, in order, to
+    /// one mutation thread, which reads the body on a helper thread, waits
+    /// for it no longer than the body deadline, and runs the mutation.
+    pub fn run(self, reads: &dyn Reads, mutations: &(dyn Mutations + Sync)) -> Result<(), ServeError> {
+        let Self { http, mut gate, body_deadline } = self;
+        let refused = Helpers::new(MAX_HELPERS);
+        let bodies = Helpers::new(MAX_HELPERS);
+        thread::scope(|scope| {
+            let (writes, queued) = mpsc::channel::<(tiny_http::Request, Write)>();
+            let refused_for_writes = Arc::clone(&refused);
+            scope.spawn(move || {
+                for (request, write) in queued {
+                    // When the read is abandoned, a helper owns the request
+                    // and answers 408.
+                    if let Some(BodyRead { request, body, complete }) = read_body(request, body_deadline, &bodies) {
+                        let answer = Answer::json(mutate(write, body.as_deref(), mutations));
+                        respond(request, &answer, complete, &refused_for_writes);
+                    }
                 }
-            };
-            if !matches!(route, Route::Write(_)) {
-                respond(request, &dispatch(route, &incoming, reads, mutations), false);
-                continue;
+            });
+            loop {
+                let request = http.recv().map_err(ServeError::Accept)?;
+                let incoming = Incoming::head(&request);
+                match gate.admit(&incoming) {
+                    Err(answer) => respond(request, &answer, false, &refused),
+                    Ok(Route::Write(write)) => {
+                        // The mutation thread stops only by panicking; its
+                        // requests drop and answer 500.
+                        let _ = writes.send((request, write));
+                    }
+                    Ok(route) => respond(request, &dispatch(route, reads), false, &refused),
+                }
             }
-            // When the read is abandoned, the helper thread owns the request
-            // and answers 408.
-            if let Some(BodyRead { request, body, complete }) = read_body(request, self.body_deadline) {
-                incoming.body = body;
-                respond(request, &dispatch(route, &incoming, reads, mutations), complete);
-            }
-        }
+        })
     }
 }
+
+/// Threads that finish requests whose body may be unread. At most `cap` run
+/// at once; past that, jobs wait in a queue for a thread to finish its job.
+struct Helpers {
+    cap: usize,
+    state: Mutex<HelperState>,
+}
+
+impl Helpers {
+    fn new(cap: usize) -> Arc<Self> {
+        Arc::new(Self { cap, state: Mutex::new(HelperState { running: 0, queue: VecDeque::new() }) })
+    }
+
+    /// Run `job` on a helper thread, or queue it while `cap` threads run.
+    fn run(self: &Arc<Self>, job: Job) {
+        let mut state = self.lock();
+        if state.running >= self.cap {
+            state.queue.push_back(job);
+            return;
+        }
+        state.running += 1;
+        drop(state);
+        let helpers = Arc::clone(self);
+        thread::spawn(move || {
+            let mut job = job;
+            loop {
+                job();
+                let mut state = helpers.lock();
+                match state.queue.pop_front() {
+                    Some(next) => job = next,
+                    None => {
+                        state.running -= 1;
+                        return;
+                    }
+                }
+            }
+        });
+    }
+
+    /// The number of helper threads running and of jobs waiting.
+    #[cfg(test)]
+    fn load(&self) -> (usize, usize) {
+        let state = self.lock();
+        (state.running, state.queue.len())
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HelperState> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// The helper threads running and the jobs waiting for one.
+struct HelperState {
+    running: usize,
+    queue: VecDeque<Job>,
+}
+
+/// Work for a helper thread.
+type Job = Box<dyn FnOnce() + Send>;
 
 /// The body of a mutation that takes no options: an empty object.
 #[derive(Debug, Default, Deserialize)]
@@ -377,9 +466,6 @@ struct Incoming {
     host: Option<String>,
     origin: Option<String>,
     token: Option<String>,
-    /// The body, up to one byte past [`MAX_BODY_BYTES`], or `None` when it
-    /// was not read or could not be read.
-    body: Option<Vec<u8>>,
 }
 
 impl Incoming {
@@ -398,7 +484,6 @@ impl Incoming {
             host: header("Host"),
             origin: header("Origin"),
             token: header(TOKEN_HEADER),
-            body: None,
         }
     }
 }
@@ -410,6 +495,8 @@ struct Answer {
     body: Vec<u8>,
     /// The method to name in an `Allow` header, on a 405.
     allow: Option<&'static str>,
+    /// The `Retry-After` header's value, if any.
+    retry_after: Option<&'static str>,
     /// The Content-Security-Policy header's value.
     csp: &'static str,
 }
@@ -428,6 +515,9 @@ impl Answer {
         if let Some(method) = self.allow {
             headers.push(("Allow", method));
         }
+        if let Some(seconds) = self.retry_after {
+            headers.push(("Retry-After", seconds));
+        }
         headers
     }
 
@@ -437,6 +527,7 @@ impl Answer {
             content_type: "application/json",
             body: reply.body.into_bytes(),
             allow: None,
+            retry_after: reply.retry.then_some(RETRY_AFTER_SECONDS),
             csp: API_CSP,
         }
     }
@@ -594,31 +685,38 @@ pub trait Mutations {
     fn complete_task(&self, id: &str, input: Completion) -> Reply;
 }
 
-/// Answer an admitted request. A mutation reads `incoming.body`.
-fn dispatch(route: Route, incoming: &Incoming, reads: &dyn Reads, mutations: &dyn Mutations) -> Answer {
+/// Answer an admitted read or page request.
+fn dispatch(route: Route, reads: &dyn Reads) -> Answer {
     match route {
         Route::List(query) => Answer::json(reads.list(&query)),
         Route::Show(id) => Answer::json(reads.show(&id)),
         Route::Ready(query) => Answer::json(reads.ready(&query)),
         Route::Explain(id) => Answer::json(reads.explain(&id)),
         Route::Context(id) => Answer::json(reads.context(&id)),
-        Route::Work { has_query: true } => Answer::json(Reply::invalid_request("`/api/work` takes no query parameters")),
+        Route::Work { has_query: true } => {
+            Answer::json(Reply::invalid_request("`/api/work` takes no query parameters"))
+        }
         Route::Work { has_query: false } => Answer::json(reads.work()),
-        Route::Write(write) => Answer::json(mutate(write, incoming.body.as_deref(), mutations)),
+        // `Server::run` sends mutations to the mutation thread.
+        Route::Write(_) => Answer::json(Reply::refusal(
+            500,
+            "internal_error",
+            "a mutation reached the read path",
+        )),
         Route::UnknownApi => Answer::json(Reply::refusal(404, "not_found", "no endpoint has this path")),
         Route::Page => page(),
     }
 }
 
-/// Read the body of `request` on a helper thread, waiting up to `deadline`,
+/// Read the body of `request` on one of `helpers`, waiting up to `deadline`,
 /// or return `None` when the deadline passes first.
 ///
 /// When the deadline passes, the helper keeps the request and answers 408
 /// once its read ends, which happens when the client sends the rest or closes.
-fn read_body(mut request: tiny_http::Request, deadline: Duration) -> Option<BodyRead> {
+fn read_body(mut request: tiny_http::Request, deadline: Duration, helpers: &Arc<Helpers>) -> Option<BodyRead> {
     // A rendezvous channel: a send succeeds only while the server still waits.
     let (sender, receiver) = mpsc::sync_channel(0);
-    thread::spawn(move || {
+    helpers.run(Box::new(move || {
         // One byte past the limit tells an oversized body from a full one.
         let limit = u64::try_from(MAX_BODY_BYTES + 1).unwrap_or(u64::MAX);
         let mut body = Vec::new();
@@ -626,24 +724,25 @@ fn read_body(mut request: tiny_http::Request, deadline: Duration) -> Option<Body
         let complete = read.is_ok() && body.len() <= MAX_BODY_BYTES;
         let done = BodyRead { request, body: read.is_ok().then_some(body), complete };
         if let Err(mpsc::SendError(BodyRead { request, .. })) = sender.send(done) {
-            respond(request, &Answer::json(Reply::timed_out()), false);
+            // This is a helper thread already, so the answer may block here.
+            let _ = request.respond(Answer::json(Reply::timed_out()).response());
         }
-    });
+    }));
     receiver.recv_timeout(deadline).ok()
 }
 
 /// Write `answer` to `request`. tiny_http drains an unread body when the
 /// request drops, which blocks on a client that stops sending, so a request
-/// whose body may be unread is answered and dropped on its own thread.
-fn respond(request: tiny_http::Request, answer: &Answer, body_read: bool) {
+/// whose body may be unread is answered and dropped on one of `helpers`.
+fn respond(request: tiny_http::Request, answer: &Answer, body_read: bool, helpers: &Arc<Helpers>) {
     let response = answer.response();
     // A client that went away is not the server's failure.
     if body_read || request.body_length().is_none_or(|length| length == 0) {
         let _ = request.respond(response);
     } else {
-        thread::spawn(move || {
+        helpers.run(Box::new(move || {
             let _ = request.respond(response);
-        });
+        }));
     }
 }
 
@@ -774,6 +873,7 @@ fn page() -> Answer {
         content_type: "text/html; charset=utf-8",
         body: INDEX_HTML.unwrap_or(NOT_BUILT_PAGE.as_bytes()).to_vec(),
         allow: None,
+        retry_after: None,
         csp: PAGE_CSP.as_str(),
     }
 }
@@ -841,10 +941,17 @@ mod tests {
         Gate::new(TOKEN.to_owned(), PORT)
     }
 
-    /// Check and answer `incoming` as [`Server::run`] does, with its body read.
+    /// Check and answer `incoming` as [`Server::run`] does, with an empty body.
     fn answered(gate: &mut Gate, incoming: &Incoming) -> Answer {
+        answered_with(gate, incoming, Some(b""))
+    }
+
+    /// Check and answer `incoming` as [`Server::run`] does, with `body` as
+    /// the body read, or `None` for a failed read.
+    fn answered_with(gate: &mut Gate, incoming: &Incoming, body: Option<&[u8]>) -> Answer {
         match gate.admit(incoming) {
-            Ok(route) => dispatch(route, incoming, &Echo, &Echo),
+            Ok(Route::Write(write)) => Answer::json(mutate(write, body, &Echo)),
+            Ok(route) => dispatch(route, &Echo),
             Err(answer) => answer,
         }
     }
@@ -906,16 +1013,14 @@ mod tests {
             host: Some(format!("127.0.0.1:{PORT}")),
             origin: None,
             token: token.map(str::to_owned),
-            body: Some(Vec::new()),
         }
     }
 
     /// A POST from the served origin with the token.
-    fn post(url: &str, body: &str) -> Incoming {
+    fn post(url: &str) -> Incoming {
         Incoming {
             method: "POST".to_owned(),
             origin: Some(format!("http://127.0.0.1:{PORT}")),
-            body: Some(body.as_bytes().to_vec()),
             ..get(url, Some(TOKEN))
         }
     }
@@ -999,7 +1104,7 @@ mod tests {
 
     #[test]
     fn serve_answers_reads_only_on_get() {
-        let incoming = post("/api/records", "");
+        let incoming = post("/api/records");
         let answer = answered(&mut gate(), &incoming);
         assert_eq!(answer.status, 405);
         assert!(answer.headers().contains(&("Allow", "GET")));
@@ -1015,7 +1120,7 @@ mod tests {
             "/api/tasks/arcl-t-1/complete",
         ] {
             for method in ["GET", "PUT", "DELETE", "OPTIONS"] {
-                let incoming = Incoming { method: method.to_owned(), ..post(url, "{}") };
+                let incoming = Incoming { method: method.to_owned(), ..post(url) };
                 let answer = answered(&mut gate(), &incoming);
                 assert_eq!(answer.status, 405, "{method} {url}");
                 assert!(answer.headers().contains(&("Allow", "POST")));
@@ -1033,7 +1138,7 @@ mod tests {
             Some("https://127.0.0.1:4321"),
             Some("null"),
         ] {
-            let incoming = Incoming { origin: origin.map(str::to_owned), ..post("/api/tasks/arcl-t-1/park", "") };
+            let incoming = Incoming { origin: origin.map(str::to_owned), ..post("/api/tasks/arcl-t-1/park") };
             let answer = answered(&mut gate(), &incoming);
             assert_eq!(answer.status, 403, "{origin:?}");
             assert_eq!(error_code(&answer), "forbidden");
@@ -1041,7 +1146,7 @@ mod tests {
         let incoming = Incoming {
             host: Some(format!("localhost:{PORT}")),
             origin: Some(format!("http://localhost:{PORT}")),
-            ..post("/api/tasks/arcl-t-1/park", "")
+            ..post("/api/tasks/arcl-t-1/park")
         };
         assert_eq!(
             text(answered(&mut gate(), &incoming)),
@@ -1051,15 +1156,15 @@ mod tests {
 
     #[test]
     fn serve_mutations_still_need_the_token_and_host() {
-        let missing = Incoming { token: None, ..post("/api/tasks", r#"{"title":"T"}"#) };
+        let missing = Incoming { token: None, ..post("/api/tasks") };
         assert_eq!(answered(&mut gate(), &missing).status, 401);
-        let host = Incoming { host: Some("evil.example".to_owned()), ..post("/api/tasks", r#"{"title":"T"}"#) };
+        let host = Incoming { host: Some("evil.example".to_owned()), ..post("/api/tasks") };
         assert_eq!(answered(&mut gate(), &host).status, 403);
     }
 
     #[test]
     fn serve_routes_the_mutations() {
-        let routed = |url: &str, body: &str| text(answered(&mut gate(), &post(url, body)));
+        let routed = |url: &str, body: &str| text(answered_with(&mut gate(), &post(url), Some(body.as_bytes())));
         assert_eq!(
             routed("/api/tasks", r#"{"title":"New","priority":"high"}"#),
             (
@@ -1102,10 +1207,7 @@ mod tests {
 
     #[test]
     fn serve_refuses_malformed_mutation_bodies() {
-        let with_body = |url: &str, body: &[u8]| {
-            let incoming = Incoming { body: Some(body.to_vec()), ..post(url, "") };
-            answered(&mut gate(), &incoming)
-        };
+        let with_body = |url: &str, body: &[u8]| answered_with(&mut gate(), &post(url), Some(body));
         for (url, body) in [
             ("/api/tasks", b"{}".as_slice()),
             ("/api/tasks", b"not json"),
@@ -1119,8 +1221,10 @@ mod tests {
         }
         let large = vec![b' '; MAX_BODY_BYTES + 1];
         assert_eq!(with_body("/api/tasks/arcl-t-1/park", &large).status, 413);
-        let unread = Incoming { body: None, ..post("/api/tasks/arcl-t-1/park", "") };
-        assert_eq!(answered(&mut gate(), &unread).status, 400);
+        assert_eq!(
+            answered_with(&mut gate(), &post("/api/tasks/arcl-t-1/park"), None).status,
+            400
+        );
     }
 
     #[test]
@@ -1274,6 +1378,86 @@ mod tests {
     }
 
     #[test]
+    fn serve_caps_the_threads_that_wait_on_refused_bodies() {
+        let (port, token) = serve(BODY_DEADLINE);
+        let stall = || {
+            // tiny_http hands a connection that arrives while its idle
+            // threads are still waking to a busy thread, so space them out.
+            thread::sleep(Duration::from_millis(30));
+            send(
+                port,
+                "POST /api/tasks HTTP/1.1\r\nContent-Length: 100000",
+                "\r\n0123456789",
+            )
+        };
+        // Each helper answers, then waits on the rest of its client's body.
+        let mut held: Vec<TcpStream> = (0..MAX_HELPERS).map(|_| stall()).collect();
+        for stream in &mut held {
+            assert_eq!(status_line(stream), "HTTP/1.1 401 Unauthorized\r\n");
+        }
+        // Past the cap, a refused request waits for a free helper.
+        let mut queued = stall();
+        queued
+            .set_read_timeout(Some(Duration::from_millis(300)))
+            .expect("a read timeout");
+        let mut byte = [0_u8];
+        let early = queued.read(&mut byte);
+        assert!(early.is_err(), "answered past the cap: {early:?}");
+        // Reads go on while every helper is taken.
+        let started = std::time::Instant::now();
+        assert!(authorized_get(port, &token).starts_with("HTTP/1.1 200"));
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "{:?}",
+            started.elapsed()
+        );
+        // A client that closes frees its helper for the queued request.
+        held.pop()
+            .expect("a held stream")
+            .shutdown(Shutdown::Both)
+            .expect("a shutdown");
+        queued
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .expect("a read timeout");
+        assert_eq!(status_line(&mut queued), "HTTP/1.1 401 Unauthorized\r\n");
+    }
+
+    #[test]
+    fn serve_helpers_queue_jobs_past_the_cap() {
+        let helpers = Helpers::new(2);
+        let (release, wait) = mpsc::channel::<()>();
+        let wait = Arc::new(Mutex::new(wait));
+        let (done, finished) = mpsc::channel();
+        for job in 0..5 {
+            let (wait, done) = (Arc::clone(&wait), done.clone());
+            helpers.run(Box::new(move || {
+                let _ = wait.lock().expect("the lock").recv();
+                done.send(job).expect("a send");
+            }));
+        }
+        assert_eq!(helpers.load(), (2, 3));
+        for _ in 0..5 {
+            release.send(()).expect("a send");
+        }
+        let mut jobs: Vec<i32> = (0..5)
+            .map(|_| finished.recv_timeout(Duration::from_secs(3)).expect("a finished job"))
+            .collect();
+        jobs.sort_unstable();
+        assert_eq!(jobs, [0, 1, 2, 3, 4]);
+        thread::sleep(Duration::from_millis(50));
+        assert_eq!(helpers.load(), (0, 0));
+    }
+
+    #[test]
+    fn serve_answers_busy_with_retry_after() {
+        let answer = Answer::json(Reply::busy(r#"{"error":{}}"#.to_owned()));
+        assert_eq!(answer.status, 503);
+        assert!(answer.headers().contains(&("Retry-After", RETRY_AFTER_SECONDS)));
+        let plain = Answer::json(Reply::failure(1, String::new()));
+        assert!(plain.headers().iter().all(|(name, _)| *name != "Retry-After"));
+    }
+
+    #[test]
     fn serve_abandons_an_admitted_body_that_stalls() {
         let (port, token) = serve(Duration::from_millis(300));
         let head = format!(
@@ -1281,7 +1465,15 @@ mod tests {
         );
         let stalled = send(port, &head, "\r\n{        ");
         thread::sleep(Duration::from_millis(100));
+        // The mutation thread waits for the body; reads go on meanwhile.
+        let started = std::time::Instant::now();
         assert!(authorized_get(port, &token).starts_with("HTTP/1.1 200"));
+        assert!(
+            started.elapsed() < Duration::from_millis(150),
+            "{:?}",
+            started.elapsed()
+        );
+        thread::sleep(Duration::from_millis(400));
         stalled.shutdown(Shutdown::Write).expect("a shutdown");
         let timed_out = response(stalled);
         assert!(timed_out.starts_with("HTTP/1.1 408"), "{timed_out}");

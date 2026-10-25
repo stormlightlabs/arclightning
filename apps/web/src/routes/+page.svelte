@@ -96,9 +96,10 @@
     createBusy = true;
     createFailure = null;
     try {
-      const task = await dataSource().createTask(body === "" ? { title, priority } : { title, body, priority });
+      const { value: task, warnings } = await dataSource().createTask(body === "" ? { title, priority } : { title, body, priority });
       creating = null;
-      await goto(taskHref(task.id));
+      // The Task view shows the create's warnings.
+      await goto(taskHref(task.id), { state: { warnings } });
     } catch (error) {
       createFailure = failureOf(error);
     } finally {

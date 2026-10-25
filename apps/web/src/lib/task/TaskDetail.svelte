@@ -1,5 +1,5 @@
 <script module lang="ts">
-  import type { TaskDetail } from "$lib/data";
+  import type { ChangeWarning, TaskDetail } from "$lib/data";
 
   /** Props for the body of the Task view, once its task has loaded. */
   export interface TaskDetailProps {
@@ -15,6 +15,12 @@
      * lose, such as a typed handoff note or a changed field.
      */
     unsaved?: boolean;
+    /**
+     * The warnings the last saved change gave, shown until dismissed. The
+     * view sets them after each change; a caller may pass a change's
+     * warnings in, such as those of the create that opened the view.
+     */
+    warnings?: ChangeWarning[];
   }
 </script>
 
@@ -37,7 +43,14 @@
   } from "./actions";
   import { blockersOf, propertiesOf, reasonSegments, titlesOf, type DoneBlocker } from "./view";
 
-  let { detail, workHref, panelOpen = $bindable(true), onchanged, unsaved = $bindable(false) }: TaskDetailProps = $props();
+  let {
+    detail,
+    workHref,
+    panelOpen = $bindable(true),
+    onchanged,
+    unsaved = $bindable(false),
+    warnings = $bindable([]),
+  }: TaskDetailProps = $props();
   let showSource = $state(false);
 
   /** The action running now, or `"edit"` while an edit saves. */
@@ -93,11 +106,17 @@
    * Run `change`, reload the task, then call `done`. A failed change stays
    * next to `action`; a failed reload after a saved change says so.
    */
-  async function perform<T>(action: TaskAction | "edit", change: () => Promise<T>, done: (result: T) => void) {
+  async function perform<T extends { warnings: ChangeWarning[] }>(
+    action: TaskAction | "edit",
+    change: () => Promise<T>,
+    done: (result: T) => void,
+  ) {
     busy = action;
     stale = null;
+    warnings = [];
     try {
       const result = await change();
+      warnings = result.warnings;
       await onchanged?.().catch((error: unknown) => (stale = failureOf(error)));
       done(result);
     } catch (error) {
@@ -178,6 +197,13 @@
           </div>
         </form>
       {/if}
+      {#each warnings as warning, index (index)}
+        <Feedback tone="warning" title="The change is saved, with a warning" message={`${warning.message} (${warning.code})`}>
+          {#snippet actions()}
+            <Button label="Dismiss" variant="ghost" onclick={() => (warnings = warnings.filter((_, other) => other !== index))} />
+          {/snippet}
+        </Feedback>
+      {/each}
       {#if stale !== null}
         <Feedback tone="warning" title="The change is saved, but this view did not reload" message={`${stale.message} (${stale.code})`} />
       {/if}

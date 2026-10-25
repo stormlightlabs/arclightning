@@ -1,8 +1,13 @@
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DataError, setDataSource, type DataSource, type TaskDetail as Detail } from "$lib/data";
+import { DataError, setDataSource, type Changed, type DataSource, type TaskDetail as Detail } from "$lib/data";
 import { blockedDetail } from "./fixtures";
 import TaskDetail from "./TaskDetail.svelte";
+
+/** `value` as a change that saved with no warnings. */
+function changed<T>(value: T): Changed<T> {
+  return { value, warnings: [] };
+}
 
 /** A data source whose changes are spies; each resolves unless a test says otherwise. */
 function stubSource(detail: Detail) {
@@ -10,12 +15,12 @@ function stubSource(detail: Detail) {
     work: vi.fn(),
     task: vi.fn(async () => detail),
     createTask: vi.fn(),
-    updateTask: vi.fn(async () => detail.task),
-    startTask: vi.fn(async () => detail.task),
-    parkTask: vi.fn(async () => detail.task),
-    unparkTask: vi.fn(async () => detail.task),
-    handOffTask: vi.fn(async () => detail.task),
-    completeTask: vi.fn(async () => ({ task: detail.task, unblocked: [] as string[] })),
+    updateTask: vi.fn(async () => changed(detail.task)),
+    startTask: vi.fn(async () => changed(detail.task)),
+    parkTask: vi.fn(async () => changed(detail.task)),
+    unparkTask: vi.fn(async () => changed(detail.task)),
+    handOffTask: vi.fn(async () => changed(detail.task)),
+    completeTask: vi.fn(async () => changed({ task: detail.task, completed_subtasks: [] as string[], unblocked: [] as string[] })),
   };
   setDataSource(source as unknown as DataSource);
   return source;
@@ -90,7 +95,7 @@ describe("TaskDetail changes", () => {
 
   it("lists the tasks a completion unblocked as links", async () => {
     const source = stubSource(inProgress());
-    source.completeTask.mockResolvedValueOnce({ task: inProgress().task, unblocked: ["t-10.5", "t-99"] });
+    source.completeTask.mockResolvedValueOnce(changed({ task: inProgress().task, completed_subtasks: [], unblocked: ["t-10.5", "t-99"] }));
     const root = view(inProgress());
     button(root, "Complete").click();
     flushSync();
@@ -103,6 +108,36 @@ describe("TaskDetail changes", () => {
       ["/tasks/t-10.5", "T10.5: Document the MCP tools"],
       ["/tasks/t-99", "t-99"],
     ]);
+  });
+
+  it("shows a saved change's warnings until they are dismissed", async () => {
+    const source = stubSource(inProgress());
+    const warning = { code: "workspace_sync", message: "the change is saved, but the workspace was not updated" };
+    source.parkTask.mockResolvedValueOnce({ value: inProgress().task, warnings: [warning] });
+    const root = view(inProgress());
+    button(root, "Park").click();
+    await settle();
+    const notice = root.querySelector('.arcl-feedback[data-tone="warning"]');
+    expect(notice?.textContent).toContain("The change is saved, with a warning");
+    expect(notice?.textContent).toContain("the change is saved, but the workspace was not updated (workspace_sync)");
+    expect(notice?.getAttribute("role")).toBe("status");
+    // The notice blocks nothing: the next change runs, and Dismiss clears it.
+    expect(button(root, "Park").disabled).toBe(false);
+    button(root, "Dismiss").click();
+    flushSync();
+    expect(root.querySelector('.arcl-feedback[data-tone="warning"]')).toBeNull();
+  });
+
+  it("clears the last change's warnings when the next change saves without any", async () => {
+    const source = stubSource(inProgress());
+    source.parkTask.mockResolvedValueOnce({ value: inProgress().task, warnings: [{ code: "blocker_edge", message: "loaded" }] });
+    const root = view(inProgress());
+    button(root, "Park").click();
+    await settle();
+    expect(root.querySelector('.arcl-feedback[data-tone="warning"]')).not.toBeNull();
+    button(root, "Park").click();
+    await settle();
+    expect(root.querySelector('.arcl-feedback[data-tone="warning"]')).toBeNull();
   });
 
   it("saves only the fields the edit form changed", async () => {
@@ -123,7 +158,7 @@ describe("TaskDetail changes", () => {
   it("sends nothing on a second click while a change runs", async () => {
     const source = stubSource(inProgress());
     let finish = () => {};
-    source.parkTask.mockImplementationOnce(() => new Promise((resolve) => (finish = () => resolve(inProgress().task))));
+    source.parkTask.mockImplementationOnce(() => new Promise((resolve) => (finish = () => resolve(changed(inProgress().task)))));
     const root = view(inProgress());
     button(root, "Park").click();
     flushSync();
