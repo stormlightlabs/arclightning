@@ -20,4 +20,4 @@ kind = "task"
 id = "arcl-t-01M5RRJ1C5MR74AF7G6HMCN129"
 +++
 
-The first release after `v0.1.0-alpha.1`. It adds the MCP server and the Arc Lightning skill (T10), the local web app served by `arcl serve` (T18), and its axum server (T21). Install with `cargo install --git https://github.com/stormlightlabs/arclightning --tag v0.1.0 arcl-cli`.
+Ships the MCP server and the Arc Lightning skill (T10), the local web app served by `arcl serve` (T18) and its axum server (T21). T22 covers the release work itself. Install with `cargo install --git https://github.com/stormlightlabs/arclightning --tag v0.1.0 arcl-cli`. The release completes once the tag is on `main`.
