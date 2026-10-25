@@ -6,6 +6,30 @@ use serde::de::DeserializeOwned;
 use crate::answer::Reply;
 use crate::routes::Write;
 
+/// The operations a queued change can name, as `arcl web apply` reads them.
+/// Each row holds the name, whether it names a target record, and the
+/// [`Write`] it runs. This table is the only map from a name to a mutation,
+/// so a name outside it is refused, never run as another mutation.
+const OPERATIONS: &[Operation] = &[
+    ("create_task", false, |_| Write::Create),
+    ("update_task", true, Write::Update),
+    ("start_task", true, Write::Start),
+    ("park_task", true, Write::Park),
+    ("unpark_task", true, Write::Unpark),
+    ("hand_off_task", true, Write::Handoff),
+    ("complete_task", true, Write::Complete),
+    ("create_capture", false, |_| Write::CreateCapture),
+    ("promote_capture", true, Write::PromoteCapture),
+    ("discard_capture", true, Write::DiscardCapture),
+    ("create_spec", false, |_| Write::CreateSpec),
+    ("create_plan", false, |_| Write::CreatePlan),
+    ("apply_plan", true, Write::ApplyPlan),
+];
+
+/// One row of [`OPERATIONS`]: the name, whether it names a target record,
+/// and the [`Write`] it runs given the target's ID.
+type Operation = (&'static str, bool, fn(String) -> Write);
+
 /// The options of `arcl task create`, as the body of `POST /api/tasks`.
 /// `priority` defaults to `normal`.
 #[derive(Debug, Default, Deserialize, Eq, PartialEq)]
@@ -197,6 +221,33 @@ pub trait Mutations {
     fn create_plan(&self, input: NewPlan) -> Reply;
     /// `arcl plan apply <id>`.
     fn apply_plan(&self, id: &str, input: PlanInput) -> Reply;
+}
+
+/// Run the mutation `operation` names, one of [`operations`], on the record
+/// `target` names, with `input` as the JSON object of its options.
+///
+/// `input` is what the matching POST endpoint takes as its body, and it is
+/// checked the same way: an unknown option or a missing required one is
+/// refused before the mutation runs. An unknown operation, a missing target
+/// or a target on an operation that takes none is refused too.
+pub fn apply(operation: &str, target: Option<&str>, input: &[u8], mutations: &dyn Mutations) -> Reply {
+    let Some(&(_, needs_target, write)) = OPERATIONS.iter().find(|(name, ..)| *name == operation) else {
+        return Reply::invalid_request(&format!("unknown operation `{operation}`"));
+    };
+    let id = match (needs_target, target) {
+        (true, Some(id)) if !id.is_empty() => id.to_owned(),
+        (true, _) => return Reply::invalid_request(&format!("`{operation}` needs a target")),
+        (false, None) => String::new(),
+        (false, Some(_)) => return Reply::invalid_request(&format!("`{operation}` takes no target")),
+    };
+    let write = write(id);
+    mutate(write, input, mutations)
+}
+
+/// The operations [`apply`] runs, each with whether it names a target
+/// record. Each runs the [`Mutations`] method of the same name.
+pub fn operations() -> impl Iterator<Item = (&'static str, bool)> {
+    OPERATIONS.iter().map(|&(name, needs_target, _)| (name, needs_target))
 }
 
 /// The body of a mutation that takes no options: an empty object.

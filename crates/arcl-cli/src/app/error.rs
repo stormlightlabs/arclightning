@@ -167,6 +167,16 @@ pub(super) enum CommandError {
     SkillOutsideProject { path: PathBuf, root: PathBuf },
     #[error("{count} skill file(s) are missing or differ from this arcl; run `arcl skill install`")]
     SkillDrift { count: usize },
+    #[error("could not read `{path}`: {source}")]
+    ReadWebFile { path: PathBuf, source: io::Error },
+    #[error("could not write `{path}`: {source}")]
+    WriteWebFile { path: PathBuf, source: io::Error },
+    #[error("could not export `{document}`: {message}")]
+    WebExport { document: String, message: String },
+    #[error("the queued edits are not valid: {message}")]
+    InvalidQueue { message: String },
+    #[error("the workspace did not sync, so `web export` wrote nothing: {0}")]
+    ExportSync(Box<CommandError>),
 }
 
 impl From<WorkspaceExportError> for CommandError {
@@ -206,6 +216,7 @@ impl CommandError {
             Self::WorkspaceSync(error) => error.exit_code(),
             Self::WorkspaceStatus(_) => 1,
             Self::AutoSync(error) => error.exit_code(),
+            Self::ExportSync(error) => error.exit_code(),
             Self::ReadConfig { .. }
             | Self::ReadMarkdown { .. }
             | Self::ReadStdin { .. }
@@ -214,7 +225,10 @@ impl CommandError {
             | Self::SyncLock { .. }
             | Self::SyncLockBusy { .. }
             | Self::ReadSkill { .. }
-            | Self::WriteSkill { .. } => 1,
+            | Self::WriteSkill { .. }
+            | Self::ReadWebFile { .. }
+            | Self::WriteWebFile { .. }
+            | Self::WebExport { .. } => 1,
             Self::SkillDrift { .. } => 4,
             Self::OpenDatabase { source, .. } => source.exit_code(),
             Self::Storage(error) => error.exit_code(),
@@ -226,7 +240,8 @@ impl CommandError {
             | Self::SkillSymlink { .. }
             | Self::SkillNotFile { .. }
             | Self::SkillNotDirectory { .. }
-            | Self::SkillOutsideProject { .. } => 3,
+            | Self::SkillOutsideProject { .. }
+            | Self::InvalidQueue { .. } => 3,
         }
     }
 }

@@ -32,6 +32,7 @@ mod reads;
 mod serve;
 mod skill;
 mod support;
+mod web;
 mod workspace;
 
 use commands::{
@@ -46,6 +47,7 @@ use reads::{read_context, read_explain, read_list, read_ready, read_show, read_t
 use serve::exec_serve;
 use skill::exec_skill;
 use support::{open_database, write_output};
+use web::exec_web;
 use workspace::exec_workspace;
 
 use auto_sync::{Access, auto_sync, command_access, export_after_write, refuse_write, synced_write, workspace_roots};
@@ -85,6 +87,9 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
     let renderer = Renderer::new(mode, cli.color);
 
     let access = command_access(cli.command.as_ref());
+    // `web export` stamps its documents with the time, so it must not export
+    // a database the sync did not bring up to date.
+    let needs_sync = matches!(cli.command, Some(Command::Web { command: WebCommand::Export { .. } }));
     // The lock is held from the first sync until `run` returns.
     let (roots, synced, _lock) = match access {
         Access::Untracked => (None, Ok(Vec::new()), None),
@@ -106,6 +111,9 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
         // A missing database is the command's own error to report, once.
         Err(CommandError::NotInitialized { .. }) => {}
         Err(error) if access == Access::Write => return Err(refuse_write(error).into()),
+        Err(error) if needs_sync => {
+            return Err(ApplicationError::from_command(CommandError::ExportSync(Box::new(error))).into());
+        }
         Err(error) => warnings.push(Warning::workspace_sync(format!(
             "the workspace did not sync, so this shows the database as it is: {error}"
         ))),
@@ -205,6 +213,7 @@ fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Wa
             write_output(renderer.render_next_planning_task(task.as_ref())?)
         }
         Some(Command::Serve { port }) => exec_serve(port, renderer),
+        Some(Command::Web { command }) => exec_web(command, renderer),
         None => write_output(renderer.render_startup()?),
     }
 }

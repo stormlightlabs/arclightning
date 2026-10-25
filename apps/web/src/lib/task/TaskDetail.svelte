@@ -35,6 +35,7 @@
   import { Button, Feedback, Field, Markdown, MarkdownEditor, PropertiesPanel, SelectMenu, StatusBadge } from "@arclightning/ui";
   import { useCommands, type Command } from "$lib/commands";
   import { dataSource, type Task } from "$lib/data";
+  import { failureNotice } from "$lib/notice";
   import { PRIORITIES, taskHref } from "$lib/work";
   import {
     ACTION_KEYS,
@@ -196,7 +197,7 @@
 
 {#snippet failed(action: TaskAction | "edit", what: string)}
   {#if failure?.action === action}
-    <Feedback tone="danger" title={`Could not ${what}`} message={`${failure.failure.message} (${failure.failure.code})`} />
+    <Feedback {...failureNotice(failure.failure, `Could not ${what}`)} />
   {/if}
 {/snippet}
 

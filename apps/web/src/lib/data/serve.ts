@@ -1,22 +1,17 @@
 import { tokenHeaders } from "$lib/token";
+import { type Listing, type Tree, type Work, captureOf, capturesOf, milestoneOf, taskIndexOf, taskOf, workOf } from "./envelopes";
 import {
   type Changed,
   DataError,
   type Capture,
-  type CaptureStatus,
   type DataSource,
-  type Milestone,
   type Plan,
   type PlanApplied,
   type PromotionTarget,
-  type Readiness,
   type Spec,
   type Task,
   type TaskCompletion,
   type TaskDetail,
-  type TaskStatus,
-  type TreeNode,
-  type WorkItem,
   type WorkList,
 } from "./types";
 
@@ -25,29 +20,6 @@ export interface ServeOptions {
   fetch?: typeof fetch;
   /** The headers that authenticate each request. */
   headers?: () => Record<string, string>;
-}
-
-/** A record as `arcl list --json` lists it. */
-interface ListedRecord {
-  id: string;
-  kind: string;
-  status: string;
-  title: string;
-}
-
-/** A phase as `arcl serve` returns it. */
-interface Phase {
-  id: string;
-  plan_id: string;
-  title: string;
-  status: Milestone["status"];
-  position: number;
-}
-
-/** The `data` of `/api/work`: every task with its readiness and phase, and every phase. */
-interface Work {
-  tasks: { task: Task; readiness: Readiness; phase_id: string | null }[];
-  phases: Phase[];
 }
 
 /**
@@ -91,17 +63,7 @@ export function serveSource(options: ServeOptions = {}): DataSource {
   }
 
   async function work(signal?: AbortSignal): Promise<WorkList> {
-    const work = await get<Work>("/api/work", signal);
-    const milestones = work.phases.map(milestoneOf);
-    const byId = new Map(milestones.map((milestone) => [milestone.id, milestone]));
-    const items = work.tasks.map(
-      ({ task, readiness, phase_id }): WorkItem => ({
-        task,
-        readiness,
-        milestone: phase_id === null ? null : (byId.get(phase_id) ?? null),
-      }),
-    );
-    return { milestones, items };
+    return workOf(await get<Work>("/api/work", signal));
   }
 
   /** `post` to one capture's action. */
@@ -113,15 +75,11 @@ export function serveSource(options: ServeOptions = {}): DataSource {
     work,
 
     async task(id, signal) {
-      const detail = await get<Partial<TaskDetail>>(`/api/records/${encodeURIComponent(id)}`, signal);
-      // `arcl show` answers for any record kind; only a task has readiness.
-      if (!("readiness" in detail)) throw new DataError("not_a_task", `\`${id}\` is not a task`);
-      return detail as TaskDetail;
+      return taskOf(id, await get<Partial<TaskDetail>>(`/api/records/${encodeURIComponent(id)}`, signal));
     },
 
     async taskIndex() {
-      const { records } = await get<{ records: ListedRecord[] }>("/api/records?kind=task");
-      return records.map(({ id, title, status }) => ({ id, title, status: status as TaskStatus }));
+      return taskIndexOf(await get<Listing>("/api/records?kind=task"));
     },
 
     async createTask(input) {
@@ -144,14 +102,11 @@ export function serveSource(options: ServeOptions = {}): DataSource {
     },
 
     async captures(signal) {
-      const { records } = await get<{ records: ListedRecord[] }>("/api/records?kind=capture&status=captured", signal);
-      return records.map(({ id, title, status }) => ({ id, title, status: status as CaptureStatus }));
+      return capturesOf(await get<Listing>("/api/records?kind=capture&status=captured", signal));
     },
 
     async capture(id, signal) {
-      const shown = await get<{ capture?: Capture }>(`/api/records/${encodeURIComponent(id)}`, signal);
-      if (shown.capture === undefined) throw new DataError("not_a_capture", `\`${id}\` is not a capture`);
-      return shown.capture;
+      return captureOf(id, await get<{ capture?: Capture }>(`/api/records/${encodeURIComponent(id)}`, signal));
     },
 
     async promoteCapture(id, input) {
@@ -168,7 +123,7 @@ export function serveSource(options: ServeOptions = {}): DataSource {
     },
 
     async planning(signal) {
-      const [tree, list] = await Promise.all([get<{ nodes: TreeNode[] }>("/api/tree", signal), work(signal)]);
+      const [tree, list] = await Promise.all([get<Tree>("/api/tree", signal), work(signal)]);
       return { tree: tree.nodes, work: list };
     },
 
@@ -193,8 +148,4 @@ export function serveSource(options: ServeOptions = {}): DataSource {
 /** The API path of one task, with its ID escaped. */
 function taskPath(id: string): string {
   return `/api/tasks/${encodeURIComponent(id)}`;
-}
-
-function milestoneOf({ id, plan_id, title, status, position }: Phase): Milestone {
-  return { id, plan_id, title, status, position };
 }

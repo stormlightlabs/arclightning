@@ -16,6 +16,8 @@
   import { page } from "$app/state";
   import { useCommands, type Command } from "$lib/commands";
   import { dataSource, latestRead, type ChangeWarning, type NewTask, type TaskPriority, type WorkList } from "$lib/data";
+  import { failureNotice } from "$lib/notice";
+  import { appUrl, appUrlHref } from "$lib/route";
   import { ACTION_KEYS, ACTION_LABELS, ACTION_TEXT, actionsFor, failureOf, runAction, type ActionFailure, type TaskAction } from "$lib/task";
   import {
     NO_MILESTONE,
@@ -40,9 +42,11 @@
   let list = $state<WorkList | null>(null);
   let failure = $state<string | null>(null);
   // The Task view's Escape comes back here with its task selected.
-  let selectedId = $state<string | null>(selectedOf(page.url.searchParams));
+  let selectedId = $state<string | null>(selectedOf(appUrl(page.url).searchParams));
 
-  let filters = $derived(parseFilters(page.url.searchParams));
+  /** The page's app path and query, which hold the filters. */
+  let route = $derived(appUrl(page.url));
+  let filters = $derived(parseFilters(route.searchParams));
   let groups = $derived(list ? groupWork(list, filters) : []);
   let order = $derived(rowOrder(groups));
   // A selected task the filters hide is not selected.
@@ -89,7 +93,7 @@
   $effect(() => {
     if (list === null) return;
     const shown = withKnownMilestone(filters, list.milestones.map((milestone) => milestone.id));
-    if (writeFilters(shown, page.url.searchParams).toString() !== page.url.searchParams.toString()) showFilters(shown);
+    if (writeFilters(shown, route.searchParams).toString() !== route.searchParams.toString()) showFilters(shown);
   });
 
   useCommands(() => ({
@@ -181,9 +185,9 @@
   }
 
   function showFilters(next: WorkFilters) {
-    const url = new URL(page.url);
+    const url = appUrl(page.url);
     url.search = writeFilters(next, url.searchParams).toString();
-    goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+    goto(appUrlHref(url), { replaceState: true, keepFocus: true, noScroll: true });
   }
 
   function onkeydown(event: KeyboardEvent) {
@@ -231,17 +235,13 @@
       <Button label="Cancel" variant="ghost" disabled={createBusy} onclick={() => (creating = null)} />
     </div>
     {#if createFailure !== null}
-      <Feedback tone="danger" title="Could not create the task" message={`${createFailure.message} (${createFailure.code})`} />
+      <Feedback {...failureNotice(createFailure, "Could not create the task")} />
     {/if}
   </form>
 {/if}
 
 {#if actionFailure !== null}
-  <Feedback
-    tone="danger"
-    title={`Could not ${ACTION_LABELS[actionFailure.action].toLowerCase()} ${actionFailure.title}`}
-    message={`${actionFailure.failure.message} (${actionFailure.failure.code})`}
-  />
+  <Feedback {...failureNotice(actionFailure.failure, `Could not ${ACTION_LABELS[actionFailure.action].toLowerCase()} ${actionFailure.title}`)} />
 {/if}
 {#each actionWarnings as warning, index (index)}
   <Feedback tone="warning" title="The change is saved, with a warning" message={`${warning.message} (${warning.code})`}>

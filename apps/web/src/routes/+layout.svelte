@@ -2,7 +2,7 @@
   import "@arclightning/ui/styles.css";
   import "@arclightning/ui/inter.css";
   import "virtual:uno.css";
-  import { Button, CommandMenu, Feedback, Icon, type IconName } from "@arclightning/ui";
+  import { Button, CommandMenu, EmptyState, Feedback, Icon, type IconName } from "@arclightning/ui";
   import { afterNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
   import QuickCapture from "$lib/capture/QuickCapture.svelte";
@@ -21,16 +21,18 @@
     useCommands,
     type Command,
   } from "$lib/commands";
-  import { dataSource, type ChangeWarning, type TaskSummary } from "$lib/data";
+  import { ARTIFACT_BUILD, OPEN_IN_CLAUDE, connectArtifact, dataSource, type ChangeWarning, type SyncStatus as Sync, type TaskSummary } from "$lib/data";
+  import { appHref, appUrl } from "$lib/route";
+  import SyncStatus from "$lib/sync/SyncStatus.svelte";
   import { adoptToken } from "$lib/token";
   import { taskHref } from "$lib/work";
 
   let { children } = $props();
 
-  const views: { href: string; label: string; icon: IconName; key: string }[] = [
-    { href: "/inbox", label: "Inbox", icon: "inbox", key: "i" },
-    { href: "/", label: "Work", icon: "work", key: "w" },
-    { href: "/planning", label: "Planning", icon: "planning", key: "p" },
+  const views: { path: string; label: string; icon: IconName; key: string }[] = [
+    { path: "/inbox", label: "Inbox", icon: "inbox", key: "i" },
+    { path: "/", label: "Work", icon: "work", key: "w" },
+    { path: "/planning", label: "Planning", icon: "planning", key: "p" },
   ];
   const mac = isMac(navigator.platform);
   const menuKeys = formatKeys(["Mod", "k"], mac);
@@ -51,6 +53,15 @@
   let nav = $state<HTMLElement>();
   /** The Menu button, which Escape returns focus to. */
   let navToggle = $state<HTMLButtonElement>();
+  /** Whether views can read yet. The artifact build waits for the artifact's database. */
+  let connection = $state<"ready" | "connecting" | "unavailable">(ARTIFACT_BUILD ? "connecting" : "ready");
+  /** The artifact's last sync and queued edits; `null` in the `arcl serve` build. */
+  let sync = $state<Sync | null>(null);
+  /** The revision of the records the views loaded. */
+  let shownRevision = $state<string | null>(null);
+  let syncedRevision = $derived(sync?.revision ?? null);
+  /** Bumped to mount the view again, so it reads the records a sync brought. */
+  let viewKey = $state(0);
   let pending: string[] = [];
   let pendingTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -67,10 +78,33 @@
         group: "Go to",
         keys: ["g", view.key],
         icon: view.icon,
-        run: () => goto(view.href),
+        run: () => goto(appHref(view.path)),
       })),
     ],
   }));
+
+  if (ARTIFACT_BUILD) connectArtifact().then((connected) => (connection = connected ? "ready" : "unavailable"));
+
+  // Follow the artifact's syncs and queue once its database is connected.
+  $effect(() => {
+    if (connection !== "ready") return;
+    return dataSource().watch?.((status) => {
+      shownRevision ??= status.revision;
+      sync = status;
+    });
+  });
+
+  function reloadView() {
+    shownRevision = syncedRevision;
+    viewKey += 1;
+  }
+
+  /** Remove a failed edit from the queue. One that stays shows on the next update. */
+  function dismiss(id: string) {
+    dataSource()
+      .dismiss?.(id)
+      .catch(() => {});
+  }
 
   /** Open the command menu with an empty search, and load the tasks it searches. */
   function openMenu() {
@@ -144,7 +178,9 @@
   // navigate before that. A real navigation, unlike shallow `replaceState`,
   // updates `page.url` too, so views that rewrite the query do not bring the
   // token back.
-  let cleaned = adoptToken(new URL(window.location.href), window.sessionStorage);
+  // The artifact build has no token, and a sandboxed artifact page may have no
+  // session storage.
+  let cleaned = ARTIFACT_BUILD ? null : adoptToken(new URL(window.location.href), window.sessionStorage);
   afterNavigate(() => {
     navOpen = false;
     const target = cleaned;
@@ -158,7 +194,7 @@
 <div class="shell">
   <nav class="sidebar" aria-label="Views" bind:this={nav} onfocusout={closeNavOnFocusOut}>
     <div class="bar">
-      <a class="brand" href="/">Arc Lightning</a>
+      <a class="brand" href={appHref("/")}>Arc Lightning</a>
       <button type="button" class="menu-toggle" bind:this={navToggle} aria-expanded={navOpen} aria-controls="views-menu" onclick={() => (navOpen = !navOpen)}>
         <Icon name={navOpen ? "close" : "menu"} size="1.125rem" />
         <span>Menu</span>
@@ -178,9 +214,9 @@
         </button>
       </div>
       <ul>
-        {#each views as view (view.href)}
+        {#each views as view (view.path)}
           <li>
-            <a href={view.href} aria-current={page.url.pathname === view.href ? "page" : undefined}>
+            <a href={appHref(view.path)} aria-current={appUrl(page.url).pathname === view.path ? "page" : undefined}>
               <Icon name={view.icon} size="1.125rem" />
               {view.label}
             </a>
@@ -198,7 +234,16 @@
         {/snippet}
       </Feedback>
     {/each}
-    {@render children()}
+    {#if sync !== null}
+      <SyncStatus status={sync} stale={syncedRevision !== shownRevision} onreload={reloadView} ondismiss={dismiss} />
+    {/if}
+    {#if connection === "connecting"}
+      <p class="connecting" role="status">Connecting to the artifact’s database…</p>
+    {:else if connection === "unavailable"}
+      <EmptyState title="Open this page in claude.ai" message={OPEN_IN_CLAUDE} />
+    {:else}
+      {#key viewKey}{@render children()}{/key}
+    {/if}
   </main>
 </div>
 
@@ -235,6 +280,7 @@
   .tool span:not(.keys) { flex: 1; }
   .keys { display: inline-flex; gap: 2px; }
   kbd { display: inline-flex; min-width: 1.125rem; height: 1.125rem; align-items: center; justify-content: center; padding: 0 0.25rem; border: var(--arcl-border-width) solid var(--arcl-border); border-radius: 4px; background: var(--arcl-surface); font: 500 var(--arcl-type-xs) / 1 var(--arcl-font-ui); }
+  .connecting { margin: 0; color: var(--arcl-text-muted); }
   .filed { margin: 0 0 var(--arcl-space-4); padding: var(--arcl-space-2) var(--arcl-space-3); border-inline-start: 4px solid var(--arcl-success); border-radius: var(--arcl-radius-sm); background: var(--arcl-success-surface); font-size: var(--arcl-type-sm); }
   /* Narrow windows stack the sidebar above the page as a bar whose Menu button shows the views. */
   @media (max-width: 48rem) {

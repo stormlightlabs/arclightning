@@ -27,14 +27,23 @@ use super::*;
 /// long as it takes; the web app's user is waiting on a button instead.
 const LOCK_WAIT: Duration = Duration::from_secs(3);
 
-/// The endpoints, answering with the CLI's `--json` envelopes.
-struct ServeApp {
+/// The endpoints, answering with the CLI's `--json` envelopes. `arcl web`
+/// runs the same reads and mutations for a claude.ai artifact.
+pub(super) struct ServeApp {
     renderer: Renderer,
-    /// How `arcl serve` prints a mutation's sync warnings to stderr.
+    /// How a mutation's sync warnings print to stderr.
     mode: OutputMode,
+    /// How long a mutation waits for the project's sync lock.
+    lock_wait: Duration,
 }
 
 impl ServeApp {
+    /// Reads and mutations that print sync warnings to stderr as `mode` does
+    /// and wait at most `lock_wait` for the sync lock.
+    pub(super) fn new(mode: OutputMode, lock_wait: Duration) -> Self {
+        Self { renderer: Renderer::new(OutputMode::Json, ColorChoice::Never), mode, lock_wait }
+    }
+
     /// Run a task command as the CLI runs a write.
     fn task(&self, command: TaskCommand) -> Reply {
         self.write(|| run_task(command, &self.renderer))
@@ -43,7 +52,7 @@ impl ServeApp {
     /// Run `command` as the CLI runs a write. The warnings its syncs give go
     /// in the reply and to the server's stderr.
     fn write(&self, command: impl FnOnce() -> Result<Option<String>, ApplicationError>) -> Reply {
-        match synced_write(LOCK_WAIT, command) {
+        match synced_write(self.lock_wait, command) {
             Ok((body, warnings)) => {
                 let body = with_warnings(body.unwrap_or_default(), &warnings);
                 write_warnings(self.mode, warnings);
@@ -222,7 +231,7 @@ pub(super) fn exec_serve(port: Option<u16>, renderer: &Renderer) -> anyhow::Resu
     drop(open_database().map_err(ApplicationError::from_command)?);
     let server = Server::bind(port).context("could not start the web app server")?;
     write_output(renderer.render_serve(&server.url())?)?;
-    let app = ServeApp { renderer: Renderer::new(OutputMode::Json, ColorChoice::Never), mode: renderer.mode() };
+    let app = ServeApp::new(renderer.mode(), LOCK_WAIT);
     server.run(&app, &app).context("the web app server stopped")?;
     Ok(())
 }

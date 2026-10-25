@@ -128,6 +128,11 @@ pub enum Command {
         #[arg(long, value_name = "PORT")]
         port: Option<u16>,
     },
+    /// Export records for the web app's claude.ai artifact and apply the edits queued on it.
+    Web {
+        #[command(subcommand)]
+        command: WebCommand,
+    },
 }
 
 /// Inbox capture commands.
@@ -722,6 +727,28 @@ pub enum SkillCommand {
         /// status 4 when any differs.
         #[arg(long)]
         check: bool,
+    },
+}
+
+/// Commands that keep a claude.ai artifact of the web app in step with the project.
+#[derive(Clone, Debug, Subcommand)]
+pub enum WebCommand {
+    /// Write the artifact database's documents as JSON files under a directory,
+    /// with a manifest naming the ones that changed since the last export there.
+    Export {
+        /// The directory to write; created if missing.
+        #[arg(value_name = "DIR")]
+        dir: PathBuf,
+        /// List every document as changed, for a sync into a new artifact or
+        /// after a sync that did not finish.
+        #[arg(long)]
+        full: bool,
+    },
+    /// Apply the edits queued on the artifact, read from a JSON file, as `arcl serve` applies a change.
+    Apply {
+        /// The JSON array of queued edits, or `-` for standard input.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
     },
 }
 

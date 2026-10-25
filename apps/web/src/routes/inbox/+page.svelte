@@ -3,6 +3,7 @@
   import { onMount, tick, untrack } from "svelte";
   import { formatKeys, useCommands, type Command } from "$lib/commands";
   import {
+    QUEUED,
     dataSource,
     latestRead,
     type Capture,
@@ -13,6 +14,8 @@
   } from "$lib/data";
   import { TRIAGE_KEYS, TRIAGE_LABELS, afterRemoval, formFor, promotionOf, type PromotionForm, type TriageAction } from "$lib/inbox";
   import PromoteForm from "$lib/inbox/PromoteForm.svelte";
+  import { failureNotice } from "$lib/notice";
+  import { appHref } from "$lib/route";
   import { failureOf, type ActionFailure } from "$lib/task";
   import { moveSelection, orderMilestones, orderTasks, taskHref, visibleSelection, workKeyAction } from "$lib/work";
 
@@ -242,6 +245,8 @@
       readList.start();
       return;
     }
+    // A queued promotion is done here; the capture stays until the next sync.
+    if (failure.code === QUEUED) form = null;
     actionFailure = { ...failure, capture: capture.id };
   }
 
@@ -256,7 +261,7 @@
       case "task":
         return { text: `Promoted “${capture.title}” to the task “${made.title}”.`, href: taskHref(made.id), label: "Open task" };
       case "spec":
-        return { text: `Promoted “${capture.title}” to the spec “${made.title}”.`, href: "/planning", label: "Open Planning" };
+        return { text: `Promoted “${capture.title}” to the spec “${made.title}”.`, href: appHref("/planning"), label: "Open Planning" };
       case "note":
         return { text: `Made the note “${made.title}” (${made.id}) from “${capture.title}”.` };
     }
@@ -373,7 +378,7 @@
           <PromoteForm bind:form {phases} {parents} {busy} onsubmit={promote} oncancel={() => (form = null)} />
         {/if}
         {#if actionFailure !== null && actionFailure.capture === selectedCapture.id}
-          <Feedback tone="danger" title="Could not triage this capture" message={`${actionFailure.message} (${actionFailure.code})`} />
+          <Feedback {...failureNotice(actionFailure, "Could not triage this capture")} />
         {/if}
       {/if}
     </section>

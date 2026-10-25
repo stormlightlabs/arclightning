@@ -15,6 +15,7 @@
     type MilestoneRow,
     type PlanningRow,
   } from "$lib/planning";
+  import { failureNotice } from "$lib/notice";
   import { failureOf, type ActionFailure } from "$lib/task";
   import { moveSelection, taskHref, visibleSelection, workKeyAction } from "$lib/work";
 
@@ -260,7 +261,7 @@
       <Button label="Cancel" variant="ghost" disabled={busy} onclick={closeForm} />
     </div>
     {#if formFailure !== null}
-      <Feedback tone="danger" title="Could not save this" message={`${formFailure.message} (${formFailure.code})`} />
+      <Feedback {...failureNotice(formFailure, "Could not save this")} />
     {/if}
   </form>
 {/snippet}

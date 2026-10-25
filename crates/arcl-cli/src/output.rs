@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use owo_colors::{OwoColorize, Stream};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::cli::ColorChoice;
@@ -816,6 +816,84 @@ impl Renderer {
         Ok(Some(self.style(message)))
     }
 
+    /// Render what `web export` wrote. Human output names the directory and
+    /// each changed or removed document; plain output lists them as
+    /// `<changed|removed>\t<path>`.
+    pub fn render_web_export(&self, dir: &Path, manifest: &WebManifest) -> Result<Option<String>, OutputError> {
+        let listed = || {
+            let changed = manifest.changed.iter().map(|path| ("changed", path));
+            changed.chain(manifest.removed.iter().map(|path| ("removed", path)))
+        };
+        let message = match self.mode {
+            OutputMode::Human => {
+                let heading = format!(
+                    "Exported {} documents to `{}`: {} changed, {} removed.",
+                    manifest.documents.len(),
+                    dir.display(),
+                    manifest.changed.len(),
+                    manifest.removed.len()
+                );
+                std::iter::once(heading)
+                    .chain(listed().map(|(status, path)| format!("  {status} {path}")))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+            OutputMode::Plain => listed()
+                .map(|(status, path)| format!("{status}\t{}", plain_escape(path)))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            OutputMode::Json => serde_json::to_string(&Envelope { format_version: FORMAT_VERSION, data: manifest })?,
+            OutputMode::Quiet => return Ok(None),
+        };
+        Ok(Some(self.style(message)))
+    }
+
+    /// Render the result of each edit `web apply` read, in order. Plain
+    /// output lists them as `<status>\t<id>\t<op>\t<target>`.
+    pub fn render_web_apply(&self, results: &[AppliedEdit]) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human => results
+                .iter()
+                .map(|result| {
+                    let target = result
+                        .target
+                        .as_deref()
+                        .map(|target| format!(" {target}"))
+                        .unwrap_or_default();
+                    let op = result.op.as_deref().unwrap_or("an entry");
+                    let id = result.id.as_deref().unwrap_or("no ID");
+                    let edit = format!("{op}{target} (queued as {id})");
+                    match result.status {
+                        AppliedStatus::Applied => format!("Applied {edit}"),
+                        AppliedStatus::Skipped => format!("Skipped {edit}: it is not queued"),
+                        AppliedStatus::Failed => {
+                            let error = result.error.as_ref();
+                            let text = |field: &str| error.and_then(|error| error[field].as_str()).unwrap_or_default();
+                            format!("Failed {edit}: {} ({})", text("message"), text("code"))
+                        }
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            OutputMode::Plain => results
+                .iter()
+                .map(|result| {
+                    let target = result.target.as_deref().unwrap_or_default();
+                    let id = result.id.as_deref().unwrap_or_default();
+                    let op = result.op.as_deref().unwrap_or_default();
+                    let fields = [result.status.as_str(), id, op, target];
+                    fields.map(plain_escape).join("\t")
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            OutputMode::Json => {
+                serde_json::to_string(&Envelope { format_version: FORMAT_VERSION, data: AppliedData { results } })?
+            }
+            OutputMode::Quiet => return Ok(None),
+        };
+        Ok(Some(self.style(message)))
+    }
+
     /// Render a workspace status report.
     pub fn render_workspace_status(&self, status: &WorkspaceStatus) -> Result<Option<String>, OutputError> {
         let message = match self.mode {
@@ -904,6 +982,77 @@ pub struct SkillReport {
     pub root: String,
     /// One entry per agent directory and skill file, in install order.
     pub files: Vec<SkillFile>,
+}
+
+/// The manifest `web export` writes beside the documents, and reads back on
+/// the next export to tell which documents changed.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct WebManifest {
+    /// The manifest's own version, 1.
+    pub format_version: u8,
+    /// The Git commit HEAD named at the export, if the project is in Git.
+    pub commit: Option<String>,
+    /// When the export ran, in UTC, as RFC 3339.
+    pub synced_at: String,
+    /// A digest of every document but `meta/sync`, which changes only when one of them does.
+    pub revision: String,
+    /// Every document path, in the order to write them.
+    pub documents: Vec<String>,
+    /// The documents that are new or differ from the files of the last export,
+    /// in the order to write them; every document under `--full`.
+    pub changed: Vec<String>,
+    /// The documents the last export had and this one does not, to delete.
+    pub removed: Vec<String>,
+}
+
+/// What became of one queued edit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AppliedStatus {
+    /// The change ran and saved.
+    Applied,
+    /// The change was refused, with the CLI's error.
+    Failed,
+    /// The entry's status was not `queued`, or it had none, so it did not run.
+    Skipped,
+}
+
+impl AppliedStatus {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Applied => "applied",
+            Self::Failed => "failed",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
+/// The result of one edit `web apply` read.
+#[derive(Clone, Debug, Serialize)]
+pub struct AppliedEdit {
+    /// The queued entry's ID, or `None` for a malformed entry without a
+    /// string `id`.
+    pub id: Option<String>,
+    /// The operation it named, or `None` for a malformed entry without a
+    /// string `op`.
+    pub op: Option<String>,
+    /// The record it named, if any.
+    pub target: Option<String>,
+    /// Whether the edit applied, failed or was skipped.
+    pub status: AppliedStatus,
+    /// The `data` of the change's JSON envelope, when it applied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
+    /// The CLI's error, with its `code` and `message`, when it failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<serde_json::Value>,
+    /// The warnings the change's syncs gave, as `{"code", "message"}` objects.
+    pub warnings: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+struct AppliedData<'a> {
+    results: &'a [AppliedEdit],
 }
 
 /// A compact connected-record summary used by human and plain list output.

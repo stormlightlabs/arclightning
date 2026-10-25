@@ -1,0 +1,411 @@
+{
+  "about": "Recorded with `arcl web export` from a scratch project: a spec, a plan with one milestone and two tasks, one blocked; a task outside the plan; and one capture.",
+  "documents": {
+    "views/work": {
+      "data": {
+        "phases": [
+          {
+            "body": "",
+            "id": "arcl-ph-01M5RVP5WQV9WY62EGZQ5S26Y7",
+            "plan_id": "arcl-pl-01M5RVP5VNV1ZWJTPMJXY42HV8",
+            "plan_key": "publish",
+            "position": 0,
+            "project_id": "arcl-pj-00000000000000000000000000",
+            "status": "open",
+            "title": "Publish"
+          }
+        ],
+        "tasks": [
+          {
+            "phase_id": "arcl-ph-01M5RVP5WQV9WY62EGZQ5S26Y7",
+            "readiness": {
+              "blocked": false,
+              "ready": true,
+              "reasons": []
+            },
+            "task": {
+              "body": "",
+              "evidence": "",
+              "handoff": "",
+              "id": "arcl-t-01M5RVP5WQ2VC67M1APSRK2ZTG",
+              "parent_id": null,
+              "phase_id": "arcl-ph-01M5RVP5WQV9WY62EGZQ5S26Y7",
+              "plan_id": "arcl-pl-01M5RVP5VNV1ZWJTPMJXY42HV8",
+              "plan_key": "publish/build",
+              "position": 0,
+              "priority": "high",
+              "project_id": "arcl-pj-00000000000000000000000000",
+              "spec_id": "arcl-s-01M5RVP5TFAGM9THCYXQ77592B",
+              "status": "pending",
+              "title": "Build the page"
+            }
+          },
+          {
+            "phase_id": null,
+            "readiness": {
+              "blocked": false,
+              "ready": true,
+              "reasons": []
+            },
+            "task": {
+              "body": "Outside any **plan**.",
+              "evidence": "",
+              "handoff": "",
+              "id": "arcl-t-01M5RVP5X713CPGM5M3WMPPSZW",
+              "parent_id": null,
+              "phase_id": null,
+              "plan_id": null,
+              "position": 0,
+              "priority": "normal",
+              "project_id": "arcl-pj-00000000000000000000000000",
+              "spec_id": null,
+              "status": "pending",
+              "title": "Loose task"
+            }
+          },
+          {
+            "phase_id": "arcl-ph-01M5RVP5WQV9WY62EGZQ5S26Y7",
+            "readiness": {
+              "blocked": true,
+              "ready": false,
+              "reasons": [
+                {
+                  "blocker": "arcl-t-01M5RVP5WQ2VC67M1APSRK2ZTG",
+                  "kind": "direct_blocker",
+                  "message": "blocked by `arcl-t-01M5RVP5WQ2VC67M1APSRK2ZTG` (pending)"
+                }
+              ]
+            },
+            "task": {
+              "body": "",
+              "evidence": "",
+              "handoff": "",
+              "id": "arcl-t-01M5RVP5WQQ1JH509T612ZZ60W",
+              "parent_id": null,
+              "phase_id": "arcl-ph-01M5RVP5WQV9WY62EGZQ5S26Y7",
+              "plan_id": "arcl-pl-01M5RVP5VNV1ZWJTPMJXY42HV8",
+              "plan_key": "publish/sync",
+              "position": 1,
+              "priority": "normal",
+              "project_id": "arcl-pj-00000000000000000000000000",
+              "spec_id": "arcl-s-01M5RVP5TFAGM9THCYXQ77592B",
+              "status": "pending",
+              "title": "Sync the database"
+            }
+          }
+        ]
+      },
+      "format_version": 2
+    },
+    "views/tree": {
+      "data": {
+        "nodes": [
+          {
+            "children": [],
+            "id": "arcl-c-01M5RVP5XHT7D6S1NWEJ9BEEYG",
+            "kind": "capture",
+            "status": "captured",
+            "title": "Try the artifact"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [],
+                        "id": "arcl-t-01M5RVP5WQ2VC67M1APSRK2ZTG",
+                        "kind": "task",
+                        "status": "pending",
+                        "title": "Build the page"
+                      },
+                      {
+                        "children": [],
+                        "id": "arcl-t-01M5RVP5WQQ1JH509T612ZZ60W",
+                        "kind": "task",
+                        "status": "pending",
+                        "title": "Sync the database"
+                      }
+                    ],
+                    "id": "arcl-ph-01M5RVP5WQV9WY62EGZQ5S26Y7",
+                    "kind": "phase",
+                    "status": "open",
+                    "title": "Publish"
+                  }
+                ],
+                "id": "arcl-pl-01M5RVP5VNV1ZWJTPMJXY42HV8",
+                "kind": "plan",
+                "status": "open",
+                "title": "Artifact"
+              }
+            ],
+            "id": "arcl-s-01M5RVP5TFAGM9THCYXQ77592B",
+            "kind": "spec",
+            "status": "open",
+            "title": "Web app"
+          },
+          {
+            "children": [],
+            "id": "arcl-t-01M5RVP5X713CPGM5M3WMPPSZW",
+            "kind": "task",
+            "status": "pending",
+            "title": "Loose task"
+          }
+        ]
+      },
+      "format_version": 1
+    },
+    "views/tasks": {
+      "data": {
+        "records": [
+          {
+            "id": "arcl-t-01M5RVP5WQ2VC67M1APSRK2ZTG",
+            "kind": "task",
+            "status": "pending",
+            "title": "Build the page"
+          },
+          {
+            "id": "arcl-t-01M5RVP5WQQ1JH509T612ZZ60W",
+            "kind": "task",
+            "status": "pending",
+            "title": "Sync the database"
+          },
+          {
+            "id": "arcl-t-01M5RVP5X713CPGM5M3WMPPSZW",
+            "kind": "task",
+            "status": "pending",
+            "title": "Loose task"
+          }
+        ]
+      },
+      "format_version": 1
+    },
+    "views/captures": {
+      "data": {
+        "records": [
+          {
+            "id": "arcl-c-01M5RVP5XHT7D6S1NWEJ9BEEYG",
+            "kind": "capture",
+            "status": "captured",
+            "title": "Try the artifact"
+          }
+        ]
+      },
+      "format_version": 1
+    },
+    "records/arcl-t-01M5RVP5WQ2VC67M1APSRK2ZTG": {
+      "data": {
+        "ancestors": [],
+        "blockers": [],
+        "children": [],
+        "dependents": [
+          {
+            "body": "",
+            "evidence": "",
+            "handoff": "",
+            "id": "arcl-t-01M5RVP5WQQ1JH509T612ZZ60W",
+            "parent_id": null,
+            "phase_id": "arcl-ph-01M5RVP5WQV9WY62EGZQ5S26Y7",
+            "plan_id": "arcl-pl-01M5RVP5VNV1ZWJTPMJXY42HV8",
+            "plan_key": "publish/sync",
+            "position": 1,
+            "priority": "normal",
+            "project_id": "arcl-pj-00000000000000000000000000",
+            "spec_id": "arcl-s-01M5RVP5TFAGM9THCYXQ77592B",
+            "status": "pending",
+            "title": "Sync the database"
+          }
+        ],
+        "inherited_blockers": [],
+        "phase": {
+          "body": "",
+          "id": "arcl-ph-01M5RVP5WQV9WY62EGZQ5S26Y7",
+          "plan_id": "arcl-pl-01M5RVP5VNV1ZWJTPMJXY42HV8",
+          "plan_key": "publish",
+          "position": 0,
+          "project_id": "arcl-pj-00000000000000000000000000",
+          "status": "open",
+          "title": "Publish"
+        },
+        "plan": {
+          "body": "",
+          "id": "arcl-pl-01M5RVP5VNV1ZWJTPMJXY42HV8",
+          "project_id": "arcl-pj-00000000000000000000000000",
+          "spec_id": "arcl-s-01M5RVP5TFAGM9THCYXQ77592B",
+          "status": "open",
+          "title": "Artifact"
+        },
+        "readiness": {
+          "blocked": false,
+          "ready": true,
+          "reasons": []
+        },
+        "spec": {
+          "acceptance_criteria": "",
+          "body": "Browse the plan.",
+          "id": "arcl-s-01M5RVP5TFAGM9THCYXQ77592B",
+          "project_id": "arcl-pj-00000000000000000000000000",
+          "source_capture_id": null,
+          "status": "open",
+          "title": "Web app"
+        },
+        "task": {
+          "body": "",
+          "evidence": "",
+          "handoff": "",
+          "id": "arcl-t-01M5RVP5WQ2VC67M1APSRK2ZTG",
+          "parent_id": null,
+          "phase_id": "arcl-ph-01M5RVP5WQV9WY62EGZQ5S26Y7",
+          "plan_id": "arcl-pl-01M5RVP5VNV1ZWJTPMJXY42HV8",
+          "plan_key": "publish/build",
+          "position": 0,
+          "priority": "high",
+          "project_id": "arcl-pj-00000000000000000000000000",
+          "spec_id": "arcl-s-01M5RVP5TFAGM9THCYXQ77592B",
+          "status": "pending",
+          "title": "Build the page"
+        }
+      },
+      "format_version": 2
+    },
+    "records/arcl-t-01M5RVP5WQQ1JH509T612ZZ60W": {
+      "data": {
+        "ancestors": [],
+        "blockers": [
+          {
+            "completed": false,
+            "evidence": "",
+            "task": {
+              "body": "",
+              "evidence": "",
+              "handoff": "",
+              "id": "arcl-t-01M5RVP5WQ2VC67M1APSRK2ZTG",
+              "parent_id": null,
+              "phase_id": "arcl-ph-01M5RVP5WQV9WY62EGZQ5S26Y7",
+              "plan_id": "arcl-pl-01M5RVP5VNV1ZWJTPMJXY42HV8",
+              "plan_key": "publish/build",
+              "position": 0,
+              "priority": "high",
+              "project_id": "arcl-pj-00000000000000000000000000",
+              "spec_id": "arcl-s-01M5RVP5TFAGM9THCYXQ77592B",
+              "status": "pending",
+              "title": "Build the page"
+            }
+          }
+        ],
+        "children": [],
+        "dependents": [],
+        "inherited_blockers": [],
+        "phase": {
+          "body": "",
+          "id": "arcl-ph-01M5RVP5WQV9WY62EGZQ5S26Y7",
+          "plan_id": "arcl-pl-01M5RVP5VNV1ZWJTPMJXY42HV8",
+          "plan_key": "publish",
+          "position": 0,
+          "project_id": "arcl-pj-00000000000000000000000000",
+          "status": "open",
+          "title": "Publish"
+        },
+        "plan": {
+          "body": "",
+          "id": "arcl-pl-01M5RVP5VNV1ZWJTPMJXY42HV8",
+          "project_id": "arcl-pj-00000000000000000000000000",
+          "spec_id": "arcl-s-01M5RVP5TFAGM9THCYXQ77592B",
+          "status": "open",
+          "title": "Artifact"
+        },
+        "readiness": {
+          "blocked": true,
+          "ready": false,
+          "reasons": [
+            {
+              "blocker": "arcl-t-01M5RVP5WQ2VC67M1APSRK2ZTG",
+              "kind": "direct_blocker",
+              "message": "blocked by `arcl-t-01M5RVP5WQ2VC67M1APSRK2ZTG` (pending)"
+            }
+          ]
+        },
+        "spec": {
+          "acceptance_criteria": "",
+          "body": "Browse the plan.",
+          "id": "arcl-s-01M5RVP5TFAGM9THCYXQ77592B",
+          "project_id": "arcl-pj-00000000000000000000000000",
+          "source_capture_id": null,
+          "status": "open",
+          "title": "Web app"
+        },
+        "task": {
+          "body": "",
+          "evidence": "",
+          "handoff": "",
+          "id": "arcl-t-01M5RVP5WQQ1JH509T612ZZ60W",
+          "parent_id": null,
+          "phase_id": "arcl-ph-01M5RVP5WQV9WY62EGZQ5S26Y7",
+          "plan_id": "arcl-pl-01M5RVP5VNV1ZWJTPMJXY42HV8",
+          "plan_key": "publish/sync",
+          "position": 1,
+          "priority": "normal",
+          "project_id": "arcl-pj-00000000000000000000000000",
+          "spec_id": "arcl-s-01M5RVP5TFAGM9THCYXQ77592B",
+          "status": "pending",
+          "title": "Sync the database"
+        }
+      },
+      "format_version": 2
+    },
+    "records/arcl-t-01M5RVP5X713CPGM5M3WMPPSZW": {
+      "data": {
+        "ancestors": [],
+        "blockers": [],
+        "children": [],
+        "dependents": [],
+        "inherited_blockers": [],
+        "phase": null,
+        "plan": null,
+        "readiness": {
+          "blocked": false,
+          "ready": true,
+          "reasons": []
+        },
+        "spec": null,
+        "task": {
+          "body": "Outside any **plan**.",
+          "evidence": "",
+          "handoff": "",
+          "id": "arcl-t-01M5RVP5X713CPGM5M3WMPPSZW",
+          "parent_id": null,
+          "phase_id": null,
+          "plan_id": null,
+          "position": 0,
+          "priority": "normal",
+          "project_id": "arcl-pj-00000000000000000000000000",
+          "spec_id": null,
+          "status": "pending",
+          "title": "Loose task"
+        }
+      },
+      "format_version": 2
+    },
+    "records/arcl-c-01M5RVP5XHT7D6S1NWEJ9BEEYG": {
+      "data": {
+        "action": "shown",
+        "capture": {
+          "body": "On claude.ai.",
+          "created_at": "2026-10-25T06:24:09.137Z",
+          "id": "arcl-c-01M5RVP5XHT7D6S1NWEJ9BEEYG",
+          "project_id": "arcl-pj-00000000000000000000000000",
+          "status": "captured",
+          "title": "Try the artifact"
+        }
+      },
+      "format_version": 1
+    },
+    "meta/sync": {
+      "commit": null,
+      "format_version": 1,
+      "revision": "02046c58acc5ce55",
+      "synced_at": "2026-10-25T06:24:09Z"
+    }
+  }
+}
