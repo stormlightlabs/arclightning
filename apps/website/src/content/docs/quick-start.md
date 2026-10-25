@@ -37,17 +37,17 @@ For development, keep the checkout and run the CLI with Cargo instead:
 cargo run -- --help
 ```
 
-## Install a tagged pre-release
+## Install a tagged release
 
 To pin a known build without a checkout, as a cloud session or CI job would,
 install a tag from Git:
 
 ```sh
-cargo install --git https://github.com/stormlightlabs/arclightning --tag v0.1.0-alpha.1 arcl-cli
+cargo install --git https://github.com/stormlightlabs/arclightning --tag v0.1.0 arcl-cli
 ```
 
-This installs the `arcl` binary. Pre-release tags can change JSON shapes, and
-each envelope's `format_version` names the shape it carries.
+This installs the `arcl` binary. Releases before 1.0 can change JSON shapes,
+and each envelope's `format_version` names the shape it carries.
 
 A Git install does not include the web app, since its build is not committed,
 so `arcl serve` serves a page that says the web app was not built. To get the

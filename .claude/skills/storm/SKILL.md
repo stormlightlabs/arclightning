@@ -72,14 +72,17 @@ its revise. It runs once per pull request, never in a loop.
    pushes and replies.
 5. **Adversarial pass.** Pin the new head. Dispatch the `adversarial-reviewer`
    agent with it, the standard pass's findings and the reviser's reply.
-6. **Verify, post and revise** as in steps 2 to 4, opening the comment with
-   `Adversarial pass on <short sha> · <model>`.
+6. **Verify and revise** as in steps 2 and 4, but tell the reviser to report
+   back rather than reply on the pull request. The findings and its report
+   go in the Finish comment, under `Adversarial pass on <short sha> ·
+   <model>`, so the run posts one comment fewer.
 
 Nits are left in the comments for the owner; they start no revise.
 
 Dispatch each agent fresh. On Claude Code, use the Agent tool with the
 agent's name; on Codex, `spawn_agent` with `fork_turns` set to `"none"` and the
-role's text from `.claude/agents/`. A reviewer that inherits this session's
+role's text from `.claude/agents/`; on Pi, the fabrial package's `agent` tool
+with the role's name. A reviewer that inherits this session's
 history is not a fresh reader.
 
 ## Finish
@@ -91,17 +94,57 @@ is exactly:
 Review finished at <full head sha>
 ```
 
+Below a blank line, the same comment carries the adversarial pass's findings
+and what the revise did about them. Each comment is one Bot comment run.
+
+Before posting it, check that the pull request still merges. The review
+passes read the diff, not the base, so they do not see a conflict. `gh pr
+view <n> --json mergeable` must say `MERGEABLE`. In `pull_request_read`, a
+`mergeable_state` of `clean`, `unstable`, `blocked`, `draft` or `has_hooks`
+means it merges; the pull request is still a draft at this point, so `draft`
+is the usual answer. GitHub answers `UNKNOWN` (or `unknown`) for a while after
+a push: read it again until it settles, and never post on an unknown answer.
+
+On `behind`, merge `main` into the branch; with no conflict only the base
+moves, so the review stands. On `CONFLICTING` (or `dirty`), merge `main` with a
+merge commit, not a rebase, and resolve it. Regenerate a generated file with
+its tool rather than editing it, as `fab update` does for
+`.github/fabrial.toml`. Stop and report when both sides changed the same
+logic. Run the gates and push. A resolved conflict changes the branch's own
+diff, so the gate takes the new head as unreviewed: run both passes again on
+it before posting, or ask the owner to accept it with `/storm:ready <sha>`.
+The `resync` skill does not resolve conflicts; this step does, for the pull
+request this run reviews.
+
 Post it through the Bot comment workflow like the rest. The Review gate
 workflow then turns `storm/review` green for that head, marks the draft ready
-and turns on auto-merge. A pull request that GitHub would merge already takes
-no auto-merge; the bot posts the squash message instead. Post it only once the
+and posts the squash message. It never turns on auto-merge: the owner merges,
+by hand or with auto-merge they turn on. Post it only once the
 sequence has run to its end. A push after it sets the check back to pending,
 unless the push only moved the base.
 
-Then report: the pull request, what each pass found and what each revise
-fixed, and anything left for the owner to judge, including any finding the
-adversarial pass's revise did not resolve. The owner approves, and auto-merge
-lands it, or the owner merges it with the message the bot posted.
+Confirm the finish comment appeared, then watch `storm/review` and the
+repository's required checks for this head. With `gh`, use `gh pr checks <n>`
+and `gh pr view <n>`; cloud sessions use `pull_request_read`. Check at most once
+every 30 seconds for up to five minutes. Stop when checks finish or a failure
+needs action; on timeout report the pending checks instead of claiming ready.
+A push invalidates earlier check results. Fix only failures within this task;
+otherwise stop and report. If work remains when ending the session, use the
+`handoff` skill so the next session can finish watching.
+
+Then report the PR link, current head and check state, what each pass found,
+what each revise fixed, and anything left for the owner to judge. The owner
+approves and merges it, by hand or with auto-merge, using the message the bot
+posted. Do not wait indefinitely for approval. When the owner reports a
+merge, use the `implement` skill's **After merge** steps.
+
+## Session changes
+
+Before clearing context with unfinished work, use the `handoff` skill. On
+pickup, verify the PR head and recorded progress and continue the unfinished
+step, not a new sequence. Never claim a pass ran without its result. If the
+record is missing or contradictory, stop and ask rather than posting
+`Review finished` or silently repeating the sequence.
 
 ## Comment commands
 
