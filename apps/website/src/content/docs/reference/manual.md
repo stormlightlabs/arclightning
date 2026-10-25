@@ -209,7 +209,12 @@ an `Origin` header naming the server, which stops other pages, including
 those on other `127.0.0.1` ports, from sending one. Responses carry no CORS
 headers. The page's Content-Security-Policy runs only the app's own script and
 loads images only from the server or `data:` URLs, so Markdown cannot pull
-images from other hosts. The server runs until interrupted.
+images from other hosts. The server runs until Ctrl-C, then gives open
+requests up to 5 seconds to finish and exits.
+
+The server closes a connection that takes more than 5 seconds to send a request
+head, or idles that long between requests. It keeps at most 128 connections
+open; a new one waits to be accepted until another closes.
 
 | Endpoint                           | Same JSON as             |
 | ---------------------------------- | ------------------------ |
@@ -263,10 +268,11 @@ with `_` for `-`:
 is the plan's TOML, as `arcl plan apply --file` reads it.
 
 `park`, `unpark` and `discard` take an empty body or `{}`. An unknown option, a body that
-is not JSON, or a body over 1 MiB is refused. The server reads a body only
-after the request passes its checks, and gives up on a body that has not
-arrived after 5 seconds; that request gets status 408 once the client sends the
-rest or closes. A failure returns the CLI's error envelope with status 400 for
+is not JSON, or a body over 1 MiB is refused. A request whose
+`Content-Length` is over 1 MiB gets status 413 before any other check. The
+server reads a body only after the request passes its checks, and answers 408
+and closes the connection when the body has not arrived after 5 seconds. A
+failure returns the CLI's error envelope with status 400 for
 exit codes 2 and 3, 404 for 5, 409 for 4, and 500 otherwise.
 
 A read opens the database without syncing the workspace, takes no lock and

@@ -1,8 +1,12 @@
 +++
 id = "arcl-c-01M5R7K4B5Y60KSVMQCHNR6RTX"
 title = "arcl serve: a huge declared Content-Length aborts the server"
-status = "captured"
+status = "promoted"
 created-at = "2026-10-25T00:32:57.701Z"
+
+[promoted-to]
+kind = "task"
+id = "arcl-t-01M5RJQ1E512E5HM76Q65V3DGR"
 +++
 
 Found while revising #41. tiny_http 0.12 drains an unread body when a
