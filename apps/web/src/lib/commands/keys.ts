@@ -9,6 +9,8 @@ export interface ShortcutKey {
   altKey: boolean;
   ctrlKey: boolean;
   metaKey: boolean;
+  /** Whether the key is held down and this press is the browser's repeat. */
+  repeat: boolean;
   defaultPrevented: boolean;
   target: EventTarget | null;
 }
@@ -33,20 +35,21 @@ export function isMac(platform: string): boolean {
 
 /**
  * Whether a key press opens the command menu: `⌘K` on macOS and `Ctrl+K`
- * elsewhere, outside form fields and the editor.
+ * elsewhere, outside form fields and the editor. A held key opens it once.
  */
 export function opensMenu(event: ShortcutKey, mac: boolean): boolean {
   const modifier = mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
-  return modifier && !event.altKey && event.key.toLowerCase() === "k" && !event.defaultPrevented && !inField(event.target);
+  return modifier && !event.altKey && !event.repeat && event.key.toLowerCase() === "k" && !event.defaultPrevented && !inField(event.target);
 }
 
 /**
  * Whether single-key shortcuts may act on a key press. Keys typed into a form
  * field, the editor or a dialog, held with `Ctrl`, `⌘` or `Alt`, or already
- * handled are left alone.
+ * handled are left alone, and so are the repeats of a held key, so holding
+ * `c` runs Complete once.
  */
 export function takesShortcut(event: ShortcutKey): boolean {
-  return !(event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || inField(event.target));
+  return !(event.repeat || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || inField(event.target));
 }
 
 /**

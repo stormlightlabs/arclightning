@@ -7,7 +7,7 @@ function element(...matching: string[]): EventTarget {
 }
 
 function press(key: string, fields: Partial<ShortcutKey> = {}): ShortcutKey {
-  return { key, altKey: false, ctrlKey: false, metaKey: false, defaultPrevented: false, target: null, ...fields };
+  return { key, altKey: false, ctrlKey: false, metaKey: false, repeat: false, defaultPrevented: false, target: null, ...fields };
 }
 
 const commands = [
@@ -34,6 +34,10 @@ describe("opensMenu", () => {
     }
     expect(opensMenu(press("k", { ctrlKey: true, defaultPrevented: true }), false)).toBe(false);
   });
+
+  it("opens once for a held key", () => {
+    expect(opensMenu(press("k", { ctrlKey: true, repeat: true }), false)).toBe(false);
+  });
 });
 
 describe("takesShortcut", () => {
@@ -53,6 +57,10 @@ describe("takesShortcut", () => {
     expect(takesShortcut(press("q", { ctrlKey: true }))).toBe(false);
     expect(takesShortcut(press("q", { altKey: true }))).toBe(false);
     expect(takesShortcut(press("q", { defaultPrevented: true }))).toBe(false);
+  });
+
+  it("ignores the repeats of a held key", () => {
+    expect(takesShortcut(press("c", { repeat: true }))).toBe(false);
   });
 });
 
