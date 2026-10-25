@@ -5,14 +5,19 @@ edition.workspace = true
 build = "build.rs"
 
 [dependencies]
+axum = { version = "0.8", default-features = false }
 getrandom = "0.4"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["http1", "server-graceful", "service", "tokio"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tiny_http = "0.12"
+tokio = { workspace = true, features = ["net", "signal", "sync", "time"] }
 
 [build-dependencies]
 sha2 = "0.10"
 
 [dev-dependencies]
 sha2 = "0.10"
+tokio = { workspace = true, features = ["io-util"] }
