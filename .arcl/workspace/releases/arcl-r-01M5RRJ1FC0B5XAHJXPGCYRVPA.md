@@ -1,7 +1,7 @@
 +++
 id = "arcl-r-01M5RRJ1FC0B5XAHJXPGCYRVPA"
 title = "v0.1.0"
-status = "open"
+status = "completed"
 
 [[members]]
 kind = "task"
@@ -20,4 +20,4 @@ kind = "task"
 id = "arcl-t-01M5RRJ1C5MR74AF7G6HMCN129"
 +++
 
-Ships the MCP server and the Arc Lightning skill (T10), the local web app served by `arcl serve` (T18) and its axum server (T21). T22 covers the release work itself. Install with `cargo install --git https://github.com/stormlightlabs/arclightning --tag v0.1.0 arcl-cli`. The release completes once the tag is on `main`.
+Ships the MCP server and the Arc Lightning skill (T10), the local web app served by `arcl serve` (T18) and its axum server (T21). T22 covers the release work itself. Tagged `v0.1.0` on 9ca3a4d (#46). Install with `cargo install --git https://github.com/stormlightlabs/arclightning --tag v0.1.0 arcl-cli`.
