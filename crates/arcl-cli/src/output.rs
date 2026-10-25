@@ -860,7 +860,9 @@ impl Renderer {
                         .as_deref()
                         .map(|target| format!(" {target}"))
                         .unwrap_or_default();
-                    let edit = format!("{}{target} (queued as {})", result.op, result.id);
+                    let op = result.op.as_deref().unwrap_or("an entry");
+                    let id = result.id.as_deref().unwrap_or("no ID");
+                    let edit = format!("{op}{target} (queued as {id})");
                     match result.status {
                         AppliedStatus::Applied => format!("Applied {edit}"),
                         AppliedStatus::Skipped => format!("Skipped {edit}: it is not queued"),
@@ -877,7 +879,9 @@ impl Renderer {
                 .iter()
                 .map(|result| {
                     let target = result.target.as_deref().unwrap_or_default();
-                    let fields = [result.status.as_str(), &result.id, &result.op, target];
+                    let id = result.id.as_deref().unwrap_or_default();
+                    let op = result.op.as_deref().unwrap_or_default();
+                    let fields = [result.status.as_str(), id, op, target];
                     fields.map(plain_escape).join("\t")
                 })
                 .collect::<Vec<_>>()
@@ -1009,7 +1013,7 @@ pub enum AppliedStatus {
     Applied,
     /// The change was refused, with the CLI's error.
     Failed,
-    /// The entry's status was not `queued`, so it did not run.
+    /// The entry's status was not `queued`, or it had none, so it did not run.
     Skipped,
 }
 
@@ -1026,10 +1030,12 @@ impl AppliedStatus {
 /// The result of one edit `web apply` read.
 #[derive(Clone, Debug, Serialize)]
 pub struct AppliedEdit {
-    /// The queued entry's ID.
-    pub id: String,
-    /// The operation it named.
-    pub op: String,
+    /// The queued entry's ID, or `None` for a malformed entry without a
+    /// string `id`.
+    pub id: Option<String>,
+    /// The operation it named, or `None` for a malformed entry without a
+    /// string `op`.
+    pub op: Option<String>,
     /// The record it named, if any.
     pub target: Option<String>,
     /// Whether the edit applied, failed or was skipped.

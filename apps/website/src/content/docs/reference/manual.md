@@ -461,7 +461,9 @@ edits; only editors and the owner write records. Opened outside claude.ai, or
 without the database, the page says to open it in claude.ai.
 
 `arcl web export <dir>` syncs the workspace, then writes the database's
-documents under `<dir>` with the same reads `arcl serve` runs:
+documents under `<dir>` with the same reads `arcl serve` runs. If the sync
+fails, it exits non-zero and writes nothing, so `meta/sync` never stamps
+records the sync did not update:
 
 | Document         | File                  | Same JSON as                                        |
 | ---------------- | --------------------- | --------------------------------------------------- |
@@ -483,8 +485,9 @@ lists every document in `changed`.
 
 A document over 200 KiB is written as parts, `chunks/<collection>~<id>~<n>`,
 each `{"part": "..."}`, listed before a header
-`{"chunked": {"parts": n, "digest": "..."}}` at the document's own path; the
-page joins the parts. A document needs at most 64 parts, about 12.5 MiB.
+`{"chunked": {"parts": n, "digest": "..."}}` at the document's own path. The
+page joins the parts and checks them against `digest`, the 64-bit FNV-1a hash
+of the joined text; parts that do not match are read as a sync in progress. A document needs at most 64 parts, about 12.5 MiB.
 `export` fails on a larger one.
 
 A change on the page writes a `queue/<id>` document instead of changing a
@@ -511,15 +514,18 @@ the records as they are, and lists the queued edits above each view.
 
 `arcl web apply <file>` reads a JSON array of queue entries, each the
 document's fields plus its `id`, from a file or `-` for standard input. It
-runs each entry whose `status` is `queued`, or missing, through the same code
-as `arcl serve`'s endpoint: the same validation, sync lock and export, waiting
-up to 60 seconds for the lock. An entry with any other status is skipped. A
-file that is not such an array, or an entry with a field the page does not
-write, exits with code 3 and applies nothing. Under `--json` it prints
+runs each entry whose `status` is `queued` through the same code as
+`arcl serve`'s endpoint: the same validation, sync lock and export, waiting up
+to 60 seconds for the lock. An entry with any other status, or none, is
+skipped; the page does not list it either. A file that is not a JSON array
+exits with code 3 and applies nothing. An entry that is not a valid queue
+entry, such as one with a field the page does not write, fails with an
+`invalid_request` error naming its position and `id`, and the other entries
+still run. Under `--json` it prints
 `{"format_version": 1, "data": {"results": [...]}}`, one result per entry in
-order: `id`, `op`, `target`, `status` (`applied`, `failed` or `skipped`), the
-command's `data` when it applied, the CLI's `error` when it failed, and
-`warnings`.
+order: `id`, `op`, `target` (each `null` when a malformed entry has no string
+value for it), `status` (`applied`, `failed` or `skipped`), the command's
+`data` when it applied, the CLI's `error` when it failed, and `warnings`.
 
 Anyone who can queue an edit can also change or delete another queued entry,
 so the queue is untrusted input. `apply` checks every entry as the CLI checks
@@ -540,7 +546,8 @@ To sync, the agent session that owns the artifact:
    one, so the page shows why.
 4. Runs `arcl --json web export <dir>` into the directory of the last sync,
    writes each `changed` document from `<dir>/<path>.json` and deletes each
-   `removed` one. If a write fails, or `<dir>` is new, the next sync runs
+   `removed` one. If the export fails because the workspace did not sync,
+   resolve that, with `arcl workspace status`, and run it again. If a write fails, or `<dir>` is new, the next sync runs
    `arcl --json web export --full <dir>`, writes every `changed` document
    and deletes every document in `views`, `records` and `chunks` that
    `documents` does not list.

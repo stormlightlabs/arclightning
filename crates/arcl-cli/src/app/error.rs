@@ -175,6 +175,8 @@ pub(super) enum CommandError {
     WebExport { document: String, message: String },
     #[error("the queued edits are not valid: {message}")]
     InvalidQueue { message: String },
+    #[error("the workspace did not sync, so `web export` wrote nothing: {0}")]
+    ExportSync(Box<CommandError>),
 }
 
 impl From<WorkspaceExportError> for CommandError {
@@ -214,6 +216,7 @@ impl CommandError {
             Self::WorkspaceSync(error) => error.exit_code(),
             Self::WorkspaceStatus(_) => 1,
             Self::AutoSync(error) => error.exit_code(),
+            Self::ExportSync(error) => error.exit_code(),
             Self::ReadConfig { .. }
             | Self::ReadMarkdown { .. }
             | Self::ReadStdin { .. }

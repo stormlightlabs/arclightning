@@ -56,8 +56,8 @@ const COLLECTIONS: &[&str] = &["chunks", "views", "records", "meta"];
 const META_DOCUMENT: &str = "meta/sync";
 
 /// One edit the artifact queued, as the `queue/<id>` document holds it with
-/// its ID added. Every field the page writes is named, so a document with
-/// any other field is refused.
+/// its ID added. Every field the page writes is named, so an entry with any
+/// other field fails without running.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct QueuedEdit {
@@ -80,7 +80,8 @@ struct QueuedEdit {
     #[allow(dead_code, reason = "the page records it; apply only checks its shape")]
     created_by: Option<String>,
     /// `queued` until an agent claims it, `applying` while one applies it,
-    /// and `failed` after a refusal. Only `queued` entries run.
+    /// and `failed` after a refusal. Only `queued` entries run; an entry
+    /// without a status is skipped, as the page does not list it.
     #[serde(default)]
     status: Option<String>,
     /// The error of an earlier failed apply.
@@ -122,9 +123,16 @@ pub(super) fn exec_web(command: WebCommand, renderer: &Renderer) -> anyhow::Resu
             write_output(renderer.render_web_export(&dir, &manifest)?)
         }
         WebCommand::Apply { file } => {
-            let edits = read_queue(&file).map_err(ApplicationError::from_command)?;
+            let entries = read_queue(&file).map_err(ApplicationError::from_command)?;
             let app = ServeApp::new(OutputMode::Quiet, APPLY_LOCK_WAIT);
-            let results = edits.into_iter().map(|edit| apply_edit(&app, edit)).collect::<Vec<_>>();
+            let results = entries
+                .into_iter()
+                .enumerate()
+                .map(|(index, entry)| match parse_entry(index, entry) {
+                    Ok(edit) => apply_edit(&app, edit),
+                    Err(failed) => *failed,
+                })
+                .collect::<Vec<_>>();
             write_output(renderer.render_web_apply(&results)?)
         }
     }
@@ -379,39 +387,70 @@ fn rfc3339(seconds: u64) -> String {
     )
 }
 
-/// Read the queue file, or standard input for `-`: a JSON array of
-/// [`QueuedEdit`] objects. Any entry that does not parse refuses the whole
-/// file, so nothing applies.
-fn read_queue(path: &Path) -> CResult<Vec<QueuedEdit>> {
+/// Read the queue file, or standard input for `-`, which must hold a JSON
+/// array. Each element is parsed on its own by [`parse_entry`], so one
+/// malformed entry does not stop the rest.
+fn read_queue(path: &Path) -> CResult<Vec<Value>> {
     let input = if path == Path::new("-") {
         read_stdin()?.unwrap_or_default()
     } else {
         fs::read_to_string(path).map_err(|source| CommandError::ReadWebFile { path: path.to_owned(), source })?
     };
-    serde_json::from_str(&input).map_err(|error| CommandError::InvalidQueue { message: error.to_string() })
+    match serde_json::from_str::<Value>(&input) {
+        Ok(Value::Array(entries)) => Ok(entries),
+        Ok(_) => {
+            Err(CommandError::InvalidQueue { message: "the file is not a JSON array of queue entries".to_owned() })
+        }
+        Err(error) => Err(CommandError::InvalidQueue { message: error.to_string() }),
+    }
 }
 
-/// Apply one queued edit through `app`, unless its status says it is not
-/// queued.
+/// Parse the queue entry at `index`, or return the `failed` result for an
+/// entry that is not a [`QueuedEdit`]. The result names the entry by the
+/// `id`, `op` and `target` it has as strings, and its error names the index.
+fn parse_entry(index: usize, entry: Value) -> Result<QueuedEdit, Box<AppliedEdit>> {
+    let field = |name: &str| entry.get(name).and_then(Value::as_str).map(str::to_owned);
+    let (id, op, target) = (field("id"), field("op"), field("target"));
+    let reason = match serde_json::from_value::<QueuedEdit>(entry.clone()) {
+        Ok(edit) => return Ok(edit),
+        Err(_) if !entry.is_object() => "it is not a JSON object".to_owned(),
+        Err(error) => error.to_string(),
+    };
+    let named = id.as_deref().map(|id| format!(" (`{id}`)")).unwrap_or_default();
+    let message = format!("queue entry {index}{named} is not a valid queue entry: {reason}");
+    let mut envelope = serde_json::from_str::<Value>(Reply::invalid_request(&message).body()).unwrap_or(Value::Null);
+    Err(Box::new(AppliedEdit {
+        id,
+        op,
+        target,
+        status: AppliedStatus::Failed,
+        data: None,
+        error: Some(envelope["error"].take()),
+        warnings: Vec::new(),
+    }))
+}
+
+/// Apply one queued edit through `app`, unless its status is not `queued`.
 fn apply_edit(app: &ServeApp, edit: QueuedEdit) -> AppliedEdit {
     let mut result = AppliedEdit {
-        id: edit.id,
-        op: edit.op,
+        id: Some(edit.id),
+        op: Some(edit.op),
         target: edit.target,
         status: AppliedStatus::Skipped,
         data: None,
         error: None,
         warnings: Vec::new(),
     };
-    if edit.status.as_deref().is_some_and(|status| status != "queued") {
+    if edit.status.as_deref() != Some("queued") {
         return result;
     }
     let input = match edit.input {
         None => Value::Object(serde_json::Map::new()),
         Some(input) => input,
     };
+    let op = result.op.as_deref().unwrap_or_default();
     let reply = if input.is_object() {
-        arcl_serve::apply(&result.op, result.target.as_deref(), input.to_string().as_bytes(), app)
+        arcl_serve::apply(op, result.target.as_deref(), input.to_string().as_bytes(), app)
     } else {
         Reply::invalid_request("the input is not a JSON object")
     };
@@ -479,6 +518,20 @@ mod tests {
         assert_eq!(split("views/work", text.clone()).expect("splits").len(), MAX_PARTS + 1);
         let error = split("views/work", format!("{text}a")).expect_err("too many parts");
         assert!(error.to_string().contains("64 parts"), "{error}");
+    }
+
+    #[test]
+    fn fnv_digest_matches_the_page() {
+        // `artifact.test.ts` checks the page's `digest` against the same values.
+        for (text, expected) in [
+            ("", "af64724c8602eb6e"),
+            ("{}", "c736581983dda06e"),
+            ("{\"title\":\"é ✓\"}", "8e84190b8ddb4463"),
+        ] {
+            let mut digest = Fnv::new();
+            digest.write(text.as_bytes());
+            assert_eq!(digest.hex(), expected, "{text}");
+        }
     }
 
     #[test]

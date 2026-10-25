@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import recorded from "./artifact.fixture.json";
-import type { ArtifactDb, ArtifactDbError, ArtifactDocument, ArtifactHost, ArtifactQuery, ArtifactSnapshot } from "./artifact";
+import { type ArtifactDb, type ArtifactDbError, type ArtifactDocument, type ArtifactHost, type ArtifactQuery, type ArtifactSnapshot, digest } from "./artifact";
 import {
   DataError,
   OPEN_IN_CLAUDE,
@@ -193,7 +193,7 @@ describe("artifactSource reads", () => {
     const middle = Math.floor(text.length / 2);
     db.write(`chunks/records~${BLOCKED}~0`, { part: text.slice(0, middle) });
     db.write(`chunks/records~${BLOCKED}~1`, { part: text.slice(middle) });
-    db.write(`records/${BLOCKED}`, { chunked: { parts: 2, digest: "0" } });
+    db.write(`records/${BLOCKED}`, { chunked: { parts: 2, digest: digest(text) } });
     expect(await source(db).task(BLOCKED)).toEqual(await source().task(BLOCKED));
 
     db.write(`chunks/records~${BLOCKED}~1`, null);
@@ -203,6 +203,27 @@ describe("artifactSource reads", () => {
     const error = await failure(source(db).task(BLOCKED));
     expect(error.code).toBe("bad_document");
     expect(error.message).toContain("65 parts");
+  });
+
+  it("hashes text as arcl web export does", () => {
+    // The same values `web.rs`'s `fnv_digest_matches_the_page` checks.
+    expect(digest("")).toBe("af64724c8602eb6e");
+    expect(digest("{}")).toBe("c736581983dda06e");
+    expect(digest('{"title":"é ✓"}')).toBe("8e84190b8ddb4463");
+  });
+
+  it("says a sync is half written when the parts join into JSON the header's digest does not match", async () => {
+    const db = new FakeDb();
+    const old = JSON.stringify(DOCUMENTS[`records/${BLOCKED}`]);
+    const next = JSON.stringify({ ...DOCUMENTS[`records/${BLOCKED}`], format_version: 1, data: { task: { id: BLOCKED, title: "Renamed" } } });
+    // The old parts are still there, and the new header names the new text.
+    const middle = Math.floor(old.length / 2);
+    db.write(`chunks/records~${BLOCKED}~0`, { part: old.slice(0, middle) });
+    db.write(`chunks/records~${BLOCKED}~1`, { part: old.slice(middle) });
+    db.write(`records/${BLOCKED}`, { chunked: { parts: 2, digest: digest(next) } });
+    const error = await failure(source(db).task(BLOCKED));
+    expect(error.code).toBe("unavailable");
+    expect(error.message).toContain("while an agent syncs");
   });
 
   it("stops a read when its signal aborts", async () => {

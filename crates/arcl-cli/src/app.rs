@@ -87,6 +87,9 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
     let renderer = Renderer::new(mode, cli.color);
 
     let access = command_access(cli.command.as_ref());
+    // `web export` stamps its documents with the time, so it must not export
+    // a database the sync did not bring up to date.
+    let needs_sync = matches!(cli.command, Some(Command::Web { command: WebCommand::Export { .. } }));
     // The lock is held from the first sync until `run` returns.
     let (roots, synced, _lock) = match access {
         Access::Untracked => (None, Ok(Vec::new()), None),
@@ -108,6 +111,9 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
         // A missing database is the command's own error to report, once.
         Err(CommandError::NotInitialized { .. }) => {}
         Err(error) if access == Access::Write => return Err(refuse_write(error).into()),
+        Err(error) if needs_sync => {
+            return Err(ApplicationError::from_command(CommandError::ExportSync(Box::new(error))).into());
+        }
         Err(error) => warnings.push(Warning::workspace_sync(format!(
             "the workspace did not sync, so this shows the database as it is: {error}"
         ))),

@@ -4378,6 +4378,36 @@ fn web_export_removes_the_parts_a_shrunk_document_no_longer_has() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn web_export_fails_and_writes_nothing_when_the_sync_fails() {
+    let directory = tempdir().expect("temporary directory can be created");
+    let dir = directory.path();
+    run_json(dir, ["--json", "init", "--workspace"].as_ref());
+    create_capture(dir, "Idea", "");
+    let workspace = dir.join(".arcl/workspace");
+    let moved = dir.join("moved-workspace");
+    fs::rename(&workspace, &moved).expect("workspace moves");
+    std::os::unix::fs::symlink(&moved, &workspace).expect("symlink is created");
+
+    let out = tempdir().expect("an export directory");
+    let output = arcl_in(dir)
+        .args(["--json", "web", "export", out.path().to_str().expect("UTF-8")])
+        .output()
+        .expect("web export runs");
+    assert_eq!(output.status.code(), Some(3));
+    assert!(output.stdout.is_empty());
+    let message = json(&output.stderr)["error"]["message"]
+        .as_str()
+        .expect("a message")
+        .to_owned();
+    assert!(
+        message.contains("did not sync") && message.contains("symbolic link"),
+        "{message}"
+    );
+    assert_eq!(fs::read_dir(out.path()).expect("the directory reads").count(), 0);
+}
+
 /// Write `queue` as the queue file under `directory` and run `arcl --json web apply` on it.
 fn web_apply(directory: &Path, queue: &Value) -> std::process::Output {
     let file = directory.join("queue.json");
@@ -4401,12 +4431,13 @@ fn web_apply_runs_queued_edits_as_arcl_serve_does() {
         { "id": "q2", "op": "promote_capture", "target": promoted, "input": { "to": "task", "priority": "high" }, "status": "queued" },
         { "id": "q3", "op": "create_capture", "input": { "title": "  " }, "status": "queued" },
         { "id": "q4", "op": "create_capture", "input": { "title": "T", "priority": "high" }, "status": "queued" },
-        { "id": "q5", "op": "discard_capture", "target": missing, "input": {} },
-        { "id": "q6", "op": "delete_everything", "target": task },
+        { "id": "q5", "op": "discard_capture", "target": missing, "input": {}, "status": "queued" },
+        { "id": "q6", "op": "delete_everything", "target": task, "status": "queued" },
         { "id": "q7", "op": "park_task", "target": task, "status": "applied" },
         { "id": "q8", "op": "update_task", "target": task, "input": "not an object", "status": "queued" },
         { "id": "q9", "op": "start_task", "target": task, "input": {}, "status": "failed", "error": { "code": "x", "message": "y" } },
-        { "id": "q10", "op": "park_task", "target": task, "input": {}, "status": "applying" }
+        { "id": "q10", "op": "park_task", "target": task, "input": {}, "status": "applying" },
+        { "id": "q11", "op": "park_task", "target": task, "input": {} }
     ]);
     let output = web_apply(dir, &queue);
     assert!(
@@ -4439,7 +4470,8 @@ fn web_apply_runs_queued_edits_as_arcl_serve_does() {
             ("q7", "skipped"),
             ("q8", "failed"),
             ("q9", "skipped"),
-            ("q10", "skipped")
+            ("q10", "skipped"),
+            ("q11", "skipped")
         ]
     );
 
@@ -4469,22 +4501,87 @@ fn web_apply_runs_queued_edits_as_arcl_serve_does() {
 }
 
 #[test]
-fn web_apply_refuses_a_malformed_queue_and_applies_nothing() {
+fn web_apply_refuses_a_file_that_is_not_an_array_and_applies_nothing() {
     let directory = initialized_directory();
     let dir = directory.path();
     let capture = create_capture(dir, "Idea", "");
-    for queue in [
-        serde_json::json!({ "id": "q1", "op": "discard_capture", "target": capture }),
-        serde_json::json!([
-            { "id": "q1", "op": "discard_capture", "target": capture },
-            { "id": "q2", "op": "discard_capture", "target": capture, "run_as": "root" }
-        ]),
-        serde_json::json!([{ "op": "discard_capture", "target": capture }]),
+    let entry = serde_json::json!({ "id": "q1", "op": "discard_capture", "target": capture, "status": "queued" });
+    let output = web_apply(dir, &entry);
+    assert_eq!(output.status.code(), Some(3));
+    assert!(output.stdout.is_empty());
+    let error = json(&output.stderr);
+    assert_eq!(error["error"]["code"], "invalid_request");
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .expect("a message")
+            .contains("not a JSON array")
+    );
+    assert_eq!(capture_field(dir, &capture, "status"), "captured");
+}
+
+#[test]
+fn web_apply_fails_a_malformed_entry_and_applies_the_rest() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let first = create_capture(dir, "First", "");
+    let second = create_capture(dir, "Second", "");
+    let queue = serde_json::json!([
+        { "id": "q1", "op": "discard_capture", "target": first, "status": "queued", "run_as": "root" },
+        { "id": "q2", "op": "discard_capture", "target": 5, "status": "queued" },
+        { "op": "discard_capture", "target": first, "status": "queued" },
+        "not an entry",
+        { "id": "q5", "op": "discard_capture", "target": second, "input": {}, "status": "queued" }
+    ]);
+    let output = web_apply(dir, &queue);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let results = json(&output.stdout)["data"]["results"]
+        .as_array()
+        .expect("results")
+        .clone();
+    let summary = results
+        .iter()
+        .map(|result| (result["id"].clone(), result["status"].as_str().expect("a status")))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        summary,
+        [
+            (Value::from("q1"), "failed"),
+            (Value::from("q2"), "failed"),
+            (Value::Null, "failed"),
+            (Value::Null, "failed"),
+            (Value::from("q5"), "applied"),
+        ]
+    );
+    let message = |index: usize| {
+        results[index]["error"]["message"]
+            .as_str()
+            .expect("a message")
+            .to_owned()
+    };
+    for (index, expected) in [
+        (0, "queue entry 0 (`q1`)"),
+        (0, "unknown field `run_as`"),
+        (1, "queue entry 1 (`q2`)"),
+        (2, "queue entry 2 is not"),
+        (2, "missing field `id`"),
+        (3, "queue entry 3 is not"),
+        (3, "not a JSON object"),
     ] {
-        let output = web_apply(dir, &queue);
-        assert_eq!(output.status.code(), Some(3), "{queue}");
-        assert!(output.stdout.is_empty());
-        assert_eq!(json(&output.stderr)["error"]["code"], "invalid_request");
-        assert_eq!(capture_field(dir, &capture, "status"), "captured", "{queue}");
+        assert!(message(index).contains(expected), "{expected} in {}", message(index));
+        assert_eq!(results[index]["error"]["code"], "invalid_request");
     }
+    assert_eq!(results[0]["op"], "discard_capture");
+    assert_eq!(results[0]["target"], first);
+    assert_eq!(results[1]["target"], Value::Null);
+    assert_eq!(
+        capture_field(dir, &first, "status"),
+        "captured",
+        "a malformed entry does not run"
+    );
+    assert_eq!(capture_field(dir, &second, "status"), "discarded");
 }

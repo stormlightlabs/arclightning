@@ -132,11 +132,14 @@ export function artifactSource(db: ArtifactDb, options: ArtifactOptions = {}): D
     const reads = Array.from({ length: parts }, (_, index) => call(() => db.doc(`chunks/${name}~${index}`).get()));
     const texts = (await abortable(Promise.all(reads), signal)).map((part) => part.data()?.part);
     if (!texts.every((text) => typeof text === "string")) throw midSync(path);
+    const text = texts.join("");
+    // A sync that has written some parts but not all can leave parts that join into other JSON.
+    if (isRecord(body.chunked) && body.chunked.digest !== digest(text)) throw midSync(path);
     try {
-      const joined: unknown = JSON.parse(texts.join(""));
+      const joined: unknown = JSON.parse(text);
       if (isRecord(joined)) return joined;
     } catch {
-      // A sync that has written some parts but not all leaves text that does not parse.
+      // The digest matched, so the export wrote text that is not an object.
     }
     throw midSync(path);
   }
@@ -332,6 +335,36 @@ function chunkCount(path: string, header: unknown): number | null {
     throw new DataError("bad_document", `\`${path}\` is split into ${String(parts)} parts; this page reads 1 to ${MAX_PARTS}. Run \`arcl web export --full\` and sync again.`);
   }
   return parts;
+}
+
+/**
+ * The digest `arcl web export` puts in a chunked document's header: the
+ * 64-bit FNV-1a hash of the joined text's UTF-8 bytes, followed by one
+ * `0xff` byte, as 16 hex digits. It tells versions apart; it is not a
+ * security boundary. The hash is kept as four 16-bit limbs, so every step
+ * stays exact in a JavaScript number.
+ */
+export function digest(text: string): string {
+  // The offset basis 0xcbf29ce484222325, low limb first.
+  const hash = [0x2325, 0x8422, 0x9ce4, 0xcbf2];
+  const mix = (byte: number) => {
+    hash[0] ^= byte;
+    // Multiply by the prime 0x100000001b3: by 0x1b3, plus the hash shifted left 40 bits.
+    const t0 = hash[0] * 0x1b3;
+    const t1 = hash[1] * 0x1b3 + (t0 >>> 16);
+    const t2 = hash[2] * 0x1b3 + (hash[0] << 8) + (t1 >>> 16);
+    const t3 = hash[3] * 0x1b3 + (hash[1] << 8) + (t2 >>> 16);
+    hash[0] = t0 & 0xffff;
+    hash[1] = t1 & 0xffff;
+    hash[2] = t2 & 0xffff;
+    hash[3] = t3 & 0xffff;
+  };
+  for (const byte of new TextEncoder().encode(text)) mix(byte);
+  mix(0xff);
+  return hash
+    .reverse()
+    .map((limb) => limb.toString(16).padStart(4, "0"))
+    .join("");
 }
 
 /** The error for a chunked document whose parts do not join. */
