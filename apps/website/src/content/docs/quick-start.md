@@ -43,7 +43,7 @@ To pin a known build without a checkout, as a cloud session or CI job would,
 install a tag from Git:
 
 ```sh
-cargo install --git https://github.com/stormlightlabs/arclightning --tag v0.1.0 arcl-cli
+cargo install --git https://github.com/stormlightlabs/arclightning --tag v0.2.0 arcl-cli
 ```
 
 This installs the `arcl` binary. Releases before 1.0 can change JSON shapes,

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/banner.webp" alt="arclightning: version-controlled, markdown task management for devs and agents" width="800">
+</p>
+
 # Arc Lightning (`arcl`)
 
 A local-first project planning and execution CLI for developers and their agents.
