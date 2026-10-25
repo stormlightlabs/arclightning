@@ -5,6 +5,7 @@
   import { page } from "$app/state";
   import { dataSource, latestRead, type ChangeWarning, type TaskDetail } from "$lib/data";
   import { useCommands } from "$lib/commands";
+  import { appUrl, appUrlHref } from "$lib/route";
   import { formAction, taskKeyAction, type TaskAction } from "$lib/task";
   import TaskDetailView from "$lib/task/TaskDetail.svelte";
   import { workHref } from "$lib/work";
@@ -28,14 +29,15 @@
 
   afterNavigate((navigation) => {
     // The first load has a `from` without a URL.
-    if (navigation.from?.url?.pathname === "/") from = navigation.from.url;
+    const opener = navigation.from?.url ? appUrl(navigation.from.url) : null;
+    if (opener?.pathname === "/") from = opener;
     if (asked !== null && asked.id !== id) asked = null;
-    if (page.url.searchParams.has("action")) {
-      const action = formAction(page.url.searchParams.get("action"));
+    const url = appUrl(page.url);
+    if (url.searchParams.has("action")) {
+      const action = formAction(url.searchParams.get("action"));
       if (action !== null) asked = { id, action };
-      const url = new URL(page.url);
       url.searchParams.delete("action");
-      goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+      goto(appUrlHref(url), { replaceState: true, keepFocus: true, noScroll: true });
     }
   });
 

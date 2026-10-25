@@ -32,6 +32,7 @@ mod reads;
 mod serve;
 mod skill;
 mod support;
+mod web;
 mod workspace;
 
 use commands::{
@@ -46,6 +47,7 @@ use reads::{read_context, read_explain, read_list, read_ready, read_show, read_t
 use serve::exec_serve;
 use skill::exec_skill;
 use support::{open_database, write_output};
+use web::exec_web;
 use workspace::exec_workspace;
 
 use auto_sync::{Access, auto_sync, command_access, export_after_write, refuse_write, synced_write, workspace_roots};
@@ -205,6 +207,7 @@ fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Wa
             write_output(renderer.render_next_planning_task(task.as_ref())?)
         }
         Some(Command::Serve { port }) => exec_serve(port, renderer),
+        Some(Command::Web { command }) => exec_web(command, renderer),
         None => write_output(renderer.render_startup()?),
     }
 }

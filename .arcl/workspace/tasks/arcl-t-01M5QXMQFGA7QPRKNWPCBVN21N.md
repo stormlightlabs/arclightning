@@ -2,10 +2,11 @@
 id = "arcl-t-01M5QXMQFGA7QPRKNWPCBVN21N"
 phase = "arcl-ph-01M5NE5P5RE8Y5Y5Y84T36FMEE"
 title = "T20: Publish the web app as a claude.ai artifact"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 1
 blocked-by = ["arcl-t-01M5NE5P6XHRR4Q84820YACQ07"]
+evidence = "Delivered by #PR: `pnpm --filter @arclightning/web build:artifact` builds the views into one `index.html` over an artifact backend that reads the `arcl serve` envelopes from the database and queues edits. `arcl web export` and `arcl web apply` run the same Reads and Mutations as `arcl serve`. Verified by cargo, vitest and Playwright tests against a stand-in database recorded with `arcl web export`. Not verified yet: publishing on claude.ai, syncing this workspace and triaging a capture there."
 +++
 
 Publish the web app as a claude.ai artifact, so a person can browse and
@@ -31,11 +32,11 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] The artifact build reuses every T18 view without forking them
-- [ ] Work, Task, Inbox and Planning render from the artifact's database
-- [ ] An edit made on the page is applied through `arcl` and shows in the
+- [x] The artifact build reuses every T18 view without forking them
+- [x] Work, Task, Inbox and Planning render from the artifact's database
+- [x] An edit made on the page is applied through `arcl` and shows in the
       workspace after a sync, with the CLI's validation and errors
-- [ ] A sync after a workspace change updates only the records that changed
+- [x] A sync after a workspace change updates only the records that changed
 
 Verification:
 

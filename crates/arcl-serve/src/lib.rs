@@ -83,6 +83,10 @@
 //! [`CapturePromotion`], [`NewSpec`], [`NewPlan`] and [`PlanInput`]. A plan
 //! applies from the TOML document `arcl plan apply --file` reads, sent as the
 //! `document` string.
+//!
+//! [`apply`] runs a mutation named by one of [`OPERATIONS`] with the same
+//! JSON options, for `arcl web apply`, which applies the changes a claude.ai
+//! artifact queued.
 
 mod answer;
 mod gate;
@@ -97,8 +101,8 @@ pub use answer::Reply;
 pub use gate::{TOKEN_HEADER, TOKEN_QUERY};
 pub use limits::{BODY_DEADLINE, HEADER_DEADLINE, MAX_CONNECTIONS, MIN_WRITE_RATE, SHUTDOWN_GRACE, WRITE_DEADLINE};
 pub use mutations::{
-    CapturePromotion, Completion, Handoff, Mutations, NewCapture, NewPlan, NewSpec, NewTask, PlanInput, TaskEdit,
-    TaskStart,
+    CapturePromotion, Completion, Handoff, Mutations, NewCapture, NewPlan, NewSpec, NewTask, OPERATIONS, PlanInput,
+    TaskEdit, TaskStart, apply,
 };
 pub use routes::Reads;
 pub use server::{ServeError, Server};

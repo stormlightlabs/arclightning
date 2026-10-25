@@ -16,6 +16,7 @@
 <script lang="ts">
   import { Button, Dialog, Feedback } from "@arclightning/ui";
   import { dataSource } from "$lib/data";
+  import { failureNotice } from "$lib/notice";
   import { failureOf, type ActionFailure } from "$lib/task";
   import { captureOf, describeToken, parseCapture, taskOf } from "./tokens";
 
@@ -95,7 +96,7 @@
       <span class="keys" aria-hidden="true"><kbd>↵</kbd> capture <kbd>{mod}</kbd><kbd>↵</kbd> task</span>
     </div>
     {#if failure !== null}
-      <Feedback tone="danger" title="Could not file this" message={`${failure.message} (${failure.code})`} />
+      <Feedback {...failureNotice(failure, "Could not file this")} />
     {/if}
   </form>
 </Dialog>

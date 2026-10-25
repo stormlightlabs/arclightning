@@ -4149,3 +4149,279 @@ fn skill_install_writes_nothing_when_a_parent_is_a_file() {
     );
     assert!(!dir.join(".claude").exists());
 }
+
+/// Run `arcl --json web export` in `directory` into `out` and return the manifest.
+fn web_export(directory: &Path, out: &Path) -> Value {
+    let out = out.to_str().expect("the export path is UTF-8");
+    let exported = run_json(directory, ["--json", "web", "export", out].as_ref());
+    assert_eq!(exported["format_version"], 1);
+    exported["data"].clone()
+}
+
+/// Read the exported document at `path` under `out`.
+fn exported(out: &Path, path: &str) -> Value {
+    let text = fs::read_to_string(out.join(format!("{path}.json"))).expect("the document file reads");
+    serde_json::from_str(&text).expect("the document is JSON")
+}
+
+/// The manifest's list `name` as strings.
+fn manifest_list(manifest: &Value, name: &str) -> Vec<String> {
+    manifest[name]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .map(|path| path.as_str().expect("a path").to_owned())
+        .collect()
+}
+
+#[test]
+fn web_export_writes_the_envelopes_arcl_serve_returns() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let blocker = create_task(dir, "Blocker", None);
+    let task = create_task(dir, "Blocked", None);
+    run_json(
+        dir,
+        ["--json", "dependency", "add", &task, "--blocked-by", &blocker].as_ref(),
+    );
+    let capture = create_capture(dir, "Idea", "More detail");
+    let discarded = create_capture(dir, "Old idea", "");
+    run_json(dir, ["--json", "capture", "discard", &discarded].as_ref());
+    let out = tempdir().expect("an export directory");
+
+    let manifest = web_export(dir, out.path());
+    let served = Served::start(dir);
+    let pairs = [
+        ("views/work", "/api/work".to_owned()),
+        ("views/tree", "/api/tree".to_owned()),
+        ("views/tasks", "/api/records?kind=task".to_owned()),
+        ("views/captures", "/api/records?kind=capture&status=captured".to_owned()),
+        (&*format!("records/{task}"), format!("/api/records/{task}")),
+        (&*format!("records/{blocker}"), format!("/api/records/{blocker}")),
+        (&*format!("records/{capture}"), format!("/api/records/{capture}")),
+    ];
+    for (document, path) in &pairs {
+        assert_eq!((200, exported(out.path(), document)), served.read(path), "{document}");
+    }
+
+    let mut documents = pairs
+        .iter()
+        .map(|(document, _)| (*document).to_owned())
+        .collect::<Vec<_>>();
+    documents.push("meta/sync".to_owned());
+    let mut listed = manifest_list(&manifest, "documents");
+    listed.sort();
+    documents.sort();
+    assert_eq!(listed, documents, "a discarded capture is not exported");
+    assert_eq!(manifest_list(&manifest, "changed").len(), documents.len());
+    assert_eq!(manifest_list(&manifest, "removed"), Vec::<String>::new());
+    let meta = exported(out.path(), "meta/sync");
+    assert_eq!(meta["revision"], manifest["revision"]);
+    assert_eq!(meta["commit"], Value::Null, "the project is not in Git");
+    assert_eq!(meta["synced_at"], manifest["synced_at"]);
+    let on_disk: Value = serde_json::from_str(&fs::read_to_string(out.path().join("manifest.json")).expect("reads"))
+        .expect("the manifest is JSON");
+    assert_eq!(on_disk, manifest);
+}
+
+#[test]
+fn web_export_rewrites_only_the_documents_that_changed() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let task = create_task(dir, "First", None);
+    let other = create_task(dir, "Second", None);
+    let capture = create_capture(dir, "Idea", "");
+    let out = tempdir().expect("an export directory");
+    let first = web_export(dir, out.path());
+
+    let again = web_export(dir, out.path());
+    // Only `meta/sync` can change, and only when the clock has moved to another second.
+    let changed = manifest_list(&again, "changed");
+    assert!(changed.iter().all(|path| path == "meta/sync"), "{changed:?}");
+    assert_eq!(again["revision"], first["revision"]);
+
+    run_json(dir, ["--json", "task", "update", &task, "--title", "Renamed"].as_ref());
+    run_json(dir, ["--json", "capture", "discard", &capture].as_ref());
+    let after = web_export(dir, out.path());
+    let changed = manifest_list(&after, "changed");
+    for document in [
+        "views/work",
+        "views/tree",
+        "views/tasks",
+        "views/captures",
+        &format!("records/{task}"),
+        "meta/sync",
+    ] {
+        assert!(changed.iter().any(|path| path == document), "{document} in {changed:?}");
+    }
+    assert!(!changed.contains(&format!("records/{other}")), "{changed:?}");
+    assert_ne!(after["revision"], first["revision"]);
+    assert_eq!(manifest_list(&after, "removed"), [format!("records/{capture}")]);
+    assert!(!out.path().join(format!("records/{capture}.json")).exists());
+    assert_eq!(
+        exported(out.path(), &format!("records/{task}"))["data"]["task"]["title"],
+        "Renamed"
+    );
+}
+
+#[test]
+fn web_export_splits_a_document_over_the_size_limit() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let body = "A line of the task body that runs on.\n".repeat(8_000);
+    let body_file = dir.join("body.md");
+    fs::write(&body_file, &body).expect("the body writes");
+    let created = run_json(
+        dir,
+        [
+            "--json",
+            "task",
+            "create",
+            "Large",
+            "--body-file",
+            body_file.to_str().expect("UTF-8"),
+        ]
+        .as_ref(),
+    );
+    let task = created["data"]["task"]["id"].as_str().expect("a task ID").to_owned();
+    let out = tempdir().expect("an export directory");
+    let manifest = web_export(dir, out.path());
+
+    let header = exported(out.path(), &format!("records/{task}"));
+    let parts = header["chunked"]["parts"].as_u64().expect("a part count");
+    assert!(parts >= 2, "{header}");
+    let mut joined = String::new();
+    for index in 0..parts {
+        let path = format!("chunks/records~{task}~{index}");
+        let size = fs::metadata(out.path().join(format!("{path}.json")))
+            .expect("the part exists")
+            .len();
+        assert!(size < 256 * 1024, "{path} is {size} bytes");
+        joined.push_str(exported(out.path(), &path)["part"].as_str().expect("a part"));
+    }
+    let served = Served::start(dir);
+    let joined: Value = serde_json::from_str(&joined).expect("the parts join into JSON");
+    assert_eq!((200, joined), served.read(&format!("/api/records/{task}")));
+    // Parts come before the header they belong to, so a reader never sees a header without them.
+    let documents = manifest_list(&manifest, "documents");
+    let header_at = documents
+        .iter()
+        .position(|path| *path == format!("records/{task}"))
+        .expect("listed");
+    let part_at = documents
+        .iter()
+        .position(|path| *path == format!("chunks/records~{task}~0"))
+        .expect("listed");
+    assert!(part_at < header_at);
+    // `views/work` holds the body too, and is split the same way.
+    assert!(exported(out.path(), "views/work")["chunked"].is_object());
+}
+
+/// Write `queue` as the queue file under `directory` and run `arcl --json web apply` on it.
+fn web_apply(directory: &Path, queue: &Value) -> std::process::Output {
+    let file = directory.join("queue.json");
+    fs::write(&file, queue.to_string()).expect("the queue writes");
+    arcl_in(directory)
+        .args(["--json", "web", "apply", file.to_str().expect("UTF-8")])
+        .output()
+        .expect("web apply runs")
+}
+
+#[test]
+fn web_apply_runs_queued_edits_as_arcl_serve_does() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let capture = create_capture(dir, "Idea", "");
+    let promoted = create_capture(dir, "Make it a task", "");
+    let task = create_task(dir, "Task", None);
+    let missing = "arcl-c-00000000000000000000000000";
+    let queue = serde_json::json!([
+        { "id": "q1", "op": "discard_capture", "target": capture, "input": {}, "created_at": "2026-10-25T06:30:00Z", "created_by": "u_1", "status": "queued" },
+        { "id": "q2", "op": "promote_capture", "target": promoted, "input": { "to": "task", "priority": "high" }, "status": "queued" },
+        { "id": "q3", "op": "create_capture", "input": { "title": "  " }, "status": "queued" },
+        { "id": "q4", "op": "create_capture", "input": { "title": "T", "priority": "high" }, "status": "queued" },
+        { "id": "q5", "op": "discard_capture", "target": missing, "input": {} },
+        { "id": "q6", "op": "delete_everything", "target": task },
+        { "id": "q7", "op": "park_task", "target": task, "status": "applied" },
+        { "id": "q8", "op": "update_task", "target": task, "input": "not an object", "status": "queued" },
+        { "id": "q9", "op": "start_task", "target": task, "input": {}, "status": "failed", "error": { "code": "x", "message": "y" } }
+    ]);
+    let output = web_apply(dir, &queue);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let results = json(&output.stdout)["data"]["results"]
+        .as_array()
+        .expect("results")
+        .clone();
+    let statuses = results
+        .iter()
+        .map(|result| {
+            (
+                result["id"].as_str().expect("an ID"),
+                result["status"].as_str().expect("a status"),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        statuses,
+        [
+            ("q1", "applied"),
+            ("q2", "applied"),
+            ("q3", "failed"),
+            ("q4", "failed"),
+            ("q5", "failed"),
+            ("q6", "failed"),
+            ("q7", "skipped"),
+            ("q8", "failed"),
+            ("q9", "skipped")
+        ]
+    );
+
+    assert_eq!(capture_field(dir, &capture, "status"), "discarded");
+    assert_eq!(results[0]["data"]["capture"]["status"], "discarded");
+    let made = results[1]["data"]["task"]["id"].as_str().expect("the new task's ID");
+    assert_eq!(task_field(dir, made, "priority"), "high");
+    assert_eq!(
+        task_field(dir, &task, "status"),
+        "pending",
+        "skipped entries do not run"
+    );
+
+    let (_, blank) = cli_error(dir, &["capture", "create", "  "]);
+    assert_eq!(results[2]["error"], blank["error"], "the CLI's validation and error");
+    let (_, absent) = cli_error(dir, &["capture", "discard", missing]);
+    assert_eq!(results[4]["error"], absent["error"]);
+    for index in [3, 5, 7] {
+        assert_eq!(results[index]["error"]["code"], "invalid_request", "{}", results[index]);
+    }
+    assert!(
+        results[5]["error"]["message"]
+            .as_str()
+            .expect("a message")
+            .contains("unknown operation")
+    );
+}
+
+#[test]
+fn web_apply_refuses_a_malformed_queue_and_applies_nothing() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let capture = create_capture(dir, "Idea", "");
+    for queue in [
+        serde_json::json!({ "id": "q1", "op": "discard_capture", "target": capture }),
+        serde_json::json!([
+            { "id": "q1", "op": "discard_capture", "target": capture },
+            { "id": "q2", "op": "discard_capture", "target": capture, "run_as": "root" }
+        ]),
+        serde_json::json!([{ "op": "discard_capture", "target": capture }]),
+    ] {
+        let output = web_apply(dir, &queue);
+        assert_eq!(output.status.code(), Some(3), "{queue}");
+        assert!(output.stdout.is_empty());
+        assert_eq!(json(&output.stderr)["error"]["code"], "invalid_request");
+        assert_eq!(capture_field(dir, &capture, "status"), "captured", "{queue}");
+    }
+}

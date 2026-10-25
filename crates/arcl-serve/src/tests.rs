@@ -502,6 +502,82 @@ fn serve_refuses_malformed_mutation_bodies() {
 }
 
 #[test]
+fn apply_runs_each_operation_as_its_endpoint_does() {
+    let applied = |operation: &str, target: Option<&str>, input: &[u8]| {
+        let reply = apply(operation, target, input, &Echo);
+        (reply.status(), reply.body().to_owned())
+    };
+    let cases: [(&str, Option<&str>, &[u8], &str); 13] = [
+        ("create_task", None, br#"{"title":"T"}"#, "create NewTask"),
+        ("update_task", Some("arcl-t-1"), br#"{"title":"T"}"#, "update arcl-t-1"),
+        (
+            "start_task",
+            Some("arcl-t-1"),
+            br#"{"force":true}"#,
+            "start arcl-t-1 TaskStart { force: true }",
+        ),
+        ("park_task", Some("arcl-t-1"), b"{}", "park arcl-t-1"),
+        ("unpark_task", Some("arcl-t-1"), b"", "unpark arcl-t-1"),
+        (
+            "hand_off_task",
+            Some("arcl-t-1"),
+            br#"{"note":"N"}"#,
+            "handoff arcl-t-1",
+        ),
+        ("complete_task", Some("arcl-t-1"), b"{}", "complete arcl-t-1"),
+        ("create_capture", None, br#"{"title":"I"}"#, "capture NewCapture"),
+        (
+            "promote_capture",
+            Some("arcl-c-1"),
+            br#"{"to":"note"}"#,
+            "promote arcl-c-1",
+        ),
+        ("discard_capture", Some("arcl-c-1"), b"{}", "discard arcl-c-1"),
+        ("create_spec", None, br#"{"title":"S"}"#, "spec NewSpec"),
+        (
+            "create_plan",
+            None,
+            br#"{"title":"P","spec":"arcl-s-1"}"#,
+            "plan NewPlan",
+        ),
+        (
+            "apply_plan",
+            Some("arcl-pl-1"),
+            br#"{"document":""}"#,
+            "apply arcl-pl-1",
+        ),
+    ];
+    assert_eq!(cases.len(), OPERATIONS.len());
+    for (operation, target, input, expected) in cases {
+        let (_, body) = applied(operation, target, input);
+        assert!(body.starts_with(expected), "{operation}: {body}");
+    }
+    // `Echo` fails a completion with exit code 4, which `apply` passes on.
+    assert_eq!(applied("complete_task", Some("arcl-t-1"), b"{}").0, 409);
+}
+
+#[test]
+fn apply_refuses_unknown_operations_targets_and_options() {
+    for (operation, target, input) in [
+        ("delete_task", Some("arcl-t-1"), b"{}".as_slice()),
+        ("", None, b"{}"),
+        ("park_task", None, b"{}"),
+        ("park_task", Some(""), b"{}"),
+        ("create_capture", Some("arcl-c-1"), br#"{"title":"I"}"#),
+        ("create_capture", None, br#"{"title":"I","priority":"high"}"#),
+        ("create_capture", None, b"{}"),
+        ("discard_capture", Some("arcl-c-1"), br#"{"force":true}"#),
+        ("update_task", Some("arcl-t-1"), br#"{"spec_file":"/etc/passwd"}"#),
+        ("apply_plan", Some("arcl-pl-1"), br#"{"file":"/etc/passwd"}"#),
+    ] {
+        let reply = apply(operation, target, input, &Echo);
+        assert_eq!(reply.status(), 400, "{operation} {target:?} {input:?}");
+        let body: serde_json::Value = serde_json::from_str(reply.body()).expect("a JSON body");
+        assert_eq!(body["error"]["code"], "invalid_request", "{operation}");
+    }
+}
+
+#[test]
 fn serve_sends_no_cors_headers() {
     let answer = answered(&gate(), &get("/api/records", Some(TOKEN)));
     assert!(

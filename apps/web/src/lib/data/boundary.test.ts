@@ -4,8 +4,11 @@ import { describe, expect, it } from "vitest";
 
 const SRC = join(import.meta.dirname, "..", "..");
 const DATA = join(SRC, "lib", "data");
-/** Any mention of `fetch`, called or not, and any `/api/` path literal. */
-const REACHES_API = /\bfetch\b|["'`]\/api\//;
+/**
+ * Any mention of `fetch`, called or not, any `/api/` path literal, and any
+ * use of the artifact host or a database reference.
+ */
+const REACHES_API = /\bfetch\b|["'`]\/api\/|\bclaude\??\.use\b|\.(?:doc|collection)\(/;
 
 function sources(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -23,8 +26,18 @@ describe("the data module", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("catches fetch however it is reached", () => {
-    for (const source of ["fetch(url)", "const f = fetch;", "globalThis.fetch", "window['fetch']", "get(`/api/records`)"]) {
+  it("catches fetch and the artifact's database however they are reached", () => {
+    for (const source of [
+      "fetch(url)",
+      "const f = fetch;",
+      "globalThis.fetch",
+      "window['fetch']",
+      "get(`/api/records`)",
+      'window.claude?.use("db")',
+      'claude.use("user")',
+      'db.doc("views/work")',
+      'db.collection("queue")',
+    ]) {
       expect(REACHES_API.test(source), source).toBe(true);
     }
     expect(REACHES_API.test("prefetch()")).toBe(false);

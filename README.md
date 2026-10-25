@@ -95,8 +95,16 @@ pnpm --filter @arclightning/web test:visual   # screenshots against local baseli
 pnpm --filter @arclightning/web screenshots   # rewrite the README images
 ```
 
-`test:e2e` builds the web app and `arcl`, then runs a keyboard-only workflow
-against `arcl serve` on a scratch project and checks each result with the CLI.
+`pnpm --filter @arclightning/web build:artifact` builds the claude.ai artifact
+page into `apps/web/build-artifact/index.html`; the manual's "Publishing and
+syncing the artifact" covers publishing it and `arcl web export` and
+`arcl web apply`. Both builds write `apps/web/.svelte-kit/output`, which
+`vite preview` serves, so run `build` after `build:artifact` before previewing.
+
+`test:e2e` builds the web app, the artifact page and `arcl`, then runs a
+keyboard-only workflow against `arcl serve` on a scratch project and checks
+each result with the CLI. It also opens the artifact page against a stand-in
+database recorded with `arcl web export`.
 The other tests answer the API from `apps/web/e2e/fixtures.json`. Set
 `WEB_E2E_PORT` when port 4174 is taken. Screenshot baselines are not
 committed. The first `test:visual` run writes them to `apps/web/e2e/*-snapshots`

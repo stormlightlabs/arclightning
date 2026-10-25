@@ -292,12 +292,13 @@ export interface Changed<T> {
 }
 
 /**
- * Where views read and change records. `arcl serve` backs it locally; another
- * backend, such as a claude.ai artifact's database, can stand in for it.
+ * Where views read and change records. `arcl serve` backs it locally; a
+ * claude.ai artifact's database stands in for it in the artifact build.
  *
  * Each change runs the `arcl task`, `arcl capture`, `arcl spec` or `arcl plan`
  * command of the same name, with its validation, and fails with a {@link DataError} carrying the CLI's error
- * code and message. A saved change can still carry warnings.
+ * code and message. A saved change can still carry warnings. A backend that
+ * cannot run the command queues it and fails with the code {@link QUEUED}.
  */
 export interface DataSource {
   /** Every task, with its readiness and milestone. Aborting `signal` stops the read. */
@@ -338,6 +339,48 @@ export interface DataSource {
   createPlan(input: NewPlan): Promise<Changed<Plan>>;
   /** `arcl plan apply <id>`, with `document` as the TOML `--file` holds. */
   applyPlan(id: string, document: string): Promise<Changed<PlanApplied>>;
+  /**
+   * Follow the last sync and the edits waiting for the next. Only a backend
+   * that queues changes for an agent to apply, such as a claude.ai
+   * artifact's, has it. Returns a function that stops following.
+   */
+  watch?(listener: (status: SyncStatus) => void): () => void;
+  /** Remove a queued edit, such as one that failed, from the queue. */
+  dismiss?(id: string): Promise<void>;
+}
+
+/**
+ * The code of the {@link DataError} a change fails with when the backend
+ * queued it instead of saving it. An agent applies it with `arcl` on the
+ * next sync; until then the records do not change.
+ */
+export const QUEUED = "queued";
+
+/** An edit queued for an agent to apply with `arcl web apply`. */
+export interface QueuedEdit {
+  id: string;
+  /** The `arcl serve` mutation it runs, such as `discard_capture`. */
+  op: string;
+  /** The record it changes, if the operation names one. */
+  target: string | null;
+  /** The mutation's options, as its endpoint takes them. */
+  input: Record<string, unknown>;
+  created_at: string;
+  /** `queued` until an agent applies it, or `failed` with the CLI's error. */
+  status: "queued" | "failed";
+  error: { code: string; message: string } | null;
+}
+
+/** When the backend's records last synced, and what waits for the next sync. */
+export interface SyncStatus {
+  /** When the last sync ran, as RFC 3339, or `null` before the first. */
+  syncedAt: string | null;
+  /** The Git commit the last sync read. */
+  commit: string | null;
+  /** Changes when any record a view reads changes. */
+  revision: string | null;
+  /** Queued and failed edits, oldest first. */
+  edits: QueuedEdit[];
 }
 
 /** A failed read or change, with the CLI's error code and message. */

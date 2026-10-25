@@ -431,6 +431,109 @@ a page saying the web app was not built. To get the web app, run
 `pnpm install` and `pnpm --filter @arclightning/web build` in a checkout, then
 `cargo install --path .`.
 
+## Publishing and syncing the artifact
+
+The web app also runs as a claude.ai artifact, so a person can browse and
+triage a project from claude.ai without `arcl serve`. The artifact cannot
+reach the repository. An agent session copies the project's records into the
+artifact's database and applies the edits people queue on the page.
+
+`pnpm --filter @arclightning/web build:artifact` writes the artifact page to
+`apps/web/build-artifact/index.html`: the same views as `arcl serve`'s page,
+in one file with no external scripts. It routes on the URL's hash, such as
+`#/tasks/<id>`, sends no token and never calls `/api`. Publish it with this
+capability declaration:
+
+```json
+{
+  "db": {
+    "rules": [
+      { "path": "", "read": "view", "write": "admin" },
+      { "path": "queue", "read": "view", "write": "interact" }
+    ]
+  },
+  "user": {}
+}
+```
+
+Everyone the artifact admits reads the records. Contributors and above queue
+edits; only editors and the owner write records. Opened outside claude.ai, or
+without the database, the page says to open it in claude.ai.
+
+`arcl web export <dir>` syncs the workspace, then writes the database's
+documents under `<dir>` with the same reads `arcl serve` runs:
+
+| Document         | File                  | Same JSON as                                        |
+| ---------------- | --------------------- | --------------------------------------------------- |
+| `views/work`     | `views/work.json`     | `GET /api/work`                                     |
+| `views/tree`     | `views/tree.json`     | `GET /api/tree`                                     |
+| `views/tasks`    | `views/tasks.json`    | `GET /api/records?kind=task`                        |
+| `views/captures` | `views/captures.json` | `GET /api/records?kind=capture&status=captured`     |
+| `records/<id>`   | `records/<id>.json`   | `GET /api/records/<id>`, per task and open capture  |
+| `meta/sync`      | `meta/sync.json`      | the commit, time and revision of the export         |
+
+`<dir>/manifest.json` lists every document in `documents`, the ones that are
+new or differ from the last export into `<dir>` in `changed`, and the ones the
+last export had and this one does not in `removed`. A sync writes the
+`changed` documents in order and deletes the `removed` ones, so it touches
+only the records that changed. A document over 200 KiB is written as parts,
+`chunks/<collection>~<id>~<n>`, each `{"part": "..."}`, listed before a
+header `{"chunked": {"parts": n, "digest": "..."}}` at the document's own
+path; the page joins the parts.
+
+A change on the page writes a `queue/<id>` document instead of changing a
+record:
+
+```json
+{
+  "op": "discard_capture",
+  "target": "arcl-c-...",
+  "input": {},
+  "created_at": "2026-10-25T06:30:00.000Z",
+  "created_by": "u_...",
+  "status": "queued"
+}
+```
+
+`op` names the change: `create_task`, `update_task`, `start_task`,
+`park_task`, `unpark_task`, `hand_off_task`, `complete_task`,
+`create_capture`, `promote_capture`, `discard_capture`, `create_spec`,
+`create_plan` or `apply_plan`. `target` is the record ID for those that name
+one and `null` otherwise. `input` holds the options of the matching
+`arcl serve` POST endpoint. The page says the edit is queued, keeps showing
+the records as they are, and lists the queued edits above each view.
+
+`arcl web apply <file>` reads a JSON array of queue entries, each the
+document's fields plus its `id`, from a file or `-` for standard input. It
+runs each entry whose `status` is `queued`, or missing, through the same code
+as `arcl serve`'s endpoint: the same validation, sync lock and export, waiting
+up to 60 seconds for the lock. An entry with any other status is skipped. A
+file that is not such an array, or an entry with a field the page does not
+write, exits with code 3 and applies nothing. Under `--json` it prints
+`{"format_version": 1, "data": {"results": [...]}}`, one result per entry in
+order: `id`, `op`, `target`, `status` (`applied`, `failed` or `skipped`), the
+command's `data` when it applied, the CLI's `error` when it failed, and
+`warnings`.
+
+Anyone who can queue an edit can also change or delete another queued entry,
+so the queue is untrusted input. `apply` checks every entry as the CLI checks
+a command, and an applied edit runs as the person who runs `arcl`.
+
+To sync, the agent session that owns the artifact:
+
+1. Reads the `queue` collection and writes its entries, with their IDs, to a
+   file.
+2. Runs `arcl --json web apply <file>`, then deletes each applied entry and
+   sets `status` to `failed` and `error` to the result's error on each failed
+   one, so the page shows why.
+3. Runs `arcl --json web export <dir>` into the directory of the last sync,
+   writes each `changed` document from `<dir>/<path>.json` and deletes each
+   `removed` one.
+
+The page follows `meta/sync` and the queue. When `revision` changes, it offers
+to reload the view with the new records. Dismissing a failed edit on the page
+deletes its entry.
+
 ## Lifecycle
 
 Container records—releases, epics, and milestones—use `open`, `completed`, and
