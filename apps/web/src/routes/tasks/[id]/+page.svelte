@@ -4,7 +4,7 @@
   import { page } from "$app/state";
   import { dataSource, type TaskDetail } from "$lib/data";
   import { useCommands } from "$lib/commands";
-  import { isTaskAction, taskKeyAction, type TaskAction } from "$lib/task";
+  import { formAction, taskKeyAction, type TaskAction } from "$lib/task";
   import TaskDetailView from "$lib/task/TaskDetail.svelte";
   import { workHref } from "$lib/work";
 
@@ -16,17 +16,18 @@
   // tasks so Escape brings back its filters.
   let from = $state<URL | null>(null);
 
-  // The Work list's menu asks for an action that takes text with `?action=`,
-  // which applies to that task only.
+  // The Work list's menu opens the form of an action that takes text with
+  // `?action=`, which applies to that task only. Any other value is ignored,
+  // so a link never runs a change.
   let asked = $state<{ id: string; action: TaskAction } | null>(null);
 
   afterNavigate((navigation) => {
     // The first load has a `from` without a URL.
     if (navigation.from?.url?.pathname === "/") from = navigation.from.url;
-    const action = page.url.searchParams.get("action");
     if (asked !== null && asked.id !== id) asked = null;
-    if (isTaskAction(action)) {
-      asked = { id, action };
+    if (page.url.searchParams.has("action")) {
+      const action = formAction(page.url.searchParams.get("action"));
+      if (action !== null) asked = { id, action };
       const url = new URL(page.url);
       url.searchParams.delete("action");
       goto(url, { replaceState: true, keepFocus: true, noScroll: true });

@@ -3,9 +3,10 @@
 //! Each read opens the database and runs the same read as the CLI, with no
 //! workspace sync. A read never changes records, though opening the database
 //! can run its migrations. Each mutation runs the same `arcl task` or
-//! `arcl capture` command as the CLI, with the same sync around it: it takes the sync lock, syncs,
-//! changes the record and syncs again to export it. The server holds the lock
-//! only during a mutation, so other arcl commands run while it serves.
+//! `arcl capture` command as the CLI, with the same sync around it: it takes
+//! the sync lock, syncs, changes the record and syncs again to export it. The
+//! server holds the lock only during a mutation, so other arcl commands run
+//! while it serves.
 
 use arcl_serve::{Completion, Handoff, Mutations, NewCapture, NewTask, Reads, Reply, Server, TaskEdit, TaskStart};
 

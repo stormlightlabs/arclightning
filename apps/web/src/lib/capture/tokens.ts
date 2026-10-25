@@ -35,20 +35,28 @@ export interface RefProblem {
  * - `^REF` sets the parent task; the last wins
  * - `after:REF` adds a blocker, once for each token
  *
- * `REF` is a task ID, or the key a task title starts with, such as `T18.4`
- * for `T18.4: Add task mutations`. A word that only looks like a token, such
- * as `!later` or a bare `^`, stays in the title. The body is never scanned.
+ * `REF` is a task ID such as `arcl-t-01M5…`, or a task number such as
+ * `T18.4`, the key a title like `T18.4: Add task mutations` starts with.
+ * A word that only looks like a token, such as `!later`, `^C` or
+ * `after:lunch`, stays in the title. A leading backslash keeps a token in the
+ * title without it: `\!high` is the word `!high`. The body is never scanned.
  */
 export function parseCapture(text: string): ParsedCapture {
   const newline = text.indexOf("\n");
   const line = (newline === -1 ? text : text.slice(0, newline)).trim();
   const body = newline === -1 ? "" : text.slice(newline + 1).trim();
   const tokens: CaptureToken[] = [];
-  const words = line.split(/\s+/).filter((word) => {
+  const words: string[] = [];
+  for (const word of line.split(/\s+/)) {
+    if (word === "") continue;
+    if (word.startsWith("\\") && tokenOf(word.slice(1))) {
+      words.push(word.slice(1));
+      continue;
+    }
     const token = tokenOf(word);
     if (token) tokens.push(token);
-    return word !== "" && !token;
-  });
+    else words.push(word);
+  }
   return { title: words.join(" "), body, line, tokens };
 }
 
@@ -72,10 +80,13 @@ export function taskOf(parsed: ParsedCapture, tasks: TaskSummary[]): { task: New
   const task: NewTask = { title: parsed.title };
   if (parsed.body !== "") task.body = parsed.body;
   const blockers: string[] = [];
+  // Only the last parent counts, so an earlier one is never resolved.
+  const parent = parsed.tokens.findLast((token) => token.kind === "parent");
   for (const token of parsed.tokens) {
     if (token.kind === "priority") task.priority = token.priority;
-    else if (token.kind === "parent") task.parent = resolve(token.ref);
-    else {
+    else if (token.kind === "parent") {
+      if (token === parent) task.parent = resolve(token.ref);
+    } else {
       const id = resolve(token.ref);
       if (!blockers.includes(id)) blockers.push(id);
     }
@@ -112,12 +123,21 @@ export function describeToken(token: CaptureToken): string {
   }
 }
 
+/**
+ * Whether `ref` has the shape of a task reference: a task ID such as
+ * `arcl-t-01M5…`, or a task number such as `T18` or `T18.4`, in any case.
+ * {@link resolveRef} still decides which task, if any, it names.
+ */
+export function isTaskRef(ref: string): boolean {
+  return /^arcl-t-[0-9a-z]+$/i.test(ref) || /^t\d+(\.\d+)*$/i.test(ref);
+}
+
 function tokenOf(word: string): CaptureToken | null {
   if (word.startsWith("!")) {
     const priority = word.slice(1).toLowerCase();
     return (PRIORITIES as readonly string[]).includes(priority) ? { kind: "priority", text: word, priority: priority as TaskPriority } : null;
   }
-  if (word.startsWith("^") && word.length > 1) return { kind: "parent", text: word, ref: word.slice(1) };
-  if (word.toLowerCase().startsWith("after:") && word.length > 6) return { kind: "blocker", text: word, ref: word.slice(6) };
+  if (word.startsWith("^") && isTaskRef(word.slice(1))) return { kind: "parent", text: word, ref: word.slice(1) };
+  if (word.toLowerCase().startsWith("after:") && isTaskRef(word.slice(6))) return { kind: "blocker", text: word, ref: word.slice(6) };
   return null;
 }

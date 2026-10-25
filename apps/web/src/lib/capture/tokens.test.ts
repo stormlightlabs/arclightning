@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { captureOf, describeToken, parseCapture, resolveRef, taskOf } from "./tokens";
+import { captureOf, describeToken, isTaskRef, parseCapture, resolveRef, taskOf } from "./tokens";
 
 const tasks = [
   { id: "arcl-t-1", title: "T18: Serve the local web app", status: "pending" as const },
@@ -32,6 +32,22 @@ describe("parseCapture", () => {
     expect(parsed.tokens).toEqual([]);
     expect(parsed.body).toBe("!high ^T18 after:T1");
   });
+
+  it("takes ^ and after: as tokens only before a task number or ID", () => {
+    const parsed = parseCapture("Press ^C after:lunch ^T18.4x after:arcl-c-1 ^t18 after:ARCL-T-01M5");
+    expect(parsed.title).toBe("Press ^C after:lunch ^T18.4x after:arcl-c-1");
+    expect(parsed.tokens).toEqual([
+      { kind: "parent", text: "^t18", ref: "t18" },
+      { kind: "blocker", text: "after:ARCL-T-01M5", ref: "ARCL-T-01M5" },
+    ]);
+  });
+
+  it("keeps a backslashed token in the title without its backslash", () => {
+    const parsed = parseCapture("Read \\!high \\^T18 \\after:T1 \\^C a\\b");
+    expect(parsed.title).toBe("Read !high ^T18 after:T1 \\^C a\\b");
+    expect(parsed.tokens).toEqual([]);
+    expect(captureOf(parsed)).toEqual({ title: "Read \\!high \\^T18 \\after:T1 \\^C a\\b" });
+  });
 });
 
 describe("captureOf", () => {
@@ -58,6 +74,11 @@ describe("taskOf", () => {
     });
   });
 
+  it("resolves only the last parent, so an earlier one cannot fail", () => {
+    expect(taskOf(parseCapture("X ^T99 ^T18"), tasks)).toEqual({ task: { title: "X", parent: "arcl-t-1" } });
+    expect(taskOf(parseCapture("X ^T18 ^T99"), tasks)).toEqual({ problems: [{ ref: "T99", problem: "missing" }] });
+  });
+
   it("files plain text as a task with only a title", () => {
     expect(taskOf(parseCapture("Just a title"), [])).toEqual({ task: { title: "Just a title" } });
   });
@@ -69,5 +90,12 @@ describe("resolveRef", () => {
     expect(resolveRef("t18", tasks)).toBe("arcl-t-1");
     expect(resolveRef("T18.3", tasks)).toBe("arcl-t-4");
     expect(resolveRef("T18.", tasks)).toEqual({ ref: "T18.", problem: "missing" });
+  });
+});
+
+describe("isTaskRef", () => {
+  it("accepts task numbers and task IDs only", () => {
+    for (const ref of ["T1", "t18.4", "T18.4.2", "arcl-t-01M5QS2QP9TNCV3A88EHX375D9"]) expect(isTaskRef(ref)).toBe(true);
+    for (const ref of ["", "C", "lunch", "T", "T18.", "T18.4x", "arcl-c-1", "arcl-t-"]) expect(isTaskRef(ref)).toBe(false);
   });
 });

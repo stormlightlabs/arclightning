@@ -11,7 +11,10 @@
     panelOpen?: boolean;
     /** Reload `detail` after a change; the view waits for it before it shows the result. */
     onchanged?: () => Promise<void>;
-    /** An action to choose once the view shows, such as one the Work list's menu asked for. */
+    /**
+     * An action whose form opens once the view shows, such as one the Work
+     * list's menu asked for. An action without a form is ignored.
+     */
     initialAction?: TaskAction | null;
   }
 </script>
@@ -80,8 +83,15 @@
     ],
   }));
 
+  // Only open the form: an initial action never runs a change by itself.
   $effect(() => {
-    if (initialAction !== null && untrack(() => actions).includes(initialAction)) untrack(() => choose(initialAction));
+    if (initialAction === null || ACTION_TEXT[initialAction] === undefined) return;
+    if (!untrack(() => actions).includes(initialAction)) return;
+    untrack(() => {
+      asking = initialAction;
+      text = "";
+      failure = null;
+    });
   });
 
   function openEdit() {

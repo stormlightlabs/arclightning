@@ -28,6 +28,7 @@
     parseFilters,
     selectedOf,
     taskHref,
+    visibleSelection,
     workKeyAction,
     writeFilters,
     type WorkFilters,
@@ -65,7 +66,9 @@
   /** The selected task's lifecycle action that last failed, shown above the list. */
   let actionFailure = $state<{ title: string; action: TaskAction; failure: ActionFailure } | null>(null);
   let actionBusy = $state(false);
-  let selected = $derived(list?.items.find((item) => item.task.id === selectedId)?.task ?? null);
+  // Shortcuts and the menu act on the selected row only while the filters show it.
+  let visibleId = $derived(visibleSelection(order, selectedId));
+  let selected = $derived(list?.items.find((item) => item.task.id === visibleId)?.task ?? null);
 
   onMount(load);
 
@@ -171,8 +174,8 @@
     const action = workKeyAction(event);
     if (action === null) return;
     if (action === "open") {
-      if (selectedId === null) return;
-      goto(taskHref(selectedId));
+      if (visibleId === null) return;
+      goto(taskHref(visibleId));
     } else {
       selectedId = moveSelection(order, selectedId, action === "next" ? 1 : -1);
     }

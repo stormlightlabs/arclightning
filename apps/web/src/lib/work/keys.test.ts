@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { moveSelection, workKeyAction, type WorkKey } from "./keys";
+import { moveSelection, visibleSelection, workKeyAction, type WorkKey } from "./keys";
 
 /** A stand-in element that matches the selectors in `matching`. */
 function element(...matching: string[]): EventTarget {
@@ -57,5 +57,16 @@ describe("moveSelection", () => {
 
   it("selects nothing in an empty list", () => {
     expect(moveSelection([], "a", 1)).toBeNull();
+  });
+});
+
+describe("visibleSelection", () => {
+  it("keeps a selection the list shows", () => {
+    expect(visibleSelection(["a", "b"], "b")).toBe("b");
+  });
+
+  it("drops a selection the filters hide, or none", () => {
+    expect(visibleSelection(["a", "b"], "c")).toBeNull();
+    expect(visibleSelection(["a", "b"], null)).toBeNull();
   });
 });

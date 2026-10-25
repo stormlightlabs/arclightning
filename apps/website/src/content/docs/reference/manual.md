@@ -327,11 +327,14 @@ set the task's fields:
 | `^REF`      | The parent task                                            |
 | `after:REF` | A blocker; repeat it for more than one                     |
 
-`REF` is a task ID or the key a task title starts with, such as `T18.4` for
-`T18.4: Add task mutations`. A key that names no task or several stops the
-task with an error. Only a whole word is a token, so `!later` stays text, and
-the body is never read for tokens. A capture holds only a title and a body,
-so `Enter` keeps tokens in the title as typed.
+`REF` is a task ID, such as `arcl-t-01M5…`, or a task number, such as `T18.4`
+for `T18.4: Add task mutations`. A reference that names no task or several
+stops the task with an error. With two `^REF`, only the last is looked up.
+Only a whole word is a token, so `!later`, `^C` and `after:lunch` stay text,
+and the body is never read for tokens. A leading backslash keeps a token as
+text: `\!high` puts `!high` in the title. A capture holds only a title and a
+body, so `Enter` keeps the first line as typed, tokens and backslashes
+included.
 
 `arcl` embeds the web app from `apps/web/build` when it compiles. That build is
 not committed, so `cargo install --git` produces an `arcl` whose `serve` shows

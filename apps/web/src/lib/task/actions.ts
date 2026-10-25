@@ -47,11 +47,6 @@ export const ACTION_KEYS: Record<TaskAction, string> = {
 /** The key that opens the Task view's edit form. */
 export const EDIT_KEY = "e";
 
-/** Whether `value` names a task action, such as the `action` query parameter. */
-export function isTaskAction(value: string | null): value is TaskAction {
-  return value !== null && Object.hasOwn(ACTION_LABELS, value);
-}
-
 /**
  * The actions that take Markdown before they run, with the label of the text
  * they take: completion evidence, which is optional, and a handoff note.
@@ -60,6 +55,15 @@ export const ACTION_TEXT: Partial<Record<TaskAction, string>> = {
   complete: "Evidence",
   handoff: "Handoff note",
 };
+
+/**
+ * The action `value` names when that action opens a form, such as the
+ * `action` query parameter, else `null`. A URL only opens a form: it never
+ * names an action that runs as soon as it is chosen.
+ */
+export function formAction(value: string | null): TaskAction | null {
+  return value !== null && Object.hasOwn(ACTION_TEXT, value) ? (value as TaskAction) : null;
+}
 
 /**
  * The actions a task in `status` can take, the usual next step first. The

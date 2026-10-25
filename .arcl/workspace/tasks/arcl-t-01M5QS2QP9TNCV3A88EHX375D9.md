@@ -24,8 +24,11 @@ Acceptance criteria:
       for the current selection first, each with its shortcut
 - [x] Choosing an action runs the same mutation as its button
 - [x] A global shortcut opens quick capture from any view
-- [x] Tokens in the capture text set fields on the capture; the syntax is
-      recorded as a Decision note and in the manual
+- [x] Tokens in the quick capture text set fields on a task filed with
+      `Mod+Enter`; a capture filed with `Enter` keeps them in its title.
+      Capture `arcl-c-01M5R4X7HWSBW09BJ92M1N42YP` tracks storing them as
+      fields on captures. The syntax is recorded as a Decision note and in the
+      manual
 - [x] Every action in the app is reachable from the keyboard
 
 Verification:

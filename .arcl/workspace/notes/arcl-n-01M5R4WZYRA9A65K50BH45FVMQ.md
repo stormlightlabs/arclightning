@@ -17,7 +17,7 @@ Quick capture reads its text as fields. The first line is the title and the line
 - `^REF` sets the parent task; the last one wins.
 - `after:REF` adds a blocker, once for each token.
 
-`REF` is a task ID, or the key a task title starts with followed by `:` or a space, such as `T18.4`. A reference that matches no task or more than one refuses the task. Only a whole word is a token, so `!later` and a bare `^` stay text, and the body is never read for tokens.
+`REF` is a task ID, such as `arcl-t-01M5…`, or a task number, such as `T18.4`, which matches the task whose title starts with it followed by `:` or a space. A word is a `^` or `after:` token only when the rest has one of those shapes, so `^C` and `after:lunch` stay text. A reference that matches no task or more than one refuses the task; with two `^REF`, only the last is looked up. Only a whole word is a token, so `!later` stays text, and the body is never read for tokens. A leading backslash keeps a token as text without the backslash: `\!high` puts `!high` in the title.
 
 `Enter` files a capture and `⌘Enter`, or `Ctrl+Enter` off macOS, files a task. The tokens set fields only on the task: a capture stores only a title and a body, so it keeps the first line as typed, tokens included, for triage to read.
 

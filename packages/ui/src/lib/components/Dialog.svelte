@@ -39,7 +39,9 @@
     if (dialog.open) return;
     if (dialog.contains(document.activeElement)) {
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
-      else (document.activeElement as HTMLElement | null)?.blur();
+      // Focusing `body`, or any opener that cannot take focus, leaves focus
+      // in the dialog until its `close` event, so drop it here instead.
+      if (dialog.contains(document.activeElement)) (document.activeElement as HTMLElement | null)?.blur();
     }
     const notify = open;
     open = false;

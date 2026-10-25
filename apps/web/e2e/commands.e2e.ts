@@ -98,6 +98,37 @@ test("from the Work list, an action that takes text opens the Task view with its
   expect(posts).toEqual([]);
 });
 
+for (const [status, action] of [
+  ["pending", "park"],
+  ["pending", "start"],
+  ["parked", "unpark"],
+]) {
+  test(`?action=${action} on a ${status} task does nothing: a link only opens a form`, async ({ page }) => {
+    const posts = await serve(page, status);
+    await page.goto(`/tasks/${task.id}?action=${action}`);
+    await expect(page.getByRole("heading", { level: 1, name: task.title })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/tasks/${task.id}$`));
+    await expect(page.getByRole("form")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^(Start|Park|Unpark)$/ }).first()).toBeEnabled();
+    expect(posts).toEqual([]);
+  });
+}
+
+test("shortcuts and the menu skip a selected task the filters hide", async ({ page }) => {
+  const posts = await serve(page);
+  await page.goto(`/?selected=${task.id}&status=parked`);
+  await expect(page.getByText("No tasks match these filters")).toBeVisible();
+  await page.keyboard.press("s");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Control+k");
+  const menu = page.getByRole("dialog", { name: "Command menu" });
+  await expect(menu.getByRole("combobox")).toBeFocused();
+  await expect(menu.getByRole("option", { name: /^Start/ })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page).not.toHaveURL(/\/tasks\//);
+  expect(posts).toEqual([]);
+});
+
 test("q opens quick capture from any view, and its tokens set the task's fields", async ({ page }) => {
   const posts = await serve(page);
   for (const path of ["/", "/inbox", "/planning", `/tasks/${task.id}`]) {
@@ -109,12 +140,15 @@ test("q opens quick capture from any view, and its tokens set the task's fields"
     await expect(page.getByRole("dialog")).toHaveCount(0);
   }
 
+  const capture = page.getByRole("dialog", { name: "Quick capture" }).getByRole("textbox", { name: "Capture" });
   await page.keyboard.press("q");
+  await expect(capture).toBeFocused();
   await page.keyboard.type("An idea !high");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("status")).toHaveText("Captured “An idea !high” in the Inbox.");
 
   await page.keyboard.press("q");
+  await expect(capture).toBeFocused();
   await page.keyboard.type("Follow up !high after:T1");
   await page.keyboard.press("Control+Enter");
   await expect(page).toHaveURL(/\/tasks\/arcl-t-2$/);

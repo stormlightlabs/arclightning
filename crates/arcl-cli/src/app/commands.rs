@@ -121,6 +121,7 @@ pub(super) fn run_capture(command: CaptureCommand, renderer: &Renderer) -> Resul
         CaptureResult::List(captures) => renderer.render_captures(&captures),
     })
 }
+
 pub(super) fn exec_release(command: ReleaseCommand, renderer: &Renderer) -> anyhow::Result<()> {
     let result: Result<Option<String>, ApplicationError> = (|| match command {
         ReleaseCommand::Create { title, body } => {
