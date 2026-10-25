@@ -323,6 +323,10 @@ blockers, so the form names each `after:REF` for you to add with
 `arcl dependency add`. The spec form takes optional acceptance criteria.
 **Discard** asks first, then runs `arcl capture discard`. After either, the
 next capture is selected, and a notice links to the new task or to Planning.
+While a form holds edits, or a promotion or discard is running, `j`, `k` and
+clicking another capture keep the selection; with edits, they return focus to
+the form. A capture already promoted or discarded elsewhere, such as from the
+CLI, reloads the list with a notice.
 
 Planning lists each spec with its plans, and each plan with its milestones in
 `arcl tree` order. A milestone row shows whether the phase is open or done,
@@ -372,7 +376,7 @@ Hand off open the Task view with their form.
 | `n`           | New spec, in Planning                         |
 | `a`           | New plan on a spec, or Apply plan on a plan, in Planning |
 | `Enter`       | Open or close the selected row, in Planning   |
-| `Escape`      | Close the open form, in Inbox and Planning    |
+| `Escape`      | Close the open form if it has no edits, in Inbox and Planning |
 
 Shortcuts do nothing while you type in a field, the editor or a dialog, or
 hold `Ctrl`, `⌘` or `Alt`. Press `g` and its second key within a second.

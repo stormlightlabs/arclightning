@@ -122,8 +122,9 @@
   }
 
   async function openForm(next: PlanningForm) {
-    // A form with edits stays open; the key takes focus back to it.
-    if (!unsaved) {
+    // A form with edits, or one whose request is in flight, stays open; the
+    // key takes focus back to it.
+    if (!unsaved && !busy) {
       opened = JSON.stringify(next);
       form = next;
       formFailure = null;
@@ -177,10 +178,11 @@
         for (const phase of value.phases) expanded.add(phase.id);
         selectedId = value.plan.id;
       }
-      form = null;
+      // Only the form that sent the request closes, so a newer one keeps its edits.
+      if (form === current) form = null;
       read.start();
     } catch (error) {
-      formFailure = failureOf(error);
+      if (form === current) formFailure = failureOf(error);
     } finally {
       busy = false;
     }
@@ -204,9 +206,9 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
-    // Escape closes the form, unless it holds edits or an open listbox or a
-    // dialog took it.
-    if (event.key === "Escape" && form !== null && !unsaved && !event.defaultPrevented) {
+    // Escape closes the form, unless it holds edits, its request is in flight,
+    // or an open listbox or a dialog took it.
+    if (event.key === "Escape" && form !== null && !unsaved && !busy && !event.defaultPrevented) {
       closeForm();
       event.preventDefault();
       return;

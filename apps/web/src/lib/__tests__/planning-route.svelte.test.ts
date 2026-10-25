@@ -164,6 +164,24 @@ describe("Planning route", () => {
     await expect.element(form).not.toBeInTheDocument();
   });
 
+  it("keeps the form whose request is in flight open until the reply", async () => {
+    let settle!: (value: Awaited<ReturnType<DataSource["applyPlan"]>>) => void;
+    source({ applyPlan: () => new Promise((resolve) => (settle = resolve)) });
+    await render(PlanningRoute);
+    await screen.getByRole("button", { name: "Apply plan" }).first().click();
+    await screen.getByRole("button", { name: "Apply", exact: true }).click();
+    const form = screen.getByRole("form", { name: "Apply plan" });
+    (document.activeElement as HTMLElement).blur();
+    // Escape and New spec leave the form that sent the request in place.
+    await userEvent.keyboard("{Escape}");
+    registeredCommands().find((command) => command.id === "planning:new-spec")?.run();
+    await expect.element(form).toBeVisible();
+    await expect.element(screen.getByRole("form", { name: "New spec" })).not.toBeInTheDocument();
+    settle({ value: { plan: { id: "pl-1", spec_id: "s-1", title: "plan pl-1", body: "", status: "open" }, phases: [], tasks: [] }, warnings: [] });
+    await expect.element(screen.getByRole("status")).toHaveTextContent("Applied “plan pl-1”");
+    await expect.element(form).not.toBeInTheDocument();
+  });
+
   it("says when there is no spec yet", async () => {
     source({ planning: async () => ({ tree: [], work: { milestones: [], items: [] } }) });
     await render(PlanningRoute);

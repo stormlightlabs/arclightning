@@ -39,7 +39,10 @@
   /** Milestones and tasks for the task form, read when it first opens. */
   let work = $state<WorkList | null>(null);
   let busy = $state(false);
-  let actionFailure = $state<ActionFailure | null>(null);
+  /** The last promote or discard failure, with the capture it belongs to. */
+  let actionFailure = $state<(ActionFailure & { capture: string }) | null>(null);
+  /** Said when a capture was promoted or discarded elsewhere, and the list reloaded. */
+  let changedElsewhere = $state<string | null>(null);
   /** What the last triage did, with a link to the new record where it has a view. */
   let notice = $state<{ text: string; href?: string; label?: string } | null>(null);
   let warnings = $state<ChangeWarning[]>([]);
@@ -134,7 +137,20 @@
   }
 
   function move(step: 1 | -1) {
-    selectedId = moveSelection(order, selected, step);
+    select(moveSelection(order, selected, step));
+  }
+
+  /**
+   * Select `id`, unless a promote or discard is in flight or the open form
+   * holds edits. A form with edits takes focus back instead.
+   */
+  function select(id: string | null) {
+    if (busy || confirming || id === selected) return;
+    if (unsaved) {
+      focusForm();
+      return;
+    }
+    selectedId = id;
   }
 
   function triage(action: TriageAction) {
@@ -157,7 +173,7 @@
       try {
         work = await dataSource().work();
       } catch (error) {
-        actionFailure = failureOf(error);
+        actionFailure = { ...failureOf(error), capture: capture.id };
         return;
       }
       if (selected !== capture.id) return;
@@ -181,6 +197,7 @@
     if (form === null || capture === null || busy) return;
     busy = true;
     actionFailure = null;
+    changedElsewhere = null;
     try {
       const { value, warnings: given } = await dataSource().promoteCapture(capture.id, promotionOf(form));
       warnings = given;
@@ -189,7 +206,7 @@
       work = null;
       remove(capture.id);
     } catch (error) {
-      actionFailure = failureOf(error);
+      failed(capture, error);
     } finally {
       busy = false;
     }
@@ -202,15 +219,30 @@
     busy = true;
     actionFailure = null;
     notice = null;
+    changedElsewhere = null;
     try {
       warnings = (await dataSource().discardCapture(capture.id)).warnings;
       notice = { text: `Discarded “${capture.title}”.` };
       remove(capture.id);
     } catch (error) {
-      actionFailure = failureOf(error);
+      failed(capture, error);
     } finally {
       busy = false;
     }
+  }
+
+  /**
+   * Show why a promote or discard of `capture` failed. A capture that is gone
+   * or no longer open was triaged elsewhere, so the list reloads.
+   */
+  function failed(capture: CaptureSummary, error: unknown) {
+    const failure = failureOf(error);
+    if (failure.code === "not_found" || failure.code === "conflict") {
+      changedElsewhere = `“${capture.title}” changed elsewhere: ${failure.message} (${failure.code}). The list is reloaded.`;
+      readList.start();
+      return;
+    }
+    actionFailure = { ...failure, capture: capture.id };
   }
 
   /** Drop `id` from the list and select the capture after it. */
@@ -236,9 +268,9 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
-    // Escape closes the form, unless it holds edits or an open listbox or the
-    // dialog took it.
-    if (event.key === "Escape" && form !== null && !unsaved && !confirming && !event.defaultPrevented) {
+    // Escape closes the form, unless it holds edits, a request is in flight, or
+    // an open listbox or the dialog took it.
+    if (event.key === "Escape" && form !== null && !unsaved && !busy && !confirming && !event.defaultPrevented) {
       form = null;
       event.preventDefault();
       return;
@@ -263,6 +295,13 @@
     {notice.text}
     {#if notice.href}<a href={notice.href}>{notice.label}</a>{/if}
   </p>
+{/if}
+{#if changedElsewhere !== null}
+  <Feedback tone="warning" title="The Inbox changed elsewhere" message={changedElsewhere}>
+    {#snippet actions()}
+      <Button label="Dismiss" variant="ghost" onclick={() => (changedElsewhere = null)} />
+    {/snippet}
+  </Feedback>
 {/if}
 {#each warnings as warning, index (index)}
   <Feedback tone="warning" title="The change is saved, with a warning" message={`${warning.message} (${warning.code})`}>
@@ -293,7 +332,7 @@
               data-capture-id={capture.id}
               aria-current={capture.id === selected ? "true" : undefined}
               tabindex={capture.id === selected ? 0 : -1}
-              onclick={() => (selectedId = capture.id)}
+              onclick={() => select(capture.id)}
             >
               {capture.title}
             </button>
@@ -333,7 +372,7 @@
         {#if form !== null}
           <PromoteForm bind:form {phases} {parents} {busy} onsubmit={promote} oncancel={() => (form = null)} />
         {/if}
-        {#if actionFailure !== null}
+        {#if actionFailure !== null && actionFailure.capture === selectedCapture.id}
           <Feedback tone="danger" title="Could not triage this capture" message={`${actionFailure.message} (${actionFailure.code})`} />
         {/if}
       {/if}

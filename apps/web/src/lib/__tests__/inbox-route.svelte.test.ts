@@ -40,6 +40,17 @@ function source(answers: Partial<DataSource> = {}) {
   return made;
 }
 
+/** A promise the test settles by hand. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
+  return { promise, resolve, reject };
+}
+
 beforeEach(reset);
 
 describe("Inbox route", () => {
@@ -154,6 +165,83 @@ describe("Inbox route", () => {
     await expect.element(input).toHaveValue("Edited");
     await screen.getByRole("button", { name: "Cancel" }).click();
     await expect.element(screen.getByRole("heading", { level: 3 })).not.toBeInTheDocument();
+  });
+
+  it("keeps the selection while the form holds edits, and takes focus back to it", async () => {
+    source();
+    await render(InboxRoute);
+    await screen.getByRole("button", { name: "Make a note" }).click();
+    const title = screen.getByRole("textbox", { name: "Title" });
+    await title.fill("Edited");
+    (document.activeElement as HTMLElement).blur();
+    await userEvent.keyboard("j");
+    await expect.element(title).toHaveFocus();
+    await screen.getByRole("button", { name: "Planned idea" }).click();
+    await expect.element(title).toHaveFocus();
+    await expect.element(title).toHaveValue("Edited");
+    await expect.element(screen.getByRole("button", { name: summaries[0].title })).toHaveAttribute("aria-current", "true");
+    await expect.element(screen.getByText("Body of c-1")).toBeVisible();
+  });
+
+  it("keeps the selection while a promote is in flight, then selects the next capture", async () => {
+    const reply = deferred<Awaited<ReturnType<DataSource["promoteCapture"]>>>();
+    source({ promoteCapture: () => reply.promise });
+    await render(InboxRoute);
+    await screen.getByRole("button", { name: "Make a note" }).click();
+    await screen.getByRole("button", { name: "Create note" }).click();
+    (document.activeElement as HTMLElement).blur();
+    await userEvent.keyboard("j");
+    await screen.getByRole("button", { name: "Stray thought" }).click();
+    // Escape does not close the form whose request is in flight.
+    await userEvent.keyboard("{Escape}");
+    await expect.element(screen.getByRole("heading", { level: 3, name: "Make a note" })).toBeVisible();
+    await expect.element(screen.getByRole("button", { name: summaries[0].title })).toHaveAttribute("aria-current", "true");
+    reply.resolve({ value: { kind: "note", id: "n-1", title: summaries[0].title }, warnings: [] });
+    await expect.element(screen.getByText("2 open captures")).toBeVisible();
+    await expect.element(screen.getByRole("button", { name: "Planned idea" })).toHaveAttribute("aria-current", "true");
+  });
+
+  it("keeps the selection while a discard is in flight, and shows its failure under its capture", async () => {
+    const reply = deferred<Awaited<ReturnType<DataSource["discardCapture"]>>>();
+    source({ discardCapture: () => reply.promise });
+    await render(InboxRoute);
+    await screen.getByRole("button", { name: "Discard", exact: true }).click();
+    await screen.getByRole("dialog").getByRole("button", { name: "Discard" }).click();
+    (document.activeElement as HTMLElement).blur();
+    await userEvent.keyboard("j");
+    await screen.getByRole("button", { name: "Stray thought" }).click();
+    reply.reject(new DataError("unavailable", "the server stopped"));
+    const message = screen.getByText("the server stopped (unavailable)");
+    await expect.element(message).toBeVisible();
+    await expect.element(screen.getByRole("button", { name: summaries[0].title })).toHaveAttribute("aria-current", "true");
+    await userEvent.keyboard("j");
+    await expect.element(screen.getByText("Body of c-2")).toBeVisible();
+    await expect.element(message).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { code: "not_found", action: "promote" },
+    { code: "conflict", action: "discard" },
+  ])("reloads the list when a $action fails with $code", async ({ code, action }) => {
+    let reads = 0;
+    const refuse = async () => Promise.reject(new DataError(code, "capture `c-1` is not open"));
+    const { calls } = source({
+      captures: async () => (reads++ === 0 ? summaries : summaries.slice(1)),
+      promoteCapture: refuse,
+      discardCapture: refuse,
+    });
+    await render(InboxRoute);
+    if (action === "promote") {
+      await screen.getByRole("button", { name: "Make a note" }).click();
+      await screen.getByRole("button", { name: "Create note" }).click();
+    } else {
+      await screen.getByRole("button", { name: "Discard", exact: true }).click();
+      await screen.getByRole("dialog").getByRole("button", { name: "Discard" }).click();
+    }
+    await expect.element(screen.getByText(`changed elsewhere: capture \`c-1\` is not open (${code})`, { exact: false })).toBeVisible();
+    await expect.element(screen.getByText("2 open captures")).toBeVisible();
+    await expect.element(screen.getByText("Body of c-2")).toBeVisible();
+    expect(calls.filter(([name]) => name === "captures")).toHaveLength(2);
   });
 
   it("says when the Inbox is empty", async () => {
