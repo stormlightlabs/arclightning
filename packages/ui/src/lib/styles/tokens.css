@@ -53,6 +53,8 @@
   --arcl-radius-sm: 0.375rem;
   --arcl-radius-md: 0.625rem;
   --arcl-radius-lg: 0.875rem;
+  /* Buttons, fields, selects and menu triggers. Badges stay round. */
+  --arcl-radius-control: 0.375rem;
   --arcl-border-width: 1px;
   --arcl-focus-width: 3px;
   --arcl-shadow-control: 0 1px 2px rgb(14 17 22 / 12%);

@@ -173,7 +173,7 @@
 
 <style>
   .arcl-select-menu { position: relative; display: inline-block; font-family: var(--arcl-font-ui); font-size: var(--arcl-type-sm); }
-  .arcl-select-menu__trigger { display: inline-flex; min-height: 2rem; align-items: center; gap: var(--arcl-space-2); padding: 0 var(--arcl-space-2) 0 var(--arcl-space-3); border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-sm); color: var(--arcl-text); background: var(--arcl-surface); box-shadow: var(--arcl-shadow-control); cursor: pointer; user-select: none; white-space: nowrap; }
+  .arcl-select-menu__trigger { display: inline-flex; min-height: 2rem; align-items: center; gap: var(--arcl-space-2); padding: 0 var(--arcl-space-2) 0 var(--arcl-space-3); border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-control); color: var(--arcl-text); background: var(--arcl-surface); box-shadow: var(--arcl-shadow-control); cursor: pointer; user-select: none; white-space: nowrap; }
   .arcl-select-menu__trigger:hover { background: var(--arcl-surface-hover); }
   .arcl-select-menu__trigger[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
   .arcl-select-menu__label { color: var(--arcl-text-muted); }

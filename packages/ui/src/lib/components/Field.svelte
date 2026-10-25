@@ -61,7 +61,7 @@
     min-height: var(--arcl-control-height);
     padding: var(--arcl-space-3);
     border: 1px solid var(--arcl-border);
-    border-radius: var(--arcl-radius-md);
+    border-radius: var(--arcl-radius-control);
     color: var(--arcl-text);
     background: var(--arcl-surface);
   }

@@ -66,7 +66,7 @@ describe("TaskDetail", () => {
 
   it("renders the body as Markdown with a way to open its source", () => {
     const description = slice(show(), 'id="task-description"', "</section>");
-    expect(description).toContain("<li>[ ] A run passes through MCP tools only</li>");
+    expect(description).toContain('<li><input type="checkbox" disabled="" /> A run passes through MCP tools only</li>');
     expect(description).toContain('aria-pressed="false"');
     expect(description).toContain("View Markdown");
   });

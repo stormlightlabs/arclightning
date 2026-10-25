@@ -1,5 +1,5 @@
 import { page as screen, userEvent } from "vitest/browser";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-svelte";
 import "@arclightning/ui/styles.css";
 import { registeredCommands } from "$lib/commands";
@@ -248,5 +248,70 @@ describe("Inbox route", () => {
     source({ captures: async () => [] });
     await render(InboxRoute);
     await expect.element(screen.getByRole("heading", { name: "The Inbox is empty" })).toBeVisible();
+  });
+
+  it("lists captures in a table with the time each was created", async () => {
+    const ulid = "arcl-c-01M5QSTZR7D5Y37H635KD8NA44";
+    source({ captures: async () => [...summaries, { id: ulid, title: "Dated idea", status: "captured" }] });
+    await render(InboxRoute);
+    const table = screen.getByRole("table");
+    await expect.element(table.getByRole("columnheader", { name: "Title" })).toBeVisible();
+    await expect.element(table.getByRole("columnheader", { name: "Created" })).toBeVisible();
+    const time = table.getByRole("row").filter({ hasText: "Dated idea" }).element().querySelector("time");
+    expect(time?.getAttribute("datetime")).toBe("2026-10-24T20:32:35.079Z");
+    // A click anywhere in a row selects its capture.
+    await table.getByRole("row").filter({ hasText: "Dated idea" }).getByRole("cell").last().click();
+    await expect.element(screen.getByRole("button", { name: "Dated idea" })).toHaveAttribute("aria-current", "true");
+    await expect.element(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Dated idea");
+  });
+});
+
+describe("Inbox layout", () => {
+  const many: CaptureSummary[] = Array.from({ length: 40 }, (_, index) => ({ id: `c-${index + 1}`, title: `Capture number ${index + 1} with a title long enough to need truncating in its cell`, status: "captured" }));
+
+  function layout() {
+    const box = (element: Element) => element.getBoundingClientRect();
+    const columns = document.querySelector(".columns")!;
+    const table = screen.getByRole("region", { name: "Captures" }).element() as HTMLElement;
+    const triage = screen.getByRole("region", { name: "Triage" }).element();
+    return { columns: box(columns), table: box(table), triage: box(triage), scroller: table };
+  }
+
+  beforeEach(() => {
+    source({ captures: async () => many, capture: async (id) => ({ id, title: `Title of ${id}`, status: "captured", body: "", created_at: "2026-10-23T03:51:43Z" }) });
+  });
+  afterEach(() => screen.viewport(1024, 768));
+
+  it("shows the selected capture beside the list, which fits its box and scrolls inside it", async () => {
+    // 660 px is wide enough for both columns, and narrow enough that the
+    // list used to wrap above the capture.
+    await screen.viewport(660, 800);
+    await render(InboxRoute);
+    await expect.element(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Title of c-1");
+    const { columns, table, triage, scroller } = layout();
+    expect(triage.left).toBeGreaterThanOrEqual(table.right - 1);
+    expect(Math.abs(triage.top - table.top)).toBeLessThan(2);
+    expect(table.left).toBeGreaterThanOrEqual(columns.left);
+    expect(triage.right).toBeLessThanOrEqual(columns.right);
+    expect(table.bottom).toBeLessThanOrEqual(columns.bottom);
+    expect(scroller.scrollHeight).toBeGreaterThan(scroller.clientHeight);
+    expect(scroller.scrollWidth).toBeLessThanOrEqual(scroller.clientWidth);
+    // j moves the selection down the table and keeps its row in view.
+    for (let step = 0; step < 30; step++) await userEvent.keyboard("j");
+    await expect.element(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Title of c-31");
+    const row = screen.getByRole("button", { name: /^Capture number 31 / }).element().getBoundingClientRect();
+    expect(row.top).toBeGreaterThanOrEqual(table.top);
+    expect(row.bottom).toBeLessThanOrEqual(table.bottom + 1);
+  });
+
+  it("stacks the selected capture below the list in a narrow window", async () => {
+    await screen.viewport(390, 844);
+    await render(InboxRoute);
+    await expect.element(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Title of c-1");
+    const { columns, table, triage, scroller } = layout();
+    expect(triage.top).toBeGreaterThanOrEqual(table.bottom - 1);
+    expect(Math.round(table.width)).toBe(Math.round(columns.width - 2));
+    expect(scroller.scrollHeight).toBeGreaterThan(scroller.clientHeight);
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(document.documentElement.clientWidth);
   });
 });

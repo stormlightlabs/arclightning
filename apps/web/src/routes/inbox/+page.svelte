@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, Dialog, EmptyState, Feedback, Markdown, type IconName, type SelectOption } from "@arclightning/ui";
+  import { Button, DataTable, Dialog, EmptyState, Feedback, Markdown, type DataTableColumn, type IconName, type SelectOption } from "@arclightning/ui";
   import { onMount, tick, untrack } from "svelte";
   import { formatKeys, useCommands, type Command } from "$lib/commands";
   import {
@@ -12,7 +12,17 @@
     type Promoted,
     type WorkList,
   } from "$lib/data";
-  import { TRIAGE_KEYS, TRIAGE_LABELS, afterRemoval, formFor, promotionOf, type PromotionForm, type TriageAction } from "$lib/inbox";
+  import {
+    TRIAGE_KEYS,
+    TRIAGE_LABELS,
+    afterRemoval,
+    createdAt,
+    formFor,
+    promotionOf,
+    shortAge,
+    type PromotionForm,
+    type TriageAction,
+  } from "$lib/inbox";
   import PromoteForm from "$lib/inbox/PromoteForm.svelte";
   import { failureNotice } from "$lib/notice";
   import { appHref } from "$lib/route";
@@ -21,8 +31,14 @@
 
   const ACTIONS: TriageAction[] = ["task", "spec", "note", "discard"];
   const ICONS: Record<TriageAction, IconName> = { task: "task", spec: "spec", note: "note", discard: "close" };
+  const COLUMNS: DataTableColumn[] = [
+    { id: "title", label: "Title" },
+    { id: "created", label: "Created", width: "6.5rem" },
+  ];
 
   let captures = $state<CaptureSummary[] | null>(null);
+  /** When the list was read, which the Created column counts from. */
+  let readAt = $state(new Date());
   let failure = $state<string | null>(null);
   let selectedId = $state<string | null>(null);
   let order = $derived(captures?.map((capture) => capture.id) ?? []);
@@ -50,7 +66,6 @@
   let notice = $state<{ text: string; href?: string; label?: string } | null>(null);
   let warnings = $state<ChangeWarning[]>([]);
   let confirming = $state(false);
-  let list = $state<HTMLElement>();
   let pane = $state<HTMLElement>();
 
   let phases = $derived<SelectOption[]>(
@@ -65,7 +80,10 @@
   );
 
   const readList = latestRead((signal) => dataSource().captures(signal), {
-    loaded: (loaded) => (captures = loaded),
+    loaded: (loaded) => {
+      readAt = new Date();
+      captures = loaded;
+    },
     failed: (error) => (failure = error instanceof Error ? error.message : String(error)),
   });
   // The capture the read in flight asks for.
@@ -91,15 +109,6 @@
       actionFailure = null;
       showDetail(id);
     });
-  });
-
-  // Keep focus on the selected row while focus is in the list or nowhere.
-  $effect(() => {
-    const id = selected;
-    if (id === null || !list) return;
-    const active = document.activeElement;
-    if (active !== null && active !== document.body && !list.contains(active)) return;
-    list.querySelector<HTMLElement>(`[data-capture-id="${CSS.escape(id)}"]`)?.focus();
   });
 
   useCommands(() => ({
@@ -327,61 +336,56 @@
 {:else if captures.length === 0}
   <EmptyState title="The Inbox is empty" message="Press Q to capture an idea. Captures wait here until you promote or discard them." />
 {:else}
-  <div class="columns">
-    <section class="list" aria-label="Captures" bind:this={list}>
-      <ul>
-        {#each captures as capture (capture.id)}
-          <li>
-            <button
-              type="button"
-              data-capture-id={capture.id}
-              aria-current={capture.id === selected ? "true" : undefined}
-              tabindex={capture.id === selected ? 0 : -1}
-              onclick={() => select(capture.id)}
-            >
-              {capture.title}
-            </button>
-          </li>
-        {/each}
-      </ul>
-    </section>
+  <div class="inbox">
+    <div class="columns">
+      <DataTable rows={captures} columns={COLUMNS} rowId={(capture) => capture.id} selectedId={selected} onselect={select} label="Captures">
+        {#snippet cell(capture, column)}
+          {@const date = column.id === "created" ? createdAt(capture.id) : null}
+          {#if column.id === "title"}
+            {capture.title}
+          {:else if date !== null}
+            <time datetime={date.toISOString()} title={date.toLocaleString("en-US")}>{shortAge(date, readAt)}</time>
+          {/if}
+        {/snippet}
+      </DataTable>
 
-    <section class="triage" aria-label="Triage" bind:this={pane}>
-      {#if selectedCapture !== null}
-        <p class="meta">Capture{#if detail !== null && created(detail)}{` · ${created(detail)}`}{/if}</p>
-        <h2>{detail?.title ?? selectedCapture.title}</h2>
-        {#if detailFailure !== null}
-          <Feedback tone="danger" title="Could not load this capture" message={detailFailure}>
-            {#snippet actions()}
-              <Button label="Retry" onclick={() => showDetail(selected)} />
-            {/snippet}
-          </Feedback>
-        {:else if detail === null}
-          <p class="loading" role="status">Loading capture…</p>
-        {:else if detail.body !== ""}
-          <Markdown source={detail.body} label="Capture body" />
+      <section class="triage" aria-label="Triage" bind:this={pane}>
+        {#if selectedCapture !== null}
+          <p class="meta">Capture{#if detail !== null && created(detail)}{` · ${created(detail)}`}{/if}</p>
+          <h2>{detail?.title ?? selectedCapture.title}</h2>
+          {#if detailFailure !== null}
+            <Feedback tone="danger" title="Could not load this capture" message={detailFailure}>
+              {#snippet actions()}
+                <Button label="Retry" onclick={() => showDetail(selected)} />
+              {/snippet}
+            </Feedback>
+          {:else if detail === null}
+            <p class="loading" role="status">Loading capture…</p>
+          {:else if detail.body !== ""}
+            <Markdown source={detail.body} label="Capture body" />
+          {/if}
+          <div class="actions" role="group" aria-label="Triage actions">
+            {#each ACTIONS as action (action)}
+              <Button
+                variant={action === "task" ? "primary" : action === "discard" ? "ghost" : "secondary"}
+                aria-keyshortcuts={TRIAGE_KEYS[action]}
+                disabled={busy}
+                onclick={() => triage(action)}
+              >
+                <kbd aria-hidden="true">{formatKeys([TRIAGE_KEYS[action]], false)[0]}</kbd>
+                {TRIAGE_LABELS[action]}
+              </Button>
+            {/each}
+          </div>
+          {#if form !== null}
+            <PromoteForm bind:form {phases} {parents} {busy} onsubmit={promote} oncancel={() => (form = null)} />
+          {/if}
+          {#if actionFailure !== null && actionFailure.capture === selectedCapture.id}
+            <Feedback {...failureNotice(actionFailure, "Could not triage this capture")} />
+          {/if}
         {/if}
-        <div class="actions" role="group" aria-label="Triage actions">
-          {#each ACTIONS as action (action)}
-            <Button
-              variant={action === "task" ? "primary" : action === "discard" ? "ghost" : "secondary"}
-              aria-keyshortcuts={TRIAGE_KEYS[action]}
-              disabled={busy}
-              onclick={() => triage(action)}
-            >
-              <kbd aria-hidden="true">{formatKeys([TRIAGE_KEYS[action]], false)[0]}</kbd>
-              {TRIAGE_LABELS[action]}
-            </Button>
-          {/each}
-        </div>
-        {#if form !== null}
-          <PromoteForm bind:form {phases} {parents} {busy} onsubmit={promote} oncancel={() => (form = null)} />
-        {/if}
-        {#if actionFailure !== null && actionFailure.capture === selectedCapture.id}
-          <Feedback {...failureNotice(actionFailure, "Could not triage this capture")} />
-        {/if}
-      {/if}
-    </section>
+      </section>
+    </div>
   </div>
 {/if}
 
@@ -402,20 +406,21 @@
   .count, .meta, .loading { margin: 0; color: var(--arcl-text-muted); font-size: var(--arcl-type-sm); }
   .notice { display: flex; flex-wrap: wrap; gap: var(--arcl-space-2); margin: 0 0 var(--arcl-space-4); padding: var(--arcl-space-2) var(--arcl-space-3); border-inline-start: 4px solid var(--arcl-success); border-radius: var(--arcl-radius-sm); background: var(--arcl-success-surface); font-size: var(--arcl-type-sm); }
   .notice a { color: var(--arcl-link); }
-  .columns { display: flex; flex-wrap: wrap; align-items: stretch; border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-md); background: var(--arcl-surface); }
-  /* The list scrolls on its own, so the triage pane stays in view. */
-  .list { flex: 1 1 18rem; max-width: 28rem; max-height: calc(100dvh - 10rem); overflow-y: auto; border-inline-end: var(--arcl-border-width) solid var(--arcl-border); }
-  ul { margin: 0; padding: 0; list-style: none; }
-  li + li { border-top: var(--arcl-border-width) solid var(--arcl-surface-subtle); }
-  li button { display: block; width: 100%; padding: var(--arcl-space-3) var(--arcl-space-4); border: 0; color: var(--arcl-text); background: transparent; font: 500 var(--arcl-type-sm) / 1.4 var(--arcl-font-ui); text-align: start; cursor: pointer; }
-  li button:hover { background: var(--arcl-surface-hover); }
-  li button[aria-current="true"] { background: var(--arcl-surface-subtle); box-shadow: inset 2px 0 0 var(--arcl-focus); }
-  .triage { display: grid; flex: 999 1 24rem; align-content: start; gap: var(--arcl-space-4); min-width: 0; padding: var(--arcl-space-5) var(--arcl-space-6); }
+  /* The list and the selected capture sit side by side when the Inbox is wide enough, and stack when it is not. */
+  .inbox { container-type: inline-size; }
+  .columns { display: grid; grid-template-columns: minmax(0, 1fr); border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-md); background: var(--arcl-surface); }
+  /* The table scrolls inside its own box, so the triage pane stays in view, and rounds with the container's corners. */
+  .columns > :global(.arcl-data-table) { max-height: min(20rem, 45dvh); border-bottom: var(--arcl-border-width) solid var(--arcl-border); border-radius: calc(var(--arcl-radius-md) - var(--arcl-border-width)) calc(var(--arcl-radius-md) - var(--arcl-border-width)) 0 0; }
+  .triage { display: grid; align-content: start; gap: var(--arcl-space-4); min-width: 0; padding: var(--arcl-space-4); }
+  @container (min-width: 40rem) {
+    .columns { grid-template-columns: minmax(0, 3fr) minmax(18rem, 2fr); }
+    .columns > :global(.arcl-data-table) { max-height: calc(100dvh - 10rem); border-bottom: 0; border-radius: calc(var(--arcl-radius-md) - var(--arcl-border-width)) 0 0 calc(var(--arcl-radius-md) - var(--arcl-border-width)); }
+    .triage { padding: var(--arcl-space-5); border-inline-start: var(--arcl-border-width) solid var(--arcl-border); }
+  }
   h2 { margin: 0; color: var(--arcl-heading); font: 650 var(--arcl-type-lg) / 1.3 var(--arcl-font-ui); }
   .actions { display: flex; flex-wrap: wrap; gap: var(--arcl-space-2); }
   kbd { display: inline-flex; min-width: 1.125rem; height: 1.125rem; align-items: center; justify-content: center; margin-inline-end: var(--arcl-space-1); padding: 0 0.25rem; border: var(--arcl-border-width) solid currentColor; border-radius: 4px; font: 500 var(--arcl-type-xs) / 1 var(--arcl-font-ui); opacity: 0.8; }
   .confirm { display: grid; gap: var(--arcl-space-4); }
   .confirm p { margin: 0; font-weight: 600; }
   .buttons { display: flex; gap: var(--arcl-space-2); }
-  @media (max-width: 40rem) { .list { max-width: none; max-height: 40dvh; border-inline-end: 0; border-bottom: var(--arcl-border-width) solid var(--arcl-border); } .triage { padding: var(--arcl-space-4); } }
 </style>

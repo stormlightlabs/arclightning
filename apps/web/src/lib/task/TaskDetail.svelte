@@ -427,7 +427,7 @@
   h3 a, .relations a, .readiness a { color: var(--arcl-link); text-decoration: none; }
   h3 a:hover, .relations a:hover, .readiness a:hover { text-decoration: underline; }
   .muted { margin: 0; color: var(--arcl-text-muted); }
-  .readiness { padding: var(--arcl-space-3) var(--arcl-space-4); border-inline-start: 4px solid var(--arcl-warning); border-radius: var(--arcl-radius-sm); background: var(--arcl-warning-surface); }
+  .readiness { padding: var(--arcl-space-3) var(--arcl-space-4); border: var(--arcl-border-width) solid var(--arcl-warning); border-radius: var(--arcl-radius-sm); background: var(--arcl-warning-surface); }
   .readiness[data-ready="true"] { border-color: var(--arcl-success); background: var(--arcl-success-surface); }
   .readiness p { margin: 0; }
   .readiness strong { color: var(--arcl-heading); font-family: var(--arcl-font-ui); }

@@ -15,7 +15,7 @@
 </section>
 
 <style>
-  .arcl-readiness { padding: var(--arcl-space-4); border-inline-start: 4px solid var(--arcl-warning); border-radius: var(--arcl-radius-sm); background: var(--arcl-warning-surface); }
+  .arcl-readiness { padding: var(--arcl-space-4); border: var(--arcl-border-width) solid var(--arcl-warning); border-radius: var(--arcl-radius-sm); background: var(--arcl-warning-surface); }
   .arcl-readiness[data-ready="true"] { border-color: var(--arcl-success); background: var(--arcl-success-surface); }
   strong { color: var(--arcl-heading); font-family: var(--arcl-font-ui); }
   ul, p { margin: var(--arcl-space-2) 0 0; padding-inline-start: 1.25rem; color: var(--arcl-text-muted); }

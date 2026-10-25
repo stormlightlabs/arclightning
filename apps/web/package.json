@@ -7,15 +7,16 @@
   "scripts": {
     "dev": "vite dev",
     "build": "pnpm --filter @arclightning/ui exec svelte-kit sync && vite build",
-    "build:artifact": "pnpm --filter @arclightning/ui exec svelte-kit sync && VITE_ARCL_TARGET=artifact vite build",
+    "build:artifact": "pnpm --filter @arclightning/ui exec svelte-kit sync && svelte-kit sync && VITE_ARCL_TARGET=artifact vite build",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run --project unit --project dom",
     "test:browser": "vitest run --project browser",
-    "test:e2e": "pnpm build:artifact && pnpm build && cargo build -p arcl-cli && playwright test --project e2e",
-    "test:visual": "pnpm build && playwright test --project visual",
-    "test:visual:update": "pnpm build && playwright test --project visual --update-snapshots",
-    "screenshots": "pnpm build && playwright test --project screenshots"
+    "test:ui": "vitest --project unit --project dom --project browser",
+    "test:e2e": "node scripts/e2e-build.mjs web artifact arcl && playwright test --project e2e",
+    "test:visual": "node scripts/e2e-build.mjs web && playwright test --project visual",
+    "test:visual:update": "node scripts/e2e-build.mjs web && playwright test --project visual --update-snapshots",
+    "screenshots": "node scripts/e2e-build.mjs web && playwright test --project screenshots"
   },
   "license": "MIT",
   "dependencies": {

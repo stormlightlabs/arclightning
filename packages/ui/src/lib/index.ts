@@ -1,6 +1,7 @@
 export { default as Badge } from "./components/Badge.svelte";
 export { default as Button } from "./components/Button.svelte";
 export { default as CommandMenu } from "./components/CommandMenu.svelte";
+export { default as DataTable } from "./components/DataTable.svelte";
 export { default as Dialog } from "./components/Dialog.svelte";
 export { default as EmptyState } from "./components/EmptyState.svelte";
 export { default as Feedback } from "./components/Feedback.svelte";
@@ -27,6 +28,7 @@ export { default as TaskRow } from "./components/TaskRow.svelte";
 export type { BadgeProps, BadgeTone } from "./components/Badge.svelte";
 export type { ButtonProps, ButtonVariant } from "./components/Button.svelte";
 export type { CommandGroup, CommandItem, CommandMenuProps } from "./components/CommandMenu.svelte";
+export type { DataTableColumn, DataTableProps } from "./components/DataTable.svelte";
 export type { DialogProps } from "./components/Dialog.svelte";
 export type { EmptyStateProps } from "./components/EmptyState.svelte";
 export type { FeedbackProps, FeedbackTone } from "./components/Feedback.svelte";
