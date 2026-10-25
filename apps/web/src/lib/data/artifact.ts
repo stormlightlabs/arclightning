@@ -3,12 +3,15 @@
  *
  * The database holds the JSON the `arcl serve` read endpoints return, which
  * `arcl web export` writes and an agent copies in: `views/work`,
- * `views/tree`, `views/tasks`, `views/captures`, `records/<id>` for each task
- * and open capture, and `meta/sync`. Views read them through the same
- * functions as over `arcl serve`.
+ * `views/tree`, `views/tasks`, `views/captures`, `records/<id>` and
+ * `sources/<id>` for each task and open capture, and `meta/sync`. Views read
+ * them through the same functions as over `arcl serve`.
  *
  * The page cannot run `arcl`, so a change writes a `queue/<id>` document
- * instead and fails with {@link QUEUED}. An agent applies the queue with
+ * instead and fails with {@link QUEUED}. A raw record edit queues as
+ * `update_source`, with the revision its `sources/<id>` document held, so
+ * `arcl web apply` refuses it when the file has changed since that sync. An
+ * agent applies the queue with
  * `arcl web apply` and syncs the result back. Until then the records do not
  * change, and the page says the edit is queued.
  *
@@ -16,7 +19,16 @@
  * capabilities this module calls.
  */
 import { type Listing, type Tree, type Work, captureOf, capturesOf, taskIndexOf, taskOf, workOf } from "./envelopes";
-import { type Capture, DataError, type DataSource, QUEUED, type QueuedEdit, type SyncStatus, type TaskDetail } from "./types";
+import {
+  type Capture,
+  DataError,
+  type DataSource,
+  QUEUED,
+  type QueuedEdit,
+  type RecordSource,
+  type SyncStatus,
+  type TaskDetail,
+} from "./types";
 
 /** A failed `db` call, as the artifact rejects it. */
 export interface ArtifactDbError {
@@ -155,7 +167,7 @@ export function artifactSource(db: ArtifactDb, options: ArtifactOptions = {}): D
 
   /** The `data` of one record's `arcl show` envelope. */
   async function record<T>(id: string, signal?: AbortSignal): Promise<T> {
-    const body = await read(recordPath(id), signal);
+    const body = await read(recordPath("records", id), signal);
     if (body === null || !isRecord(body.data)) throw new DataError("not_found", `No record with the ID \`${id}\` was in the last sync.`);
     return body.data as T;
   }
@@ -224,6 +236,15 @@ export function artifactSource(db: ArtifactDb, options: ArtifactOptions = {}): D
     createSpec: (input) => queue("create_spec", null, input),
     createPlan: (input) => queue("create_plan", null, input),
     applyPlan: (id, document) => queue("apply_plan", id, { document }),
+    async recordSource(id, signal) {
+      const path = recordPath("sources", id);
+      const body = await read(path, signal);
+      if (body === null || !isRecord(body.data)) {
+        throw new DataError("not_synced", `The artifact has no \`${path}\` yet. Run \`arcl web export\` and copy its documents into the artifact.`);
+      }
+      return body.data as unknown as RecordSource;
+    },
+    saveRecordSource: (id, { source, revision }) => queue("update_source", id, { source, revision }),
 
     watch(listener) {
       const status: SyncStatus = { syncedAt: null, commit: null, revision: null, edits: [], stopped: null };
@@ -298,10 +319,10 @@ export function artifactSource(db: ArtifactDb, options: ArtifactOptions = {}): D
   };
 }
 
-/** The database path of one record's `arcl show` envelope. */
-function recordPath(id: string): string {
+/** The database path of one record's document in `collection`: `records` for its `arcl show` envelope, `sources` for its file. */
+function recordPath(collection: "records" | "sources", id: string): string {
   if (!/^[A-Za-z0-9_\-.~:@+]+$/.test(id) || id === "." || id === "..") throw new DataError("not_found", `\`${id}\` is not a record ID.`);
-  return `records/${id}`;
+  return `${collection}/${id}`;
 }
 
 /** Run a `db` call, and turn its rejection, or a malformed path, into a {@link DataError}. */

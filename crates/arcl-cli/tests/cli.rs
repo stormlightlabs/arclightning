@@ -4298,6 +4298,9 @@ fn web_export_writes_the_envelopes_arcl_serve_returns() {
         (&*format!("records/{task}"), format!("/api/records/{task}")),
         (&*format!("records/{blocker}"), format!("/api/records/{blocker}")),
         (&*format!("records/{capture}"), format!("/api/records/{capture}")),
+        (&*format!("sources/{task}"), format!("/api/records/{task}/source")),
+        (&*format!("sources/{blocker}"), format!("/api/records/{blocker}/source")),
+        (&*format!("sources/{capture}"), format!("/api/records/{capture}/source")),
     ];
     for (document, path) in &pairs {
         assert_eq!((200, exported(out.path(), document)), served.read(path), "{document}");
@@ -4349,14 +4352,20 @@ fn web_export_rewrites_only_the_documents_that_changed() {
         "views/tasks",
         "views/captures",
         &format!("records/{task}"),
+        &format!("sources/{task}"),
         "meta/sync",
     ] {
         assert!(changed.iter().any(|path| path == document), "{document} in {changed:?}");
     }
     assert!(!changed.contains(&format!("records/{other}")), "{changed:?}");
+    assert!(!changed.contains(&format!("sources/{other}")), "{changed:?}");
     assert_ne!(after["revision"], first["revision"]);
-    assert_eq!(manifest_list(&after, "removed"), [format!("records/{capture}")]);
+    assert_eq!(
+        manifest_list(&after, "removed"),
+        [format!("records/{capture}"), format!("sources/{capture}")]
+    );
     assert!(!out.path().join(format!("records/{capture}.json")).exists());
+    assert!(!out.path().join(format!("sources/{capture}.json")).exists());
     assert_eq!(
         exported(out.path(), &format!("records/{task}"))["data"]["task"]["title"],
         "Renamed"
@@ -4414,6 +4423,18 @@ fn web_export_splits_a_document_over_the_size_limit() {
     assert!(part_at < header_at);
     // `views/work` holds the body too, and is split the same way.
     assert!(exported(out.path(), "views/work")["chunked"].is_object());
+    // So does the record's file, which the page's raw editor reads.
+    let header = exported(out.path(), &format!("sources/{task}"));
+    let parts = header["chunked"]["parts"].as_u64().expect("a part count");
+    assert!(parts >= 2, "{header}");
+    let joined = (0..parts)
+        .map(|index| {
+            let path = format!("chunks/sources~{task}~{index}");
+            exported(out.path(), &path)["part"].as_str().expect("a part").to_owned()
+        })
+        .collect::<String>();
+    let joined: Value = serde_json::from_str(&joined).expect("the parts join into JSON");
+    assert_eq!((200, joined), served.read(&format!("/api/records/{task}/source")));
 }
 
 #[test]
@@ -4431,7 +4452,10 @@ fn web_export_full_lists_every_document_as_changed() {
     let documents = manifest_list(&full, "documents");
     assert!(documents.contains(&format!("records/{task}")));
     assert_eq!(manifest_list(&full, "changed"), documents);
-    assert_eq!(manifest_list(&full, "removed"), [format!("records/{capture}")]);
+    assert_eq!(
+        manifest_list(&full, "removed"),
+        [format!("records/{capture}"), format!("sources/{capture}")]
+    );
 }
 
 #[test]
@@ -4597,6 +4621,75 @@ fn web_apply_runs_queued_edits_as_arcl_serve_does() {
             .expect("a message")
             .contains("unknown operation")
     );
+}
+
+#[test]
+fn web_apply_runs_a_queued_raw_edit_as_the_edit_endpoint_does() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let task = create_task(dir, "Raw task", None);
+    let out = tempdir().expect("an export directory");
+    web_export(dir, out.path());
+    // The page edits the file it read from the export, with that revision.
+    let read = exported(out.path(), &format!("sources/{task}"));
+    let source = read["data"]["source"].as_str().expect("a source").to_owned();
+    let revision = read["data"]["revision"].as_str().expect("a revision").to_owned();
+    let entry = |id: &str, source: &str, revision: &str| serde_json::json!({ "id": id, "op": "update_source", "target": task, "input": { "source": source, "revision": revision }, "status": "queued" });
+    let large = format!(
+        "{}\n{}",
+        source.replace("Raw task", "Large raw"),
+        "A long line.\n".repeat(20_000)
+    );
+    let queue = serde_json::json!([
+        entry("q1", "+++\ntitle = \n+++\n", &revision),
+        entry(
+            "q2",
+            &source.replace("status = \"pending\"", "status = \"completed\""),
+            &revision
+        ),
+        entry("q3", &source.replace("Raw task", "Edited raw"), &revision),
+        // q3 moved the file's revision, so an edit from the read before it is stale.
+        entry("q4", &source.replace("Raw task", "Lost edit"), &revision),
+    ]);
+    let output = web_apply(dir, &queue);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let results = json(&output.stdout)["data"]["results"]
+        .as_array()
+        .expect("results")
+        .clone();
+    let statuses = results
+        .iter()
+        .map(|result| result["status"].as_str().expect("a status"))
+        .collect::<Vec<_>>();
+    assert_eq!(statuses, ["failed", "failed", "applied", "failed"]);
+    let message = |index: usize| {
+        results[index]["error"]["message"]
+            .as_str()
+            .expect("a message")
+            .to_owned()
+    };
+    assert!(message(0).contains("front matter TOML is invalid"), "{}", message(0));
+    assert!(message(1).contains("field `status`"), "{}", message(1));
+    assert_eq!(results[3]["error"]["code"], "conflict");
+    assert!(message(3).contains("changed since it was opened"), "{}", message(3));
+    assert_eq!(task_field(dir, &task, "title"), "Edited raw");
+    assert_eq!(task_field(dir, &task, "status"), "pending");
+    let saved = results[2]["data"].clone();
+    assert_eq!(saved["id"], task.as_str());
+    assert_ne!(saved["revision"], revision.as_str());
+
+    // The page refuses a queue entry over 200 KiB; `apply` takes any size the
+    // edit endpoint takes, so a larger file saves.
+    let fresh = saved["revision"].as_str().expect("a revision").to_owned();
+    assert!(large.len() > 200 * 1024);
+    let output = web_apply(dir, &serde_json::json!([entry("q5", &large, &fresh)]));
+    let results = json(&output.stdout)["data"]["results"].clone();
+    assert_eq!(results[0]["status"], "applied", "{results}");
+    assert_eq!(task_field(dir, &task, "title"), "Large raw");
 }
 
 #[test]

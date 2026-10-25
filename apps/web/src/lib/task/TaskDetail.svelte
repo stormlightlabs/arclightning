@@ -81,7 +81,7 @@
   /**
    * The raw file editor: the file as loaded, its revision and the edited
    * text, or `null` while it is closed. Only a source that can save the file
-   * offers it, so the artifact build never shows it.
+   * or queue its save offers it.
    */
   let file = $state<{ path: string; source: string; revision: string; text: string } | null>(null);
   const source = dataSource();

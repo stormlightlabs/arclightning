@@ -1,6 +1,10 @@
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import recorded from "../src/lib/data/artifact.fixture.json" with { type: "json" };
+import { ARCL, SETUP_TIMEOUT } from "./serve";
 
 /**
  * The artifact build, opened at a path of the host's choosing with a stand-in
@@ -128,6 +132,45 @@ test("the artifact renders Work, Task, Inbox and Planning from its database and 
   await expect(page.getByText("The project synced")).toBeHidden();
 
   expect(new Set(requests)).toEqual(new Set([PAGE]));
+});
+
+test("the artifact queues a raw record edit that arcl web apply saves, and refuses it once stale", async ({ page }) => {
+  const dir = mkdtempSync(join(tmpdir(), "arcl-e2e-artifact-"));
+  try {
+    const arcl = (...args: string[]) => JSON.parse(execFileSync(ARCL, [...args, "--json"], { cwd: dir, encoding: "utf8", timeout: SETUP_TIMEOUT })).data;
+    arcl("init");
+    const task = arcl("task", "create", "Raw edit target").task.id as string;
+    const out = join(dir, "export");
+    const manifest = arcl("web", "export", out);
+    const documents = Object.fromEntries((manifest.documents as string[]).map((path) => [path, JSON.parse(readFileSync(join(out, `${path}.json`), "utf8"))]));
+    const { source, revision } = documents[`sources/${task}`].data;
+    await openArtifact(page, documents);
+
+    await page.getByRole("link", { name: "Raw edit target" }).first().click();
+    await page.getByRole("button", { name: "Edit file" }).click();
+    const editor = page.getByRole("textbox", { name: "Record file" });
+    await expect(editor).toContainText('title = "Raw edit target"');
+    await editor.focus();
+    await page.keyboard.press("ControlOrMeta+a");
+    const edited = (source as string).replace("Raw edit target", "Edited in the artifact");
+    await page.keyboard.insertText(edited);
+    await page.getByRole("button", { name: "Save file" }).click();
+    await expect(page.getByText("Queued for the next sync")).toBeVisible();
+    await expect(page.getByRole("list", { name: "Queued edits" })).toHaveText(`Edit the file of ${task}`);
+    const queued = await queue(page);
+    expect(queued).toEqual([
+      { op: "update_source", target: task, input: { source: edited, revision }, created_at: expect.any(String), created_by: "u_viewer", status: "queued" },
+    ]);
+
+    // An agent applies the queue: the edit saves once, and a second run from the same revision is stale.
+    const file = join(dir, "queue.json");
+    writeFileSync(file, JSON.stringify(queued.map((entry, index) => ({ id: `q${index}`, ...(entry as object) }))));
+    expect(arcl("web", "apply", file).results[0]).toMatchObject({ status: "applied", data: { id: task } });
+    expect(arcl("show", task).task.title).toBe("Edited in the artifact");
+    expect(arcl("web", "apply", file).results[0]).toMatchObject({ status: "failed", error: { code: "conflict" } });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("the artifact asks to be opened in claude.ai when it has no database", async ({ page }) => {

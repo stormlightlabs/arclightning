@@ -126,7 +126,12 @@ function recordedFetch(): typeof fetch {
   };
   return (async (input: RequestInfo | URL) => {
     const path = String(input);
-    const record = path.startsWith("/api/records/") ? `records/${decodeURIComponent(path.slice("/api/records/".length))}` : routes[path];
+    const file = /^\/api\/records\/([^/]+)\/source$/.exec(path);
+    const record = file
+      ? `sources/${decodeURIComponent(file[1])}`
+      : path.startsWith("/api/records/")
+        ? `records/${decodeURIComponent(path.slice("/api/records/".length))}`
+        : routes[path];
     return new Response(JSON.stringify(DOCUMENTS[record]), { status: 200 });
   }) as typeof fetch;
 }
@@ -150,6 +155,16 @@ describe("artifactSource reads", () => {
     expect(await artifact.captures()).toEqual(await served.captures());
     expect(await artifact.task(BLOCKED)).toEqual(await served.task(BLOCKED));
     expect(await artifact.capture(CAPTURE)).toEqual(await served.capture(CAPTURE));
+    expect(await artifact.recordSource?.(BLOCKED)).toEqual(await served.recordSource?.(BLOCKED));
+  });
+
+  it("reads a record's file and revision for the raw editor", async () => {
+    const artifact = source();
+    const file = await artifact.recordSource?.(BLOCKED);
+    expect(file).toMatchObject({ id: BLOCKED, kind: "task", path: `tasks/${BLOCKED}.md`, revision: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    expect(file?.source).toContain('title = "Sync the database"');
+    expect((await failure(source(new FakeDb({})).recordSource!(BLOCKED))).code).toBe("not_synced");
+    expect((await failure(artifact.recordSource!("../views/work"))).code).toBe("not_found");
   });
 
   it("gives Work its milestones and readiness", async () => {
@@ -252,6 +267,7 @@ describe("artifactSource changes", () => {
       [artifact.createSpec({ title: "Spec" }), "create_spec", null, { title: "Spec" }],
       [artifact.createPlan({ title: "Plan", spec: "arcl-s-1" }), "create_plan", null, { title: "Plan", spec: "arcl-s-1" }],
       [artifact.applyPlan("arcl-pl-1", "format-version = 1"), "apply_plan", "arcl-pl-1", { document: "format-version = 1" }],
+      [artifact.saveRecordSource!(TASK, { source: "+++\n", revision: "r1" }), "update_source", TASK, { source: "+++\n", revision: "r1" }],
     ];
     const queued = [];
     for (const [change, op, target, input] of changes) {
@@ -281,6 +297,17 @@ describe("artifactSource changes", () => {
     expect(error.code).toBe("too_large");
     expect(error.message).not.toContain("Contributor");
     expect([...db.documents.keys()].some((path) => path.startsWith("queue/"))).toBe(false);
+  });
+
+  it("refuses a raw edit whose queue entry is over 200 KiB, and queues one under it", async () => {
+    const db = new FakeDb();
+    const artifact = source(db);
+    // Each newline doubles in JSON, so 101 KiB of them is over the limit as a queue entry.
+    const error = await failure(artifact.saveRecordSource!(TASK, { source: "\n".repeat(101 * 1024), revision: "r1" }));
+    expect(error.code).toBe("too_large");
+    expect(error.message).toMatch(/^The edit is 203 KiB, over the 200 KiB the artifact queues\./);
+    expect([...db.documents.keys()].some((path) => path.startsWith("queue/"))).toBe(false);
+    expect((await failure(artifact.saveRecordSource!(TASK, { source: "x".repeat(190 * 1024), revision: "r1" }))).code).toBe(QUEUED);
   });
 });
 
@@ -395,9 +422,9 @@ describe("connectArtifact", () => {
       use: async (name: string) => (name === "db" ? db : { id: async () => "u_person" }),
     } as ArtifactHost;
     expect(await connectArtifact(host)).toBe(true);
-    // The artifact cannot save a record's file, so the raw editor stays hidden.
-    expect(dataSource().recordSource).toBeUndefined();
-    expect(dataSource().saveRecordSource).toBeUndefined();
+    // The artifact queues a record file's save, so the raw editor shows.
+    expect(dataSource().recordSource).toBeDefined();
+    expect(dataSource().saveRecordSource).toBeDefined();
     expect((await dataSource().captures()).map((capture) => capture.id)).toEqual([CAPTURE]);
     await failure(dataSource().discardCapture(CAPTURE));
     expect([...db.documents].find(([path]) => path.startsWith("queue/"))?.[1]).toMatchObject({ created_by: "u_person" });

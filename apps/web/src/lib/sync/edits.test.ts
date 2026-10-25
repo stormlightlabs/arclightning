@@ -18,6 +18,7 @@ describe("describeEdit", () => {
     expect(describeEdit(edit("promote_capture", "arcl-c-1", { to: "task", title: "Ship it" }))).toBe("Promote the capture “Ship it” to a task");
     expect(describeEdit(edit("create_capture", null, { title: "Idea" }))).toBe("Capture “Idea”");
     expect(describeEdit(edit("park_task", "arcl-t-1", { title: "  " }))).toBe("Park the task arcl-t-1");
+    expect(describeEdit(edit("update_source", "arcl-t-1", { source: "+++\n", revision: "r1" }))).toBe("Edit the file of arcl-t-1");
     expect(describeEdit(edit("rename_everything", null))).toBe("Run rename_everything");
     expect(describeEdit(edit("rename_everything", "arcl-t-1"))).toBe("Run rename_everything on arcl-t-1");
   });

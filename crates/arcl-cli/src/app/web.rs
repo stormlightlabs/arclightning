@@ -15,7 +15,11 @@
 //! | `views/tasks`      | `GET /api/records?kind=task`                    |
 //! | `views/captures`   | `GET /api/records?kind=capture&status=captured` |
 //! | `records/<id>`     | `GET /api/records/<id>`, per task and capture   |
+//! | `sources/<id>`     | `GET /api/records/<id>/source`, for each record |
 //! | `meta/sync`        | the commit, time and revision of the export     |
+//!
+//! The page edits a record's file from its `sources/<id>` document and queues
+//! the save as `update_source` with the revision that document holds.
 //!
 //! A document whose JSON is over [`MAX_DOCUMENT_BYTES`] is stored as a
 //! header, `{"chunked": {"parts": n, "digest": "..."}}`, and `n` parts at
@@ -50,7 +54,7 @@ const MANIFEST_FILE: &str = "manifest.json";
 
 /// The collections `export` writes. A path from an older manifest outside
 /// them is never deleted.
-const COLLECTIONS: &[&str] = &["chunks", "views", "records", "meta"];
+const COLLECTIONS: &[&str] = &["chunks", "views", "records", "sources", "meta"];
 
 /// The path of the document that describes the export.
 const META_DOCUMENT: &str = "meta/sync";
@@ -167,6 +171,9 @@ fn export(app: &ServeApp, dir: &Path, full: bool) -> CResult<WebManifest> {
         let path = format!("records/{id}");
         let shown = read(app.show(&id), &path)?;
         documents.push((path, shown));
+        let path = format!("sources/{id}");
+        let source = read(app.source(&id), &path)?;
+        documents.push((path, source));
     }
 
     let mut files = Vec::new();

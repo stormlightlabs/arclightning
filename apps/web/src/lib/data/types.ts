@@ -363,7 +363,8 @@ export interface DataSource {
   applyPlan(id: string, document: string): Promise<Changed<PlanApplied>>;
   /**
    * The workspace file of record `id`. Only a backend that can save it, as
-   * `arcl serve` does, has it; the views hide the raw editor otherwise.
+   * `arcl serve` does, or queue its save, as the artifact build does, has
+   * it; the views hide the raw editor otherwise.
    */
   recordSource?(id: string, signal?: AbortSignal): Promise<RecordSource>;
   /**

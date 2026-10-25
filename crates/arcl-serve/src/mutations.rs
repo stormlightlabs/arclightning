@@ -24,6 +24,7 @@ const OPERATIONS: &[Operation] = &[
     ("create_spec", false, |_| Write::CreateSpec),
     ("create_plan", false, |_| Write::CreatePlan),
     ("apply_plan", true, Write::ApplyPlan),
+    ("update_source", true, Write::EditRecord),
 ];
 
 /// One row of [`OPERATIONS`]: the name, whether it names a target record,
@@ -75,8 +76,9 @@ pub struct TaskEdit {
     pub priority: Option<String>,
 }
 
-/// The body of `POST /api/records/{id}/edit`: a complete record file and
-/// the revision of the file it was edited from.
+/// The body of `POST /api/records/{id}/edit`, and the input of the queued
+/// `update_source` operation: a complete record file and the revision of the
+/// file it was edited from.
 #[derive(Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct RecordSourceEdit {
@@ -263,7 +265,8 @@ pub fn apply(operation: &str, target: Option<&str>, input: &[u8], mutations: &dy
 }
 
 /// The operations [`apply`] runs, each with whether it names a target
-/// record. Each runs the [`Mutations`] method of the same name.
+/// record. Each runs the [`Mutations`] method of the same name, except
+/// `update_source`, which runs [`Mutations::edit_record`].
 pub fn operations() -> impl Iterator<Item = (&'static str, bool)> {
     OPERATIONS.iter().map(|&(name, needs_target, _)| (name, needs_target))
 }

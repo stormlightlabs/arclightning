@@ -15,6 +15,7 @@ const VERBS: Record<string, string> = {
   create_spec: "Create the spec",
   create_plan: "Create the plan",
   apply_plan: "Apply the plan",
+  update_source: "Edit the file of",
 };
 
 /**

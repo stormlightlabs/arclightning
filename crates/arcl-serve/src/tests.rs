@@ -560,7 +560,7 @@ fn apply_runs_each_operation_as_its_endpoint_does() {
         let reply = apply(operation, target, input, &Echo);
         (reply.status(), reply.body().to_owned())
     };
-    let cases: [(&str, Option<&str>, &[u8], &str); 13] = [
+    let cases: [(&str, Option<&str>, &[u8], &str); 14] = [
         ("create_task", None, br#"{"title":"T"}"#, "create NewTask"),
         ("update_task", Some("arcl-t-1"), br#"{"title":"T"}"#, "update arcl-t-1"),
         (
@@ -599,6 +599,12 @@ fn apply_runs_each_operation_as_its_endpoint_does() {
             br#"{"document":""}"#,
             "apply arcl-pl-1",
         ),
+        (
+            "update_source",
+            Some("arcl-t-1"),
+            br#"{"source":"+++\n","revision":"r1"}"#,
+            r#"edit arcl-t-1 RecordSourceEdit { source: "+++\n", revision: "r1" }"#,
+        ),
     ];
     assert_eq!(cases.len(), operations().count());
     for (operation, target, input, expected) in cases {
@@ -607,6 +613,12 @@ fn apply_runs_each_operation_as_its_endpoint_does() {
     }
     // `Echo` fails a completion with exit code 4, which `apply` passes on.
     assert_eq!(applied("complete_task", Some("arcl-t-1"), b"{}").0, 409);
+    // A stale revision fails as `POST /api/records/{id}/edit` fails it.
+    let stale = br#"{"source":"+++\n","revision":"stale"}"#;
+    assert_eq!(
+        applied("update_source", Some("arcl-t-1"), stale),
+        (409, "stale arcl-t-1".to_owned())
+    );
 }
 
 #[test]
@@ -622,6 +634,13 @@ fn apply_refuses_unknown_operations_targets_and_options() {
         ("discard_capture", Some("arcl-c-1"), br#"{"force":true}"#),
         ("update_task", Some("arcl-t-1"), br#"{"spec_file":"/etc/passwd"}"#),
         ("apply_plan", Some("arcl-pl-1"), br#"{"file":"/etc/passwd"}"#),
+        ("update_source", None, br#"{"source":"","revision":""}"#),
+        ("update_source", Some("arcl-t-1"), br#"{"source":""}"#),
+        (
+            "update_source",
+            Some("arcl-t-1"),
+            br#"{"source":"","revision":"","path":"/etc/passwd"}"#,
+        ),
     ] {
         let reply = apply(operation, target, input, &Echo);
         assert_eq!(reply.status(), 400, "{operation} {target:?} {input:?}");

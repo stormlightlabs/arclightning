@@ -546,6 +546,7 @@ records the sync did not update:
 | `views/tasks`    | `views/tasks.json`    | `GET /api/records?kind=task`                        |
 | `views/captures` | `views/captures.json` | `GET /api/records?kind=capture&status=captured`     |
 | `records/<id>`   | `records/<id>.json`   | `GET /api/records/<id>`, per task and open capture  |
+| `sources/<id>`   | `sources/<id>.json`   | `GET /api/records/<id>/source`, for those records   |
 | `meta/sync`      | `meta/sync.json`      | the commit, time and revision of the export         |
 
 `<dir>/manifest.json` lists every document in `documents`, the ones that are
@@ -581,13 +582,22 @@ record:
 `op` names the change: `create_task`, `update_task`, `start_task`,
 `park_task`, `unpark_task`, `hand_off_task`, `complete_task`,
 `create_capture`, `promote_capture`, `discard_capture`, `create_spec`,
-`create_plan` or `apply_plan`. `target` is the record ID for those that name
-one and `null` otherwise. `input` holds the options of the matching
-`arcl serve` POST endpoint. The page says the edit is queued, keeps showing
-the records as they are, and lists the queued edits above each view. A board
-move queues the same way, and its card stays put until the edit applies. The
-queue has no operation for a raw record edit, so the artifact hides **Edit
-file**.
+`create_plan`, `apply_plan` or `update_source`. `target` is the record ID for
+those that name one and `null` otherwise. `input` holds the options of the
+matching `arcl serve` POST endpoint. The page says the edit is queued, keeps
+showing the records as they are, and lists the queued edits above each view.
+A board move queues the same way, and its card stays put until the edit
+applies. The page refuses an edit whose entry is over 200 KiB as UTF-8 JSON
+and says to make it smaller or make it with `arcl`.
+
+**Edit file** reads the task's file from `sources/<id>` and **Save file**
+queues `update_source` with `{"source", "revision"}`: the whole file and the
+revision from that document. `apply` runs it as
+`POST /api/records/<id>/edit`, with the same checks. If the file changed
+after the export the page read, the entry fails with the `conflict` error;
+open the file again after the next sync and redo the edit. Two raw edits of
+one file queued from the same sync conflict the same way, so only the first
+applies.
 
 `arcl web apply <file>` reads a JSON array of queue entries, each the
 document's fields plus its `id`, from a file or `-` for standard input. It
@@ -626,7 +636,7 @@ To sync, the agent session that owns the artifact:
    `removed` one. If the export fails because the workspace did not sync,
    resolve that, with `arcl workspace status`, and run it again. If a write fails, or `<dir>` is new, the next sync runs
    `arcl --json web export --full <dir>`, writes every `changed` document
-   and deletes every document in `views`, `records` and `chunks` that
+   and deletes every document in `views`, `records`, `sources` and `chunks` that
    `documents` does not list.
 
 The page follows `meta/sync` and the queue. When `revision` changes, it offers

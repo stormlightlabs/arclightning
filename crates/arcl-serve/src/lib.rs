@@ -97,7 +97,9 @@
 //!
 //! [`apply`] runs a mutation named by one of [`operations`] with the same
 //! JSON options, for `arcl web apply`, which applies the changes a claude.ai
-//! artifact queued.
+//! artifact queued. Its `update_source` operation is `POST
+//! /api/records/{id}/edit`, so a queued raw edit gets the same checks and
+//! the same conflict error for a stale revision.
 
 mod answer;
 mod gate;
