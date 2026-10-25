@@ -76,7 +76,7 @@ test.describe("a 390 px window", () => {
     await serveFixtures(page);
     await open(page, VIEWS[3]);
     const menu = page.getByRole("navigation", { name: "Views" }).getByRole("button", { name: "Menu" });
-    await page.getByRole("button", { name: "Edit" }).click();
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
     const form = page.getByRole("form", { name: "Edit task" });
     const editor = form.getByRole("textbox", { name: "Description Markdown" });
     await editor.click();

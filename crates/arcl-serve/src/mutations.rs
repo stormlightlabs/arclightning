@@ -75,6 +75,19 @@ pub struct TaskEdit {
     pub priority: Option<String>,
 }
 
+/// The body of `POST /api/records/{id}/edit`: a complete record file and
+/// the revision of the file it was edited from.
+#[derive(Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecordSourceEdit {
+    /// The whole file: TOML front matter between `+++` lines, then the
+    /// Markdown body.
+    pub source: String,
+    /// The `revision` that `GET /api/records/{id}/source` gave for the file
+    /// the edit started from.
+    pub revision: String,
+}
+
 /// The options of `arcl task start <id>`.
 #[derive(Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -221,6 +234,11 @@ pub trait Mutations {
     fn create_plan(&self, input: NewPlan) -> Reply;
     /// `arcl plan apply <id>`.
     fn apply_plan(&self, id: &str, input: PlanInput) -> Reply;
+    /// Replace the workspace file of the record `id` with `input.source`,
+    /// checked as a workspace import checks a file, when the file still has
+    /// `input.revision`. Answers as [`Reads::source`](crate::Reads::source)
+    /// does, with the saved file.
+    fn edit_record(&self, id: &str, input: RecordSourceEdit) -> Reply;
 }
 
 /// Run the mutation `operation` names, one of [`operations`], on the record
@@ -271,6 +289,7 @@ pub(crate) fn mutate(write: Write, body: &[u8], mutations: &dyn Mutations) -> Re
         Write::CreateSpec => with_input(body, |input| mutations.create_spec(input)),
         Write::CreatePlan => with_input(body, |input| mutations.create_plan(input)),
         Write::ApplyPlan(id) => with_input(body, |input| mutations.apply_plan(&id, input)),
+        Write::EditRecord(id) => with_input(body, |input| mutations.edit_record(&id, input)),
     }
 }
 

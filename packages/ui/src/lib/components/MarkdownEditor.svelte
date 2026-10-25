@@ -5,6 +5,11 @@
     /** The editor's accessible name. */
     label: string;
     readonly?: boolean;
+    /**
+     * Read the text as a whole record file: TOML front matter between `+++`
+     * lines at the top, highlighted as TOML, then the Markdown body.
+     */
+    frontMatter?: boolean;
     /** Called with the whole text after each edit a person makes, not when `value` changes. */
     onchange?: (value: string) => void;
   }
@@ -16,9 +21,10 @@
   import { Annotation, Compartment, EditorState } from "@codemirror/state";
   import { EditorView, keymap } from "@codemirror/view";
   import { tags } from "@lezer/highlight";
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
+  import { recordFile } from "../record-file";
 
-  let { value, label, readonly = true, onchange }: MarkdownEditorProps = $props();
+  let { value, label, readonly = true, frontMatter = false, onchange }: MarkdownEditorProps = $props();
   let host: HTMLDivElement;
   let view = $state<EditorView>();
   const access = new Compartment();
@@ -41,6 +47,11 @@
     { tag: [tags.link, tags.url], color: "var(--arcl-link)" },
     { tag: tags.monospace, color: "var(--arcl-warning)" },
     { tag: [tags.quote, tags.processingInstruction, tags.meta], color: "var(--arcl-text-muted)" },
+    // TOML front matter.
+    { tag: tags.propertyName, color: "var(--arcl-info)" },
+    { tag: tags.string, color: "var(--arcl-success)" },
+    { tag: [tags.number, tags.atom, tags.bool], color: "var(--arcl-warning)" },
+    { tag: tags.comment, color: "var(--arcl-text-muted)", fontStyle: "italic" },
   ]);
 
   // Read-only content is not editable, so page shortcuts work inside it, but
@@ -59,7 +70,8 @@
       state: EditorState.create({
         doc: value,
         extensions: [
-          markdown(),
+          // Read once: an editor keeps the language it was made with.
+          untrack(() => frontMatter) ? recordFile() : markdown(),
           syntaxHighlighting(highlight),
           EditorView.lineWrapping,
           access.of(accessFor(readonly)),

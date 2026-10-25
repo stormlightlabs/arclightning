@@ -162,6 +162,7 @@ dependencies = [
  "arcl-store",
  "gix",
  "serde",
+ "sha2",
  "tempfile",
  "thiserror",
  "toml",

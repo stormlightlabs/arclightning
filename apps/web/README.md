@@ -5,7 +5,9 @@ plan. `arcl serve` serves it on 127.0.0.1. Its views are in `src/routes`; the
 components they share are in `packages/ui`.
 
 To dogfood the app on claude.ai, `pnpm build:artifact` also builds it as an
-artifact page in `build-artifact/index.html`.
+artifact page in `build-artifact/index.html`. The artifact queues changes for
+`arcl web apply`, board moves included. It hides the Task view's Edit file
+editor, since the queue has no operation for a raw record edit.
 
 ## Tests
 
@@ -17,9 +19,9 @@ Run these from this directory, or with `pnpm --filter @arclightning/web`.
 | `pnpm test:browser`       | Route, layout and component tests in headless Chromium                |
 | `pnpm test:ui`            | Both of the above in watch mode                                       |
 | `pnpm test:e2e`           | Playwright workflows, fit and themes                                  |
-| `pnpm test:visual`        | Screenshots of the four views, compared with local baselines          |
+| `pnpm test:visual`        | Screenshots of the views and the Work board, compared with baselines  |
 | `pnpm test:visual:update` | Rewrites the baselines after an intended visual change                |
-| `pnpm screenshots`        | Rewrites the README images in `docs/images/`, at twice the density    |
+| `pnpm screenshots`        | Rewrites the README images in `docs/images/`: dark, rounded, 2x       |
 
 The browser tests need Chromium. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to
 use one already installed. CI runs `just check`, which runs `pnpm test` and

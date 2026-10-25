@@ -15,26 +15,35 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { useCommands, type Command } from "$lib/commands";
-  import { dataSource, latestRead, type ChangeWarning, type NewTask, type TaskPriority, type WorkList } from "$lib/data";
+  import { dataSource, latestRead, type ChangeWarning, type NewTask, type TaskPriority, type TaskStatus, type WorkList } from "$lib/data";
   import { failureNotice } from "$lib/notice";
   import { appUrl, appUrlHref } from "$lib/route";
   import { ACTION_KEYS, ACTION_LABELS, ACTION_TEXT, actionsFor, failureOf, runAction, type ActionFailure, type TaskAction } from "$lib/task";
+  import WorkBoard from "$lib/work/WorkBoard.svelte";
   import {
     NO_MILESTONE,
     PRIORITIES,
     STATUSES,
+    boardColumns,
+    boardOrder,
     groupWork,
     isFiltered,
     moveSelection,
     orderMilestones,
     parseFilters,
+    refusal,
+    rememberView,
     selectedOf,
     taskHref,
+    viewOf,
     visibleSelection,
     withKnownMilestone,
     workKeyAction,
     writeFilters,
+    writeView,
+    type BoardCard,
     type WorkFilters,
+    type WorkView,
   } from "$lib/work";
 
   type FilterName = keyof WorkFilters;
@@ -47,8 +56,16 @@
   /** The page's app path and query, which hold the filters. */
   let route = $derived(appUrl(page.url));
   let filters = $derived(parseFilters(route.searchParams));
+  /** The layout: the URL's `view`, or the one this viewer last chose. */
+  let view = $derived<WorkView>(viewOf(route.searchParams, () => window.localStorage));
   let groups = $derived(list ? groupWork(list, filters) : []);
-  let order = $derived(rowOrder(groups));
+  let columns = $derived(list && view === "board" ? boardColumns(list, filters) : []);
+  let order = $derived(view === "board" ? boardOrder(columns) : rowOrder(groups));
+  let board = $state<ReturnType<typeof WorkBoard>>();
+  /** The card whose move is running. */
+  let movingId = $state<string | null>(null);
+  /** Why the last move the board refused did not run. */
+  let refused = $state<string | null>(null);
   // A selected task the filters hide is not selected.
   let selected = $derived(visibleSelection(order, selectedId));
 
@@ -89,11 +106,13 @@
   });
 
   // Once the list loads, and the router with it, keep the URL to the filters
-  // the menus show: one value each, and no milestone the list does not have.
+  // the menus show, one value each and no milestone the list does not have,
+  // and to the layout shown, so the URL names what the page shows.
   $effect(() => {
     if (list === null) return;
     const shown = withKnownMilestone(filters, list.milestones.map((milestone) => milestone.id));
-    if (writeFilters(shown, route.searchParams).toString() !== route.searchParams.toString()) showFilters(shown);
+    const search = writeView(view, writeFilters(shown, route.searchParams));
+    if (search.toString() !== route.searchParams.toString()) showSearch(search);
   });
 
   useCommands(() => ({
@@ -115,6 +134,10 @@
               };
             }),
           ]),
+      ...(view === "board" && selectedTask !== null && !actionBusy
+        ? [{ id: "work:move", label: "Move", scope: "selection", keys: ["m"], icon: "arrowRight", run: () => board?.move(selected ?? "") } satisfies Command]
+        : []),
+      { id: "work:view", label: view === "board" ? "Show as list" : "Show as board", scope: "view", group: "Work", keys: ["v"], run: () => setView(view === "board" ? "list" : "board") },
       { id: "work:new", label: "New task", scope: "view", group: "Work", keys: ["n"], icon: "capture", run: openCreate },
       { id: "work:next", label: "Select the next task", scope: "view", group: "Work", keys: ["j"], viewKeys: true, run: () => (selectedId = moveSelection(order, selectedId, 1)) },
       { id: "work:previous", label: "Select the previous task", scope: "view", group: "Work", keys: ["k"], viewKeys: true, run: () => (selectedId = moveSelection(order, selectedId, -1)) },
@@ -129,6 +152,7 @@
    * takes Markdown opens the Task view with its form instead.
    */
   async function act(id: string, action: TaskAction) {
+    if (actionBusy) return;
     if (ACTION_TEXT[action] !== undefined) {
       await goto(`${taskHref(id)}?action=${action}`);
       return;
@@ -136,6 +160,7 @@
     const title = list?.items.find((item) => item.task.id === id)?.task.title ?? id;
     actionFailure = null;
     actionWarnings = [];
+    refused = null;
     actionBusy = true;
     try {
       actionWarnings = (await runAction(dataSource(), id, action)).warnings;
@@ -147,6 +172,41 @@
     }
     // Reload in place, so the list and its selection stay on screen.
     read.start();
+  }
+
+  /**
+   * Run the move the board asked for, as the list's action does. The card
+   * stays in its column until the reload after the change shows it moved; a
+   * failed or queued move leaves it there. While a change runs, another
+   * does not start.
+   */
+  async function move(card: BoardCard, action: TaskAction, text: string) {
+    if (actionBusy) return;
+    actionFailure = null;
+    actionWarnings = [];
+    refused = null;
+    actionBusy = true;
+    movingId = card.id;
+    try {
+      actionWarnings = (await runAction(dataSource(), card.id, action, text)).warnings;
+    } catch (error) {
+      actionFailure = { title: card.title, action, failure: failureOf(error) };
+      return;
+    } finally {
+      actionBusy = false;
+      movingId = null;
+    }
+    read.start();
+  }
+
+  function refuse(card: BoardCard, to: TaskStatus) {
+    actionFailure = null;
+    refused = `${card.title}: ${refusal(card.status, to)}`;
+  }
+
+  function setView(next: WorkView) {
+    rememberView(() => window.localStorage, next);
+    showSearch(writeView(next, route.searchParams));
   }
 
   function openCreate() {
@@ -185,8 +245,12 @@
   }
 
   function showFilters(next: WorkFilters) {
+    showSearch(writeFilters(next, appUrl(page.url).searchParams));
+  }
+
+  function showSearch(search: URLSearchParams) {
     const url = appUrl(page.url);
-    url.search = writeFilters(next, url.searchParams).toString();
+    url.search = search.toString();
     goto(appUrlHref(url), { replaceState: true, keepFocus: true, noScroll: true });
   }
 
@@ -210,6 +274,10 @@
   <div class="title">
     <h1>Work</h1>
     {#if creating === null}<Button label="New task" variant="primary" onclick={openCreate} />{/if}
+    <div class="layout" role="group" aria-label="Layout">
+      <button type="button" aria-pressed={view === "list"} onclick={() => setView("list")}>List</button>
+      <button type="button" aria-pressed={view === "board"} onclick={() => setView("board")}>Board</button>
+    </div>
   </div>
   <form class="filters" aria-label="Filters" onsubmit={(event) => event.preventDefault()}>
     {#each [["status", "Status"], ["readiness", "Readiness"], ["priority", "Priority"], ["milestone", "Milestone"]] as const as [name, label] (name)}
@@ -240,6 +308,13 @@
   </form>
 {/if}
 
+{#if refused !== null}
+  <Feedback tone="danger" title="Could not move the task" message={refused}>
+    {#snippet actions()}
+      <Button label="Dismiss" variant="ghost" onclick={() => (refused = null)} />
+    {/snippet}
+  </Feedback>
+{/if}
 {#if actionFailure !== null}
   <Feedback {...failureNotice(actionFailure.failure, `Could not ${ACTION_LABELS[actionFailure.action].toLowerCase()} ${actionFailure.title}`)} />
 {/if}
@@ -261,12 +336,14 @@
   <p class="loading" role="status">Loading tasks…</p>
 {:else if list.items.length === 0}
   <EmptyState title="No tasks yet" message="Tasks appear here once you create one with New task or arcl task create, or apply a plan." />
-{:else if groups.length === 0}
+{:else if order.length === 0}
   <EmptyState title="No tasks match these filters" message="Change or clear the filters to see more tasks.">
     {#snippet actions()}
       <Button label="Clear filters" onclick={() => showFilters({ status: [], readiness: [], priority: [], milestone: [] })} />
     {/snippet}
   </EmptyState>
+{:else if view === "board"}
+  <WorkBoard bind:this={board} {columns} selectedId={selected} busyId={movingId} locked={actionBusy} onselect={(id) => (selectedId = id)} onmove={move} onrefuse={refuse} />
 {:else}
   <TaskList {groups} href={taskHref} selectedId={selected} onselect={(id) => (selectedId = id)} label="Work" />
 {/if}
@@ -279,6 +356,11 @@
   .label { color: var(--arcl-text-muted); font: 600 var(--arcl-type-sm) / 1.3 var(--arcl-font-ui); }
   .buttons { display: flex; gap: var(--arcl-space-2); }
   h1 { margin: 0; color: var(--arcl-heading); font: 650 var(--arcl-type-xl) / 1.2 var(--arcl-font-ui); }
+  .layout { display: inline-flex; overflow: hidden; border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-control); }
+  .layout button { min-height: 2.25rem; padding-inline: var(--arcl-space-3); border: 0; color: var(--arcl-text-muted); background: var(--arcl-surface); font: 600 var(--arcl-type-sm) var(--arcl-font-ui); cursor: pointer; }
+  .layout button + button { border-inline-start: var(--arcl-border-width) solid var(--arcl-border); }
+  .layout button:hover { background: var(--arcl-surface-hover); }
+  .layout button[aria-pressed="true"] { color: var(--arcl-heading); background: var(--arcl-surface-subtle); box-shadow: inset 0 -2px 0 var(--arcl-link); }
   .filters { display: flex; flex-wrap: wrap; gap: var(--arcl-space-3); font-size: var(--arcl-type-sm); }
   .loading { color: var(--arcl-text-muted); }
 </style>

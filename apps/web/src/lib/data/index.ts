@@ -64,11 +64,15 @@ export async function connectArtifact(host: ArtifactHost | undefined = globalThi
   return true;
 }
 
+/** The {@link DataSource} methods a backend may leave out, and `then`. */
+const OPTIONAL = new Set(["watch", "dismiss", "recordSource", "saveRecordSource", "then"]);
+
 /** A data source whose every read and change fails with {@link OPEN_IN_CLAUDE}. */
 function unavailableSource(): DataSource {
   const fail = () => Promise.reject(new DataError("unavailable", OPEN_IN_CLAUDE));
   return new Proxy({} as DataSource, {
-    // `watch` and `dismiss` are optional, and a source is not a thenable.
-    get: (_target, key) => (key === "watch" || key === "dismiss" || key === "then" ? undefined : fail),
+    // Optional methods stay missing, so views hide what they offer, and a
+    // source is not a thenable.
+    get: (_target, key) => (typeof key === "string" && OPTIONAL.has(key) ? undefined : fail),
   });
 }

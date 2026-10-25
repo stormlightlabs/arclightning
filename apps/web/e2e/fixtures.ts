@@ -11,6 +11,7 @@ export const VIEWS = [
   { name: "work", path: "/", heading: "Work" },
   { name: "planning", path: "/planning", heading: "Planning" },
   { name: "task", path: "/tasks/arcl-t-2", heading: "Store pending writes in SQLite" },
+  { name: "board", path: "/?view=board", heading: "Work" },
 ] as const;
 
 /** Answer the API's reads from `fixtures.json` and fail on any page error. */

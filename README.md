@@ -5,8 +5,8 @@ Arc Lightning keeps the live tracker in `.arcl/arcl.db` and can optionally use a
 Git worktree for repository-native project files.
 
 <p>
-  <img src="docs/images/task-light.png" alt="The Task view in the light theme" width="640">
-  <img src="docs/images/work-narrow-dark.png" alt="The Work view in a narrow window, dark theme" width="195">
+  <img src="docs/images/work-board-dark.png" alt="The Work board, with a column for each task status" width="640">
+  <img src="docs/images/task-dark.png" alt="The Task view, with its properties, readiness and description" width="640">
 </p>
 
 ## Quick start

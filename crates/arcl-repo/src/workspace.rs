@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 mod codec;
+pub mod edit;
 pub mod export;
 pub mod import;
 pub mod reconcile;
@@ -14,6 +15,7 @@ pub mod status;
 pub mod sync;
 
 pub use codec::*;
+pub use edit::{RecordEdit, RecordEditError, RecordSource, edit_record, record_source, source_revision};
 pub use export::{WorkspaceExportError, WorkspaceFile, export_graph, export_graph_with_base, project_graph};
 pub use import::{ImportOutcome, WorkspaceImportError, import_graph, import_workspace};
 pub use reconcile::{Change, Comparison, RecordComparison, RecordState, compare};

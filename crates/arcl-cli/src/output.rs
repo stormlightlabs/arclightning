@@ -8,7 +8,7 @@ use crate::cli::ColorChoice;
 use arcl_core::domain::{Capture, Note, Phase, Plan, PlanningTask, Release, Spec, TaskDependency};
 use arcl_repo::{
     vcs::{HeadState, PathState},
-    workspace::{Change, RecordStatusKind, WorkspaceStatus},
+    workspace::{Change, RecordSource, RecordStatusKind, WorkspaceStatus},
 };
 use arcl_store::{
     CheckReport, PlanApplyResult, PlanDiff, PlanningCompletion, PlanningContext, PlanningTaskView, PlanningWork,
@@ -775,6 +775,26 @@ impl Renderer {
         Ok(Some(self.style(message)))
     }
 
+    /// Render a record's workspace file for the web app's raw editor. Human
+    /// and plain output print the file itself.
+    pub fn render_record_source(&self, source: &RecordSource) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human | OutputMode::Plain => source.content.trim_end_matches('\n').to_owned(),
+            OutputMode::Json => serde_json::to_string(&Envelope {
+                format_version: FORMAT_VERSION,
+                data: RecordSourceData {
+                    id: &source.id,
+                    kind: source.kind.as_str(),
+                    path: source.path.to_string_lossy().into_owned(),
+                    source: &source.content,
+                    revision: &source.revision,
+                },
+            })?,
+            OutputMode::Quiet => return Ok(None),
+        };
+        Ok(Some(message))
+    }
+
     /// Render a `skill install` report. Human output lists only the files
     /// that are not unchanged; plain output lists every file as
     /// `<status>\t<path>`.
@@ -931,6 +951,17 @@ impl Renderer {
 struct Envelope<T> {
     format_version: u8,
     data: T,
+}
+
+/// A record's workspace file, as `GET /api/records/{id}/source` answers it.
+#[derive(Debug, Serialize)]
+struct RecordSourceData<'a> {
+    id: &'a str,
+    kind: &'static str,
+    /// The path relative to the workspace root.
+    path: String,
+    source: &'a str,
+    revision: &'a str,
 }
 
 #[derive(Debug, Serialize)]

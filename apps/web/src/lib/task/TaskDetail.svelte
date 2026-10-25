@@ -64,20 +64,28 @@
   }: TaskDetailProps = $props();
   let showSource = $state(false);
 
-  /** The action running now, or `"edit"` while an edit saves. */
-  let busy = $state<TaskAction | "edit" | null>(null);
+  /** The action running now, `"edit"` while an edit saves, or `"file"` while the raw file loads or saves. */
+  let busy = $state<TaskAction | "edit" | "file" | null>(null);
   /** The action whose Markdown form is open. */
   let asking = $state<TaskAction | null>(null);
   let text = $state("");
   /** The open form's editor, which takes focus when the form opens. */
   let askEditor = $state<ReturnType<typeof MarkdownEditor>>();
   /** The last failed action and how it failed, shown next to that action. */
-  let failure = $state<{ action: TaskAction | "edit"; failure: ActionFailure } | null>(null);
+  let failure = $state<{ action: TaskAction | "edit" | "file"; failure: ActionFailure } | null>(null);
   /** The tasks the last completion unblocked, by ID. */
   let unblocked = $state<string[] | null>(null);
   let draft = $state<TaskDraft | null>(null);
   /** Why the task did not reload after a saved change. */
   let stale = $state<ActionFailure | null>(null);
+  /**
+   * The raw file editor: the file as loaded, its revision and the edited
+   * text, or `null` while it is closed. Only a source that can save the file
+   * offers it, so the artifact build never shows it.
+   */
+  let file = $state<{ path: string; source: string; revision: string; text: string } | null>(null);
+  const source = dataSource();
+  const canEditFile = source.recordSource !== undefined && source.saveRecordSource !== undefined;
 
   const priorities = PRIORITIES.map((priority) => ({ value: priority, label: priority[0].toUpperCase() + priority.slice(1) }));
 
@@ -90,7 +98,7 @@
   let edit = $derived(draft === null ? {} : editOf(task, draft));
 
   $effect(() => {
-    unsaved = (asking !== null && text.trim() !== "") || Object.keys(edit).length > 0;
+    unsaved = (asking !== null && text.trim() !== "") || Object.keys(edit).length > 0 || (file !== null && file.text !== file.source);
   });
 
   // The menu and the shortcuts run the same `choose` as the buttons.
@@ -106,6 +114,7 @@
         run: () => choose(action),
       })),
       ...(draft === null ? [{ id: "task:edit", label: "Edit", scope: "selection", keys: [EDIT_KEY], icon: "markdown", run: openEdit } satisfies Command] : []),
+      ...(canEditFile && file === null ? [{ id: "task:edit-file", label: "Edit file", scope: "selection", icon: "markdown", run: openFile } satisfies Command] : []),
     ],
   }));
 
@@ -119,8 +128,37 @@
 
   function openEdit() {
     draft = draftOf(task);
+    file = null;
     failure = null;
     unblocked = null;
+  }
+
+  /** Load the task's workspace file into the raw editor, replacing any edit in it. */
+  async function openFile() {
+    if (!source.recordSource || busy !== null) return;
+    draft = null;
+    failure = null;
+    unblocked = null;
+    busy = "file";
+    try {
+      const loaded = await source.recordSource(task.id);
+      file = { path: loaded.path, source: loaded.source, revision: loaded.revision, text: loaded.source };
+    } catch (error) {
+      failure = { action: "file", failure: failureOf(error) };
+    } finally {
+      busy = null;
+    }
+  }
+
+  /** Save the raw file. `arcl` checks it as it checks a workspace file it imports. */
+  function saveFile(event: SubmitEvent) {
+    event.preventDefault();
+    const save = source.saveRecordSource;
+    if (file === null || !save) return;
+    const { text: edited, revision } = file;
+    failure = null;
+    unblocked = null;
+    void perform("file", () => save(task.id, { source: edited, revision }), () => (file = null));
   }
 
   /**
@@ -175,7 +213,7 @@
    * next to `action`; a failed reload after a saved change says so.
    */
   async function perform<T extends { warnings: ChangeWarning[] }>(
-    action: TaskAction | "edit",
+    action: TaskAction | "edit" | "file",
     change: () => Promise<T>,
     done: (result: T) => void,
   ) {
@@ -195,7 +233,7 @@
   }
 </script>
 
-{#snippet failed(action: TaskAction | "edit", what: string)}
+{#snippet failed(action: TaskAction | "edit" | "file", what: string)}
   {#if failure?.action === action}
     <Feedback {...failureNotice(failure.failure, `Could not ${what}`)} />
   {/if}
@@ -254,6 +292,9 @@
         {#if draft === null}
           <Button label="Edit" variant="ghost" disabled={busy !== null} onclick={openEdit} />
         {/if}
+        {#if canEditFile && file === null}
+          <Button label="Edit file" variant="ghost" busy={busy === "file"} disabled={busy !== null} onclick={openFile} />
+        {/if}
       </div>
       {#if asking !== null}
         {@const label = ACTION_TEXT[asking] ?? ""}
@@ -276,6 +317,7 @@
         <Feedback tone="warning" title="The change is saved, but this view did not reload" message={`${stale.message} (${stale.code})`} />
       {/if}
       {#each actions as action (action)}{@render failed(action, `${ACTION_LABELS[action].toLowerCase()} this task`)}{/each}
+      {#if file === null}{@render failed("file", "open the file")}{/if}
       {#if unblocked !== null}
         <div class="notice" role="status" aria-label="Completed">
           <strong>Completed.</strong>
@@ -312,7 +354,27 @@
       {/if}
     </section>
 
-    {#if draft !== null}
+    {#if file !== null}
+      <form class="edit" aria-labelledby="task-file" onsubmit={saveFile}>
+        <div class="section-head">
+          <h2 id="task-file">Edit file</h2>
+          <code class="path">{file.path}</code>
+        </div>
+        <p class="muted">TOML front matter between the <code>+++</code> lines, then the Markdown body. <code>arcl</code> checks the file as it checks a workspace file it imports.</p>
+        <MarkdownEditor value={file.text} label="Record file" frontMatter readonly={false} onchange={(value) => file && (file.text = value)} />
+        <div class="buttons">
+          <Button type="submit" variant="primary" label="Save file" busy={busy === "file"} disabled={busy !== null || file.text === file.source} />
+          <Button label="Cancel" variant="ghost" disabled={busy !== null} onclick={() => ((file = null), (failure = null))} />
+        </div>
+        {#if failure?.action === "file"}
+          <Feedback {...failureNotice(failure.failure, "Could not save the file")}>
+            {#snippet actions()}
+              {#if failure?.failure.code === "conflict"}<Button label="Reload the file" onclick={openFile} />{/if}
+            {/snippet}
+          </Feedback>
+        {/if}
+      </form>
+    {:else if draft !== null}
       <form class="edit" aria-labelledby="task-edit" onsubmit={saveEdit}>
         <h2 id="task-edit">Edit task</h2>
         <Field label="Title" bind:value={draft.title} required />
@@ -434,6 +496,8 @@
   .readiness ul { margin: var(--arcl-space-2) 0 0; padding-inline-start: 1.25rem; }
   .readiness li { color: var(--arcl-text); }
   .kind { margin-inline-start: var(--arcl-space-2); color: var(--arcl-text-muted); font: var(--arcl-type-xs) var(--arcl-font-code); }
+  .path { overflow: hidden; color: var(--arcl-text-muted); font: var(--arcl-type-xs) var(--arcl-font-code); text-overflow: ellipsis; white-space: nowrap; }
+  .edit .muted code { font: var(--arcl-type-xs) var(--arcl-font-code); }
   .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--arcl-space-3); }
   .link-button { padding: 0; border: 0; color: var(--arcl-link); background: none; font: inherit; font-size: var(--arcl-type-sm); cursor: pointer; }
   .link-button:hover { text-decoration: underline; }

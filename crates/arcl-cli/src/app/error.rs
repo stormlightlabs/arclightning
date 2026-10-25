@@ -123,6 +123,8 @@ pub(super) enum CommandError {
     WorkspaceSync(Box<WorkspaceSyncError>),
     #[error(transparent)]
     WorkspaceStatus(Box<WorkspaceStatusError>),
+    #[error(transparent)]
+    RecordEdit(Box<RecordEditError>),
     #[error(
         "the workspace must sync before this change, and the sync stopped: {0}\nRun `arcl workspace status` to see why{hint}",
         hint = .0.resolve_hint()
@@ -191,6 +193,12 @@ impl From<WorkspaceImportError> for CommandError {
     }
 }
 
+impl From<RecordEditError> for CommandError {
+    fn from(error: RecordEditError) -> Self {
+        Self::RecordEdit(Box::new(error))
+    }
+}
+
 impl From<WorkspaceStatusError> for CommandError {
     fn from(error: WorkspaceStatusError) -> Self {
         Self::WorkspaceStatus(Box::new(error))
@@ -215,6 +223,7 @@ impl CommandError {
             Self::WorkspaceImport(error) => error.exit_code(),
             Self::WorkspaceSync(error) => error.exit_code(),
             Self::WorkspaceStatus(_) => 1,
+            Self::RecordEdit(error) => error.exit_code(),
             Self::AutoSync(error) => error.exit_code(),
             Self::ExportSync(error) => error.exit_code(),
             Self::ReadConfig { .. }

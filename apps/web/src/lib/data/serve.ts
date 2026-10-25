@@ -8,6 +8,7 @@ import {
   type Plan,
   type PlanApplied,
   type PromotionTarget,
+  type RecordSource,
   type Spec,
   type Task,
   type TaskCompletion,
@@ -137,12 +138,20 @@ export function serveSource(options: ServeOptions = {}): DataSource {
       return { value: value.plan, warnings };
     },
 
+    recordSource: (id, signal) => get<RecordSource>(`${recordPath(id)}/source`, signal),
+    saveRecordSource: (id, edit) => post<RecordSource>(`${recordPath(id)}/edit`, edit),
+
     async applyPlan(id, document) {
       const { value, warnings } = await post<PlanApplied>(`/api/plans/${encodeURIComponent(id)}/apply`, { document });
       const { plan, phases, tasks } = value;
       return { value: { plan, phases: phases.map(milestoneOf), tasks }, warnings };
     },
   };
+}
+
+/** The API path of one record, with its ID escaped. */
+function recordPath(id: string): string {
+  return `/api/records/${encodeURIComponent(id)}`;
 }
 
 /** The API path of one task, with its ID escaped. */

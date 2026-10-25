@@ -384,6 +384,8 @@ describe("connectArtifact", () => {
       expect([error.code, error.message]).toEqual(["unavailable", OPEN_IN_CLAUDE]);
       await failure(dataSource().discardCapture(CAPTURE));
       expect(dataSource().watch).toBeUndefined();
+      expect(dataSource().recordSource).toBeUndefined();
+      expect(dataSource().saveRecordSource).toBeUndefined();
     }
   });
 
@@ -393,6 +395,9 @@ describe("connectArtifact", () => {
       use: async (name: string) => (name === "db" ? db : { id: async () => "u_person" }),
     } as ArtifactHost;
     expect(await connectArtifact(host)).toBe(true);
+    // The artifact cannot save a record's file, so the raw editor stays hidden.
+    expect(dataSource().recordSource).toBeUndefined();
+    expect(dataSource().saveRecordSource).toBeUndefined();
     expect((await dataSource().captures()).map((capture) => capture.id)).toEqual([CAPTURE]);
     await failure(dataSource().discardCapture(CAPTURE));
     expect([...db.documents].find(([path]) => path.startsWith("queue/"))?.[1]).toMatchObject({ created_by: "u_person" });

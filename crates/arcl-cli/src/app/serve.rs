@@ -15,8 +15,8 @@
 //! `code` and `message` the CLI prints to stderr under `--json`.
 
 use arcl_serve::{
-    CapturePromotion, Completion, Handoff, Mutations, NewCapture, NewPlan, NewSpec, NewTask, PlanInput, Reads, Reply,
-    Server, TaskEdit, TaskStart,
+    CapturePromotion, Completion, Handoff, Mutations, NewCapture, NewPlan, NewSpec, NewTask, PlanInput, Reads,
+    RecordSourceEdit, Reply, Server, TaskEdit, TaskStart,
 };
 
 use super::reads::*;
@@ -62,6 +62,30 @@ impl ServeApp {
             Err(error) => Reply::failure(error.exit_code(), error.json()),
         }
     }
+
+    /// Replace a record's file under the sync lock, between the two syncs a
+    /// write runs. The blocker rule warnings the edit gives join the syncs'.
+    fn edit(&self, id: &str, input: RecordSourceEdit) -> Reply {
+        let edited = synced_write(self.lock_wait, || {
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            let edit = edit_record(&mut database, id, &input.source, &input.revision)
+                .map_err(ApplicationError::from_command)?;
+            let body = self.renderer.render_record_source(&edit.source).map_err(|error| {
+                ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() })
+            })?;
+            Ok((body, edit.warnings))
+        });
+        match edited {
+            Ok(((body, found), mut warnings)) => {
+                warnings.splice(0..0, Warning::blocker_edges(found));
+                let body = with_warnings(body.unwrap_or_default(), &warnings);
+                write_warnings(self.mode, warnings);
+                Reply::success(body)
+            }
+            Err(error) if error.lock_busy() => Reply::busy(error.json()),
+            Err(error) => Reply::failure(error.exit_code(), error.json()),
+        }
+    }
 }
 
 impl Reads for ServeApp {
@@ -74,6 +98,10 @@ impl Reads for ServeApp {
 
     fn show(&self, id: &str) -> Reply {
         reply(read_show(id, &self.renderer))
+    }
+
+    fn source(&self, id: &str) -> Reply {
+        reply(read_source(id, &self.renderer))
     }
 
     fn ready(&self, query: &[(String, String)]) -> Reply {
@@ -221,6 +249,10 @@ impl Mutations for ServeApp {
             let document = parse_plan_document(&input.document).map_err(ApplicationError::from_command)?;
             apply_plan_document(id, &document, &self.renderer)
         })
+    }
+
+    fn edit_record(&self, id: &str, input: RecordSourceEdit) -> Reply {
+        self.edit(id, input)
     }
 }
 

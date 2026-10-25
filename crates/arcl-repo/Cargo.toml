@@ -9,6 +9,7 @@ arcl-store = { path = "../arcl-store" }
 gix.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+sha2 = "0.10"
 toml.workspace = true
 
 [dev-dependencies]
