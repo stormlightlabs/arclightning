@@ -36,13 +36,16 @@
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.2",
     "@codemirror/language": "^6.13.1",
+    "@codemirror/legacy-modes": "^6.5.5",
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.15",
     "@fontsource-variable/google-sans": "catalog:",
     "@fontsource-variable/google-sans-code": "catalog:",
     "@fontsource-variable/ibm-plex-sans": "catalog:",
     "@fontsource-variable/inter": "catalog:",
+    "@lezer/common": "^1.5.4",
     "@lezer/highlight": "^1.2.5",
+    "@lezer/markdown": "^1.8.1",
     "micromark": "^4.0.2",
     "micromark-extension-gfm-task-list-item": "^2.1.0"
   },

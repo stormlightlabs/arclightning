@@ -3580,6 +3580,98 @@ fn serve_mutations_sync_the_workspace() {
 }
 
 #[test]
+fn serve_edits_a_record_file_with_the_import_checks() {
+    let directory = tempdir().expect("temporary directory can be created");
+    let dir = directory.path();
+    run_json(dir, ["--json", "init", "--workspace"].as_ref());
+    let task = create_task(dir, "Raw task", None);
+    let other = create_task(dir, "Other task", None);
+    let file = dir.join(format!(".arcl/workspace/tasks/{task}.md"));
+    let served = Served::start(dir);
+
+    let (status, read) = served.read(&format!("/api/records/{task}/source"));
+    assert_eq!(status, 200, "{read}");
+    let source = read["data"]["source"].as_str().expect("a source").to_owned();
+    let revision = read["data"]["revision"].as_str().expect("a revision").to_owned();
+    assert_eq!(read["data"]["kind"], "task");
+    assert_eq!(read["data"]["path"], format!("tasks/{task}.md"));
+    assert_eq!(source, fs::read_to_string(&file).expect("the record reads"));
+
+    let edit = |source: &str, revision: &str| {
+        served.write(
+            &format!("/api/records/{task}/edit"),
+            &serde_json::json!({ "source": source, "revision": revision }).to_string(),
+        )
+    };
+    let source_file = |path: &Path| fs::read_to_string(path).expect("the record reads");
+    // Each refusal leaves the file as it was.
+    let refused = |input: &str, revision: &str, status: u16, message: &str| {
+        let (got, reply) = edit(input, revision);
+        assert_eq!(got, status, "{reply}");
+        let text = reply["error"]["message"].as_str().expect("a message");
+        assert!(text.contains(message), "{text}");
+        assert_eq!(source_file(&file), source);
+    };
+    refused("+++\ntitle = \n+++\n", &revision, 400, "front matter TOML is invalid");
+    refused(
+        &source.replace(&task, &other),
+        &revision,
+        400,
+        "does not match filename",
+    );
+    refused(
+        &format!("+++\nid = \"{task}\"\ntitle = \"Spec\"\nstatus = \"open\"\nacceptance-criteria = \"x\"\n+++\n"),
+        &revision,
+        400,
+        "unknown field",
+    );
+    refused(
+        &source.replace("priority", &format!("parent = \"{task}\"\npriority")),
+        &revision,
+        400,
+        "workspace file",
+    );
+    refused(&source, "0000", 409, "changed since it was opened");
+
+    let edited = source
+        .replace("title = \"Raw task\"", "title = \"Edited raw\"")
+        .replace("priority = \"normal\"", "priority = \"high\"");
+    let edited = format!("{edited}\nA new body.\n");
+    let (status, saved) = edit(&edited, &revision);
+    assert_eq!(status, 200, "{saved}");
+    assert_eq!(task_field(dir, &task, "title"), "Edited raw");
+    assert_eq!(task_field(dir, &task, "priority"), "high");
+    assert_eq!(task_field(dir, &task, "body"), "A new body.");
+    let on_disk = source_file(&file);
+    assert_eq!(saved["data"]["source"], on_disk.as_str());
+    assert!(on_disk.contains("Edited raw"), "{on_disk}");
+
+    // A change to the file since it was read moves its revision, so an edit
+    // started from the old one is refused and the change stays.
+    let fresh = saved["data"]["revision"].as_str().expect("a revision").to_owned();
+    fs::write(&file, on_disk.replace("Edited raw", "Edited in Git")).expect("the record writes");
+    let (status, stale) = edit(&on_disk.replace("Edited raw", "Lost edit"), &fresh);
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(task_field(dir, &task, "title"), "Edited in Git");
+
+    // A raw edit is a mutation: it needs POST and the served origin.
+    let (status, _) = served.get(
+        &format!("/api/records/{task}/edit"),
+        &[served.host(), format!("X-Arcl-Token: {}", served.token)],
+    );
+    assert_eq!(status, 405);
+    let (status, _) = served.send(
+        "POST",
+        &format!("/api/records/{task}/edit"),
+        &[served.host(), format!("X-Arcl-Token: {}", served.token)],
+        r#"{"source":"","revision":""}"#,
+    );
+    assert_eq!(status, 403);
+    let (status, missing) = served.read("/api/records/arcl-t-01M5STHSRRT2ADFN3Y9YAC2N7A/source");
+    assert_eq!((status, &missing["error"]["code"]), (404, &Value::from("not_found")));
+}
+
+#[test]
 fn serve_mutations_give_up_on_a_held_sync_lock_while_reads_go_on() {
     use std::time::{Duration, Instant};
 

@@ -61,3 +61,13 @@ pub(super) fn read_tree(root: Option<&str>, renderer: &Renderer) -> anyhow::Resu
     let nodes = connected_tree(&graph, root).map_err(ApplicationError::from_command)?;
     Ok(renderer.render_connected_tree(&nodes)?)
 }
+
+/// The workspace file of the record `id`, for the web app's raw editor.
+pub(super) fn read_source(id: &str, renderer: &Renderer) -> anyhow::Result<Option<String>> {
+    let database = open_database().map_err(ApplicationError::from_command)?;
+    let graph = database.connected_graph().map_err(ApplicationError::from_command)?;
+    let source = record_source(&graph, id)
+        .map_err(ApplicationError::from_command)?
+        .ok_or_else(|| ApplicationError::from_command(RecordEditError::NotFound { id: id.to_owned() }))?;
+    Ok(renderer.render_record_source(&source)?)
+}

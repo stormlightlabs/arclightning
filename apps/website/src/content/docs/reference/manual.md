@@ -228,6 +228,7 @@ closes after the reply. It keeps at most
 | ---------------------------------- | ------------------------ |
 | `GET /api/records`                 | `arcl list`              |
 | `GET /api/records/<id>`            | `arcl show <id>`         |
+| `GET /api/records/<id>/source`     | none (see below)         |
 | `GET /api/ready`                   | `arcl ready`             |
 | `GET /api/tasks/<id>/explain`      | `arcl explain <task-id>` |
 | `GET /api/tasks/<id>/context`      | `arcl context <task-id>` |
@@ -246,6 +247,7 @@ closes after the reply. It keeps at most
 | `POST /api/specs`                  | `arcl spec create`       |
 | `POST /api/plans`                  | `arcl plan create`       |
 | `POST /api/plans/<id>/apply`       | `arcl plan apply`        |
+| `POST /api/records/<id>/edit`      | none (see below)         |
 
 `/api/records` and `/api/ready` take the command's flags as query parameters,
 such as `?kind=task&status=pending&status=parked`. `/api/tree` takes none and
@@ -270,10 +272,26 @@ with `_` for `-`:
 | `specs`    | `title` (required), `body`, `acceptance_criteria`                                       |
 | `plans`    | `title` (required), `spec` (required), `body`                                           |
 | `apply`    | `document` (required)                                                                   |
+| `edit`     | `source` (required), `revision` (required)                                              |
 
 `blocked_by` is a list of task IDs. `to` is `task`, `spec` or `note`, and
 `promote` uses the capture's title and body for any it leaves out. `document`
 is the plan's TOML, as `arcl plan apply --file` reads it.
+
+`/api/records/<id>/source` returns the record's workspace file, the bytes
+`arcl workspace export` writes for it, as
+`{"format_version": 1, "data": {"id", "kind", "path", "source", "revision"}}`.
+`path` is the file's place in the workspace, such as `tasks/<id>.md`, and
+`revision` is the lowercase hex SHA-256 of `source`. `edit` replaces the
+record with `source`, a whole file, and answers with the saved file in the
+same shape. It checks the file as `arcl workspace import` checks one: the TOML
+must parse, the fields must fit the record's kind, the ID must match the
+record, and every relationship and blocker rule must hold for the whole
+graph. The record ID in the path is the only file the request names. When the
+file's revision is no longer `revision`, such as after an edit in Git or
+another change, the edit fails with `conflict`, status 409. A refused edit
+changes nothing. A saved edit reaches the workspace file through the sync
+after the change.
 
 `park`, `unpark` and `discard` take an empty body or `{}`. An unknown option, a body that
 is not JSON, or a body over 1 MiB is refused. A request whose
@@ -305,6 +323,29 @@ while the list loads is left out; any other failed read shows an error with a
 Retry button. **New task** opens a form for the title, priority and
 description, creates the task with `arcl task create`, and opens it.
 
+**List** and **Board** beside the title, or `v`, switch the layout. The
+choice is remembered in this browser, and the URL names the board as
+`?view=board`. The board has a column for each status: Pending, In progress,
+Parked, Completed and Cancelled. Its cards show the task's ID, title,
+readiness glyph and priority, link to the Task view, and follow the filters.
+A long column scrolls inside itself, and a narrow window scrolls the board
+sideways. Dragging a card to another column runs the command that makes that
+move:
+
+| From                 | To          | Runs                 |
+| -------------------- | ----------- | -------------------- |
+| Pending              | In progress | `arcl task start`    |
+| Pending, In progress | Parked      | `arcl task park`     |
+| Parked               | Pending     | `arcl task unpark`   |
+| Pending, In progress | Completed   | `arcl task complete` |
+
+A move to Completed first asks for optional evidence. No command cancels a
+task or reopens a closed one, so any other drop is refused with a message
+and the card stays in its column. A card moves once its command succeeds; a
+refused change shows the CLI's message. Each card's **Move** button, or `m`
+on the selected card, opens a dialog with the moves it allows, so the
+keyboard reaches every move.
+
 The Task view shows what `arcl show <task-id>` returns: why the task is not
 ready, its direct blockers, the blockers it inherits from each ancestor, its
 subtasks, the tasks it unblocks, the latest handoff and the evidence. Each
@@ -326,6 +367,13 @@ validation applies. A refused change shows the CLI's message and error code
 next to its button. A saved change whose sync or export warned shows the
 warnings in a notice. After a change the view reloads the task, and after a
 completion it lists the tasks the completion made ready.
+
+**Edit file** opens the task's whole workspace file in an editor, with the
+TOML front matter between the `+++` lines highlighted as TOML and the body as
+Markdown. **Save file** sends it to `POST /api/records/<id>/edit`, so the
+file passes the checks `arcl workspace import` runs. A refused file shows the
+CLI's message and keeps the edit open; when the file changed since it was
+opened, **Reload the file** loads the new version in place of the edit.
 
 The Inbox lists the captures not yet promoted or discarded, oldest first, and
 shows the selected one's body. `j` and `k` move the selection. **Promote to
@@ -378,6 +426,8 @@ Hand off open the Task view with their form.
 | `p`           | Park the selected task                        |
 | `u`           | Unpark the selected task                      |
 | `e`           | Edit the task, in the Task view               |
+| `v`           | Switch between list and board, in Work        |
+| `m`           | Move the selected card, on the board          |
 | `j` `k`       | Select the next or previous task, in Work     |
 | `Enter`       | Open the selected task, in Work               |
 | `]`           | Collapse or expand properties, in a task      |
@@ -510,7 +560,10 @@ record:
 `create_plan` or `apply_plan`. `target` is the record ID for those that name
 one and `null` otherwise. `input` holds the options of the matching
 `arcl serve` POST endpoint. The page says the edit is queued, keeps showing
-the records as they are, and lists the queued edits above each view.
+the records as they are, and lists the queued edits above each view. A board
+move queues the same way, and its card stays put until the edit applies. The
+queue has no operation for a raw record edit, so the artifact hides **Edit
+file**.
 
 `arcl web apply <file>` reads a JSON array of queue entries, each the
 document's fields plus its `id`, from a file or `-` for standard input. It

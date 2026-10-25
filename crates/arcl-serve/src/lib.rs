@@ -46,6 +46,7 @@
 //! | -------------------------------- | ------------------------ |
 //! | `GET /api/records`               | `arcl list`              |
 //! | `GET /api/records/{id}`          | `arcl show <id>`         |
+//! | `GET /api/records/{id}/source`   | none; see below          |
 //! | `GET /api/ready`                 | `arcl ready`             |
 //! | `GET /api/tasks/{id}/explain`    | `arcl explain <task-id>` |
 //! | `GET /api/tasks/{id}/context`    | `arcl context <task-id>` |
@@ -64,6 +65,7 @@
 //! | `POST /api/specs`                | `arcl spec create`       |
 //! | `POST /api/plans`                | `arcl plan create`       |
 //! | `POST /api/plans/{id}/apply`     | `arcl plan apply`        |
+//! | `POST /api/records/{id}/edit`    | none; see below          |
 //!
 //! `/api/records` and `/api/ready` take the CLI's filter flags as query
 //! parameters, such as `?kind=task&status=pending&status=parked`.
@@ -76,6 +78,13 @@
 //! every phase, as `{"format_version": 2, "data": {"tasks": [{"task",
 //! "readiness", "phase_id"}], "phases": [...]}}`. It takes no query
 //! parameters.
+//!
+//! `/api/records/{id}/source` answers the record's workspace file, the bytes
+//! a workspace export writes, with a `revision` naming them. `POST
+//! /api/records/{id}/edit` takes `{"source", "revision"}` (see
+//! [`RecordSourceEdit`]) and replaces the record with the file when its
+//! revision still matches, after the checks a workspace import runs on a
+//! file. The record's ID is the only path the client names.
 //!
 //! A mutation takes a JSON object of the command's options, such as
 //! `{"evidence": "Delivered by #41."}`; see [`NewTask`], [`TaskEdit`],
@@ -101,8 +110,8 @@ pub use answer::Reply;
 pub use gate::{TOKEN_HEADER, TOKEN_QUERY};
 pub use limits::{BODY_DEADLINE, HEADER_DEADLINE, MAX_CONNECTIONS, MIN_WRITE_RATE, SHUTDOWN_GRACE, WRITE_DEADLINE};
 pub use mutations::{
-    CapturePromotion, Completion, Handoff, Mutations, NewCapture, NewPlan, NewSpec, NewTask, PlanInput, TaskEdit,
-    TaskStart, apply, operations,
+    CapturePromotion, Completion, Handoff, Mutations, NewCapture, NewPlan, NewSpec, NewTask, PlanInput,
+    RecordSourceEdit, TaskEdit, TaskStart, apply, operations,
 };
 pub use routes::Reads;
 pub use server::{ServeError, Server};

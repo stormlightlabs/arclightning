@@ -276,6 +276,28 @@ export interface Planning {
 }
 
 /**
+ * A record's workspace file, as `GET /api/records/{id}/source` returns it:
+ * the bytes a workspace export writes for the record.
+ */
+export interface RecordSource {
+  id: string;
+  /** The record kind, such as `task`. */
+  kind: string;
+  /** The file's path in the workspace, such as `tasks/<id>.md`. */
+  path: string;
+  /** TOML front matter between `+++` lines, then the Markdown body. */
+  source: string;
+  /** Names the file's content; a save from an older revision is refused. */
+  revision: string;
+}
+
+/** A raw record edit: the whole file, and the revision it was edited from. */
+export interface RecordSourceEdit {
+  source: string;
+  revision: string;
+}
+
+/**
  * A warning from the workspace sync around a saved change, as the CLI
  * prints it under `--json`: `blocker_edge`, or `workspace_sync` when the
  * export after the change failed.
@@ -339,6 +361,17 @@ export interface DataSource {
   createPlan(input: NewPlan): Promise<Changed<Plan>>;
   /** `arcl plan apply <id>`, with `document` as the TOML `--file` holds. */
   applyPlan(id: string, document: string): Promise<Changed<PlanApplied>>;
+  /**
+   * The workspace file of record `id`. Only a backend that can save it, as
+   * `arcl serve` does, has it; the views hide the raw editor otherwise.
+   */
+  recordSource?(id: string, signal?: AbortSignal): Promise<RecordSource>;
+  /**
+   * Replace record `id` with `edit.source`, checked as `arcl` checks a
+   * workspace file on import, when the file still has `edit.revision`.
+   * Answers with the saved file.
+   */
+  saveRecordSource?(id: string, edit: RecordSourceEdit): Promise<Changed<RecordSource>>;
   /**
    * Follow the last sync and the edits waiting for the next. Only a backend
    * that queues changes for an agent to apply, such as a claude.ai

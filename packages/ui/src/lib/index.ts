@@ -53,6 +53,7 @@ export type { TaskGroupHeaderProps } from "./components/TaskGroupHeader.svelte";
 export type { TaskListProps } from "./components/TaskList.svelte";
 export type { TaskRowProps } from "./components/TaskRow.svelte";
 export { formatGlyph, formatStatus } from "./labels";
+export { frontMatter, recordFile } from "./record-file";
 export type {
   PlanningRecordKind,
   PlanningRecordSummary,

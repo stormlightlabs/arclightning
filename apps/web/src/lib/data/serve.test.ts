@@ -45,6 +45,30 @@ function hangingFetch() {
 }
 
 describe("serveSource", () => {
+  it("reads a record's file and saves an edit with its revision", async () => {
+    const file = { id: "t 1", kind: "task", path: "tasks/t 1.md", source: "+++\n+++\n", revision: "r1" };
+    const { fetch, calls } = fakeFetch({
+      "/api/records/t%201/source": { body: { format_version: 1, data: file } },
+      "/api/records/t%201/edit": { body: { format_version: 1, data: { ...file, revision: "r2" }, warnings: [{ code: "blocker_edge", message: "m" }] } },
+    });
+    const source = serveSource({ fetch, headers: () => ({ "X-Arcl-Token": "abc" }) });
+
+    expect(await source.recordSource?.("t 1")).toEqual(file);
+    const saved = await source.saveRecordSource?.("t 1", { source: "+++\n+++\nBody\n", revision: "r1" });
+
+    expect(saved).toEqual({ value: { ...file, revision: "r2" }, warnings: [{ code: "blocker_edge", message: "m" }] });
+    expect(calls[1]).toMatchObject({ method: "POST", body: { source: "+++\n+++\nBody\n", revision: "r1" } });
+  });
+
+  it("fails a refused edit with the CLI's error", async () => {
+    const { fetch } = fakeFetch({
+      "/api/records/t-1/edit": { status: 409, body: { format_version: 1, error: { code: "conflict", message: "changed since it was opened", exit_code: 4 } } },
+    });
+    const error = await serveSource({ fetch, headers: () => ({}) }).saveRecordSource?.("t-1", { source: "", revision: "r" }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(DataError);
+    expect([(error as DataError).code, (error as DataError).message]).toEqual(["conflict", "changed since it was opened"]);
+  });
+
   it("builds the Work list from one request, with the token on it", async () => {
     const { fetch, calls } = fakeFetch({
       "/api/work": {

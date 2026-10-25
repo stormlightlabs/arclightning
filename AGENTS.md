@@ -8,6 +8,9 @@
   the user's voice. Describe the current product directly instead of framing it
   against earlier versions.
 - Linting must clear even if warnings are unrelated.
+- Give new arcl tasks plain titles that name the outcome, with no `T##:`
+  prefix, and refer to tasks in prose by title, adding the arcl ID where it
+  helps. Existing T-numbered tasks keep their titles.
 - Disk is limited. After you address review changes, run `cargo clean` (or delete
   your own `CARGO_TARGET_DIR`) so build output doesn't fill it.
 

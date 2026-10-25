@@ -10,6 +10,8 @@ pub(crate) enum Route {
     List(Vec<(String, String)>),
     /// `arcl show <id>`.
     Show(String),
+    /// The workspace file of the record with this ID.
+    Source(String),
     /// `arcl ready` with these filters.
     Ready(Vec<(String, String)>),
     /// `arcl explain <task-id>`.
@@ -60,6 +62,8 @@ pub(crate) enum Write {
     CreatePlan,
     /// `arcl plan apply <id>`.
     ApplyPlan(String),
+    /// Replace the workspace file of the record with this ID.
+    EditRecord(String),
 }
 
 /// The application's read operations, each answering with the CLI's JSON
@@ -69,6 +73,11 @@ pub trait Reads {
     fn list(&self, query: &[(String, String)]) -> Reply;
     /// `arcl show <id>`.
     fn show(&self, id: &str) -> Reply;
+    /// The workspace file of the record `id`, as `{"format_version": 1,
+    /// "data": {"id", "kind", "path", "source", "revision"}}`. `source` is the
+    /// file a workspace export writes for the record, and `revision` names
+    /// its content for [`Mutations::edit_record`](crate::Mutations::edit_record).
+    fn source(&self, id: &str) -> Reply;
     /// `arcl ready`, with the filter flags as `(name, value)` pairs.
     fn ready(&self, query: &[(String, String)]) -> Reply;
     /// `arcl explain <task-id>`.
@@ -87,6 +96,7 @@ pub(crate) fn dispatch(route: Route, reads: &dyn Reads) -> Answer {
     match route {
         Route::List(query) => Answer::json(reads.list(&query)),
         Route::Show(id) => Answer::json(reads.show(&id)),
+        Route::Source(id) => Answer::json(reads.source(&id)),
         Route::Ready(query) => Answer::json(reads.ready(&query)),
         Route::Explain(id) => Answer::json(reads.explain(&id)),
         Route::Context(id) => Answer::json(reads.context(&id)),
@@ -149,6 +159,8 @@ pub(crate) fn route(path: &str, query: Vec<(String, String)>) -> Route {
     match segments.as_slice() {
         ["api", "records"] => Route::List(query),
         ["api", "records", id] if !id.is_empty() => Route::Show((*id).to_owned()),
+        ["api", "records", id, "source"] if !id.is_empty() => Route::Source((*id).to_owned()),
+        ["api", "records", id, "edit"] if !id.is_empty() => Route::Write(Write::EditRecord((*id).to_owned())),
         ["api", "ready"] => Route::Ready(query),
         ["api", "tasks", id, "explain"] if !id.is_empty() => Route::Explain((*id).to_owned()),
         ["api", "tasks", id, "context"] if !id.is_empty() => Route::Context((*id).to_owned()),

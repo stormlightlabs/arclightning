@@ -77,16 +77,16 @@ describe("TaskDetail", () => {
     expect(slice(body, 'id="task-unblocks"', "</section>")).toContain('href="/tasks/t-10.5"');
   });
 
-  it("offers the actions the task's status allows, with Edit", () => {
+  it("offers the actions the task's status allows, with Edit and, under arcl serve, Edit file", () => {
     const buttons = (status: "pending" | "in_progress" | "parked" | "completed") => {
       const detail = blockedDetail();
       detail.task.status = status;
       return [...slice(show({}, detail), 'aria-label="Task actions"', "</div>").matchAll(/<button[^>]*>\s*<span>([^<]*)<\/span>/g)].map((match) => match[1].trim());
     };
-    expect(buttons("pending")).toEqual(["Start", "Park", "Edit"]);
-    expect(buttons("in_progress")).toEqual(["Complete", "Hand off", "Park", "Edit"]);
-    expect(buttons("parked")).toEqual(["Unpark", "Edit"]);
-    expect(buttons("completed")).toEqual(["Edit"]);
+    expect(buttons("pending")).toEqual(["Start", "Park", "Edit", "Edit file"]);
+    expect(buttons("in_progress")).toEqual(["Complete", "Hand off", "Park", "Edit", "Edit file"]);
+    expect(buttons("parked")).toEqual(["Unpark", "Edit", "Edit file"]);
+    expect(buttons("completed")).toEqual(["Edit", "Edit file"]);
   });
 
   it("marks Complete and Hand off as opening a Markdown form", () => {

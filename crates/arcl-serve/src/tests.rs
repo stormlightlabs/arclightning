@@ -30,6 +30,9 @@ impl Reads for Echo {
     fn show(&self, id: &str) -> Reply {
         Reply::success(format!("show {id}"))
     }
+    fn source(&self, id: &str) -> Reply {
+        Reply::success(format!("source {id}"))
+    }
     fn ready(&self, query: &[(String, String)]) -> Reply {
         Reply::success(format!("ready {query:?}"))
     }
@@ -86,6 +89,12 @@ impl Mutations for Echo {
     }
     fn apply_plan(&self, id: &str, input: PlanInput) -> Reply {
         Reply::success(format!("apply {id} {input:?}"))
+    }
+    fn edit_record(&self, id: &str, input: RecordSourceEdit) -> Reply {
+        if input.revision == "stale" {
+            return Reply::failure(4, format!("stale {id}"));
+        }
+        Reply::success(format!("edit {id} {input:?}"))
     }
 }
 
@@ -324,6 +333,7 @@ fn serve_answers_mutations_only_on_post() {
         "/api/specs",
         "/api/plans",
         "/api/plans/arcl-pl-1/apply",
+        "/api/records/arcl-t-1/edit",
     ] {
         for method in ["GET", "PUT", "DELETE", "OPTIONS"] {
             let incoming = Incoming { method: method.to_owned(), ..post(url) };
@@ -349,6 +359,7 @@ fn serve_mutations_need_the_served_origin() {
             "/api/captures",
             "/api/captures/arcl-c-1/discard",
             "/api/specs",
+            "/api/records/arcl-t-1/edit",
         ] {
             let incoming = Incoming { origin: origin.map(str::to_owned), ..post(url) };
             let answer = answered_with(&gate(), &incoming, br#"{"title":"T"}"#);
@@ -470,6 +481,41 @@ fn serve_routes_the_planning_mutations() {
 }
 
 #[test]
+fn serve_routes_record_edits_by_id_only() {
+    let routed = |url: &str, body: &str| text(answered_with(&gate(), &post(url), body.as_bytes()));
+    assert_eq!(
+        routed("/api/records/arcl-t-1/edit", r#"{"source":"+++\n","revision":"r1"}"#),
+        (
+            200,
+            r#"edit arcl-t-1 RecordSourceEdit { source: "+++\n", revision: "r1" }"#.to_owned()
+        )
+    );
+    assert_eq!(
+        routed("/api/records/arcl-t-1/edit", r#"{"source":"","revision":"stale"}"#),
+        (409, "stale arcl-t-1".to_owned())
+    );
+    // The source is a read, so a POST to it is refused.
+    let answer = answered_with(&gate(), &post("/api/records/arcl-t-1/source"), b"{}");
+    assert_eq!(answer.status, 405);
+    // A raw edit is not an operation a queued change can name.
+    assert_eq!(apply("edit_record", Some("arcl-t-1"), b"{}", &Echo).status(), 400);
+}
+
+#[test]
+fn serve_refuses_a_record_edit_over_the_body_limit() {
+    let (port, token) = serve(BODY_DEADLINE);
+    // The declared length is enough: the server refuses before it reads the body.
+    let head = format!(
+        "POST /api/records/arcl-t-1/edit HTTP/1.1\r\n{TOKEN_HEADER}: {token}\r\nOrigin: http://127.0.0.1:{port}\r\nContent-Length: {}",
+        MAX_BODY_BYTES + 1
+    );
+    let refused = response(send(port, &head, "\r\n{\"source\":\""));
+    assert!(refused.starts_with("HTTP/1.1 413"), "{refused}");
+    assert!(refused.contains("payload_too_large"), "{refused}");
+    assert!(authorized_get(port, &token).starts_with("HTTP/1.1 200"));
+}
+
+#[test]
 fn serve_refuses_malformed_mutation_bodies() {
     let with_body = |url: &str, body: &[u8]| answered_with(&gate(), &post(url), body);
     for (url, body) in [
@@ -494,6 +540,13 @@ fn serve_refuses_malformed_mutation_bodies() {
         ),
         ("/api/plans/arcl-pl-1/apply", br#"{"file":"/etc/passwd"}"#),
         ("/api/plans/arcl-pl-1/apply", b""),
+        ("/api/records/arcl-t-1/edit", b""),
+        ("/api/records/arcl-t-1/edit", br#"{"source":"+++"}"#),
+        ("/api/records/arcl-t-1/edit", br#"{"revision":"r"}"#),
+        (
+            "/api/records/arcl-t-1/edit",
+            br#"{"source":"+++","revision":"r","path":"/etc/passwd"}"#,
+        ),
     ] {
         let refused = with_body(url, body);
         assert_eq!(refused.status, 400, "{url} {body:?}");
@@ -602,6 +655,11 @@ fn serve_routes_the_read_endpoints() {
         )
     );
     assert_eq!(body("/api/records/arcl-t-1"), (200, "show arcl-t-1".to_owned()));
+    assert_eq!(
+        body("/api/records/arcl-t-1/source"),
+        (200, "source arcl-t-1".to_owned())
+    );
+    assert_eq!(body("/api/records/arcl-t-1/other").0, 404);
     assert_eq!(
         body("/api/ready?priority=high"),
         (200, r#"ready [("priority", "high")]"#.to_owned())
@@ -1064,6 +1122,9 @@ impl Mutations for Held {
     }
     fn apply_plan(&self, id: &str, input: PlanInput) -> Reply {
         Echo.apply_plan(id, input)
+    }
+    fn edit_record(&self, id: &str, input: RecordSourceEdit) -> Reply {
+        Echo.edit_record(id, input)
     }
 }
 
