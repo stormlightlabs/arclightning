@@ -213,8 +213,10 @@ images from other hosts. The server runs until Ctrl-C, then gives open
 requests up to 5 seconds to finish and exits.
 
 The server closes a connection that takes more than 5 seconds to send a request
-head, or idles that long between requests. It keeps at most 128 connections
-open; a new one waits to be accepted until another closes.
+head, idles that long between requests, or leaves a reply unread for 5 seconds.
+A request it refuses for a bad `Host` or token, or for a body over 1 MiB, gets
+`Connection: close` and the connection closes after the reply. It keeps at most
+128 connections open; a new one waits to be accepted until another closes.
 
 | Endpoint                           | Same JSON as             |
 | ---------------------------------- | ------------------------ |

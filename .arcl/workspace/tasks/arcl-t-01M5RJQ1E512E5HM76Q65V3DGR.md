@@ -16,16 +16,16 @@ timeouts.
 
 Acceptance criteria:
 
-- [ ] A declared `Content-Length` over 1 MiB gets 413 before any of the body
+- [x] A declared `Content-Length` over 1 MiB gets 413 before any of the body
       is read, with or without the token, and the server keeps serving
-- [ ] A body that stalls gets 408 after 5 seconds while reads stay fast
-- [ ] Stalled connections do not hold up a new authorized GET; header reads
+- [x] A body that stalls gets 408 after 5 seconds while reads stay fast
+- [x] Stalled connections do not hold up a new authorized GET; header reads
       time out and connections are capped
-- [ ] Ctrl-C shuts the server down gracefully
-- [ ] Token, Host, method and Origin checks, CSP, status mapping and the
+- [x] Ctrl-C shuts the server down gracefully
+- [x] Token, Host, method and Origin checks, CSP, status mapping and the
       one-at-a-time mutation worker behave as before; `Reads` and `Mutations`
       stay sync
-- [ ] The manual's Web app section and the module docs describe the limits
+- [x] The manual's Web app section and the module docs describe the limits
 
 Verification:
 

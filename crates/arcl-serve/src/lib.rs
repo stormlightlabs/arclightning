@@ -20,7 +20,10 @@
 //! body over 1 MiB gets 413 before any check, and its body is never read. A
 //! mutation's body that does not arrive within [`BODY_DEADLINE`] gets 408. A
 //! connection that does not send a request head within [`HEADER_DEADLINE`] is
-//! closed, idle keep-alive connections included, and at most
+//! closed, idle keep-alive connections included, as is one whose replies wait
+//! [`WRITE_DEADLINE`] for the client to read them. A refusal before the token
+//! is accepted (a bad `Host` or token, a bad request target, or 413) carries
+//! `Connection: close` and closes the connection. At most
 //! [`MAX_CONNECTIONS`] are open at once; past that, new connections wait to
 //! be accepted.
 //!
@@ -80,9 +83,10 @@ use std::future::Future;
 use std::io;
 use std::net::{Ipv4Addr, TcpListener};
 use std::panic::{self, AssertUnwindSafe};
-use std::pin::pin;
+use std::pin::{Pin, pin};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, mpsc};
+use std::task::{Context, Poll};
 use std::thread;
 use std::time::Duration;
 
@@ -101,7 +105,9 @@ use hyper_util::service::TowerToHyperService;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::sync::{Semaphore, oneshot};
+use tokio::time::Sleep;
 
 include!(concat!(env!("OUT_DIR"), "/assets.rs"));
 
@@ -119,6 +125,11 @@ pub const BODY_DEADLINE: Duration = Duration::from_secs(5);
 /// the server starts waiting for one. A connection that idles longer between
 /// requests is closed too.
 pub const HEADER_DEADLINE: Duration = Duration::from_secs(5);
+
+/// How long a write to a client may wait without progress before the server
+/// closes the connection, so a client that never reads its replies cannot
+/// hold a connection open.
+pub const WRITE_DEADLINE: Duration = Duration::from_secs(5);
 
 /// The most connections open at once. Past it, new connections wait in the
 /// listen queue until one closes.
@@ -532,7 +543,7 @@ impl Server {
         thread::scope(|scope| {
             scope.spawn(move || {
                 for Job { work: (write, body), reply } in write_jobs {
-                    let answer = guarded(|| Answer::json(mutate(write, Some(&body), mutations)));
+                    let answer = guarded(|| Answer::json(mutate(write, &body, mutations)));
                     // The client may have gone; the mutation ran either way.
                     let _ = reply.send(answer);
                 }
@@ -562,11 +573,13 @@ struct Limits {
     header: Duration,
     /// The most connections open at once.
     connections: usize,
+    /// How long a write to the client may wait without progress.
+    write: Duration,
 }
 
 impl Default for Limits {
     fn default() -> Self {
-        Self { body: BODY_DEADLINE, header: HEADER_DEADLINE, connections: MAX_CONNECTIONS }
+        Self { body: BODY_DEADLINE, header: HEADER_DEADLINE, connections: MAX_CONNECTIONS, write: WRITE_DEADLINE }
     }
 }
 
@@ -629,6 +642,9 @@ struct Answer {
     retry_after: Option<&'static str>,
     /// The Content-Security-Policy header's value.
     csp: &'static str,
+    /// Whether to send `Connection: close` and close the connection after
+    /// this response.
+    close: bool,
 }
 
 impl Answer {
@@ -648,6 +664,9 @@ impl Answer {
         if let Some(seconds) = self.retry_after {
             headers.push(("Retry-After", seconds));
         }
+        if self.close {
+            headers.push(("Connection", "close"));
+        }
         headers
     }
 
@@ -659,7 +678,15 @@ impl Answer {
             allow: None,
             retry_after: reply.retry.then_some(RETRY_AFTER_SECONDS),
             csp: API_CSP,
+            close: false,
         }
+    }
+
+    /// The answer to a request refused before its token was accepted, which
+    /// closes the connection so a client without the token gets one reply
+    /// per connection.
+    fn closing(reply: Reply) -> Self {
+        Self { close: true, ..Self::json(reply) }
     }
 }
 
@@ -677,6 +704,74 @@ impl IntoResponse for Answer {
     }
 }
 
+/// A connection whose writes fail with [`io::ErrorKind::TimedOut`] once one
+/// has waited `limit` without progress, so a client that stops reading its
+/// replies loses its connection instead of holding it open.
+struct WriteDeadline<T> {
+    inner: T,
+    limit: Duration,
+    /// Runs while a write waits; any progress clears it.
+    stall: Option<Pin<Box<Sleep>>>,
+}
+
+impl<T> WriteDeadline<T> {
+    fn new(inner: T, limit: Duration) -> Self {
+        Self { inner, limit, stall: None }
+    }
+
+    /// Clear the timer when `poll` made progress, start it when `poll` waits,
+    /// and fail once it has run out.
+    fn timed<R>(&mut self, cx: &mut Context<'_>, poll: Poll<io::Result<R>>) -> Poll<io::Result<R>> {
+        if poll.is_ready() {
+            self.stall = None;
+            return poll;
+        }
+        let limit = self.limit;
+        let stall = self.stall.get_or_insert_with(|| Box::pin(tokio::time::sleep(limit)));
+        match stall.as_mut().poll(cx) {
+            Poll::Ready(()) => Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "the client stopped reading",
+            ))),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl<T: AsyncRead + Unpin> AsyncRead for WriteDeadline<T> {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_read(cx, buf)
+    }
+}
+
+impl<T: AsyncWrite + Unpin> AsyncWrite for WriteDeadline<T> {
+    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
+        let poll = Pin::new(&mut self.inner).poll_write(cx, buf);
+        self.timed(cx, poll)
+    }
+
+    fn poll_write_vectored(
+        mut self: Pin<&mut Self>, cx: &mut Context<'_>, bufs: &[io::IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        let poll = Pin::new(&mut self.inner).poll_write_vectored(cx, bufs);
+        self.timed(cx, poll)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.inner.is_write_vectored()
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        let poll = Pin::new(&mut self.inner).poll_flush(cx);
+        self.timed(cx, poll)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        let poll = Pin::new(&mut self.inner).poll_shutdown(cx);
+        self.timed(cx, poll)
+    }
+}
+
 /// The checks every request passes before it is routed.
 struct Gate {
     token: String,
@@ -691,23 +786,29 @@ impl Gate {
     }
 
     /// Check the head of `incoming` and route it, or answer with the refusal.
-    /// The body plays no part, so a refused request is never read.
+    /// The body plays no part, so a refused request is never read. A refusal
+    /// before the token is accepted closes the connection.
     fn admit(&self, incoming: &Incoming) -> Result<Route, Answer> {
         let (path, query) =
-            split_url(&incoming.url).map_err(|message| Answer::json(Reply::invalid_request(&message)))?;
+            split_url(&incoming.url).map_err(|message| Answer::closing(Reply::invalid_request(&message)))?;
         let query_token = token_in(&query);
         let route = route(&path, query);
-        if let Err(reply) = self.check(incoming, &route, query_token.as_deref()) {
+        if self
+            .authorize(incoming, &route, query_token.as_deref())
+            .map_err(Answer::closing)?
+        {
+            return Ok(route);
+        }
+        if let Err(reply) = Self::permit(incoming, &route) {
             let allow = (reply.status == 405).then_some(if matches!(route, Route::Write(_)) { "POST" } else { "GET" });
             return Err(Answer { allow, ..Answer::json(reply) });
         }
         Ok(route)
     }
 
-    /// Refuse a request with the wrong `Host`, without the token, with the
-    /// wrong method for its route, or a mutation whose `Origin` is missing or
-    /// does not name the `Host`.
-    fn check(&self, incoming: &Incoming, route: &Route, query_token: Option<&str>) -> Result<(), Reply> {
+    /// Refuse a request with the wrong `Host` or without the token. Answers
+    /// `true` for the first page load, which needs no further checks.
+    fn authorize(&self, incoming: &Incoming, route: &Route, query_token: Option<&str>) -> Result<bool, Reply> {
         let host_matches = incoming.host.as_deref().is_some_and(|host| {
             [format!("127.0.0.1:{}", self.port), format!("localhost:{}", self.port)]
                 .iter()
@@ -725,7 +826,7 @@ impl Gate {
             let first_load = matches!(route, Route::Page) && incoming.method == "GET";
             // `swap` claims the first load, so two racing loads cannot both have it.
             if first_load && same_token(given, &self.token) && !self.first_load_used.swap(true, Ordering::SeqCst) {
-                return Ok(());
+                return Ok(true);
             }
             return Err(Reply::refusal(
                 401,
@@ -735,23 +836,23 @@ impl Gate {
         }
 
         match incoming.token.as_deref() {
-            None => {
-                return Err(Reply::refusal(
-                    401,
-                    "unauthorized",
-                    &format!("the {TOKEN_HEADER} header is missing"),
-                ));
-            }
-            Some(given) if !same_token(given, &self.token) => {
-                return Err(Reply::refusal(
-                    401,
-                    "unauthorized",
-                    &format!("the {TOKEN_HEADER} header is wrong"),
-                ));
-            }
-            Some(_) => {}
+            None => Err(Reply::refusal(
+                401,
+                "unauthorized",
+                &format!("the {TOKEN_HEADER} header is missing"),
+            )),
+            Some(given) if !same_token(given, &self.token) => Err(Reply::refusal(
+                401,
+                "unauthorized",
+                &format!("the {TOKEN_HEADER} header is wrong"),
+            )),
+            Some(_) => Ok(false),
         }
+    }
 
+    /// Refuse a request with the wrong method for its route, or a mutation
+    /// whose `Origin` is missing or does not name the `Host`.
+    fn permit(incoming: &Incoming, route: &Route) -> Result<(), Reply> {
         let writes = matches!(route, Route::Write(_));
         match (writes, incoming.method.as_str()) {
             // A path with no endpoint answers 404 to any method.
@@ -759,7 +860,7 @@ impl Gate {
             (false, "GET") => Ok(()),
             (false, _) => Err(Reply::refusal(405, "method_not_allowed", "this path takes GET only")),
             (true, "POST") => {
-                // `host_matches` passed, so `Host` is present.
+                // `authorize` passed, so `Host` is present.
                 let served = format!("http://{}", incoming.host.as_deref().unwrap_or_default());
                 match incoming.origin.as_deref() {
                     None => Err(Reply::refusal(
@@ -861,7 +962,8 @@ fn dispatch(route: Route, reads: &dyn Reads) -> Answer {
 ///
 /// At most `limits.connections` connections are open at once; the next one
 /// is accepted when one closes. hyper closes a connection that takes longer
-/// than `limits.header` to send a request head.
+/// than `limits.header` to send a request head, and [`WriteDeadline`] one
+/// whose writes wait longer than `limits.write` without progress.
 async fn accept(
     listener: TcpListener, shared: Arc<Shared>, limits: Limits, shutdown: impl Future<Output = ()>,
 ) -> Result<(), ServeError> {
@@ -891,6 +993,7 @@ async fn accept(
                 }
             },
         };
+        let stream = WriteDeadline::new(stream, limits.write);
         let connection = graceful.watch(http.serve_connection(TokioIo::new(stream), service.clone()));
         tokio::spawn(async move {
             // A client that goes away or times out is not the server's failure.
@@ -907,7 +1010,7 @@ async fn accept(
 async fn handle(State(shared): State<Arc<Shared>>, request: Request) -> Response {
     let (parts, body) = request.into_parts();
     if declares_too_much(&parts.headers) {
-        return Answer::json(Reply::too_large()).into_response();
+        return Answer::closing(Reply::too_large()).into_response();
     }
     let answer = match shared.gate.admit(&Incoming::head(&parts)) {
         Err(answer) => answer,
@@ -966,13 +1069,7 @@ fn guarded(work: impl FnOnce() -> Answer) -> Answer {
 }
 
 /// Parse a mutation's body and run it.
-fn mutate(write: Write, body: Option<&[u8]>, mutations: &dyn Mutations) -> Reply {
-    let Some(body) = body else {
-        return Reply::invalid_request("the request body could not be read");
-    };
-    if body.len() > MAX_BODY_BYTES {
-        return Reply::too_large();
-    }
+fn mutate(write: Write, body: &[u8], mutations: &dyn Mutations) -> Reply {
     match write {
         Write::Create => with_input(body, |input| mutations.create_task(input)),
         Write::Update(id) => with_input(body, |input| mutations.update_task(&id, input)),
@@ -1107,6 +1204,7 @@ fn page() -> Answer {
         allow: None,
         retry_after: None,
         csp: PAGE_CSP.as_str(),
+        close: false,
     }
 }
 
@@ -1197,12 +1295,12 @@ mod tests {
 
     /// Check and answer `incoming` as [`Server::run`] does, with an empty body.
     fn answered(gate: &Gate, incoming: &Incoming) -> Answer {
-        answered_with(gate, incoming, Some(b""))
+        answered_with(gate, incoming, b"")
     }
 
     /// Check and answer `incoming` as [`Server::run`] does, with `body` as
-    /// the body read, or `None` for a failed read.
-    fn answered_with(gate: &Gate, incoming: &Incoming, body: Option<&[u8]>) -> Answer {
+    /// the body read.
+    fn answered_with(gate: &Gate, incoming: &Incoming, body: &[u8]) -> Answer {
         match gate.admit(incoming) {
             Ok(Route::Write(write)) => Answer::json(mutate(write, body, &Echo)),
             Ok(route) => dispatch(route, &Echo),
@@ -1410,7 +1508,7 @@ mod tests {
                 "/api/specs",
             ] {
                 let incoming = Incoming { origin: origin.map(str::to_owned), ..post(url) };
-                let answer = answered_with(&gate(), &incoming, Some(br#"{"title":"T"}"#));
+                let answer = answered_with(&gate(), &incoming, br#"{"title":"T"}"#);
                 assert_eq!(answer.status, 403, "{origin:?} {url}");
                 assert_eq!(error_code(&answer), "forbidden");
             }
@@ -1433,7 +1531,7 @@ mod tests {
 
     #[test]
     fn serve_routes_the_mutations() {
-        let routed = |url: &str, body: &str| text(answered_with(&gate(), &post(url), Some(body.as_bytes())));
+        let routed = |url: &str, body: &str| text(answered_with(&gate(), &post(url), body.as_bytes()));
         assert_eq!(
             routed("/api/tasks", r#"{"title":"New","priority":"high"}"#),
             (
@@ -1490,7 +1588,7 @@ mod tests {
 
     #[test]
     fn serve_routes_the_planning_mutations() {
-        let routed = |url: &str, body: &str| text(answered_with(&gate(), &post(url), Some(body.as_bytes())));
+        let routed = |url: &str, body: &str| text(answered_with(&gate(), &post(url), body.as_bytes()));
         assert_eq!(
             routed("/api/captures/arcl-c-1/promote", r#"{"to":"task","priority":"high","phase":"arcl-ph-1"}"#),
             (
@@ -1530,7 +1628,7 @@ mod tests {
 
     #[test]
     fn serve_refuses_malformed_mutation_bodies() {
-        let with_body = |url: &str, body: &[u8]| answered_with(&gate(), &post(url), Some(body));
+        let with_body = |url: &str, body: &[u8]| answered_with(&gate(), &post(url), body);
         for (url, body) in [
             ("/api/tasks", b"{}".as_slice()),
             ("/api/tasks", b"not json"),
@@ -1558,12 +1656,6 @@ mod tests {
             assert_eq!(refused.status, 400, "{url} {body:?}");
             assert_eq!(error_code(&refused), "invalid_request");
         }
-        let large = vec![b' '; MAX_BODY_BYTES + 1];
-        assert_eq!(with_body("/api/tasks/arcl-t-1/park", &large).status, 413);
-        assert_eq!(
-            answered_with(&gate(), &post("/api/tasks/arcl-t-1/park"), None).status,
-            400
-        );
     }
 
     #[test]
@@ -1813,6 +1905,78 @@ mod tests {
             "{:?}",
             started.elapsed()
         );
+        drop(held);
+    }
+
+    /// Open a connection, write `request` pipelined `copies` times without
+    /// waiting, and never read the replies.
+    fn pipeline(port: u16, request: &str, copies: usize) -> TcpStream {
+        let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).expect("a connection");
+        stream.set_nonblocking(true).expect("a non-blocking socket");
+        // A full send buffer or a closed connection ends the write early,
+        // which is all the attack needs.
+        let _ = stream.write_all(request.repeat(copies).as_bytes());
+        stream
+    }
+
+    #[test]
+    fn serve_answers_past_clients_that_pipeline_refused_requests_and_never_read() {
+        let (port, token) = serve(BODY_DEADLINE);
+        let held: Vec<TcpStream> = (0..MAX_CONNECTIONS + 2)
+            .map(|_| pipeline(port, "GET / HTTP/1.1\r\nHost: evil\r\n\r\n", 2000))
+            .collect();
+        thread::sleep(Duration::from_millis(300));
+        let started = Instant::now();
+        assert!(authorized_get(port, &token).starts_with("HTTP/1.1 200"));
+        assert!(started.elapsed() < Duration::from_secs(1), "{:?}", started.elapsed());
+        drop(held);
+    }
+
+    #[test]
+    fn serve_closes_a_connection_after_a_refusal_before_the_token() {
+        let (port, token) = serve(BODY_DEADLINE);
+        let huge = "Content-Length: 1000000000000000";
+        for head in [
+            "GET /api/records HTTP/1.1\r\nHost: evil".to_owned(),
+            "GET /api/records HTTP/1.1".to_owned(),
+            format!("GET /api/records HTTP/1.1\r\n{TOKEN_HEADER}: wrong"),
+            format!("GET /api/records?token={token} HTTP/1.1"),
+            "GET /a%ZZ HTTP/1.1".to_owned(),
+            format!("POST /api/tasks HTTP/1.1\r\n{huge}"),
+        ] {
+            // A second request follows on the same connection, unanswered.
+            let mut stream = send(port, &head, "\r\n");
+            let next =
+                format!("GET /api/records HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{TOKEN_HEADER}: {token}\r\n\r\n");
+            let _ = stream.write_all(next.as_bytes());
+            let answered = response(stream);
+            assert!(
+                answered.contains("Connection: close") || answered.contains("connection: close"),
+                "{answered}"
+            );
+            assert_eq!(answered.matches("HTTP/1.1 ").count(), 1, "{answered}");
+        }
+        // A refusal after the token keeps the connection open.
+        let head = format!("POST /api/records HTTP/1.1\r\n{TOKEN_HEADER}: {token}\r\nContent-Length: 0");
+        let mut stream = send(port, &head, "\r\n");
+        assert_eq!(status_line(&mut stream), "HTTP/1.1 405 Method Not Allowed\r\n");
+        let next = format!(
+            "GET /api/records HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{TOKEN_HEADER}: {token}\r\nConnection: close\r\n\r\n"
+        );
+        stream.write_all(next.as_bytes()).expect("a write");
+        assert!(response(stream).contains("HTTP/1.1 200 OK"));
+    }
+
+    #[test]
+    fn serve_closes_an_admitted_connection_that_never_reads() {
+        let limits = Limits { connections: 1, write: Duration::from_millis(300), ..Limits::default() };
+        let (port, token) = serve_with(limits);
+        let request = format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{TOKEN_HEADER}: {token}\r\n\r\n");
+        let held = pipeline(port, &request, 2000);
+        thread::sleep(Duration::from_millis(100));
+        let started = Instant::now();
+        assert!(authorized_get(port, &token).starts_with("HTTP/1.1 200"));
+        assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
         drop(held);
     }
 
