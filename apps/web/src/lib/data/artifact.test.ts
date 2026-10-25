@@ -28,9 +28,15 @@ const NOW = new Date("2026-10-25T06:30:00Z");
  */
 class FakeDb implements ArtifactDb {
   readonly documents = new Map<string, Body>();
+  /** The error each new listener fails with before it delivers, if any. */
+  refuseListen: ArtifactDbError | null = null;
   /** The error the next `set` rejects with, if any. */
   refuseSet: ArtifactDbError | null = null;
-  private listeners = new Set<() => void>();
+  private listeners = new Map<() => void, ((error: ArtifactDbError) => void) | undefined>();
+  /** How many listeners are open. */
+  get listening(): number {
+    return this.listeners.size;
+  }
   private minted = 0;
 
   constructor(documents: Record<string, Body> = DOCUMENTS) {
@@ -41,7 +47,14 @@ class FakeDb implements ArtifactDb {
   write(path: string, body: Body | null) {
     if (body === null) this.documents.delete(path);
     else this.documents.set(path, body);
-    for (const listener of this.listeners) listener();
+    for (const listener of [...this.listeners.keys()]) listener();
+  }
+
+  /** End every open listener with `error`, as the platform does. */
+  drop(error: ArtifactDbError) {
+    const listeners = [...this.listeners];
+    this.listeners.clear();
+    for (const [, fail] of listeners) fail?.(error);
   }
 
   doc(path: string): ArtifactDocument {
@@ -60,14 +73,14 @@ class FakeDb implements ArtifactDb {
         this.write(path, structuredClone(data));
       },
       delete: async () => this.write(path, null),
-      onSnapshot: (next) => this.listen(() => next(snapshot())),
+      onSnapshot: (next, fail) => this.listen(() => next(snapshot()), fail),
     };
   }
 
   collection(path: string) {
     const query = (field: string | null, count: number): ArtifactQuery => ({
       limit: (limit) => query(field, limit),
-      onSnapshot: (next) =>
+      onSnapshot: (next, fail) =>
         this.listen(() => {
           const docs = [...this.documents.keys()]
             .filter((key) => key.startsWith(`${path}/`) && key.split("/").length === path.split("/").length + 1)
@@ -79,7 +92,7 @@ class FakeDb implements ArtifactDb {
             .sort((a, b) => String(a.data()?.[field ?? ""] ?? a.id).localeCompare(String(b.data()?.[field ?? ""] ?? b.id)))
             .slice(0, count);
           next({ docs });
-        }),
+        }, fail),
     });
     return {
       ...query(null, 1000),
@@ -88,8 +101,12 @@ class FakeDb implements ArtifactDb {
     };
   }
 
-  private listen(deliver: () => void): () => void {
-    this.listeners.add(deliver);
+  private listen(deliver: () => void, fail?: (error: ArtifactDbError) => void): () => void {
+    if (this.refuseListen) {
+      fail?.(this.refuseListen);
+      return () => {};
+    }
+    this.listeners.set(deliver, fail);
     deliver();
     return () => this.listeners.delete(deliver);
   }
@@ -181,6 +198,11 @@ describe("artifactSource reads", () => {
 
     db.write(`chunks/records~${BLOCKED}~1`, null);
     expect((await failure(source(db).task(BLOCKED))).code).toBe("unavailable");
+
+    db.write(`records/${BLOCKED}`, { chunked: { parts: 65, digest: "0" } });
+    const error = await failure(source(db).task(BLOCKED));
+    expect(error.code).toBe("bad_document");
+    expect(error.message).toContain("65 parts");
   });
 
   it("stops a read when its signal aborts", async () => {
@@ -230,6 +252,15 @@ describe("artifactSource changes", () => {
     db.refuseSet = { code: "quota_exceeded", message: "the database is full" };
     expect((await failure(source(db).discardCapture(CAPTURE))).code).toBe("quota_exceeded");
   });
+
+  it("refuses an edit over the size the artifact queues before writing it", async () => {
+    const db = new FakeDb();
+    db.refuseSet = { code: "invalid_argument", message: "document too large" };
+    const error = await failure(source(db).applyPlan("arcl-pl-1", "x".repeat(210 * 1024)));
+    expect(error.code).toBe("too_large");
+    expect(error.message).not.toContain("Contributor");
+    expect([...db.documents.keys()].some((path) => path.startsWith("queue/"))).toBe(false);
+  });
 });
 
 describe("artifactSource.watch", () => {
@@ -244,7 +275,9 @@ describe("artifactSource.watch", () => {
     db.write("queue/zz-failed", { op: "park_task", target: TASK, input: {}, created_at: "2026-10-25T07:00:00Z", status: "failed", error: { code: "conflict", message: "already parked" } });
     db.write("queue/zz-applied", { op: "park_task", target: TASK, input: {}, created_at: "2026-10-25T07:00:00Z", status: "applied" });
     db.write("queue/zz-junk", { op: 7, status: "queued" });
+    db.write("queue/q0-applying", { op: "park_task", target: TASK, input: {}, created_at: "2026-10-25T05:00:00Z", status: "applying" });
     expect(seen.at(-1)?.edits).toEqual([
+      { id: "q0-applying", op: "park_task", target: TASK, input: {}, created_at: "2026-10-25T05:00:00Z", status: "applying", error: null },
       { id: "q1", op: "discard_capture", target: CAPTURE, input: {}, created_at: NOW.toISOString(), status: "queued", error: null },
       { id: "zz-failed", op: "park_task", target: TASK, input: {}, created_at: "2026-10-25T07:00:00Z", status: "failed", error: { code: "conflict", message: "already parked" } },
     ]);
@@ -258,6 +291,66 @@ describe("artifactSource.watch", () => {
     stop?.();
     db.write("meta/sync", { ...DOCUMENTS["meta/sync"], revision: "later" });
     expect(seen.length).toBe(count);
+  });
+
+  it("follows again after the platform drops its listeners, waiting longer each time", () => {
+    const db = new FakeDb();
+    const timers: { run: () => void; ms: number }[] = [];
+    const artifact = artifactSource(db, { setTimeout: (run, ms) => timers.push({ run, ms }), clearTimeout: () => {} });
+    const seen: SyncStatus[] = [];
+    const stop = artifact.watch?.((status) => seen.push(status));
+    expect(db.listening).toBe(2);
+
+    db.drop({ code: "unavailable", message: "the bridge stopped" });
+    expect(db.listening).toBe(0);
+    expect(timers.map((timer) => timer.ms).every((ms) => ms >= 500 && ms <= 1_000)).toBe(true);
+    timers.splice(0).forEach((timer) => timer.run());
+    expect(db.listening).toBe(2);
+    db.write("meta/sync", { ...DOCUMENTS["meta/sync"], revision: "after" });
+    expect(seen.at(-1)).toMatchObject({ revision: "after", stopped: null });
+
+    // A code the page does not know counts as `unavailable`; a delivery resets the wait.
+    db.drop({ code: "queue_overflow", message: "" });
+    expect(timers.map((timer) => timer.ms).every((ms) => ms >= 500 && ms <= 1_000)).toBe(true);
+    timers.splice(0).forEach((timer) => timer.run());
+    db.drop({ code: "unavailable", message: "" });
+    timers.splice(0).forEach((timer) => timer.run());
+    expect(db.listening).toBe(2);
+    stop?.();
+    expect(db.listening).toBe(0);
+  });
+
+  it("doubles the wait while every fresh listener drops before it delivers", () => {
+    const db = new FakeDb();
+    const timers: { run: () => void; ms: number }[] = [];
+    const artifact = artifactSource(db, { setTimeout: (run, ms) => timers.push({ run, ms }), clearTimeout: () => {} });
+    artifact.watch?.(() => {});
+    db.drop({ code: "unavailable", message: "" });
+    db.refuseListen = { code: "unavailable", message: "" };
+    const waits: number[][] = [];
+    for (let round = 0; round < 8; round += 1) {
+      waits.push(timers.map((timer) => timer.ms));
+      timers.splice(0).forEach((timer) => timer.run());
+    }
+    waits.forEach((round, index) => {
+      const full = Math.min(1_000 * 2 ** index, 60_000);
+      expect(round.length).toBe(2);
+      for (const ms of round) expect(ms >= full / 2 && ms <= full).toBe(true);
+    });
+    db.refuseListen = null;
+    timers.splice(0).forEach((timer) => timer.run());
+    expect(db.listening).toBe(2);
+  });
+
+  it("stops following on a terminal error and says so", () => {
+    const db = new FakeDb();
+    const timers: unknown[] = [];
+    const artifact = artifactSource(db, { setTimeout: (run) => timers.push(run), clearTimeout: () => {} });
+    const seen: SyncStatus[] = [];
+    artifact.watch?.((status) => seen.push(status));
+    db.drop({ code: "revoked", message: "access changed" });
+    expect(timers).toEqual([]);
+    expect(seen.at(-1)?.stopped).toEqual({ code: "revoked", message: "access changed" });
   });
 });
 

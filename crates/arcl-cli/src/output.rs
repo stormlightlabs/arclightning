@@ -994,7 +994,8 @@ pub struct WebManifest {
     pub revision: String,
     /// Every document path, in the order to write them.
     pub documents: Vec<String>,
-    /// The documents that are new or differ from the last export, in the order to write them.
+    /// The documents that are new or differ from the files of the last export,
+    /// in the order to write them; every document under `--full`.
     pub changed: Vec<String>,
     /// The documents the last export had and this one does not, to delete.
     pub removed: Vec<String>,
@@ -1031,6 +1032,7 @@ pub struct AppliedEdit {
     pub op: String,
     /// The record it named, if any.
     pub target: Option<String>,
+    /// Whether the edit applied, failed or was skipped.
     pub status: AppliedStatus,
     /// The `data` of the change's JSON envelope, when it applied.
     #[serde(skip_serializing_if = "Option::is_none")]

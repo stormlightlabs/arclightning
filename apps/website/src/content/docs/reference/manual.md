@@ -473,13 +473,19 @@ documents under `<dir>` with the same reads `arcl serve` runs:
 | `meta/sync`      | `meta/sync.json`      | the commit, time and revision of the export         |
 
 `<dir>/manifest.json` lists every document in `documents`, the ones that are
-new or differ from the last export into `<dir>` in `changed`, and the ones the
-last export had and this one does not in `removed`. A sync writes the
-`changed` documents in order and deletes the `removed` ones, so it touches
-only the records that changed. A document over 200 KiB is written as parts,
-`chunks/<collection>~<id>~<n>`, each `{"part": "..."}`, listed before a
-header `{"chunked": {"parts": n, "digest": "..."}}` at the document's own
-path; the page joins the parts.
+new or differ from the files of the last export into `<dir>` in `changed`,
+and the ones the last export had and this one does not in `removed`. A sync
+writes the `changed` documents in order and deletes the `removed` ones, so it
+touches only the records that changed. `changed` compares against `<dir>`,
+not the database, so after an upload that did not finish, or into a
+database `<dir>` never described, run `arcl web export --full <dir>`. It
+lists every document in `changed`.
+
+A document over 200 KiB is written as parts, `chunks/<collection>~<id>~<n>`,
+each `{"part": "..."}`, listed before a header
+`{"chunked": {"parts": n, "digest": "..."}}` at the document's own path; the
+page joins the parts. A document needs at most 64 parts, about 12.5 MiB.
+`export` fails on a larger one.
 
 A change on the page writes a `queue/<id>` document instead of changing a
 record:
@@ -521,18 +527,29 @@ a command, and an applied edit runs as the person who runs `arcl`.
 
 To sync, the agent session that owns the artifact:
 
-1. Reads the `queue` collection and writes its entries, with their IDs, to a
-   file.
-2. Runs `arcl --json web apply <file>`, then deletes each applied entry and
+1. Reads the `queue` collection. An entry whose `status` is `applying` was
+   claimed by a sync that stopped before it finished. Check whether its
+   change is in the records: delete the entry if it is, and set `status`
+   back to `queued` if it is not.
+2. Sets `status` to `applying` on each `queued` entry in the database, then
+   writes those entries, with their IDs and `status` still `queued`, to a
+   file. An entry claimed this way never runs twice: `apply` skips it if a
+   later sync reads it again.
+3. Runs `arcl --json web apply <file>`, then deletes each applied entry and
    sets `status` to `failed` and `error` to the result's error on each failed
    one, so the page shows why.
-3. Runs `arcl --json web export <dir>` into the directory of the last sync,
+4. Runs `arcl --json web export <dir>` into the directory of the last sync,
    writes each `changed` document from `<dir>/<path>.json` and deletes each
-   `removed` one.
+   `removed` one. If a write fails, or `<dir>` is new, the next sync runs
+   `arcl --json web export --full <dir>`, writes every `changed` document
+   and deletes every document in `views`, `records` and `chunks` that
+   `documents` does not list.
 
 The page follows `meta/sync` and the queue. When `revision` changes, it offers
-to reload the view with the new records. Dismissing a failed edit on the page
-deletes its entry.
+to reload the view with the new records. It lists `applying` entries with the
+queued ones, marked as applying now. Dismissing a failed edit on the page
+deletes its entry. If the database ends the page's subscription for good, the
+page says it stopped following syncs and to reload.
 
 ## Lifecycle
 

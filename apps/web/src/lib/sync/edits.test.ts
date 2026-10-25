@@ -25,7 +25,7 @@ describe("describeEdit", () => {
 
 describe("syncedLabel", () => {
   it("shows the sync time in UTC, or nothing before the first sync", () => {
-    const status = { syncedAt: "2026-10-25T06:17:12Z", commit: null, revision: null, edits: [] };
+    const status = { syncedAt: "2026-10-25T06:17:12Z", commit: null, revision: null, edits: [], stopped: null };
     expect(syncedLabel(status)).toBe("Oct 25, 06:17 UTC");
     expect(syncedLabel({ ...status, syncedAt: null })).toBeNull();
     expect(syncedLabel({ ...status, syncedAt: "not a time" })).toBeNull();

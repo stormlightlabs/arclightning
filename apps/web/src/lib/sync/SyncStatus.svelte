@@ -19,7 +19,8 @@
 
   let { status, stale = false, onreload, ondismiss }: SyncStatusProps = $props();
 
-  let queued = $derived(status.edits.filter((edit) => edit.status === "queued"));
+  /** Edits waiting for the next sync, including those an agent is applying now. */
+  let queued = $derived(status.edits.filter((edit) => edit.status !== "failed"));
   let failed = $derived(status.edits.filter((edit) => edit.status === "failed"));
   let synced = $derived(syncedLabel(status));
 </script>
@@ -31,8 +32,11 @@
   </p>
   {#if queued.length}
     <ul aria-label="Queued edits">
-      {#each queued as edit (edit.id)}<li>{describeEdit(edit)}</li>{/each}
+      {#each queued as edit (edit.id)}<li>{describeEdit(edit)}{edit.status === "applying" ? " (applying now)" : ""}</li>{/each}
     </ul>
+  {/if}
+  {#if status.stopped}
+    <Feedback tone="warning" title="This page stopped following syncs" message={`Reload the page to see new syncs and queued edits. (${status.stopped.code})`} />
   {/if}
   {#if stale}
     <Feedback tone="info" title="The project synced" message="This view shows the records from before the sync.">

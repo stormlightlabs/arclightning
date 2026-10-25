@@ -739,6 +739,10 @@ pub enum WebCommand {
         /// The directory to write; created if missing.
         #[arg(value_name = "DIR")]
         dir: PathBuf,
+        /// List every document as changed, for a sync into a new artifact or
+        /// after a sync that did not finish.
+        #[arg(long)]
+        full: bool,
     },
     /// Apply the edits queued on the artifact, read from a JSON file, as `arcl serve` applies a change.
     Apply {

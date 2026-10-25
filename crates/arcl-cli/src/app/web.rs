@@ -20,7 +20,8 @@
 //! A document whose JSON is over [`MAX_DOCUMENT_BYTES`] is stored as a
 //! header, `{"chunked": {"parts": n, "digest": "..."}}`, and `n` parts at
 //! `chunks/<collection>~<id>~<index>`, each `{"part": "..."}`, whose texts
-//! join into the document's JSON.
+//! join into the document's JSON. A document needs at most [`MAX_PARTS`]
+//! parts, the most the page reads.
 
 use arcl_serve::{Reads, Reply};
 use serde::Deserialize;
@@ -35,6 +36,10 @@ use super::*;
 /// refuses a document over 256 KiB; the rest is headroom for the store's
 /// own encoding.
 const MAX_DOCUMENT_BYTES: usize = 200 * 1024;
+
+/// The most parts a chunked document may have. The page's reader refuses a
+/// header with more, so `export` fails instead of writing one.
+const MAX_PARTS: usize = 64;
 
 /// How long an applied edit waits for the project's sync lock. A person runs
 /// `apply` and can wait longer than the local app's user waits on a button.
@@ -58,7 +63,7 @@ const META_DOCUMENT: &str = "meta/sync";
 struct QueuedEdit {
     /// The `queue` document's ID.
     id: String,
-    /// One of [`arcl_serve::OPERATIONS`].
+    /// One of [`arcl_serve::operations`].
     op: String,
     /// The record the operation changes, for an operation that names one.
     #[serde(default)]
@@ -74,7 +79,8 @@ struct QueuedEdit {
     #[serde(default)]
     #[allow(dead_code, reason = "the page records it; apply only checks its shape")]
     created_by: Option<String>,
-    /// `queued` until an agent applies it; any other entry is skipped.
+    /// `queued` until an agent claims it, `applying` while one applies it,
+    /// and `failed` after a refusal. Only `queued` entries run.
     #[serde(default)]
     status: Option<String>,
     /// The error of an earlier failed apply.
@@ -110,9 +116,9 @@ impl Fnv {
 /// Run one `web` subcommand and render its result.
 pub(super) fn exec_web(command: WebCommand, renderer: &Renderer) -> anyhow::Result<()> {
     match command {
-        WebCommand::Export { dir } => {
+        WebCommand::Export { dir, full } => {
             let app = ServeApp::new(OutputMode::Quiet, APPLY_LOCK_WAIT);
-            let manifest = export(&app, &dir).map_err(ApplicationError::from_command)?;
+            let manifest = export(&app, &dir, full).map_err(ApplicationError::from_command)?;
             write_output(renderer.render_web_export(&dir, &manifest)?)
         }
         WebCommand::Apply { file } => {
@@ -126,7 +132,13 @@ pub(super) fn exec_web(command: WebCommand, renderer: &Renderer) -> anyhow::Resu
 
 /// Write every document under `dir` and return the manifest, which lists
 /// the documents that changed since the export the old manifest describes.
-fn export(app: &ServeApp, dir: &Path) -> CResult<WebManifest> {
+///
+/// `changed` compares against the files under `dir`, not against the
+/// artifact's database, which `export` cannot read. With `full`, every
+/// document is listed as changed, so a sync after an upload that did not
+/// finish, or into a database the directory never described, writes them
+/// all.
+fn export(app: &ServeApp, dir: &Path, full: bool) -> CResult<WebManifest> {
     let mut documents = vec![
         ("views/work".to_owned(), read(app.work(), "views/work")?),
         ("views/tree".to_owned(), read(app.tree(), "views/tree")?),
@@ -170,8 +182,11 @@ fn export(app: &ServeApp, dir: &Path) -> CResult<WebManifest> {
     let mut changed = Vec::new();
     for (path, text) in &files {
         let file = document_file(dir, path);
-        if fs::read(&file).ok().as_deref() != Some(text.as_bytes()) {
+        let same = fs::read(&file).ok().as_deref() == Some(text.as_bytes());
+        if !same {
             write_file(&file, text.as_bytes())?;
+        }
+        if full || !same {
             changed.push(path.clone());
         }
     }
@@ -257,6 +272,16 @@ fn split(path: &str, text: String) -> CResult<Vec<(String, String)>> {
         size += encoded;
     }
     parts.push(part);
+    if parts.len() > MAX_PARTS {
+        return Err(CommandError::WebExport {
+            document: path.to_owned(),
+            message: format!(
+                "the document is {} bytes, more than the {MAX_PARTS} parts of {} KiB the page reads",
+                text.len(),
+                MAX_DOCUMENT_BYTES / 1024
+            ),
+        });
+    }
     let header = json!({ "chunked": { "parts": parts.len(), "digest": digest.hex() } });
     let mut documents = parts
         .into_iter()
@@ -330,6 +355,11 @@ fn utc_now() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())
         .unwrap_or_default();
+    rfc3339(seconds)
+}
+
+/// `seconds` since the Unix epoch as an RFC 3339 UTC time.
+fn rfc3339(seconds: u64) -> String {
     let (days, time) = (seconds / 86_400, seconds % 86_400);
     // Howard Hinnant's days-to-civil algorithm, for days since 1970-01-01.
     let shifted = days + 719_468;
@@ -444,10 +474,26 @@ mod tests {
     }
 
     #[test]
-    fn utc_now_is_rfc_3339() {
-        let now = utc_now();
-        assert_eq!(now.len(), 20, "{now}");
-        assert!(now.starts_with("20") && now.ends_with('Z'), "{now}");
-        assert_eq!(&now[10..11], "T");
+    fn split_refuses_a_document_over_the_part_limit() {
+        let text = "a".repeat(MAX_DOCUMENT_BYTES * MAX_PARTS);
+        assert_eq!(split("views/work", text.clone()).expect("splits").len(), MAX_PARTS + 1);
+        let error = split("views/work", format!("{text}a")).expect_err("too many parts");
+        assert!(error.to_string().contains("64 parts"), "{error}");
+    }
+
+    #[test]
+    fn rfc3339_converts_epoch_seconds_to_a_utc_date() {
+        for (seconds, expected) in [
+            (0, "1970-01-01T00:00:00Z"),
+            (951_782_400, "2000-02-29T00:00:00Z"),
+            (951_868_799, "2000-02-29T23:59:59Z"),
+            (978_307_199, "2000-12-31T23:59:59Z"),
+            (1_709_251_199, "2024-02-29T23:59:59Z"),
+            (1_761_373_800, "2025-10-25T06:30:00Z"),
+            (4_107_542_400, "2100-03-01T00:00:00Z"),
+        ] {
+            assert_eq!(rfc3339(seconds), expected, "{seconds}");
+        }
+        assert_eq!(utc_now().len(), 20);
     }
 }

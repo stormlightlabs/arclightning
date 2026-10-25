@@ -76,6 +76,10 @@ export interface ArtifactOptions {
   /** The ID of the person viewing the page, stored on each queued edit. */
   userId?: () => Promise<string | null>;
   now?: () => Date;
+  /** Schedule a resubscription; tests pass their own timer. */
+  setTimeout?: (run: () => void, ms: number) => unknown;
+  /** Cancel a scheduled resubscription. */
+  clearTimeout?: (handle: unknown) => void;
 }
 
 /** What a queued change's {@link DataError} says. */
@@ -84,20 +88,45 @@ export const QUEUED_MESSAGE = "An agent applies this edit with arcl on the next 
 /** The queued edits {@link ArtifactSource.watch} follows, at most. */
 const QUEUE_LIMIT = 200;
 
-/** The most parts a chunked document may have: 200 KiB each, well past any real document. */
+/** The most parts a chunked document may have. `arcl web export` refuses to write more, under the same limit. */
 const MAX_PARTS = 64;
+
+/** The largest queued edit, as UTF-8 JSON. The database refuses a document over 256 KiB; the rest is headroom. */
+const MAX_EDIT_BYTES = 200 * 1024;
+
+/** The first and the longest wait before following the database again after a listener drops. */
+const RETRY_FIRST_MS = 1_000;
+const RETRY_MAX_MS = 60_000;
+
+/**
+ * The `onSnapshot` error codes that end a listener for good, which a fresh
+ * listener cannot fix. Any other code, `unavailable` included, means the
+ * platform dropped the listener and a fresh one may work.
+ */
+const TERMINAL_CODES = new Set([
+  "invalid_argument",
+  "resource_exhausted",
+  "quota_exceeded",
+  "revoked",
+  "not_granted",
+  "capability_disabled",
+  "capability_removed",
+  "transform_error",
+]);
 
 /** A data source over a claude.ai artifact's database. */
 export function artifactSource(db: ArtifactDb, options: ArtifactOptions = {}): DataSource {
   const userId = options.userId ?? (() => Promise.resolve(null));
   const now = options.now ?? (() => new Date());
+  const schedule = options.setTimeout ?? ((run, ms) => globalThis.setTimeout(run, ms));
+  const cancel = options.clearTimeout ?? ((handle) => globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>));
 
   /** Read the document at `path`, joining its parts when it is chunked. */
   async function read(path: string, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
     const snapshot = await abortable(call(() => db.doc(path).get()), signal);
     const body = snapshot.exists ? snapshot.data() : undefined;
     if (body === undefined) return null;
-    const parts = chunkCount(body.chunked);
+    const parts = chunkCount(path, body.chunked);
     if (parts === null) return body;
     const name = path.replace("/", "~");
     const reads = Array.from({ length: parts }, (_, index) => call(() => db.doc(`chunks/${name}~${index}`).get()));
@@ -139,7 +168,13 @@ export function artifactSource(db: ArtifactDb, options: ArtifactOptions = {}): D
       created_by: await userId(),
       status: "queued",
     };
+    // Check the one limit an edit can break, so a refusal after this is about access.
+    const size = new TextEncoder().encode(JSON.stringify(entry)).length;
+    if (size > MAX_EDIT_BYTES) {
+      throw new DataError("too_large", `The edit is ${Math.ceil(size / 1024)} KiB, over the ${MAX_EDIT_BYTES / 1024} KiB the artifact queues. Make it smaller, or make it with arcl.`);
+    }
     await call(() => db.collection("queue").doc().set(entry)).catch((error: unknown) => {
+      // The database refuses a write the viewer may not make as `invalid_argument`, with no code of its own.
       if (error instanceof DataError && error.code === "invalid_argument") {
         throw new DataError("not_allowed", `The artifact did not queue the edit: ${error.message}. Queuing edits needs Contributor access or above.`);
       }
@@ -188,26 +223,69 @@ export function artifactSource(db: ArtifactDb, options: ArtifactOptions = {}): D
     applyPlan: (id, document) => queue("apply_plan", id, { document }),
 
     watch(listener) {
-      const status: SyncStatus = { syncedAt: null, commit: null, revision: null, edits: [] };
+      const status: SyncStatus = { syncedAt: null, commit: null, revision: null, edits: [], stopped: null };
       const report = () => listener({ ...status, edits: [...status.edits] });
-      const stopMeta = db.doc("meta/sync").onSnapshot((snapshot) => {
-        const meta = snapshot.exists ? snapshot.data() : undefined;
-        status.syncedAt = stringOr(meta?.synced_at);
-        status.commit = stringOr(meta?.commit);
-        status.revision = stringOr(meta?.revision);
-        report();
-      });
-      const stopQueue = db
-        .collection("queue")
-        .orderBy("created_at")
-        .limit(QUEUE_LIMIT)
-        .onSnapshot((snapshot) => {
-          status.edits = snapshot.docs.flatMap((doc) => queuedEdit(doc) ?? []);
-          report();
+      let ended = false;
+      const stops: (() => void)[] = [];
+
+      /**
+       * Keep a listener open with `subscribe`. When the platform drops it,
+       * open a fresh one after a wait that doubles up to a minute and resets
+       * once it delivers. A terminal error stops following and is reported.
+       */
+      function follow(subscribe: (next: () => void, fail: (error: unknown) => void) => () => void) {
+        let attempt = 0;
+        let timer: unknown = null;
+        let unsubscribe = () => {};
+        const open = () => {
+          timer = null;
+          unsubscribe = subscribe(
+            () => (attempt = 0),
+            (error) => {
+              if (ended) return;
+              const code = isRecord(error) && typeof error.code === "string" ? error.code : "unavailable";
+              if (TERMINAL_CODES.has(code)) {
+                status.stopped ??= { code, message: isRecord(error) && typeof error.message === "string" ? error.message : code };
+                report();
+                return;
+              }
+              const wait = Math.min(RETRY_FIRST_MS * 2 ** attempt, RETRY_MAX_MS);
+              attempt += 1;
+              timer = schedule(open, wait / 2 + Math.random() * (wait / 2));
+            },
+          );
+        };
+        open();
+        stops.push(() => {
+          if (timer !== null) cancel(timer);
+          unsubscribe();
         });
+      }
+
+      follow((delivered, fail) =>
+        db.doc("meta/sync").onSnapshot((snapshot) => {
+          delivered();
+          const meta = snapshot.exists ? snapshot.data() : undefined;
+          status.syncedAt = stringOr(meta?.synced_at);
+          status.commit = stringOr(meta?.commit);
+          status.revision = stringOr(meta?.revision);
+          report();
+        }, fail),
+      );
+      follow((delivered, fail) =>
+        db
+          .collection("queue")
+          .orderBy("created_at")
+          .limit(QUEUE_LIMIT)
+          .onSnapshot((snapshot) => {
+            delivered();
+            status.edits = snapshot.docs.flatMap((doc) => queuedEdit(doc) ?? []);
+            report();
+          }, fail),
+      );
       return () => {
-        stopMeta();
-        stopQueue();
+        ended = true;
+        for (const stop of stops) stop();
       };
     },
 
@@ -246,11 +324,13 @@ function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   });
 }
 
-/** The part count of a chunked document's header, or `null` for a whole document. */
-function chunkCount(header: unknown): number | null {
+/** The part count of the chunked document at `path`, or `null` for a whole document. */
+function chunkCount(path: string, header: unknown): number | null {
   if (!isRecord(header)) return null;
   const parts = header.parts;
-  if (typeof parts !== "number" || !Number.isInteger(parts) || parts < 1 || parts > MAX_PARTS) return null;
+  if (typeof parts !== "number" || !Number.isInteger(parts) || parts < 1 || parts > MAX_PARTS) {
+    throw new DataError("bad_document", `\`${path}\` is split into ${String(parts)} parts; this page reads 1 to ${MAX_PARTS}. Run \`arcl web export --full\` and sync again.`);
+  }
   return parts;
 }
 
@@ -266,7 +346,7 @@ function midSync(path: string): DataError {
  */
 function queuedEdit(snapshot: ArtifactSnapshot): QueuedEdit | null {
   const body = snapshot.data();
-  if (!body || typeof body.op !== "string" || (body.status !== "queued" && body.status !== "failed")) return null;
+  if (!body || typeof body.op !== "string" || (body.status !== "queued" && body.status !== "applying" && body.status !== "failed")) return null;
   const error = isRecord(body.error) ? { code: String(body.error.code ?? ""), message: String(body.error.message ?? "") } : null;
   return {
     id: snapshot.id,

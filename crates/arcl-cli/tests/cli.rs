@@ -4317,6 +4317,67 @@ fn web_export_splits_a_document_over_the_size_limit() {
     assert!(exported(out.path(), "views/work")["chunked"].is_object());
 }
 
+#[test]
+fn web_export_full_lists_every_document_as_changed() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let task = create_task(dir, "Task", None);
+    let capture = create_capture(dir, "Idea", "");
+    let out = tempdir().expect("an export directory");
+    web_export(dir, out.path());
+
+    run_json(dir, ["--json", "capture", "discard", &capture].as_ref());
+    let out_path = out.path().to_str().expect("UTF-8");
+    let full = run_json(dir, ["--json", "web", "export", "--full", out_path].as_ref())["data"].clone();
+    let documents = manifest_list(&full, "documents");
+    assert!(documents.contains(&format!("records/{task}")));
+    assert_eq!(manifest_list(&full, "changed"), documents);
+    assert_eq!(manifest_list(&full, "removed"), [format!("records/{capture}")]);
+}
+
+#[test]
+fn web_export_removes_the_parts_a_shrunk_document_no_longer_has() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let body_file = dir.join("body.md");
+    fs::write(&body_file, "A line of the task body that runs on.\n".repeat(8_000)).expect("the body writes");
+    let body_path = body_file.to_str().expect("UTF-8");
+    let created = run_json(
+        dir,
+        ["--json", "task", "create", "Large", "--body-file", body_path].as_ref(),
+    );
+    let task = created["data"]["task"]["id"].as_str().expect("a task ID").to_owned();
+    let out = tempdir().expect("an export directory");
+    let first = web_export(dir, out.path());
+    let parts = manifest_list(&first, "documents")
+        .into_iter()
+        .filter(|path| path.starts_with(&format!("chunks/records~{task}~")))
+        .collect::<Vec<_>>();
+    assert!(parts.len() >= 2, "{parts:?}");
+
+    fs::write(&body_file, "Short now.").expect("the body writes");
+    run_json(
+        dir,
+        ["--json", "task", "update", &task, "--body-file", body_path].as_ref(),
+    );
+    let second = web_export(dir, out.path());
+    let removed = manifest_list(&second, "removed");
+    for part in &parts {
+        assert!(removed.contains(part), "{part} in {removed:?}");
+        assert!(!out.path().join(format!("{part}.json")).exists(), "{part}");
+    }
+    assert!(removed.iter().all(|path| path.starts_with("chunks/")), "{removed:?}");
+    assert!(
+        manifest_list(&second, "documents")
+            .iter()
+            .all(|path| !path.starts_with("chunks/"))
+    );
+    assert_eq!(
+        exported(out.path(), &format!("records/{task}"))["data"]["task"]["body"],
+        "Short now."
+    );
+}
+
 /// Write `queue` as the queue file under `directory` and run `arcl --json web apply` on it.
 fn web_apply(directory: &Path, queue: &Value) -> std::process::Output {
     let file = directory.join("queue.json");
@@ -4344,7 +4405,8 @@ fn web_apply_runs_queued_edits_as_arcl_serve_does() {
         { "id": "q6", "op": "delete_everything", "target": task },
         { "id": "q7", "op": "park_task", "target": task, "status": "applied" },
         { "id": "q8", "op": "update_task", "target": task, "input": "not an object", "status": "queued" },
-        { "id": "q9", "op": "start_task", "target": task, "input": {}, "status": "failed", "error": { "code": "x", "message": "y" } }
+        { "id": "q9", "op": "start_task", "target": task, "input": {}, "status": "failed", "error": { "code": "x", "message": "y" } },
+        { "id": "q10", "op": "park_task", "target": task, "input": {}, "status": "applying" }
     ]);
     let output = web_apply(dir, &queue);
     assert!(
@@ -4376,7 +4438,8 @@ fn web_apply_runs_queued_edits_as_arcl_serve_does() {
             ("q6", "failed"),
             ("q7", "skipped"),
             ("q8", "failed"),
-            ("q9", "skipped")
+            ("q9", "skipped"),
+            ("q10", "skipped")
         ]
     );
 

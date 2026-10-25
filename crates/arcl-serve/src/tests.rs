@@ -547,7 +547,7 @@ fn apply_runs_each_operation_as_its_endpoint_does() {
             "apply arcl-pl-1",
         ),
     ];
-    assert_eq!(cases.len(), OPERATIONS.len());
+    assert_eq!(cases.len(), operations().count());
     for (operation, target, input, expected) in cases {
         let (_, body) = applied(operation, target, input);
         assert!(body.starts_with(expected), "{operation}: {body}");

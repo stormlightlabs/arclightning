@@ -366,8 +366,11 @@ export interface QueuedEdit {
   /** The mutation's options, as its endpoint takes them. */
   input: Record<string, unknown>;
   created_at: string;
-  /** `queued` until an agent applies it, or `failed` with the CLI's error. */
-  status: "queued" | "failed";
+  /**
+   * `queued` until an agent claims it, `applying` while the agent runs it,
+   * or `failed` with the CLI's error.
+   */
+  status: "queued" | "applying" | "failed";
   error: { code: string; message: string } | null;
 }
 
@@ -379,8 +382,13 @@ export interface SyncStatus {
   commit: string | null;
   /** Changes when any record a view reads changes. */
   revision: string | null;
-  /** Queued and failed edits, oldest first. */
+  /** Queued, applying and failed edits, oldest first. */
   edits: QueuedEdit[];
+  /**
+   * Why the page stopped following syncs and the queue, or `null` while it
+   * follows them. Once set, only reloading the page follows them again.
+   */
+  stopped: { code: string; message: string } | null;
 }
 
 /** A failed read or change, with the CLI's error code and message. */
