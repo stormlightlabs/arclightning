@@ -1,5 +1,6 @@
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { registeredCommands } from "$lib/commands";
 import { DataError, setDataSource, type Changed, type DataSource, type TaskDetail as Detail } from "$lib/data";
 import { blockedDetail } from "./fixtures";
 import TaskDetail from "./TaskDetail.svelte";
@@ -153,6 +154,44 @@ describe("TaskDetail changes", () => {
     await settle();
     expect(source.updateTask).toHaveBeenCalledTimes(1);
     expect(source.updateTask).toHaveBeenCalledWith("t-10.4", { title: "T10.4: Run capture through MCP" });
+  });
+
+  for (const [action, label] of [
+    ["complete", "Complete"],
+    ["handoff", "Hand off"],
+  ] as const) {
+    it(`choosing ${label} again only refocuses its open form's editor`, async () => {
+      const source = stubSource(inProgress());
+      const root = view(inProgress());
+      const run = () => registeredCommands().find((command) => command.id === `task:${action}`)!.run();
+      run();
+      await settle();
+      const form = root.querySelector<HTMLElement>(`form[aria-label="${label}"]`)!;
+      const editor = form.querySelector<HTMLElement>(".cm-content")!;
+      expect(document.activeElement).toBe(editor);
+
+      editor.blur();
+      run();
+      button(root.querySelector('[aria-label="Task actions"]')!, label).click();
+      await settle();
+      expect(source.completeTask).not.toHaveBeenCalled();
+      expect(source.handOffTask).not.toHaveBeenCalled();
+      expect(root.querySelector(`form[aria-label="${label}"]`)).toBe(form);
+      expect(document.activeElement).toBe(editor);
+
+      button(form, label).click();
+      await settle();
+      expect(action === "complete" ? source.completeTask : source.handOffTask).toHaveBeenCalledTimes(1);
+    });
+  }
+
+  it("focuses the editor of a form the view opens with", async () => {
+    stubSource(inProgress());
+    const target = document.createElement("div");
+    document.body.append(target);
+    mounted = mount(TaskDetail, { target, props: { detail: inProgress(), workHref: "/", initialAction: "complete" } });
+    await settle();
+    expect(document.activeElement).toBe(target.querySelector('form[aria-label="Complete"] .cm-content'));
   });
 
   it("sends nothing on a second click while a change runs", async () => {

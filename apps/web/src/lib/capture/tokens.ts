@@ -97,12 +97,14 @@ export function taskOf(parsed: ParsedCapture, tasks: TaskSummary[]): { task: New
 
 /**
  * The ID of the one task `ref` names: a task whose ID it is, or else whose
- * title starts with it followed by `:` or a space, ignoring case.
+ * title starts with it followed by `:` or a space, ignoring case. IDs match
+ * in any case too: the store writes each one in a single canonical form, a
+ * lowercase prefix and an uppercase ULID, so no two differ only by case.
  */
 export function resolveRef(ref: string, tasks: TaskSummary[]): string | RefProblem {
-  const byId = tasks.find((task) => task.id === ref);
-  if (byId) return byId.id;
   const key = ref.toLowerCase();
+  const byId = tasks.find((task) => task.id.toLowerCase() === key);
+  if (byId) return byId.id;
   const byKey = tasks.filter((task) => {
     const title = task.title.toLowerCase();
     return title.startsWith(`${key}:`) || title.startsWith(`${key} `);

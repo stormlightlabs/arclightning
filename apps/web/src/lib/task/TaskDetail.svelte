@@ -31,7 +31,7 @@
 </script>
 
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
   import { Button, Feedback, Field, Markdown, MarkdownEditor, PropertiesPanel, SelectMenu, StatusBadge } from "@arclightning/ui";
   import { useCommands, type Command } from "$lib/commands";
   import { dataSource, type Task } from "$lib/data";
@@ -68,6 +68,8 @@
   /** The action whose Markdown form is open. */
   let asking = $state<TaskAction | null>(null);
   let text = $state("");
+  /** The open form's editor, which takes focus when the form opens. */
+  let askEditor = $state<ReturnType<typeof MarkdownEditor>>();
   /** The last failed action and how it failed, shown next to that action. */
   let failure = $state<{ action: TaskAction | "edit"; failure: ActionFailure } | null>(null);
   /** The tasks the last completion unblocked, by ID. */
@@ -110,11 +112,8 @@
   $effect(() => {
     if (initialAction === null || ACTION_TEXT[initialAction] === undefined) return;
     if (!untrack(() => actions).includes(initialAction)) return;
-    untrack(() => {
-      asking = initialAction;
-      text = "";
-      failure = null;
-    });
+    const action = initialAction;
+    untrack(() => void ask(action));
   });
 
   function openEdit() {
@@ -123,15 +122,40 @@
     unblocked = null;
   }
 
-  /** Run `action`, or open its Markdown form first when it takes text. */
+  /**
+   * Run `action`, or open its Markdown form when it takes text. Choosing an
+   * action whose form is open, by button, shortcut or menu, only refocuses
+   * the form's editor: the form's own submit button sends the change.
+   */
   function choose(action: TaskAction) {
-    failure = null;
-    unblocked = null;
-    if (ACTION_TEXT[action] !== undefined && asking !== action) {
-      asking = action;
-      text = "";
+    if (ACTION_TEXT[action] !== undefined) {
+      void ask(action);
       return;
     }
+    failure = null;
+    unblocked = null;
+    void perform(action, () => runAction(dataSource(), task.id, action), () => (asking = null));
+  }
+
+  /** Open `action`'s Markdown form, or keep the one open, and focus its editor. */
+  async function ask(action: TaskAction) {
+    if (asking !== action) {
+      asking = action;
+      text = "";
+      failure = null;
+      unblocked = null;
+    }
+    await tick();
+    askEditor?.focus();
+  }
+
+  /** Send the open form's action with its text. */
+  function submitAsk(event: SubmitEvent) {
+    event.preventDefault();
+    const action = asking;
+    if (action === null || busy !== null) return;
+    failure = null;
+    unblocked = null;
     void perform(action, () => runAction(dataSource(), task.id, action, text), (result) => {
       asking = null;
       if (action === "complete") unblocked = result.unblocked;
@@ -232,8 +256,8 @@
       </div>
       {#if asking !== null}
         {@const label = ACTION_TEXT[asking] ?? ""}
-        <form class="ask" aria-label={ACTION_LABELS[asking]} onsubmit={(event) => (event.preventDefault(), choose(asking!))}>
-          <MarkdownEditor value={text} label={`${label} Markdown`} readonly={false} onchange={(value) => (text = value)} />
+        <form class="ask" aria-label={ACTION_LABELS[asking]} onsubmit={submitAsk}>
+          <MarkdownEditor bind:this={askEditor} value={text} label={`${label} Markdown`} readonly={false} onchange={(value) => (text = value)} />
           <div class="buttons">
             <Button type="submit" variant="primary" label={ACTION_LABELS[asking]} busy={busy === asking} disabled={busy !== null} />
             <Button label="Cancel" variant="ghost" disabled={busy !== null} onclick={() => ((asking = null), (failure = null))} />

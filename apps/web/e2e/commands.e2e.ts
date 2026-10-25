@@ -39,6 +39,9 @@ async function serve(page: Page, status = "pending"): Promise<string[]> {
       if (url.pathname === "/api/tasks") {
         return route.fulfill({ body: envelope({ action: "created", task: { ...task, id: "arcl-t-2", title: body.title } }) });
       }
+      if (url.pathname.endsWith("/complete")) {
+        return route.fulfill({ body: envelope({ action: "completed", task: { ...task, status: "completed" }, completed_subtasks: [], unblocked: [] }) });
+      }
       return route.fulfill({ body: envelope({ action: "started", task: { ...task, status: "in_progress" } }) });
     }
     if (path === "/api/records?kind=task") return route.fulfill({ body: envelope({ records: [{ id: task.id, kind: "task", status, title: task.title }] }) });
@@ -73,6 +76,95 @@ test("the menu lists the open task's actions first and runs the same change as t
   await page.keyboard.press("s");
   await expect.poll(() => posts.length).toBe(3);
   expect(posts[2]).toBe(posts[0]);
+});
+
+/** The open Complete form's editor, which takes the typed evidence. */
+function evidence(page: Page) {
+  return page.getByRole("form", { name: "Complete" }).getByRole("textbox", { name: "Evidence Markdown" });
+}
+
+test("c opens Complete with its editor focused, and a second c types instead of completing", async ({ page }) => {
+  const posts = await serve(page, "in_progress");
+  await page.goto(`/tasks/${task.id}`);
+  await expect(page.getByRole("heading", { level: 1, name: task.title })).toBeVisible();
+  await page.keyboard.press("c");
+  await expect(evidence(page)).toBeFocused();
+  await page.keyboard.press("c");
+  await expect(evidence(page)).toHaveText("c");
+  expect(posts).toEqual([]);
+
+  // Only the form's own button sends the change.
+  await page.getByRole("form", { name: "Complete" }).getByRole("button", { name: "Complete" }).click();
+  await expect.poll(() => posts).toEqual([`/api/tasks/${task.id}/complete {"evidence":"c"}`]);
+});
+
+test("a held c opens Complete once and completes nothing", async ({ page }) => {
+  const posts = await serve(page, "in_progress");
+  await page.goto(`/tasks/${task.id}`);
+  await expect(page.getByRole("heading", { level: 1, name: task.title })).toBeVisible();
+  await page.keyboard.down("c");
+  await page.keyboard.down("c");
+  await page.keyboard.down("c");
+  await page.keyboard.up("c");
+  await expect(evidence(page)).toBeFocused();
+  await expect(page.getByRole("form")).toHaveCount(1);
+  expect(posts).toEqual([]);
+});
+
+test("c after Escape leaves the editor refocuses it instead of completing", async ({ page }) => {
+  const posts = await serve(page, "in_progress");
+  await page.goto(`/tasks/${task.id}`);
+  await page.getByRole("button", { name: "Complete" }).click();
+  await expect(evidence(page)).toBeFocused();
+  await page.keyboard.type("Shipped");
+  await page.keyboard.press("Escape");
+  await expect(evidence(page)).not.toBeFocused();
+  await page.keyboard.press("c");
+  await expect(evidence(page)).toBeFocused();
+  await expect(evidence(page)).toHaveText("Shipped");
+  // The header's Complete button does the same as the shortcut.
+  await page.getByRole("group", { name: "Task actions" }).getByRole("button", { name: "Complete" }).click();
+  await expect(evidence(page)).toBeFocused();
+  expect(posts).toEqual([]);
+});
+
+for (const [from, open] of [
+  ["?action=complete", async (page: Page) => page.goto(`/tasks/${task.id}?action=complete`)],
+  [
+    "the Work list's j c",
+    async (page: Page) => {
+      await page.goto("/");
+      await expect(page.getByRole("link", { name: new RegExp(task.title) })).toBeVisible();
+      await page.keyboard.press("j");
+      await page.keyboard.press("c");
+    },
+  ],
+] as const) {
+  test(`a Complete form opened from ${from} takes the next c as text`, async ({ page }) => {
+    const posts = await serve(page, "in_progress");
+    await open(page);
+    await expect(evidence(page)).toBeFocused();
+    await page.keyboard.press("c");
+    await expect(evidence(page)).toHaveText("c");
+    expect(posts).toEqual([]);
+  });
+}
+
+test("an Enter held through choosing a menu command does not press the button focus returns to", async ({ page }) => {
+  const posts = await serve(page);
+  await page.goto(`/tasks/${task.id}`);
+  await expect(page.getByRole("heading", { level: 1, name: task.title })).toBeVisible();
+  const start = page.getByRole("button", { name: "Start" });
+  await start.focus();
+  await page.keyboard.press("Control+k");
+  await page.keyboard.type("collapse");
+  await page.keyboard.down("Enter");
+  await page.keyboard.down("Enter");
+  await page.keyboard.down("Enter");
+  await page.keyboard.up("Enter");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(start).toBeFocused();
+  expect(posts).toEqual([]);
 });
 
 test("the menu acts on the Work list's selected row", async ({ page }) => {

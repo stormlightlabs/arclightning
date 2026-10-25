@@ -91,6 +91,13 @@ describe("resolveRef", () => {
     expect(resolveRef("T18.3", tasks)).toBe("arcl-t-4");
     expect(resolveRef("T18.", tasks)).toEqual({ ref: "T18.", problem: "missing" });
   });
+
+  it("matches an ID in any case, returning the store's canonical form", () => {
+    const id = "arcl-t-01M5QS2QP9TNCV3A88EHX375D9";
+    const stored = [...tasks, { id, title: "T19: Ship", status: "pending" as const }];
+    for (const ref of [id, id.toUpperCase(), id.toLowerCase()]) expect(resolveRef(ref, stored)).toBe(id);
+    expect(taskOf(parseCapture(`Idea after:${id.toUpperCase()}`), stored)).toMatchObject({ task: { blocked_by: [id] } });
+  });
 });
 
 describe("isTaskRef", () => {

@@ -26,17 +26,44 @@
   /** What had focus when the dialog opened, which gets it back on close. */
   let opener: Element | null = null;
 
+  /**
+   * After a close, swallow the repeats of an Enter or Space still held from
+   * inside the dialog, so they do not press the opener that gets focus back.
+   * The first keyup or fresh key press ends it, so a new press acts as usual.
+   */
+  function swallowHeldKeys() {
+    window.addEventListener("keydown", swallowHeldKey, true);
+    window.addEventListener("keyup", swallowHeldKey, true);
+  }
+
+  function swallowHeldKey(event: KeyboardEvent) {
+    if (event.type === "keydown" && event.repeat && (event.key === "Enter" || event.key === " ")) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    stopSwallowing();
+  }
+
+  function stopSwallowing() {
+    window.removeEventListener("keydown", swallowHeldKey, true);
+    window.removeEventListener("keyup", swallowHeldKey, true);
+  }
+
   // Update `open` and focus as the dialog closes rather than on the `close`
   // event, which comes a task later, so a key pressed right after Escape
   // reaches the page with the dialog closed.
   function requestClose() {
+    swallowHeldKeys();
     dialog.close();
     handleClose();
   }
 
   function handleClose() {
-    // A `close` event queued before the dialog opened again is stale.
-    if (dialog.open) return;
+    // A `close` event queued before the dialog opened again, or that arrives
+    // after the dialog unmounted, is stale.
+    if (!dialog || dialog.open) return;
+    if (open) swallowHeldKeys();
     if (dialog.contains(document.activeElement)) {
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
       // Focusing `body`, or any opener that cannot take focus, leaves focus
@@ -51,14 +78,18 @@
   $effect(() => {
     if (!dialog) return;
     if (open && !dialog.open) {
+      stopSwallowing();
       opener = document.activeElement;
       dialog.showModal();
     }
     if (!open && dialog.open) {
+      swallowHeldKeys();
       dialog.close();
       handleClose();
     }
   });
+
+  $effect(() => stopSwallowing);
 </script>
 
 <dialog
