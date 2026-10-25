@@ -143,6 +143,11 @@ impl Renderer {
         Self { mode, color }
     }
 
+    /// The output mode this renderer writes.
+    pub const fn mode(&self) -> OutputMode {
+        self.mode
+    }
+
     /// Render the result of starting the foundation-only application.
     pub fn render_startup(&self) -> Result<Option<String>, OutputError> {
         let message = match self.mode {

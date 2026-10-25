@@ -44,10 +44,12 @@ export interface TaskKey extends WorkKey {
  * is `Escape` held with a modifier. `]` is taken whatever modifier a layout
  * needs to type it, AltGr (reported as Ctrl and Alt where the browser lacks
  * the `AltGraph` state) or Option, but not with Meta or with Ctrl alone.
+ * `Escape` does nothing while `unsaved` says an open form holds input that
+ * leaving would lose.
  */
-export function taskKeyAction(event: TaskKey): TaskKeyAction | null {
+export function taskKeyAction(event: TaskKey, unsaved = false): TaskKeyAction | null {
   if (event.defaultPrevented || event.metaKey || inField(event.target)) return null;
-  if (event.key === "Escape") return event.altKey || event.ctrlKey ? null : "back";
+  if (event.key === "Escape") return event.altKey || event.ctrlKey || unsaved ? null : "back";
   if (event.key === "]") {
     const altGraph = event.getModifierState?.("AltGraph") ?? (event.ctrlKey && event.altKey);
     return event.ctrlKey && !altGraph ? null : "properties";

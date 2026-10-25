@@ -3153,15 +3153,35 @@ impl Served {
     /// Send a GET for `path` with these extra header lines, and return the
     /// status and body.
     fn get(&self, path: &str, headers: &[String]) -> (u16, String) {
+        self.send("GET", path, headers, "")
+    }
+
+    /// Send a `method` request for `path` with these extra header lines and
+    /// `body`, and return the status and body.
+    fn send(&self, method: &str, path: &str, headers: &[String], body: &str) -> (u16, String) {
+        let (status, _, body) = self.exchange(method, path, headers, body);
+        (status, body)
+    }
+
+    /// Send a request as [`Served::send`] does, and return the status, the
+    /// response head and the body.
+    fn exchange(&self, method: &str, path: &str, headers: &[String], body: &str) -> (u16, String, String) {
         use std::io::{Read, Write};
 
         let mut stream = std::net::TcpStream::connect(("127.0.0.1", self.port)).expect("arcl serve accepts");
-        let mut request = format!("GET {path} HTTP/1.1\r\nConnection: close\r\n");
+        let mut request = format!("{method} {path} HTTP/1.1\r\nConnection: close\r\n");
         for header in headers {
             request.push_str(header);
             request.push_str("\r\n");
         }
+        if !body.is_empty() {
+            request.push_str(&format!(
+                "Content-Type: application/json\r\nContent-Length: {}\r\n",
+                body.len()
+            ));
+        }
         request.push_str("\r\n");
+        request.push_str(body);
         stream.write_all(request.as_bytes()).expect("the request writes");
         let mut response = String::new();
         stream.read_to_string(&mut response).expect("the response reads");
@@ -3176,13 +3196,29 @@ impl Served {
             .expect("a status line")
             .parse()
             .expect("a numeric status");
-        (status, body.to_owned())
+        (status, head.to_owned(), body.to_owned())
     }
 
     /// GET `path` with the right `Host` and token.
     fn read(&self, path: &str) -> (u16, Value) {
         let (status, body) = self.get(path, &[self.host(), format!("X-Arcl-Token: {}", self.token)]);
         (status, serde_json::from_str(&body).expect("the body is JSON"))
+    }
+
+    /// POST `body` to `path` from the served origin with the right `Host`
+    /// and token.
+    fn write(&self, path: &str, body: &str) -> (u16, Value) {
+        let (status, body) = self.send("POST", path, &self.write_headers(), body);
+        (status, serde_json::from_str(&body).expect("the body is JSON"))
+    }
+
+    /// The `Host`, token and `Origin` headers a mutation from the app sends.
+    fn write_headers(&self) -> Vec<String> {
+        vec![
+            self.host(),
+            format!("X-Arcl-Token: {}", self.token),
+            format!("Origin: http://127.0.0.1:{}", self.port),
+        ]
     }
 
     fn host(&self) -> String {
@@ -3320,6 +3356,286 @@ fn serve_refuses_requests_without_the_host_and_token() {
         401
     );
     assert_eq!(served.get("/", &[served.host(), token]).0, 200);
+}
+
+/// The JSON error `arcl --json <args>` prints, with its exit code.
+fn cli_error(directory: &Path, args: &[&str]) -> (Option<i32>, Value) {
+    let output = arcl_in(directory)
+        .args([&["--json"], args].concat())
+        .output()
+        .expect("command runs");
+    assert!(output.stdout.is_empty(), "the command succeeded: {args:?}");
+    (output.status.code(), json(&output.stderr))
+}
+
+#[test]
+fn serve_task_mutations_change_records_as_the_cli_does() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let served = Served::start(dir);
+
+    let (status, created) = served.write(
+        "/api/tasks",
+        r#"{"title":"Served task","body":"First body","priority":"high"}"#,
+    );
+    assert_eq!(status, 200, "{created}");
+    assert_eq!(created["data"]["action"], "created");
+    let task = created["data"]["task"]["id"].as_str().expect("a task ID").to_owned();
+    let dependent = create_task(dir, "Waits on it", None);
+    run_json(
+        dir,
+        ["--json", "dependency", "add", &dependent, "--blocked-by", &task].as_ref(),
+    );
+
+    let (status, updated) = served.write(
+        &format!("/api/tasks/{task}/update"),
+        r#"{"title":"Renamed task","body":"Second body"}"#,
+    );
+    assert_eq!(status, 200, "{updated}");
+    assert_eq!(updated["data"]["action"], "updated");
+    assert_eq!(task_field(dir, &task, "title"), "Renamed task");
+    assert_eq!(task_field(dir, &task, "body"), "Second body");
+    assert_eq!(task_field(dir, &task, "priority"), "high");
+
+    let (status, started) = served.write(&format!("/api/tasks/{task}/start"), "");
+    assert_eq!((status, &started["data"]["action"]), (200, &Value::from("started")));
+    assert_eq!(task_field(dir, &task, "status"), "in_progress");
+
+    let (status, handed) = served.write(&format!("/api/tasks/{task}/handoff"), r#"{"note":"Resume here"}"#);
+    assert_eq!((status, &handed["data"]["action"]), (200, &Value::from("handed_off")));
+    assert_eq!(task_field(dir, &task, "status"), "parked");
+    assert_eq!(task_field(dir, &task, "handoff"), "Resume here");
+
+    let (status, unparked) = served.write(&format!("/api/tasks/{task}/unpark"), "");
+    assert_eq!((status, &unparked["data"]["action"]), (200, &Value::from("unparked")));
+    let (status, parked) = served.write(&format!("/api/tasks/{task}/park"), "{}");
+    assert_eq!((status, &parked["data"]["action"]), (200, &Value::from("parked")));
+    served.write(&format!("/api/tasks/{task}/unpark"), "");
+    served.write(&format!("/api/tasks/{task}/start"), "");
+
+    let (status, completed) = served.write(
+        &format!("/api/tasks/{task}/complete"),
+        r#"{"evidence":"Delivered by #1."}"#,
+    );
+    assert_eq!(status, 200, "{completed}");
+    assert_eq!(completed["format_version"], 2);
+    assert_eq!(completed["data"]["action"], "completed");
+    assert_eq!(completed["data"]["unblocked"], serde_json::json!([dependent]));
+    assert_eq!(task_field(dir, &task, "status"), "completed");
+    assert_eq!(task_field(dir, &task, "evidence"), "Delivered by #1.");
+}
+
+#[test]
+fn serve_mutation_failures_return_the_cli_error() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let blocker = create_task(dir, "Blocker", None);
+    let task = create_task(dir, "Blocked", None);
+    run_json(
+        dir,
+        ["--json", "dependency", "add", &task, "--blocked-by", &blocker].as_ref(),
+    );
+    let served = Served::start(dir);
+
+    let cases: [(String, &str, Vec<&str>); 6] = [
+        (format!("/api/tasks/{task}/start"), "", vec!["task", "start", &task]),
+        (
+            format!("/api/tasks/{blocker}/handoff"),
+            r#"{"note":"x"}"#,
+            vec!["task", "handoff", &blocker, "--note", "x"],
+        ),
+        (
+            format!("/api/tasks/{blocker}/handoff"),
+            "",
+            vec!["task", "handoff", &blocker],
+        ),
+        (
+            format!("/api/tasks/{task}/update"),
+            r#"{"title":"  "}"#,
+            vec!["task", "update", &task, "--title", "  "],
+        ),
+        (format!("/api/tasks/{task}/update"), "{}", vec!["task", "update", &task]),
+        (
+            "/api/tasks".to_owned(),
+            r#"{"title":"T","priority":"urgent"}"#,
+            vec!["task", "create", "T", "--priority", "urgent"],
+        ),
+    ];
+    for (path, body, args) in cases {
+        let (code, expected) = cli_error(dir, &args);
+        assert_eq!(code, Some(3), "{args:?}");
+        assert_eq!(served.write(&path, body), (400, expected), "{path} {body}");
+    }
+
+    let missing = "arcl-t-00000000000000000000000000";
+    let (code, expected) = cli_error(dir, &["task", "park", missing]);
+    assert_eq!(code, Some(5));
+    assert_eq!(served.write(&format!("/api/tasks/{missing}/park"), ""), (404, expected));
+    assert_eq!(task_field(dir, &task, "status"), "pending");
+    assert_eq!(task_field(dir, &task, "title"), "Blocked");
+}
+
+#[test]
+fn serve_refuses_mutations_without_the_origin_or_on_get() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let task = create_task(dir, "Untouched", None);
+    let served = Served::start(dir);
+    let path = format!("/api/tasks/{task}/start");
+    let token = format!("X-Arcl-Token: {}", served.token);
+
+    let missing = served.send("POST", &path, &[served.host(), token.clone()], "{}");
+    assert_eq!(missing.0, 403);
+    let foreign = served.send(
+        "POST",
+        &path,
+        &[served.host(), token.clone(), "Origin: http://127.0.0.1:1".to_owned()],
+        "{}",
+    );
+    assert_eq!(foreign.0, 403);
+    let evil = served.send(
+        "POST",
+        &path,
+        &[served.host(), token.clone(), "Origin: http://evil.example".to_owned()],
+        "{}",
+    );
+    assert_eq!(evil.0, 403);
+    let tokenless = served.send(
+        "POST",
+        &path,
+        &[served.host(), format!("Origin: http://127.0.0.1:{}", served.port)],
+        "{}",
+    );
+    assert_eq!(tokenless.0, 401);
+    assert_eq!(served.get(&path, &served.write_headers()).0, 405);
+    assert_eq!(served.send("POST", "/api/ready", &served.write_headers(), "").0, 405);
+    assert_eq!(task_field(dir, &task, "status"), "pending");
+}
+
+#[test]
+fn serve_mutations_sync_the_workspace() {
+    let directory = tempdir().expect("temporary directory can be created");
+    let dir = directory.path();
+    run_json(dir, ["--json", "init", "--workspace"].as_ref());
+    let served = Served::start(dir);
+
+    let (status, created) = served.write("/api/tasks", r#"{"title":"Exported task"}"#);
+    assert_eq!(status, 200, "{created}");
+    let task = created["data"]["task"]["id"].as_str().expect("a task ID");
+    let record =
+        fs::read_to_string(dir.join(format!(".arcl/workspace/tasks/{task}.md"))).expect("the task is exported");
+    assert!(record.contains("Exported task"), "record: {record}");
+
+    // A change made in the workspace file reaches the next mutation.
+    fs::write(
+        dir.join(format!(".arcl/workspace/tasks/{task}.md")),
+        record.replace("Exported task", "Edited in Git"),
+    )
+    .expect("the record writes");
+    let (status, started) = served.write(&format!("/api/tasks/{task}/start"), "");
+    assert_eq!(status, 200, "{started}");
+    assert_eq!(started["data"]["task"]["title"], "Edited in Git");
+}
+
+#[test]
+fn serve_mutations_give_up_on_a_held_sync_lock_while_reads_go_on() {
+    use std::time::{Duration, Instant};
+
+    let directory = tempdir().expect("temporary directory can be created");
+    let dir = directory.path();
+    run_json(dir, ["--json", "init", "--workspace"].as_ref());
+    let task = create_task(dir, "Waits for the lock", None);
+    let served = Served::start(dir);
+    let lock = fs::OpenOptions::new()
+        .write(true)
+        .open(dir.join(".arcl/arcl.db-sync.lock"))
+        .expect("the lock file opens");
+    lock.lock().expect("the test holds the sync lock");
+
+    let started = Instant::now();
+    let (status, head, body) = std::thread::scope(|scope| {
+        let write = scope.spawn(|| {
+            served.exchange(
+                "POST",
+                &format!("/api/tasks/{task}/start"),
+                &served.write_headers(),
+                "{}",
+            )
+        });
+        // Reads take no lock, and run while the mutation waits.
+        std::thread::sleep(Duration::from_millis(300));
+        let read_started = Instant::now();
+        let (status, shown) = served.read(&format!("/api/records/{task}"));
+        assert_eq!(status, 200, "{shown}");
+        assert_eq!(shown["data"]["task"]["status"], "pending");
+        assert!(
+            read_started.elapsed() < Duration::from_secs(1),
+            "the read waited {:?}",
+            read_started.elapsed()
+        );
+        write.join().expect("the mutation answers")
+    });
+    let waited = started.elapsed();
+    assert!(
+        waited >= Duration::from_secs(3) && waited < Duration::from_secs(5),
+        "waited {waited:?}"
+    );
+    assert_eq!(status, 503, "{body}");
+    assert!(head.to_ascii_lowercase().contains("\r\nretry-after: 1"), "{head}");
+    let envelope: Value = serde_json::from_str(&body).expect("the body is JSON");
+    assert_eq!(envelope["error"]["code"], "application_error");
+    assert_eq!(envelope["error"]["exit_code"], 1);
+    assert!(
+        envelope["error"]["message"]
+            .as_str()
+            .expect("a message")
+            .contains("sync lock"),
+        "{body}"
+    );
+    // `arcl task show` would wait for the lock, so read through the server.
+    let (_, shown) = served.read(&format!("/api/records/{task}"));
+    assert_eq!(shown["data"]["task"]["status"], "pending");
+
+    lock.unlock().expect("the test releases the sync lock");
+    let (status, started) = served.write(&format!("/api/tasks/{task}/start"), "{}");
+    assert_eq!(status, 200, "{started}");
+    assert_eq!(task_field(dir, &task, "status"), "in_progress");
+}
+
+#[test]
+fn serve_mutation_replies_carry_sync_warnings() {
+    let directory = git_project();
+    let path = directory.path();
+    let root = create_task(path, "Root", None);
+    let child = create_task(path, "Child", Some(&root));
+    let other = create_task(path, "Other", None);
+    store_raw_edge(path, &root, &child);
+    assert_success(
+        &arcl_in(path)
+            .args(["workspace", "sync"])
+            .output()
+            .expect("command runs"),
+    );
+    commit_all(path, "base");
+    // An unrelated workspace edit makes the next mutation import.
+    edit_task_record(path, &other, "title = \"Other\"", "title = \"Other edited\"");
+    let served = Served::start(path);
+
+    let (status, created) = served.write("/api/tasks", r#"{"title":"New"}"#);
+    assert_eq!(status, 200, "{created}");
+    assert_eq!(created["data"]["action"], "created");
+    let warnings = created["warnings"].as_array().expect("a warnings array");
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert_eq!(warnings[0]["code"], "blocker_edge");
+    let message = warnings[0]["message"].as_str().expect("a message");
+    assert!(
+        message.contains("it was already in the database, so it loads"),
+        "{message}"
+    );
+
+    let (status, quiet) = served.write(&format!("/api/tasks/{other}/park"), "");
+    assert_eq!(status, 200, "{quiet}");
+    assert!(quiet.get("warnings").is_none(), "{quiet}");
 }
 
 #[test]

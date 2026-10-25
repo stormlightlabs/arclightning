@@ -16,8 +16,14 @@ export default defineConfig({
           name: "unit",
           environment: "node",
           include: ["src/**/*.test.ts"],
-          exclude: ["src/**/*.svelte.test.ts"],
+          exclude: ["src/**/*.svelte.test.ts", "src/**/*.dom.test.ts"],
         },
+      },
+      {
+        // Components mounted in a DOM need Svelte's client runtime.
+        extends: "./vite.config.ts",
+        resolve: { conditions: ["browser"] },
+        test: { name: "dom", environment: "happy-dom", include: ["src/**/*.dom.test.ts"] },
       },
       {
         extends: "./vite.config.ts",

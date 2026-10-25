@@ -1,21 +1,51 @@
-//! `arcl serve`: the web app and its read endpoints over the read commands.
+//! `arcl serve`: the web app and its endpoints over the CLI's commands.
 //!
-//! Each request opens the database and runs the same read as the CLI, with
-//! no workspace sync. A read never changes records, though opening the
-//! database can run its migrations. The server holds no sync lock, so other
-//! arcl commands run while it serves.
+//! Each read opens the database and runs the same read as the CLI, with no
+//! workspace sync. A read never changes records, though opening the database
+//! can run its migrations. Each mutation runs the same `arcl task` command
+//! as the CLI, with the same sync around it: it takes the sync lock, syncs,
+//! changes the record and syncs again to export it. The server holds the lock
+//! only during a mutation, so other arcl commands run while it serves.
+//!
+//! A mutation waits at most [`LOCK_WAIT`] for the lock. When another command
+//! holds it longer, the mutation fails with `application_error`, exit code 1,
+//! and status 503 with `Retry-After`, and changes nothing. A mutation's reply
+//! lists the warnings its syncs gave in `warnings`, as objects with the
+//! `code` and `message` the CLI prints to stderr under `--json`.
 
-use arcl_serve::{Reads, Reply, Server};
+use arcl_serve::{Completion, Handoff, Mutations, NewTask, Reads, Reply, Server, TaskEdit, TaskStart};
 
 use super::reads::*;
 use super::*;
 
-/// The read endpoints, answering with the CLI's `--json` envelopes.
-struct ServeReads {
+/// How long a mutation waits for the project's sync lock. The CLI waits as
+/// long as it takes; the web app's user is waiting on a button instead.
+const LOCK_WAIT: Duration = Duration::from_secs(3);
+
+/// The endpoints, answering with the CLI's `--json` envelopes.
+struct ServeApp {
     renderer: Renderer,
+    /// How `arcl serve` prints a mutation's sync warnings to stderr.
+    mode: OutputMode,
 }
 
-impl Reads for ServeReads {
+impl ServeApp {
+    /// Run a task command as the CLI runs a write. The warnings its syncs
+    /// give go in the reply and to the server's stderr.
+    fn write(&self, command: TaskCommand) -> Reply {
+        match synced_write(LOCK_WAIT, || run_task(command, &self.renderer)) {
+            Ok((body, warnings)) => {
+                let body = with_warnings(body.unwrap_or_default(), &warnings);
+                write_warnings(self.mode, warnings);
+                Reply::success(body)
+            }
+            Err(error) if error.lock_busy() => Reply::busy(error.json()),
+            Err(error) => Reply::failure(error.exit_code(), error.json()),
+        }
+    }
+}
+
+impl Reads for ServeApp {
     fn list(&self, query: &[(String, String)]) -> Reply {
         match list_args(query) {
             Ok(filters) => reply(read_list(filters, &self.renderer)),
@@ -47,6 +77,69 @@ impl Reads for ServeReads {
     }
 }
 
+impl Mutations for ServeApp {
+    fn create_task(&self, input: NewTask) -> Reply {
+        self.write(TaskCommand::Create {
+            title: input.title,
+            spec: input.spec,
+            plan: input.plan,
+            phase: input.phase,
+            parent: input.parent,
+            priority: input.priority.unwrap_or_else(|| "normal".to_owned()),
+            position: 0,
+            blocked_by: Vec::new(),
+            body: MarkdownArgs { body: input.body, body_file: None },
+        })
+    }
+
+    fn update_task(&self, id: &str, input: TaskEdit) -> Reply {
+        self.write(TaskCommand::Update {
+            id: id.to_owned(),
+            title: input.title,
+            body: MarkdownArgs { body: input.body, body_file: None },
+            priority: input.priority,
+            position: None,
+            spec: None,
+            no_spec: false,
+            plan: None,
+            no_plan: false,
+            phase: None,
+            no_phase: false,
+            parent: None,
+            no_parent: false,
+        })
+    }
+
+    fn start_task(&self, id: &str, input: TaskStart) -> Reply {
+        self.write(TaskCommand::Start { id: id.to_owned(), force: input.force })
+    }
+
+    fn park_task(&self, id: &str) -> Reply {
+        self.write(TaskCommand::Park { id: id.to_owned() })
+    }
+
+    fn unpark_task(&self, id: &str) -> Reply {
+        self.write(TaskCommand::Unpark { id: id.to_owned() })
+    }
+
+    fn hand_off_task(&self, id: &str, input: Handoff) -> Reply {
+        self.write(TaskCommand::Handoff { id: id.to_owned(), note: input.note, note_file: None })
+    }
+
+    fn complete_task(&self, id: &str, input: Completion) -> Reply {
+        if input.allow_open_children && input.with_subtasks {
+            return Reply::invalid_request("`allow_open_children` and `with_subtasks` cannot be used together");
+        }
+        self.write(TaskCommand::Complete {
+            id: id.to_owned(),
+            allow_open_children: input.allow_open_children,
+            with_subtasks: input.with_subtasks,
+            evidence: input.evidence,
+            evidence_file: None,
+        })
+    }
+}
+
 /// Bind the server, print its URL and serve until interrupted. The database
 /// opens first, so outside a project `serve` fails like other commands
 /// instead of serving endpoints that all fail.
@@ -54,9 +147,26 @@ pub(super) fn exec_serve(port: Option<u16>, renderer: &Renderer) -> anyhow::Resu
     drop(open_database().map_err(ApplicationError::from_command)?);
     let server = Server::bind(port).context("could not start the web app server")?;
     write_output(renderer.render_serve(&server.url())?)?;
-    let reads = ServeReads { renderer: Renderer::new(OutputMode::Json, ColorChoice::Never) };
-    server.run(&reads).context("the web app server stopped")?;
+    let app = ServeApp { renderer: Renderer::new(OutputMode::Json, ColorChoice::Never), mode: renderer.mode() };
+    server.run(&app, &app).context("the web app server stopped")?;
     Ok(())
+}
+
+/// Add `warnings` to the JSON envelope `body` as a `warnings` array of
+/// `{"code", "message"}` objects. With no warnings, `body` is unchanged.
+fn with_warnings(body: String, warnings: &[Warning]) -> String {
+    if warnings.is_empty() {
+        return body;
+    }
+    let Ok(serde_json::Value::Object(mut envelope)) = serde_json::from_str(&body) else {
+        return body;
+    };
+    let warnings = warnings
+        .iter()
+        .map(|warning| serde_json::json!({ "code": warning.code, "message": warning.message }))
+        .collect();
+    envelope.insert("warnings".to_owned(), serde_json::Value::Array(warnings));
+    serde_json::Value::Object(envelope).to_string()
 }
 
 /// Turn a read's result into a reply, with the error envelope `main` prints

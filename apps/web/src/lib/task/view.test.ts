@@ -107,6 +107,12 @@ describe("taskKeyAction", () => {
     expect(taskKeyAction(key("j"))).toBeNull();
   });
 
+  it("stays on the task on Escape while a form holds unsaved input", () => {
+    expect(taskKeyAction(key("Escape"), true)).toBeNull();
+    expect(taskKeyAction(key("]"), true)).toBe("properties");
+    expect(taskKeyAction(key("Escape"), false)).toBe("back");
+  });
+
   it("toggles the panel on ] typed with AltGr or Option", () => {
     const altGraph = (on: boolean) => (name: string) => name === "AltGraph" && on;
     expect(taskKeyAction(key("]", { ctrlKey: true, altKey: true, getModifierState: altGraph(true) }))).toBe("properties");

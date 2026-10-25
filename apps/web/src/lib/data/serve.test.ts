@@ -13,10 +13,15 @@ function item(id: string, phaseId: string | null) {
 
 /** A fetch that answers from `routes` and records each request. */
 function fakeFetch(routes: Record<string, { status?: number; body: unknown }>) {
-  const calls: { path: string; headers: Record<string, string>; signal?: AbortSignal | null }[] = [];
+  const calls: { path: string; headers: Record<string, string>; method?: string; body?: unknown; signal?: AbortSignal | null }[] =
+    [];
   const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
-    calls.push({ path, headers: (init?.headers ?? {}) as Record<string, string>, signal: init?.signal });
+    const call: (typeof calls)[number] = { path, headers: (init?.headers ?? {}) as Record<string, string> };
+    if (init?.method) call.method = init.method;
+    if (init?.body !== undefined) call.body = JSON.parse(String(init.body));
+    if (init?.signal !== undefined) call.signal = init.signal;
+    calls.push(call);
     const route = routes[path];
     if (!route) return new Response("{}", { status: 404 });
     return new Response(JSON.stringify(route.body), { status: route.status ?? 200 });
@@ -145,11 +150,94 @@ describe("serveSource.task", () => {
   });
 });
 
+describe("serveSource changes", () => {
+  const task = (id: string, status: string) => ({ id, title: `Task ${id}`, status });
+  const mutation = (action: string, id: string, status: string) => ({ body: { format_version: 1, data: { action, task: task(id, status) } } });
+  const auth = () => ({ "X-Arcl-Token": "abc" });
+  const posted = { "X-Arcl-Token": "abc", "Content-Type": "application/json" };
+
+  it("posts each task command's options as JSON with the token, escaping the ID", async () => {
+    const { fetch, calls } = fakeFetch({
+      "/api/tasks": mutation("created", "t-3", "pending"),
+      "/api/tasks/t%203/update": mutation("updated", "t 3", "pending"),
+      "/api/tasks/t%203/start": mutation("started", "t 3", "in_progress"),
+      "/api/tasks/t%203/park": mutation("parked", "t 3", "parked"),
+      "/api/tasks/t%203/unpark": mutation("unparked", "t 3", "pending"),
+      "/api/tasks/t%203/handoff": mutation("handed_off", "t 3", "parked"),
+    });
+    const source = serveSource({ fetch, headers: auth });
+
+    expect(await source.createTask({ title: "New", priority: "high" })).toMatchObject({
+      value: { id: "t-3", status: "pending" },
+      warnings: [],
+    });
+    await source.updateTask("t 3", { title: "Renamed", body: "Text" });
+    expect((await source.startTask("t 3")).value).toMatchObject({ status: "in_progress" });
+    await source.startTask("t 3", { force: true });
+    await source.parkTask("t 3");
+    await source.unparkTask("t 3");
+    expect((await source.handOffTask("t 3", "Resume here")).value).toMatchObject({ status: "parked" });
+
+    expect(calls).toEqual([
+      { path: "/api/tasks", method: "POST", headers: posted, body: { title: "New", priority: "high" } },
+      { path: "/api/tasks/t%203/update", method: "POST", headers: posted, body: { title: "Renamed", body: "Text" } },
+      { path: "/api/tasks/t%203/start", method: "POST", headers: posted, body: {} },
+      { path: "/api/tasks/t%203/start", method: "POST", headers: posted, body: { force: true } },
+      { path: "/api/tasks/t%203/park", method: "POST", headers: posted, body: {} },
+      { path: "/api/tasks/t%203/unpark", method: "POST", headers: posted, body: {} },
+      { path: "/api/tasks/t%203/handoff", method: "POST", headers: posted, body: { note: "Resume here" } },
+    ]);
+  });
+
+  it("returns a completion with the tasks it unblocked", async () => {
+    const { fetch, calls } = fakeFetch({
+      "/api/tasks/t-1/complete": {
+        body: { format_version: 2, data: { action: "completed", task: task("t-1", "completed"), completed_subtasks: [], unblocked: ["t-2", "t-4"] } },
+      },
+    });
+    const completion = await serveSource({ fetch, headers: auth }).completeTask("t-1", { evidence: "Delivered by #41." });
+    expect(completion).toEqual({
+      value: { task: task("t-1", "completed"), completed_subtasks: [], unblocked: ["t-2", "t-4"] },
+      warnings: [],
+    });
+    expect(calls[0].body).toEqual({ evidence: "Delivered by #41." });
+  });
+
+  it("returns the warnings a saved change's syncs gave", async () => {
+    const warning = { code: "workspace_sync", message: "the change is saved, but the workspace was not updated" };
+    const { fetch } = fakeFetch({
+      "/api/tasks/t-1/park": { body: { format_version: 1, data: { action: "parked", task: task("t-1", "parked") }, warnings: [warning] } },
+    });
+    const parked = await serveSource({ fetch, headers: auth }).parkTask("t-1");
+    expect(parked).toEqual({ value: task("t-1", "parked"), warnings: [warning] });
+  });
+
+  it("raises the CLI's error code and message for a refused change", async () => {
+    const { fetch } = fakeFetch({
+      "/api/tasks/t-1/start": {
+        status: 400,
+        body: { format_version: 1, error: { code: "invalid_request", message: "invalid project or record: task `t-1` is blocked", exit_code: 3 } },
+      },
+    });
+    const failure = await serveSource({ fetch, headers: auth }).startTask("t-1").catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(DataError);
+    expect(failure).toMatchObject({ code: "invalid_request", message: "invalid project or record: task `t-1` is blocked" });
+  });
+});
+
 describe("dataSource", () => {
   it("returns the source a build set in place of arcl serve", async () => {
+    const refuse = async (id: string) => Promise.reject(new DataError("not_found", id));
     const artifact: DataSource = {
       work: async () => ({ milestones: [], items: [] }),
-      task: async (id) => Promise.reject(new DataError("not_found", id)),
+      task: refuse,
+      createTask: async (input) => refuse(input.title),
+      updateTask: refuse,
+      startTask: refuse,
+      parkTask: refuse,
+      unparkTask: refuse,
+      handOffTask: refuse,
+      completeTask: refuse,
     };
     setDataSource(artifact);
     expect(dataSource()).toBe(artifact);

@@ -391,7 +391,13 @@ pub(super) fn exec_plan(command: PlanCommand, renderer: &Renderer) -> anyhow::Re
 }
 
 pub(super) fn exec_task(command: TaskCommand, renderer: &Renderer) -> anyhow::Result<()> {
-    let message = match command {
+    write_output(run_task(command, renderer)?)
+}
+
+/// Run one `arcl task` command and return what it prints, so `arcl serve`
+/// can answer with the same output and errors.
+pub(super) fn run_task(command: TaskCommand, renderer: &Renderer) -> Result<Option<String>, ApplicationError> {
+    match command {
         TaskCommand::Create { title, spec, plan, phase, parent, priority, position, blocked_by, body } => {
             validate_title(&title).map_err(|error| ApplicationError::from_command(CommandError::Domain(error)))?;
             let priority = TaskPriority::parse(&priority)
@@ -554,8 +560,7 @@ pub(super) fn exec_task(command: TaskCommand, renderer: &Renderer) -> anyhow::Re
                     .render_planning_context(&database.planning_context(id).map_err(ApplicationError::from_command)?),
             )
         }
-    }?;
-    write_output(message)
+    }
 }
 
 pub(super) fn exec_dependency(command: DependencyCommand, renderer: &Renderer) -> anyhow::Result<()> {
