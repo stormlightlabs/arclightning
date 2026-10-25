@@ -269,6 +269,16 @@
       },
       "format_version": 2
     },
+    "sources/arcl-t-01M5RVP5WQ2VC67M1APSRK2ZTG": {
+      "data": {
+        "id": "arcl-t-01M5RVP5WQ2VC67M1APSRK2ZTG",
+        "kind": "task",
+        "path": "tasks/arcl-t-01M5RVP5WQ2VC67M1APSRK2ZTG.md",
+        "revision": "a3954802bb72188b150ec3e0c2519db96d8c1eda1c8df6cd4cd556bd3c47dd5a",
+        "source": "+++\nid = \"arcl-t-01M5RVP5WQ2VC67M1APSRK2ZTG\"\nspec = \"arcl-s-01M5RVP5TFAGM9THCYXQ77592B\"\nplan = \"arcl-pl-01M5RVP5VNV1ZWJTPMJXY42HV8\"\nphase = \"arcl-ph-01M5RVP5WQV9WY62EGZQ5S26Y7\"\nplan-key = \"publish/build\"\ntitle = \"Build the page\"\nstatus = \"pending\"\npriority = \"high\"\nposition = 0\n+++\n"
+      },
+      "format_version": 1
+    },
     "records/arcl-t-01M5RVP5WQQ1JH509T612ZZ60W": {
       "data": {
         "ancestors": [],
@@ -354,6 +364,16 @@
       },
       "format_version": 2
     },
+    "sources/arcl-t-01M5RVP5WQQ1JH509T612ZZ60W": {
+      "data": {
+        "id": "arcl-t-01M5RVP5WQQ1JH509T612ZZ60W",
+        "kind": "task",
+        "path": "tasks/arcl-t-01M5RVP5WQQ1JH509T612ZZ60W.md",
+        "revision": "c5818753c44c8259849f64037f86406912bb28f9ebf4ccefcf44bccca97f04a3",
+        "source": "+++\nid = \"arcl-t-01M5RVP5WQQ1JH509T612ZZ60W\"\nspec = \"arcl-s-01M5RVP5TFAGM9THCYXQ77592B\"\nplan = \"arcl-pl-01M5RVP5VNV1ZWJTPMJXY42HV8\"\nphase = \"arcl-ph-01M5RVP5WQV9WY62EGZQ5S26Y7\"\nplan-key = \"publish/sync\"\ntitle = \"Sync the database\"\nstatus = \"pending\"\npriority = \"normal\"\nposition = 1\nblocked-by = [\"arcl-t-01M5RVP5WQ2VC67M1APSRK2ZTG\"]\n+++\n"
+      },
+      "format_version": 1
+    },
     "records/arcl-t-01M5RVP5X713CPGM5M3WMPPSZW": {
       "data": {
         "ancestors": [],
@@ -387,6 +407,16 @@
       },
       "format_version": 2
     },
+    "sources/arcl-t-01M5RVP5X713CPGM5M3WMPPSZW": {
+      "data": {
+        "id": "arcl-t-01M5RVP5X713CPGM5M3WMPPSZW",
+        "kind": "task",
+        "path": "tasks/arcl-t-01M5RVP5X713CPGM5M3WMPPSZW.md",
+        "revision": "e2e70a8d9d8f6e028d46503787e1af2572c9ce602bbb19a52c8c56b39d700c62",
+        "source": "+++\nid = \"arcl-t-01M5RVP5X713CPGM5M3WMPPSZW\"\ntitle = \"Loose task\"\nstatus = \"pending\"\npriority = \"normal\"\nposition = 0\n+++\n\nOutside any **plan**.\n"
+      },
+      "format_version": 1
+    },
     "records/arcl-c-01M5RVP5XHT7D6S1NWEJ9BEEYG": {
       "data": {
         "action": "shown",
@@ -404,8 +434,8 @@
     "meta/sync": {
       "commit": null,
       "format_version": 1,
-      "revision": "02046c58acc5ce55",
-      "synced_at": "2026-10-25T06:24:09Z"
+      "revision": "5d68c9394bdf3991",
+      "synced_at": "2026-10-25T16:34:33Z"
     }
   }
 }

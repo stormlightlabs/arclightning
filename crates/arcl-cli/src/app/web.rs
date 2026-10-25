@@ -15,7 +15,12 @@
 //! | `views/tasks`      | `GET /api/records?kind=task`                    |
 //! | `views/captures`   | `GET /api/records?kind=capture&status=captured` |
 //! | `records/<id>`     | `GET /api/records/<id>`, per task and capture   |
+//! | `sources/<id>`     | `GET /api/records/<id>/source`, per task        |
 //! | `meta/sync`        | the commit, time and revision of the export     |
+//!
+//! The Task view edits a task's file from its `sources/<id>` document and
+//! queues the save as `update_source` with the revision that document holds.
+//! No view edits a capture's file, so captures have none.
 //!
 //! A document whose JSON is over [`MAX_DOCUMENT_BYTES`] is stored as a
 //! header, `{"chunked": {"parts": n, "digest": "..."}}`, and `n` parts at
@@ -50,7 +55,7 @@ const MANIFEST_FILE: &str = "manifest.json";
 
 /// The collections `export` writes. A path from an older manifest outside
 /// them is never deleted.
-const COLLECTIONS: &[&str] = &["chunks", "views", "records", "meta"];
+const COLLECTIONS: &[&str] = &["chunks", "views", "records", "sources", "meta"];
 
 /// The path of the document that describes the export.
 const META_DOCUMENT: &str = "meta/sync";
@@ -156,16 +161,21 @@ fn export(app: &ServeApp, dir: &Path, full: bool) -> CResult<WebManifest> {
         app.list(&query(&[("kind", "capture"), ("status", "captured")])),
         "views/captures",
     )?;
-    let ids = [&tasks, &captures]
-        .into_iter()
-        .flat_map(|listing| listing["data"]["records"].as_array().cloned().unwrap_or_default())
-        .filter_map(|record| record["id"].as_str().map(str::to_owned))
-        .collect::<Vec<_>>();
+    let task_ids = record_ids(&tasks);
+    let capture_ids = record_ids(&captures);
     documents.push(("views/tasks".to_owned(), tasks));
     documents.push(("views/captures".to_owned(), captures));
-    for id in ids {
+    for id in &task_ids {
         let path = format!("records/{id}");
-        let shown = read(app.show(&id), &path)?;
+        let shown = read(app.show(id), &path)?;
+        documents.push((path, shown));
+        let path = format!("sources/{id}");
+        let source = read(app.source(id), &path)?;
+        documents.push((path, source));
+    }
+    for id in &capture_ids {
+        let path = format!("records/{id}");
+        let shown = read(app.show(id), &path)?;
         documents.push((path, shown));
     }
 
@@ -233,6 +243,16 @@ fn query(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
     pairs
         .iter()
         .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+        .collect()
+}
+
+/// The IDs of the records in a listing read's envelope.
+fn record_ids(listing: &Value) -> Vec<String> {
+    listing["data"]["records"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|record| record["id"].as_str().map(str::to_owned))
         .collect()
 }
 

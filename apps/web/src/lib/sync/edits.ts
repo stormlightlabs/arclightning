@@ -15,6 +15,7 @@ const VERBS: Record<string, string> = {
   create_spec: "Create the spec",
   create_plan: "Create the plan",
   apply_plan: "Apply the plan",
+  update_source: "Edit the file of",
 };
 
 /**
@@ -29,6 +30,15 @@ export function describeEdit(edit: QueuedEdit): string {
   const to = edit.op === "promote_capture" && typeof edit.input.to === "string" ? ` to a ${edit.input.to}` : "";
   const subject = title ?? edit.target;
   return `${subject === null ? verb : `${verb} ${subject}`}${to}`;
+}
+
+/**
+ * Whether an edit to record `id` waits for the next sync, queued or being
+ * applied. Applying it rewrites the record's file, so a raw edit made from
+ * the file before then is stale.
+ */
+export function editWaitsFor(status: SyncStatus | null, id: string): boolean {
+  return status?.edits.some((edit) => edit.target === id && edit.status !== "failed") ?? false;
 }
 
 /** A sync time for people, such as `Oct 25, 06:17 UTC`, or `null` before the first sync. */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { QueuedEdit } from "$lib/data";
-import { describeEdit, syncedLabel } from "./edits";
+import { describeEdit, editWaitsFor, syncedLabel } from "./edits";
 
 const edit = (op: string, target: string | null, input: Record<string, unknown> = {}): QueuedEdit => ({
   id: "q1",
@@ -18,6 +18,7 @@ describe("describeEdit", () => {
     expect(describeEdit(edit("promote_capture", "arcl-c-1", { to: "task", title: "Ship it" }))).toBe("Promote the capture “Ship it” to a task");
     expect(describeEdit(edit("create_capture", null, { title: "Idea" }))).toBe("Capture “Idea”");
     expect(describeEdit(edit("park_task", "arcl-t-1", { title: "  " }))).toBe("Park the task arcl-t-1");
+    expect(describeEdit(edit("update_source", "arcl-t-1", { source: "+++\n", revision: "r1" }))).toBe("Edit the file of arcl-t-1");
     expect(describeEdit(edit("rename_everything", null))).toBe("Run rename_everything");
     expect(describeEdit(edit("rename_everything", "arcl-t-1"))).toBe("Run rename_everything on arcl-t-1");
   });
@@ -29,5 +30,16 @@ describe("syncedLabel", () => {
     expect(syncedLabel(status)).toBe("Oct 25, 06:17 UTC");
     expect(syncedLabel({ ...status, syncedAt: null })).toBeNull();
     expect(syncedLabel({ ...status, syncedAt: "not a time" })).toBeNull();
+  });
+});
+
+describe("editWaitsFor", () => {
+  it("finds a queued or applying edit to the record, and ignores failed ones and other records", () => {
+    const status = { syncedAt: null, commit: null, revision: null, edits: [edit("start_task", "arcl-t-1")], stopped: null };
+    expect(editWaitsFor(status, "arcl-t-1")).toBe(true);
+    expect(editWaitsFor({ ...status, edits: [{ ...edit("start_task", "arcl-t-1"), status: "applying" }] }, "arcl-t-1")).toBe(true);
+    expect(editWaitsFor({ ...status, edits: [{ ...edit("start_task", "arcl-t-1"), status: "failed" }] }, "arcl-t-1")).toBe(false);
+    expect(editWaitsFor(status, "arcl-t-2")).toBe(false);
+    expect(editWaitsFor(null, "arcl-t-1")).toBe(false);
   });
 });
