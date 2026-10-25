@@ -1,8 +1,11 @@
 # Arc Lightning web app
 
-The web app `arcl serve` serves, and that `pnpm build:artifact` builds as a
-claude.ai artifact page in `build-artifact/index.html`. Its views are in
-`src/routes`; the components they share are in `packages/ui`.
+The local UI for working with the workspace's indexed tasks, captures and
+plan. `arcl serve` serves it on 127.0.0.1. Its views are in `src/routes`; the
+components they share are in `packages/ui`.
+
+To dogfood the app on claude.ai, `pnpm build:artifact` also builds it as an
+artifact page in `build-artifact/index.html`.
 
 ## Tests
 
@@ -47,8 +50,9 @@ Run `pnpm test:e2e` before pushing. It builds first with
 `scripts/e2e-build.mjs`, which:
 
 - skips `build/` or `build-artifact/` when the files they are built from have
-  not changed since their last build, so a change to tests alone goes
-  straight to Playwright
+  not changed since their last successful build and its output, including
+  what `vite preview` serves from `.svelte-kit/output`, is still there, so a
+  change to tests alone goes straight to Playwright
 - builds the out-of-date ones at the same time
 - runs `cargo build -p arcl-cli`, which embeds `build/index.html`
 

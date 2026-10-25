@@ -18,7 +18,9 @@ describe("createdAt", () => {
 });
 
 describe("shortAge", () => {
-  const now = new Date("2026-10-25T12:00:00Z");
+  // `shortAge` shows dates in the local time zone, so build them from local
+  // components: noon is the same calendar day in every zone.
+  const now = new Date(2026, 9, 25, 12);
   const before = (ms: number) => new Date(now.getTime() - ms);
 
   it("counts minutes, hours and days for a week", () => {
@@ -29,8 +31,8 @@ describe("shortAge", () => {
   });
 
   it("shows the date after a week, with the year once it differs, and for the future", () => {
-    expect(shortAge(new Date("2026-10-10T12:00:00Z"), now)).toBe("Oct 10");
-    expect(shortAge(new Date("2025-12-31T12:00:00Z"), now)).toBe("Dec 31, 2025");
-    expect(shortAge(new Date("2026-10-26T12:00:00Z"), now)).toBe("Oct 26");
+    expect(shortAge(new Date(2026, 9, 10, 12), now)).toBe("Oct 10");
+    expect(shortAge(new Date(2025, 11, 31, 12), now)).toBe("Dec 31, 2025");
+    expect(shortAge(new Date(2026, 9, 26, 12), now)).toBe("Oct 26");
   });
 });

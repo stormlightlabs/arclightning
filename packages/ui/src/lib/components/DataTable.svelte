@@ -3,7 +3,9 @@
 
   /** One column of a data table. */
   export interface DataTableColumn {
+    /** Names the column to `cell`, and keys it, so each column needs its own. */
     id: string;
+    /** The header text. */
     label: string;
     /** A CSS width, such as `7rem`. Columns without one share the rest. */
     width?: string;
@@ -24,8 +26,11 @@
     rowId: (row: Row) => string;
     /** The content of one cell. */
     cell: Snippet<[Row, DataTableColumn]>;
+    /** The ID of the selected row, or `null` for none. */
     selectedId?: string | null;
+    /** Called with a row's ID when the user clicks the row or presses its button. */
     onselect?: (id: string) => void;
+    /** The accessible name of the table's region. */
     label: string;
   }
 </script>

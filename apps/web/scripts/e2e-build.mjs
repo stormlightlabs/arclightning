@@ -9,16 +9,19 @@
  * - `arcl`: `cargo build -p arcl-cli`, which embeds `build/index.html`, so it
  *   runs after `web`
  *
- * The web builds that are out of date run at the same time. Each writes the
- * hash of its inputs to `.inputs` in its output directory, which the next
- * build there deletes. Cargo tracks its own inputs, so `arcl` always runs.
- * Set `ARCL_REBUILD=1` to build regardless.
+ * The web builds that are out of date run at the same time. A build that
+ * succeeds writes the hash of its inputs to `.inputs` in its output
+ * directory, and this script deletes that file before it builds there. A
+ * build is up to date when that file holds the current hash and its outputs,
+ * `vite preview`'s among them, are still there. Cargo tracks its own inputs,
+ * so `arcl` always runs. Set `ARCL_REBUILD=1` to build regardless.
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { BUILDS, STAMP, upToDate } from "./e2e-builds.mjs";
 
 const WEB = fileURLToPath(new URL("..", import.meta.url));
 const ROOT = join(WEB, "../..");
@@ -38,12 +41,6 @@ const INPUTS = [
 
 /** Tests, stories and what failed tests leave behind, which no build reads. */
 const UNREAD = /\.test\.ts$|\.stories\.ts$|\/__tests__\/|\/__screenshots__\/|\/\.vitest-attachments\//;
-
-/** Each web build: its output directory and the `VITE_ARCL_TARGET` it builds with. */
-const BUILDS = {
-  web: { out: "build", target: undefined },
-  artifact: { out: "build-artifact", target: "artifact" },
-};
 
 /** Every input file under `path`, relative to the repository, in a fixed order. */
 function files(path) {
@@ -85,14 +82,18 @@ if (names.length === 0 || unknown.length) {
 
 const stale = [];
 for (const name of names.filter((name) => name in BUILDS)) {
-  const stamp = join(WEB, BUILDS[name].out, ".inputs");
   const hash = inputHash(name);
-  if (!process.env.ARCL_REBUILD && existsSync(stamp) && readFileSync(stamp, "utf8") === hash) console.log(`${BUILDS[name].out}/ is up to date`);
-  else stale.push({ name, stamp, hash });
+  if (!process.env.ARCL_REBUILD && upToDate(WEB, BUILDS[name], hash)) console.log(`${BUILDS[name].out}/ is up to date`);
+  else stale.push({ name, stamp: join(WEB, BUILDS[name].out, STAMP), hash });
 }
 
 if (stale.length) {
-  // Sync once here: two builds that each synced would write the same files at once.
+  // A build that fails leaves no stamp, so the next run builds again.
+  for (const { stamp } of stale) rmSync(stamp, { force: true });
+  // Sync here, once, what both builds read: the ui package, and the app's
+  // `.svelte-kit/tsconfig.json`, which `tsconfig.json` extends. The artifact
+  // build syncs only `.svelte-kit/artifact/`, and two builds that each synced
+  // would write the same files at once.
   for (const args of [["--filter", "@arclightning/ui", "exec", "svelte-kit", "sync"], ["exec", "svelte-kit", "sync"]]) {
     if ((await run("pnpm", args)) !== 0) process.exit(1);
   }

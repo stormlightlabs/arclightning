@@ -31,7 +31,7 @@ export default defineConfig({
         test: {
           name: "unit",
           environment: "node",
-          include: ["src/**/*.test.ts"],
+          include: ["src/**/*.test.ts", "scripts/**/*.test.mjs"],
           exclude: ["src/**/*.svelte.test.ts", "src/**/*.dom.test.ts"],
         },
       },

@@ -84,9 +84,12 @@ pnpm dev:website
 Documentation content lives in `apps/website/src/content/docs/`. Verify the
 site with `pnpm --filter @arclightning/website build`.
 
-`pnpm --filter @arclightning/web build:artifact` builds the claude.ai artifact
-page into `apps/web/build-artifact/index.html`; the manual's "Publishing and
-syncing the artifact" covers publishing it and `arcl web export` and
-`arcl web apply`. [apps/web/README.md](apps/web/README.md) covers the web
-app's tests, including a fast loop for UI work. CI runs `just check`, which
-leaves the browser tests out.
+The web app in `apps/web` is the local UI for the workspace's tasks, which
+`arcl serve` serves on 127.0.0.1. [apps/web/README.md](apps/web/README.md)
+covers its tests, including a fast loop for UI work. CI runs `just check`,
+which leaves the browser tests out.
+
+To dogfood the app on claude.ai,
+`pnpm --filter @arclightning/web build:artifact` builds it as an artifact page
+in `apps/web/build-artifact/index.html`. The manual's "Publishing and syncing
+the artifact" covers publishing it and `arcl web export` and `arcl web apply`.
