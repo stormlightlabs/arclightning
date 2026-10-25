@@ -20,7 +20,9 @@ function recorder() {
     completeTask: async (...args: unknown[]) => (
       calls.push(["completeTask", ...args]), { task: task("t-1"), completed_subtasks: [], unblocked: ["t-10.5"] }
     ),
-  } as DataSource;
+    taskIndex: async () => [],
+    createCapture: answer("createCapture"),
+  } as unknown as DataSource;
   return { source, calls };
 }
 

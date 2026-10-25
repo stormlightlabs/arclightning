@@ -2,12 +2,12 @@
 //!
 //! Each read opens the database and runs the same read as the CLI, with no
 //! workspace sync. A read never changes records, though opening the database
-//! can run its migrations. Each mutation runs the same `arcl task` command
-//! as the CLI, with the same sync around it: it takes the sync lock, syncs,
+//! can run its migrations. Each mutation runs the same `arcl task` or
+//! `arcl capture` command as the CLI, with the same sync around it: it takes the sync lock, syncs,
 //! changes the record and syncs again to export it. The server holds the lock
 //! only during a mutation, so other arcl commands run while it serves.
 
-use arcl_serve::{Completion, Handoff, Mutations, NewTask, Reads, Reply, Server, TaskEdit, TaskStart};
+use arcl_serve::{Completion, Handoff, Mutations, NewCapture, NewTask, Reads, Reply, Server, TaskEdit, TaskStart};
 
 use super::reads::*;
 use super::*;
@@ -23,7 +23,12 @@ impl ServeApp {
     /// Run a task command as the CLI runs a write, and print the warnings
     /// its syncs give to the server's stderr.
     fn write(&self, command: TaskCommand) -> Reply {
-        match synced_write(|| run_task(command, &self.renderer)) {
+        self.synced(|| run_task(command, &self.renderer))
+    }
+
+    /// Run `command` under the CLI's write sync, printing its sync warnings.
+    fn synced(&self, command: impl FnOnce() -> Result<Option<String>, ApplicationError>) -> Reply {
+        match synced_write(command) {
             Ok((body, warnings)) => {
                 write_warnings(self.mode, warnings);
                 Reply::success(body.unwrap_or_default())
@@ -71,7 +76,7 @@ impl Mutations for ServeApp {
             parent: input.parent,
             priority: input.priority.unwrap_or_else(|| "normal".to_owned()),
             position: 0,
-            blocked_by: Vec::new(),
+            blocked_by: input.blocked_by,
             body: MarkdownArgs { body: input.body, body_file: None },
         })
     }
@@ -121,6 +126,12 @@ impl Mutations for ServeApp {
             evidence: input.evidence,
             evidence_file: None,
         })
+    }
+
+    fn create_capture(&self, input: NewCapture) -> Reply {
+        let command =
+            CaptureCommand::Create { title: input.title, body: MarkdownArgs { body: input.body, body_file: None } };
+        self.synced(|| run_capture(command, &self.renderer))
     }
 }
 

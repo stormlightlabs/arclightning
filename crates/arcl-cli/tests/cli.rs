@@ -3377,6 +3377,48 @@ fn serve_task_mutations_change_records_as_the_cli_does() {
 }
 
 #[test]
+fn serve_capture_create_matches_the_cli() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let served = Served::start(dir);
+
+    let (status, created) = served.write("/api/captures", r#"{"title":"Served idea","body":"More detail"}"#);
+    assert_eq!(status, 200, "{created}");
+    assert_eq!(created["data"]["action"], "created");
+    let id = created["data"]["capture"]["id"]
+        .as_str()
+        .expect("a capture ID")
+        .to_owned();
+    let shown = run_json(dir, ["--json", "capture", "show", &id].as_ref());
+    assert_eq!(shown["data"]["capture"]["title"], "Served idea");
+    assert_eq!(shown["data"]["capture"]["body"], "More detail");
+    assert_eq!(shown["data"]["capture"]["status"], "captured");
+
+    let (code, expected) = cli_error(dir, &["capture", "create", "  "]);
+    assert_eq!(code, Some(3));
+    assert_eq!(served.write("/api/captures", r#"{"title":"  "}"#), (400, expected));
+    assert_eq!(
+        served.write("/api/captures", r#"{"title":"T","priority":"high"}"#).0,
+        400
+    );
+}
+
+#[test]
+fn serve_task_create_takes_blockers() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let blocker = create_task(dir, "First", None);
+    let served = Served::start(dir);
+
+    let body = serde_json::json!({ "title": "Second", "blocked_by": [blocker] }).to_string();
+    let (status, created) = served.write("/api/tasks", &body);
+    assert_eq!(status, 200, "{created}");
+    let task = created["data"]["task"]["id"].as_str().expect("a task ID").to_owned();
+    let explained = run_json(dir, ["--json", "explain", &task].as_ref());
+    assert_eq!(explained["data"]["readiness"]["blocked"], true, "{explained}");
+}
+
+#[test]
 fn serve_mutation_failures_return_the_cli_error() {
     let directory = initialized_directory();
     let dir = directory.path();

@@ -1,5 +1,6 @@
 <script module lang="ts">
   import type { TaskDetail } from "$lib/data";
+  import type { TaskAction } from "./actions";
 
   /** Props for the body of the Task view, once its task has loaded. */
   export interface TaskDetailProps {
@@ -10,16 +11,22 @@
     panelOpen?: boolean;
     /** Reload `detail` after a change; the view waits for it before it shows the result. */
     onchanged?: () => Promise<void>;
+    /** An action to choose once the view shows, such as one the Work list's menu asked for. */
+    initialAction?: TaskAction | null;
   }
 </script>
 
 <script lang="ts">
+  import { untrack } from "svelte";
   import { Button, Feedback, Field, Markdown, MarkdownEditor, PropertiesPanel, SelectMenu, StatusBadge } from "@arclightning/ui";
+  import { useCommands, type Command } from "$lib/commands";
   import { dataSource, type Task } from "$lib/data";
   import { PRIORITIES, taskHref } from "$lib/work";
   import {
+    ACTION_KEYS,
     ACTION_LABELS,
     ACTION_TEXT,
+    EDIT_KEY,
     actionsFor,
     draftOf,
     editOf,
@@ -27,12 +34,11 @@
     runAction,
     unblockedTasks,
     type ActionFailure,
-    type TaskAction,
     type TaskDraft,
   } from "./actions";
   import { inheritedGroups, propertiesOf, reasonSegments, titlesOf } from "./view";
 
-  let { detail, workHref, panelOpen = $bindable(true), onchanged }: TaskDetailProps = $props();
+  let { detail, workHref, panelOpen = $bindable(true), onchanged, initialAction = null }: TaskDetailProps = $props();
   let showSource = $state(false);
 
   /** The action running now, or `"edit"` while an edit saves. */
@@ -57,6 +63,32 @@
   let reasonCount = $derived(reasons.length === 1 ? "1 reason" : `${reasons.length} reasons`);
   let actions = $derived(actionsFor(task.status));
   let edit = $derived(draft === null ? {} : editOf(task, draft));
+
+  // The menu and the shortcuts run the same `choose` as the buttons.
+  useCommands(() => ({
+    context: { id: task.id, label: task.title },
+    commands: busy !== null ? [] : [
+      ...actions.map((action): Command => ({
+        id: `task:${action}`,
+        label: ACTION_LABELS[action],
+        scope: "selection",
+        keys: [ACTION_KEYS[action]],
+        icon: action === "complete" ? "check" : "task",
+        run: () => choose(action),
+      })),
+      ...(draft === null ? [{ id: "task:edit", label: "Edit", scope: "selection", keys: [EDIT_KEY], icon: "markdown", run: openEdit } satisfies Command] : []),
+    ],
+  }));
+
+  $effect(() => {
+    if (initialAction !== null && untrack(() => actions).includes(initialAction)) untrack(() => choose(initialAction));
+  });
+
+  function openEdit() {
+    draft = draftOf(task);
+    failure = null;
+    unblocked = null;
+  }
 
   /** Run `action`, or open its Markdown form first when it takes text. */
   function choose(action: TaskAction) {
@@ -140,7 +172,7 @@
           />
         {/each}
         {#if draft === null}
-          <Button label="Edit" variant="ghost" disabled={busy !== null} onclick={() => ((draft = draftOf(task)), (failure = null), (unblocked = null))} />
+          <Button label="Edit" variant="ghost" disabled={busy !== null} onclick={openEdit} />
         {/if}
       </div>
       {#if asking !== null}

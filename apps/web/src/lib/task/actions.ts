@@ -33,6 +33,26 @@ export const ACTION_LABELS: Record<TaskAction, string> = {
 };
 
 /**
+ * The key that runs each action wherever a task is selected: in the Task
+ * view, and on the selected row of the Work list.
+ */
+export const ACTION_KEYS: Record<TaskAction, string> = {
+  start: "s",
+  complete: "c",
+  handoff: "h",
+  park: "p",
+  unpark: "u",
+};
+
+/** The key that opens the Task view's edit form. */
+export const EDIT_KEY = "e";
+
+/** Whether `value` names a task action, such as the `action` query parameter. */
+export function isTaskAction(value: string | null): value is TaskAction {
+  return value !== null && Object.hasOwn(ACTION_LABELS, value);
+}
+
+/**
  * The actions that take Markdown before they run, with the label of the text
  * they take: completion evidence, which is optional, and a handoff note.
  */

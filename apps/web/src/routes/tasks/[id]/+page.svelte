@@ -3,7 +3,8 @@
   import { afterNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
   import { dataSource, type TaskDetail } from "$lib/data";
-  import { taskKeyAction } from "$lib/task";
+  import { useCommands } from "$lib/commands";
+  import { isTaskAction, taskKeyAction, type TaskAction } from "$lib/task";
   import TaskDetailView from "$lib/task/TaskDetail.svelte";
   import { workHref } from "$lib/work";
 
@@ -15,9 +16,37 @@
   // tasks so Escape brings back its filters.
   let from = $state<URL | null>(null);
 
+  // The Work list's menu asks for an action that takes text with `?action=`,
+  // which applies to that task only.
+  let asked = $state<{ id: string; action: TaskAction } | null>(null);
+
   afterNavigate((navigation) => {
-    if (navigation.from?.url.pathname === "/") from = navigation.from.url;
+    // The first load has a `from` without a URL.
+    if (navigation.from?.url?.pathname === "/") from = navigation.from.url;
+    const action = page.url.searchParams.get("action");
+    if (asked !== null && asked.id !== id) asked = null;
+    if (isTaskAction(action)) {
+      asked = { id, action };
+      const url = new URL(page.url);
+      url.searchParams.delete("action");
+      goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+    }
   });
+
+  useCommands(() => ({
+    commands: [
+      {
+        id: "task-view:properties",
+        label: panelOpen ? "Collapse properties" : "Expand properties",
+        scope: "view",
+        group: "Task",
+        keys: ["]"],
+        viewKeys: true,
+        run: () => (panelOpen = !panelOpen),
+      },
+      { id: "task-view:back", label: "Back to Work", scope: "view", group: "Task", keys: ["Escape"], viewKeys: true, icon: "arrowLeft", run: () => goto(workHref(id, from)) },
+    ],
+  }));
 
   $effect(() => {
     const current = id;
@@ -57,7 +86,7 @@
 {:else if detail === null}
   <p class="loading" role="status">Loading task…</p>
 {:else}
-  <TaskDetailView {detail} workHref={workHref(id, from)} bind:panelOpen onchanged={refresh} />
+  <TaskDetailView {detail} workHref={workHref(id, from)} bind:panelOpen onchanged={refresh} initialAction={asked?.id === id ? asked.action : null} />
 {/if}
 
 <style>

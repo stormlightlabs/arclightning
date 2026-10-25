@@ -2,7 +2,7 @@
 id = "arcl-t-01M5QS2QP9TNCV3A88EHX375D9"
 parent = "arcl-t-01M5NE5P6XHRR4Q84820YACQ07"
 title = "T18.5: Add the command menu and quick capture"
-status = "pending"
+status = "in_progress"
 priority = "normal"
 position = 5
 blocked-by = ["arcl-t-01M5QS2QJPGMYK0NE2MDRXN7QV"]

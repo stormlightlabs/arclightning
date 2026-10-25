@@ -14,8 +14,9 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
+  import { useCommands, type Command } from "$lib/commands";
   import { dataSource, type NewTask, type TaskPriority, type WorkList } from "$lib/data";
-  import { failureOf, type ActionFailure } from "$lib/task";
+  import { ACTION_KEYS, ACTION_LABELS, ACTION_TEXT, actionsFor, failureOf, runAction, type ActionFailure, type TaskAction } from "$lib/task";
   import {
     NO_MILESTONE,
     PRIORITIES,
@@ -61,7 +62,67 @@
   let createBusy = $state(false);
   let createFailure = $state<ActionFailure | null>(null);
 
+  /** The selected task's lifecycle action that last failed, shown above the list. */
+  let actionFailure = $state<{ title: string; action: TaskAction; failure: ActionFailure } | null>(null);
+  let actionBusy = $state(false);
+  let selected = $derived(list?.items.find((item) => item.task.id === selectedId)?.task ?? null);
+
   onMount(load);
+
+  useCommands(() => ({
+    context: selected && { id: selected.id, label: selected.title },
+    commands: [
+      ...(selected === null
+        ? []
+        : [
+            { id: "work:open", label: "Open task", scope: "selection", keys: ["Enter"], viewKeys: true, icon: "arrowRight", run: () => goto(taskHref(selected.id)) } satisfies Command,
+            ...(actionBusy ? [] : actionsFor(selected.status)).map((action): Command => {
+              const id = selected.id;
+              return {
+                id: `work:${action}`,
+                label: ACTION_LABELS[action],
+                scope: "selection",
+                keys: [ACTION_KEYS[action]],
+                icon: action === "complete" ? "check" : "task",
+                run: () => act(id, action),
+              };
+            }),
+          ]),
+      { id: "work:new", label: "New task", scope: "view", group: "Work", keys: ["n"], icon: "capture", run: openCreate },
+      { id: "work:next", label: "Select the next task", scope: "view", group: "Work", keys: ["j"], viewKeys: true, run: () => (selectedId = moveSelection(order, selectedId, 1)) },
+      { id: "work:previous", label: "Select the previous task", scope: "view", group: "Work", keys: ["k"], viewKeys: true, run: () => (selectedId = moveSelection(order, selectedId, -1)) },
+      ...(isFiltered(filters)
+        ? [{ id: "work:clear", label: "Clear filters", scope: "view", group: "Work", run: () => showFilters({ status: [], readiness: [], priority: [], milestone: [] }) } satisfies Command]
+        : []),
+    ],
+  }));
+
+  /**
+   * Run `action` on task `id` as the Task view's button does. An action that
+   * takes Markdown opens the Task view with its form instead.
+   */
+  async function act(id: string, action: TaskAction) {
+    if (ACTION_TEXT[action] !== undefined) {
+      await goto(`${taskHref(id)}?action=${action}`);
+      return;
+    }
+    const title = list?.items.find((item) => item.task.id === id)?.task.title ?? id;
+    actionFailure = null;
+    actionBusy = true;
+    try {
+      await runAction(dataSource(), id, action);
+    } catch (error) {
+      actionFailure = { title, action, failure: failureOf(error) };
+      return;
+    } finally {
+      actionBusy = false;
+    }
+    try {
+      list = await dataSource().work();
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error);
+    }
+  }
 
   function openCreate() {
     creating = { title: "", body: "", priority: "normal" };
@@ -154,6 +215,14 @@
       <Feedback tone="danger" title="Could not create the task" message={`${createFailure.message} (${createFailure.code})`} />
     {/if}
   </form>
+{/if}
+
+{#if actionFailure !== null}
+  <Feedback
+    tone="danger"
+    title={`Could not ${ACTION_LABELS[actionFailure.action].toLowerCase()} ${actionFailure.title}`}
+    message={`${actionFailure.failure.message} (${actionFailure.failure.code})`}
+  />
 {/if}
 
 {#if failure !== null}

@@ -1,12 +1,14 @@
 import { tokenHeaders } from "$lib/token";
 import {
   DataError,
+  type Capture,
   type DataSource,
   type Milestone,
   type Readiness,
   type Task,
   type TaskCompletion,
   type TaskDetail,
+  type TaskStatus,
   type WorkItem,
 } from "./types";
 
@@ -133,6 +135,11 @@ export function serveSource(options: ServeOptions = {}): DataSource {
       return detail as TaskDetail;
     },
 
+    async taskIndex() {
+      const { records } = await get<{ records: ListedRecord[] }>("/api/records?kind=task");
+      return records.map(({ id, title, status }) => ({ id, title, status: status as TaskStatus }));
+    },
+
     async createTask(input) {
       return (await post<{ task: Task }>("/api/tasks", input)).task;
     },
@@ -144,6 +151,9 @@ export function serveSource(options: ServeOptions = {}): DataSource {
     async completeTask(id, options = {}) {
       const { task, completed_subtasks, unblocked } = await post<TaskCompletion>(`${taskPath(id)}/complete`, options);
       return { task, completed_subtasks, unblocked };
+    },
+    async createCapture(input) {
+      return (await post<{ capture: Capture }>("/api/captures", input)).capture;
     },
   };
 }

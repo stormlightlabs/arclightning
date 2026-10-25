@@ -47,9 +47,14 @@ export function moveSelection(order: string[], current: string | null, step: 1 |
   return order[Math.min(order.length - 1, Math.max(0, index + step))];
 }
 
-/** Whether `target` is in a form field or editable text, where keys type. */
+/**
+ * Whether `target` is in a form field or editable text, where keys type, or
+ * in a dialog, which takes the keys while it is open.
+ */
 export function inField(target: EventTarget | null): boolean {
-  return Boolean(closestOf(target)?.closest("input, textarea, select, [role=combobox], [role=listbox], [contenteditable]:not([contenteditable='false'])"));
+  return Boolean(
+    closestOf(target)?.closest("input, textarea, select, dialog, [role=combobox], [role=listbox], [contenteditable]:not([contenteditable='false'])"),
+  );
 }
 
 /** `target` as something with `closest`, which every element has. */

@@ -33,9 +33,7 @@ mod skill;
 mod support;
 mod workspace;
 
-use commands::{
-    CaptureResult, exec_capture, exec_dependency, exec_note, exec_plan, exec_release, exec_spec, exec_task, run_task,
-};
+use commands::{exec_dependency, exec_note, exec_plan, exec_release, exec_spec, exec_task, run_capture, run_task};
 pub use error::ApplicationError;
 use error::{CResult, CommandError};
 use init::initialize;
@@ -158,15 +156,7 @@ fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Wa
             let initialization = initialize(&start, workspace).map_err(ApplicationError::from_init)?;
             write_output(renderer.render_init(&initialization.root, initialization.workspace_enabled)?)
         }
-        Some(Command::Capture { command }) => {
-            let result = exec_capture(command).map_err(ApplicationError::from_command)?;
-            let message = match result {
-                CaptureResult::Mutation { action, capture } => renderer.render_capture(action, &capture),
-                CaptureResult::Promotion(result) => renderer.render_capture_promotion(&result),
-                CaptureResult::List(captures) => renderer.render_captures(&captures),
-            }?;
-            write_output(message)
-        }
+        Some(Command::Capture { command }) => write_output(run_capture(command, renderer)?),
         Some(Command::Release { command }) => exec_release(command, renderer),
         Some(Command::Spec { command }) => exec_spec(command, renderer),
         Some(Command::Plan { command }) => exec_plan(command, renderer),

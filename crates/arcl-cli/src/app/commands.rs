@@ -111,6 +111,16 @@ pub(super) fn exec_capture(command: CaptureCommand) -> CResult<CaptureResult> {
     }
 }
 
+/// Run one `arcl capture` command and return what it prints, so `arcl serve`
+/// can answer with the same output and errors.
+pub(super) fn run_capture(command: CaptureCommand, renderer: &Renderer) -> Result<Option<String>, ApplicationError> {
+    let result = exec_capture(command).map_err(ApplicationError::from_command)?;
+    render_output(match result {
+        CaptureResult::Mutation { action, capture } => renderer.render_capture(action, &capture),
+        CaptureResult::Promotion(result) => renderer.render_capture_promotion(&result),
+        CaptureResult::List(captures) => renderer.render_captures(&captures),
+    })
+}
 pub(super) fn exec_release(command: ReleaseCommand, renderer: &Renderer) -> anyhow::Result<()> {
     let result: Result<Option<String>, ApplicationError> = (|| match command {
         ReleaseCommand::Create { title, body } => {

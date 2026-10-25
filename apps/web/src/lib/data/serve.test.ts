@@ -199,6 +199,27 @@ describe("serveSource changes", () => {
   });
 });
 
+describe("serveSource captures and search", () => {
+  it("posts a capture and lists tasks for search", async () => {
+    const capture = { id: "c-1", title: "Idea", body: "More", status: "captured", created_at: "2026-10-24T00:00:00Z", project_id: "pj" };
+    const { fetch, calls } = fakeFetch({
+      "/api/captures": { body: { format_version: 1, data: { action: "created", capture } } },
+      "/api/records?kind=task": { body: listing([{ id: "t-1", kind: "task", status: "in_progress", title: "T1: First" }]) },
+    });
+    const source = serveSource({ fetch, headers: () => ({ "X-Arcl-Token": "abc" }) });
+
+    expect(await source.createCapture({ title: "Idea", body: "More" })).toEqual(capture);
+    expect(await source.taskIndex()).toEqual([{ id: "t-1", title: "T1: First", status: "in_progress" }]);
+    expect(calls[0]).toEqual({
+      path: "/api/captures",
+      method: "POST",
+      headers: { "X-Arcl-Token": "abc", "Content-Type": "application/json" },
+      body: { title: "Idea", body: "More" },
+    });
+    expect(calls[1]).toEqual({ path: "/api/records?kind=task", headers: { "X-Arcl-Token": "abc" } });
+  });
+});
+
 describe("dataSource", () => {
   it("returns the source a build set in place of arcl serve", async () => {
     const refuse = async (id: string) => Promise.reject(new DataError("not_found", id));
@@ -212,6 +233,8 @@ describe("dataSource", () => {
       unparkTask: refuse,
       handOffTask: refuse,
       completeTask: refuse,
+      taskIndex: async () => [],
+      createCapture: async (input) => refuse(input.title),
     };
     setDataSource(artifact);
     expect(dataSource()).toBe(artifact);

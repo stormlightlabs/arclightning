@@ -3,7 +3,7 @@
 //! [`Server`] binds `127.0.0.1`, checks every request, serves the web app
 //! page embedded from `apps/web/build/index.html` for any path outside
 //! `/api`, routes the read endpoints to a [`Reads`] implementation and the
-//! task mutations to a [`Mutations`] implementation. Both answer with the
+//! mutations to a [`Mutations`] implementation. Both answer with the
 //! CLI's JSON envelopes.
 //!
 //! Every request needs a `Host` header naming the server and the per-run
@@ -28,12 +28,13 @@
 //! | `POST /api/tasks/{id}/unpark`    | `arcl task unpark`       |
 //! | `POST /api/tasks/{id}/handoff`   | `arcl task handoff`      |
 //! | `POST /api/tasks/{id}/complete`  | `arcl task complete`     |
+//! | `POST /api/captures`             | `arcl capture create`    |
 //!
 //! `/api/records` and `/api/ready` take the CLI's filter flags as query
 //! parameters, such as `?kind=task&status=pending&status=parked`. A mutation
 //! takes a JSON object of the command's options, such as
 //! `{"evidence": "Delivered by #41."}`; see [`NewTask`], [`TaskEdit`],
-//! [`TaskStart`], [`Handoff`] and [`Completion`].
+//! [`TaskStart`], [`Handoff`], [`Completion`] and [`NewCapture`].
 
 use std::io::{self, Read};
 use std::net::{Ipv4Addr, TcpListener};
@@ -90,7 +91,7 @@ enum Route {
     Explain(String),
     /// `arcl context <task-id>`.
     Context(String),
-    /// A task mutation, which needs POST and a matching `Origin`.
+    /// A mutation, which needs POST and a matching `Origin`.
     Write(Write),
     /// An `/api` path with no endpoint.
     UnknownApi,
@@ -99,7 +100,7 @@ enum Route {
     Page,
 }
 
-/// A task mutation and the task it names.
+/// A mutation and the record it names.
 #[derive(Debug, Eq, PartialEq)]
 enum Write {
     /// `arcl task create`.
@@ -116,6 +117,8 @@ enum Write {
     Handoff(String),
     /// `arcl task complete <id>`.
     Complete(String),
+    /// `arcl capture create`.
+    CreateCapture,
 }
 
 /// The JSON answer to an API request: an HTTP status and a body.
@@ -198,6 +201,9 @@ pub struct NewTask {
     /// The phase's ID.
     #[serde(default)]
     pub phase: Option<String>,
+    /// The IDs of the tasks that must complete first.
+    #[serde(default)]
+    pub blocked_by: Vec<String>,
 }
 
 /// The options of `arcl task update <id>`. A field left out keeps its value.
@@ -246,6 +252,17 @@ pub struct Completion {
     /// Also complete every pending and in-progress descendant.
     #[serde(default)]
     pub with_subtasks: bool,
+}
+
+/// The options of `arcl capture create`, as the body of `POST /api/captures`.
+#[derive(Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct NewCapture {
+    /// The capture title.
+    pub title: String,
+    /// The Markdown body.
+    #[serde(default)]
+    pub body: Option<String>,
 }
 
 /// A local server for the web app and its endpoints.
@@ -489,7 +506,7 @@ pub trait Reads {
     fn context(&self, task_id: &str) -> Reply;
 }
 
-/// The application's task mutations, each answering with the CLI's JSON
+/// The application's mutations, each answering with the CLI's JSON
 /// envelope for the same command. Each runs as the CLI runs a write, with the
 /// same validation and errors.
 pub trait Mutations {
@@ -507,6 +524,8 @@ pub trait Mutations {
     fn hand_off_task(&self, id: &str, input: Handoff) -> Reply;
     /// `arcl task complete <id>`.
     fn complete_task(&self, id: &str, input: Completion) -> Reply;
+    /// `arcl capture create`.
+    fn create_capture(&self, input: NewCapture) -> Reply;
 }
 
 /// Parse a mutation's body and run it.
@@ -525,6 +544,7 @@ fn mutate(write: Write, body: Option<&[u8]>, mutations: &dyn Mutations) -> Reply
         Write::Unpark(id) => with_input(body, |NoOptions {}| mutations.unpark_task(&id)),
         Write::Handoff(id) => with_input(body, |input| mutations.hand_off_task(&id, input)),
         Write::Complete(id) => with_input(body, |input| mutations.complete_task(&id, input)),
+        Write::CreateCapture => with_input(body, |input| mutations.create_capture(input)),
     }
 }
 
@@ -611,6 +631,7 @@ fn route(path: &str, query: Vec<(String, String)>) -> Route {
         ["api", "tasks", id, "explain"] if !id.is_empty() => Route::Explain((*id).to_owned()),
         ["api", "tasks", id, "context"] if !id.is_empty() => Route::Context((*id).to_owned()),
         ["api", "tasks"] => Route::Write(Write::Create),
+        ["api", "captures"] => Route::Write(Write::CreateCapture),
         ["api", "tasks", id, action] if !id.is_empty() => {
             let id = (*id).to_owned();
             match *action {
@@ -687,6 +708,9 @@ mod tests {
         }
         fn complete_task(&self, id: &str, input: Completion) -> Reply {
             Reply::failure(4, format!("complete {id} {input:?}"))
+        }
+        fn create_capture(&self, input: NewCapture) -> Reply {
+            Reply::success(format!("capture {input:?}"))
         }
     }
 
@@ -801,6 +825,7 @@ mod tests {
             "/api/tasks",
             "/api/tasks/arcl-t-1/start",
             "/api/tasks/arcl-t-1/complete",
+            "/api/captures",
         ] {
             for method in ["GET", "PUT", "DELETE", "OPTIONS"] {
                 let incoming = Incoming { method: method.to_owned(), ..post(url, "{}") };
@@ -821,10 +846,12 @@ mod tests {
             Some("https://127.0.0.1:4321"),
             Some("null"),
         ] {
-            let incoming = Incoming { origin: origin.map(str::to_owned), ..post("/api/tasks/arcl-t-1/park", "") };
-            let answer = gate().answer(&incoming, &Echo, &Echo);
-            assert_eq!(answer.status, 403, "{origin:?}");
-            assert_eq!(error_code(&answer), "forbidden");
+            for url in ["/api/tasks/arcl-t-1/park", "/api/captures"] {
+                let incoming = Incoming { origin: origin.map(str::to_owned), ..post(url, r#"{"title":"T"}"#) };
+                let answer = gate().answer(&incoming, &Echo, &Echo);
+                assert_eq!(answer.status, 403, "{origin:?} {url}");
+                assert_eq!(error_code(&answer), "forbidden");
+            }
         }
         let incoming = Incoming {
             host: Some(format!("localhost:{PORT}")),
@@ -852,7 +879,7 @@ mod tests {
             answer("/api/tasks", r#"{"title":"New","priority":"high"}"#),
             (
                 200,
-                r#"create NewTask { title: "New", body: None, priority: Some("high"), parent: None, spec: None, plan: None, phase: None }"#.to_owned()
+                r#"create NewTask { title: "New", body: None, priority: Some("high"), parent: None, spec: None, plan: None, phase: None, blocked_by: [] }"#.to_owned()
             )
         );
         assert_eq!(
@@ -885,6 +912,20 @@ mod tests {
                 r#"complete arcl-t-1 Completion { evidence: Some("Done"), allow_open_children: false, with_subtasks: false }"#.to_owned()
             )
         );
+        assert_eq!(
+            answer("/api/tasks", r#"{"title":"New","blocked_by":["arcl-t-2"]}"#),
+            (
+                200,
+                r#"create NewTask { title: "New", body: None, priority: None, parent: None, spec: None, plan: None, phase: None, blocked_by: ["arcl-t-2"] }"#.to_owned()
+            )
+        );
+        assert_eq!(
+            answer("/api/captures", r#"{"title":"Idea","body":"More"}"#),
+            (
+                200,
+                r#"capture NewCapture { title: "Idea", body: Some("More") }"#.to_owned()
+            )
+        );
         assert_eq!(answer("/api/tasks/arcl-t-1/delete", "").0, 404);
     }
 
@@ -900,6 +941,8 @@ mod tests {
             ("/api/tasks/arcl-t-1/park", br#"{"force":true}"#),
             ("/api/tasks/arcl-t-1/update", br#"{"spec_file":"/etc/passwd"}"#),
             ("/api/tasks/arcl-t-1/start", br#"{"force":"yes"}"#),
+            ("/api/captures", b"{}"),
+            ("/api/captures", br#"{"title":"Idea","priority":"high"}"#),
         ] {
             let refused = answer(url, body);
             assert_eq!(refused.status, 400, "{url} {body:?}");
