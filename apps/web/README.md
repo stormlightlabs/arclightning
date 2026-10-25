@@ -9,7 +9,8 @@ artifact page in `build-artifact/index.html`. The artifact queues changes for
 `arcl web apply`, board moves and raw file edits included. Edit file reads
 the task's file from its `sources/<id>` document and queues the save as
 `update_source` with that document's revision; if the file changed since that
-export, the edit fails on apply with the conflict error.
+export, the edit fails on apply with the conflict error. Edit file stays
+disabled while any edit to the task waits for the sync.
 
 ## Tests
 

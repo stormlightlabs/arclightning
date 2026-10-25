@@ -25,6 +25,7 @@
   import { ARTIFACT_BUILD, OPEN_IN_CLAUDE, connectArtifact, dataSource, type ChangeWarning, type SyncStatus as Sync, type TaskSummary } from "$lib/data";
   import { appHref, appUrl } from "$lib/route";
   import { SIDEBAR_KEY, rememberSidebar, sidebarCollapsed } from "$lib/sidebar";
+  import { setSyncStatus, syncStatus } from "$lib/sync";
   import SyncStatus from "$lib/sync/SyncStatus.svelte";
   import { adoptToken } from "$lib/token";
   import { taskHref } from "$lib/work";
@@ -62,7 +63,7 @@
   /** Whether views can read yet. The artifact build waits for the artifact's database. */
   let connection = $state<"ready" | "connecting" | "unavailable">(ARTIFACT_BUILD ? "connecting" : "ready");
   /** The artifact's last sync and queued edits; `null` in the `arcl serve` build. */
-  let sync = $state<Sync | null>(null);
+  let sync = $derived<Sync | null>(syncStatus());
   /** The revision of the records the views loaded. */
   let shownRevision = $state<string | null>(null);
   let syncedRevision = $derived(sync?.revision ?? null);
@@ -107,10 +108,14 @@
   // Follow the artifact's syncs and queue once its database is connected.
   $effect(() => {
     if (connection !== "ready") return;
-    return dataSource().watch?.((status) => {
+    const stop = dataSource().watch?.((status) => {
       shownRevision ??= status.revision;
-      sync = status;
+      setSyncStatus(status);
     });
+    return () => {
+      stop?.();
+      setSyncStatus(null);
+    };
   });
 
   function toggleSidebar() {

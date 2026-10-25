@@ -157,6 +157,10 @@ test("the artifact queues a raw record edit that arcl web apply saves, and refus
     await page.getByRole("button", { name: "Save file" }).click();
     await expect(page.getByText("Queued for the next sync")).toBeVisible();
     await expect(page.getByRole("list", { name: "Queued edits" })).toHaveText(`Edit the file of ${task}`);
+    // The editor closes, and no second raw edit can be queued from the same revision until the sync.
+    await expect(editor).toBeHidden();
+    await expect(page.getByRole("button", { name: "Edit file" })).toBeDisabled();
+    await expect(page.getByText("An edit to this task waits for the next sync.")).toBeVisible();
     const queued = await queue(page);
     expect(queued).toEqual([
       { op: "update_source", target: task, input: { source: edited, revision }, created_at: expect.any(String), created_by: "u_viewer", status: "queued" },
@@ -168,6 +172,20 @@ test("the artifact queues a raw record edit that arcl web apply saves, and refus
     expect(arcl("web", "apply", file).results[0]).toMatchObject({ status: "applied", data: { id: task } });
     expect(arcl("show", task).task.title).toBe("Edited in the artifact");
     expect(arcl("web", "apply", file).results[0]).toMatchObject({ status: "failed", error: { code: "conflict" } });
+
+    // The sync deletes the applied entry and writes the new file; Edit file opens it.
+    arcl("web", "export", out);
+    const synced = JSON.parse(readFileSync(join(out, `sources/${task}.json`), "utf8"));
+    await page.evaluate(
+      ([path, body]) => {
+        const host = window as unknown as { artifactStore: Map<string, unknown>; artifactWrite: (path: string, body: unknown) => void };
+        for (const key of [...host.artifactStore.keys()].filter((key) => key.startsWith("queue/"))) host.artifactWrite(key, null);
+        host.artifactWrite(path, body);
+      },
+      [`sources/${task}`, synced] as const,
+    );
+    await page.getByRole("button", { name: "Edit file" }).click();
+    await expect(editor).toContainText('title = "Edited in the artifact"');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

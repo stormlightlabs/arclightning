@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { QueuedEdit } from "$lib/data";
-import { describeEdit, syncedLabel } from "./edits";
+import { describeEdit, editWaitsFor, syncedLabel } from "./edits";
 
 const edit = (op: string, target: string | null, input: Record<string, unknown> = {}): QueuedEdit => ({
   id: "q1",
@@ -30,5 +30,16 @@ describe("syncedLabel", () => {
     expect(syncedLabel(status)).toBe("Oct 25, 06:17 UTC");
     expect(syncedLabel({ ...status, syncedAt: null })).toBeNull();
     expect(syncedLabel({ ...status, syncedAt: "not a time" })).toBeNull();
+  });
+});
+
+describe("editWaitsFor", () => {
+  it("finds a queued or applying edit to the record, and ignores failed ones and other records", () => {
+    const status = { syncedAt: null, commit: null, revision: null, edits: [edit("start_task", "arcl-t-1")], stopped: null };
+    expect(editWaitsFor(status, "arcl-t-1")).toBe(true);
+    expect(editWaitsFor({ ...status, edits: [{ ...edit("start_task", "arcl-t-1"), status: "applying" }] }, "arcl-t-1")).toBe(true);
+    expect(editWaitsFor({ ...status, edits: [{ ...edit("start_task", "arcl-t-1"), status: "failed" }] }, "arcl-t-1")).toBe(false);
+    expect(editWaitsFor(status, "arcl-t-2")).toBe(false);
+    expect(editWaitsFor(null, "arcl-t-1")).toBe(false);
   });
 });

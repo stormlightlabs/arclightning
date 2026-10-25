@@ -546,7 +546,7 @@ records the sync did not update:
 | `views/tasks`    | `views/tasks.json`    | `GET /api/records?kind=task`                        |
 | `views/captures` | `views/captures.json` | `GET /api/records?kind=capture&status=captured`     |
 | `records/<id>`   | `records/<id>.json`   | `GET /api/records/<id>`, per task and open capture  |
-| `sources/<id>`   | `sources/<id>.json`   | `GET /api/records/<id>/source`, for those records   |
+| `sources/<id>`   | `sources/<id>.json`   | `GET /api/records/<id>/source`, per task            |
 | `meta/sync`      | `meta/sync.json`      | the commit, time and revision of the export         |
 
 `<dir>/manifest.json` lists every document in `documents`, the ones that are
@@ -595,9 +595,12 @@ queues `update_source` with `{"source", "revision"}`: the whole file and the
 revision from that document. `apply` runs it as
 `POST /api/records/<id>/edit`, with the same checks. If the file changed
 after the export the page read, the entry fails with the `conflict` error;
-open the file again after the next sync and redo the edit. Two raw edits of
-one file queued from the same sync conflict the same way, so only the first
-applies.
+open the file again after the next sync and redo the edit. Any change to the
+task that applies first rewrites its file, whether a board move, an edit or
+another raw edit, so the raw edit then fails the same way. Saving closes the
+editor, and while any edit to the task waits for the sync, queued or
+applying, the page disables **Edit file** and says to edit the file after
+that sync.
 
 `arcl web apply <file>` reads a JSON array of queue entries, each the
 document's fields plus its `id`, from a file or `-` for standard input. It

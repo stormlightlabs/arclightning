@@ -34,8 +34,9 @@
   import { tick, untrack } from "svelte";
   import { Button, Feedback, Field, Markdown, MarkdownEditor, PropertiesPanel, SelectMenu, StatusBadge } from "@arclightning/ui";
   import { useCommands, type Command } from "$lib/commands";
-  import { dataSource, type Task } from "$lib/data";
+  import { QUEUED, dataSource, type Task } from "$lib/data";
   import { failureNotice } from "$lib/notice";
+  import { editWaitsFor, syncStatus } from "$lib/sync";
   import { PRIORITIES, taskHref } from "$lib/work";
   import {
     ACTION_KEYS,
@@ -96,6 +97,12 @@
   let reasonCount = $derived(reasons.length === 1 ? "1 reason" : `${reasons.length} reasons`);
   let actions = $derived(actionsFor(task.status));
   let edit = $derived(draft === null ? {} : editOf(task, draft));
+  /**
+   * Whether an edit to this task waits for the next sync. Applying it
+   * rewrites the file, so a raw edit from the file as last synced would fail
+   * with the conflict error; the view offers none until then.
+   */
+  let fileQueued = $derived(editWaitsFor(syncStatus(), task.id));
 
   $effect(() => {
     unsaved = (asking !== null && text.trim() !== "") || Object.keys(edit).length > 0 || (file !== null && file.text !== file.source);
@@ -114,7 +121,7 @@
         run: () => choose(action),
       })),
       ...(draft === null ? [{ id: "task:edit", label: "Edit", scope: "selection", keys: [EDIT_KEY], icon: "markdown", run: openEdit } satisfies Command] : []),
-      ...(canEditFile && file === null ? [{ id: "task:edit-file", label: "Edit file", scope: "selection", icon: "markdown", run: openFile } satisfies Command] : []),
+      ...(canEditFile && file === null && !fileQueued ? [{ id: "task:edit-file", label: "Edit file", scope: "selection", icon: "markdown", run: openFile } satisfies Command] : []),
     ],
   }));
 
@@ -135,7 +142,7 @@
 
   /** Load the task's workspace file into the raw editor, replacing any edit in it. */
   async function openFile() {
-    if (!source.recordSource || busy !== null) return;
+    if (!source.recordSource || busy !== null || fileQueued) return;
     draft = null;
     failure = null;
     unblocked = null;
@@ -195,10 +202,14 @@
     if (action === null || busy !== null) return;
     failure = null;
     unblocked = null;
-    void perform(action, () => runAction(dataSource(), task.id, action, text), (result) => {
-      asking = null;
-      if (action === "complete") unblocked = result.unblocked;
-    });
+    void perform(
+      action,
+      () => runAction(dataSource(), task.id, action, text),
+      () => (asking = null),
+      (result) => {
+        if (action === "complete") unblocked = result.unblocked;
+      },
+    );
   }
 
   function saveEdit(event: SubmitEvent) {
@@ -209,13 +220,16 @@
   }
 
   /**
-   * Run `change`, reload the task, then call `done`. A failed change stays
-   * next to `action`; a failed reload after a saved change says so.
+   * Run `change`, reload the task, then `close` its form and call `done`.
+   * A failed change stays next to `action`, and its form stays open; a
+   * failed reload after a saved change says so. A queued change also closes
+   * its form, with the queued notice, so it is not queued twice.
    */
   async function perform<T extends { warnings: ChangeWarning[] }>(
     action: TaskAction | "edit" | "file",
     change: () => Promise<T>,
-    done: (result: T) => void,
+    close: () => void,
+    done?: (result: T) => void,
   ) {
     busy = action;
     stale = null;
@@ -224,9 +238,11 @@
       const result = await change();
       warnings = result.warnings;
       await onchanged?.().catch((error: unknown) => (stale = failureOf(error)));
-      done(result);
+      close();
+      done?.(result);
     } catch (error) {
       failure = { action, failure: failureOf(error) };
+      if (failure.failure.code === QUEUED) close();
     } finally {
       busy = null;
     }
@@ -293,9 +309,12 @@
           <Button label="Edit" variant="ghost" disabled={busy !== null} onclick={openEdit} />
         {/if}
         {#if canEditFile && file === null}
-          <Button label="Edit file" variant="ghost" busy={busy === "file"} disabled={busy !== null} onclick={openFile} />
+          <Button label="Edit file" variant="ghost" busy={busy === "file"} disabled={busy !== null || fileQueued} onclick={openFile} />
         {/if}
       </div>
+      {#if canEditFile && fileQueued}
+        <p class="muted">An edit to this task waits for the next sync. Edit the file after that sync.</p>
+      {/if}
       {#if asking !== null}
         {@const label = ACTION_TEXT[asking] ?? ""}
         <form class="ask" aria-label={ACTION_LABELS[asking]} onsubmit={submitAsk}>
@@ -318,6 +337,7 @@
       {/if}
       {#each actions as action (action)}{@render failed(action, `${ACTION_LABELS[action].toLowerCase()} this task`)}{/each}
       {#if file === null}{@render failed("file", "open the file")}{/if}
+      {#if draft === null}{@render failed("edit", "save the task")}{/if}
       {#if unblocked !== null}
         <div class="notice" role="status" aria-label="Completed">
           <strong>Completed.</strong>
@@ -363,7 +383,7 @@
         <p class="muted">TOML front matter between the <code>+++</code> lines, then the Markdown body. <code>arcl</code> checks the file as it checks a workspace file it imports.</p>
         <MarkdownEditor value={file.text} label="Record file" frontMatter readonly={false} onchange={(value) => file && (file.text = value)} />
         <div class="buttons">
-          <Button type="submit" variant="primary" label="Save file" busy={busy === "file"} disabled={busy !== null || file.text === file.source} />
+          <Button type="submit" variant="primary" label="Save file" busy={busy === "file"} disabled={busy !== null || fileQueued || file.text === file.source} />
           <Button label="Cancel" variant="ghost" disabled={busy !== null} onclick={() => ((file = null), (failure = null))} />
         </div>
         {#if failure?.action === "file"}

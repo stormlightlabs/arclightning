@@ -431,16 +431,6 @@
       },
       "format_version": 1
     },
-    "sources/arcl-c-01M5RVP5XHT7D6S1NWEJ9BEEYG": {
-      "data": {
-        "id": "arcl-c-01M5RVP5XHT7D6S1NWEJ9BEEYG",
-        "kind": "capture",
-        "path": "captures/arcl-c-01M5RVP5XHT7D6S1NWEJ9BEEYG.md",
-        "revision": "dabe84955b6c3227e14dfced397b229748a3740083c891d94f6e9bc477d7642e",
-        "source": "+++\nid = \"arcl-c-01M5RVP5XHT7D6S1NWEJ9BEEYG\"\ntitle = \"Try the artifact\"\nstatus = \"captured\"\ncreated-at = \"2026-10-25T06:24:09.137Z\"\n+++\n\nOn claude.ai.\n"
-      },
-      "format_version": 1
-    },
     "meta/sync": {
       "commit": null,
       "format_version": 1,

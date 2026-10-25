@@ -3,17 +3,16 @@
  *
  * The database holds the JSON the `arcl serve` read endpoints return, which
  * `arcl web export` writes and an agent copies in: `views/work`,
- * `views/tree`, `views/tasks`, `views/captures`, `records/<id>` and
- * `sources/<id>` for each task and open capture, and `meta/sync`. Views read
- * them through the same functions as over `arcl serve`.
+ * `views/tree`, `views/tasks`, `views/captures`, `records/<id>` for each
+ * task and open capture, `sources/<id>` for each task, and `meta/sync`.
+ * Views read them through the same functions as over `arcl serve`.
  *
  * The page cannot run `arcl`, so a change writes a `queue/<id>` document
- * instead and fails with {@link QUEUED}. A raw record edit queues as
- * `update_source`, with the revision its `sources/<id>` document held, so
- * `arcl web apply` refuses it when the file has changed since that sync. An
- * agent applies the queue with
+ * instead and fails with {@link QUEUED}. An agent applies the queue with
  * `arcl web apply` and syncs the result back. Until then the records do not
- * change, and the page says the edit is queued.
+ * change, and the page says the edit is queued. A raw record edit queues as
+ * `update_source` with the revision its `sources/<id>` document held, so
+ * `arcl web apply` refuses it when the file changed after that sync.
  *
  * The types here are the subset of the artifact's `db` and `user`
  * capabilities this module calls.

@@ -4300,7 +4300,6 @@ fn web_export_writes_the_envelopes_arcl_serve_returns() {
         (&*format!("records/{capture}"), format!("/api/records/{capture}")),
         (&*format!("sources/{task}"), format!("/api/records/{task}/source")),
         (&*format!("sources/{blocker}"), format!("/api/records/{blocker}/source")),
-        (&*format!("sources/{capture}"), format!("/api/records/{capture}/source")),
     ];
     for (document, path) in &pairs {
         assert_eq!((200, exported(out.path(), document)), served.read(path), "{document}");
@@ -4314,7 +4313,10 @@ fn web_export_writes_the_envelopes_arcl_serve_returns() {
     let mut listed = manifest_list(&manifest, "documents");
     listed.sort();
     documents.sort();
-    assert_eq!(listed, documents, "a discarded capture is not exported");
+    assert_eq!(
+        listed, documents,
+        "a discarded capture is not exported, and a capture has no file document"
+    );
     assert_eq!(manifest_list(&manifest, "changed").len(), documents.len());
     assert_eq!(manifest_list(&manifest, "removed"), Vec::<String>::new());
     let meta = exported(out.path(), "meta/sync");
@@ -4360,12 +4362,8 @@ fn web_export_rewrites_only_the_documents_that_changed() {
     assert!(!changed.contains(&format!("records/{other}")), "{changed:?}");
     assert!(!changed.contains(&format!("sources/{other}")), "{changed:?}");
     assert_ne!(after["revision"], first["revision"]);
-    assert_eq!(
-        manifest_list(&after, "removed"),
-        [format!("records/{capture}"), format!("sources/{capture}")]
-    );
+    assert_eq!(manifest_list(&after, "removed"), [format!("records/{capture}")]);
     assert!(!out.path().join(format!("records/{capture}.json")).exists());
-    assert!(!out.path().join(format!("sources/{capture}.json")).exists());
     assert_eq!(
         exported(out.path(), &format!("records/{task}"))["data"]["task"]["title"],
         "Renamed"
@@ -4452,10 +4450,7 @@ fn web_export_full_lists_every_document_as_changed() {
     let documents = manifest_list(&full, "documents");
     assert!(documents.contains(&format!("records/{task}")));
     assert_eq!(manifest_list(&full, "changed"), documents);
-    assert_eq!(
-        manifest_list(&full, "removed"),
-        [format!("records/{capture}"), format!("sources/{capture}")]
-    );
+    assert_eq!(manifest_list(&full, "removed"), [format!("records/{capture}")]);
 }
 
 #[test]
