@@ -2,10 +2,11 @@
 id = "arcl-t-01M5QS2QSJ1S7D1XG5Z6HAY1G3"
 parent = "arcl-t-01M5NE5P6XHRR4Q84820YACQ07"
 title = "T18.6: Build the Inbox and Planning views"
-status = "in_progress"
+status = "completed"
 priority = "normal"
 position = 6
 blocked-by = ["arcl-t-01M5QS2QP9TNCV3A88EHX375D9"]
+evidence = "Delivered by #PR: the Inbox lists open captures and promotes or discards them (1, 2, 3, Backspace); Planning shows milestones with progress and ready counts, opens their task trees, and creates specs and plans and applies plan documents. arcl serve adds GET /api/tree and POSTs for capture promote and discard, spec create, plan create and plan apply. Verified capture -> task and capture -> spec -> plan -> task in the browser against arcl show and arcl tree."
 +++
 
 Build the Inbox and Planning views, so captures become planned work in the
@@ -20,12 +21,12 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] Inbox lists open captures and promotes one to a task, a spec, or a note
-- [ ] A capture becomes a spec, the spec a plan, and the applied plan tasks,
+- [x] Inbox lists open captures and promotes one to a task, a spec, or a note
+- [x] A capture becomes a spec, the spec a plan, and the applied plan tasks,
       all from the browser
-- [ ] Planning shows each milestone with its phase, progress and ready count,
+- [x] Planning shows each milestone with its phase, progress and ready count,
       and opens the planning tree below it
-- [ ] The views follow the Work view's keyboard model
+- [x] The views follow the Work view's keyboard model
 
 Verification:
 
