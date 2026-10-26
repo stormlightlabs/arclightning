@@ -918,6 +918,57 @@ fn tree_orders_plan_children_by_position_not_id() {
 }
 
 #[test]
+fn tree_lines_start_with_the_status_mark() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let done = create_task(dir, "Done", None);
+    let active = create_task(dir, "Active", None);
+    let parked = create_task(dir, "Parked", None);
+    let dropped = create_task(dir, "Dropped", None);
+    let ready = create_task(dir, "Ready", None);
+    let blocked = create_task(dir, "Blocked", None);
+    run_json(
+        dir,
+        ["--json", "task", "complete", &done, "--evidence", "Verified"].as_ref(),
+    );
+    run_json(dir, ["--json", "task", "start", &active].as_ref());
+    run_json(dir, ["--json", "task", "park", &parked].as_ref());
+    run_json(dir, ["--json", "task", "cancel", &dropped].as_ref());
+    block_start_task(dir, &blocked, &ready);
+
+    let human = stdout_of(dir, &["--color", "never", "tree"]);
+    let mark = |title: &str| {
+        let line = human
+            .lines()
+            .find(|line| line.ends_with(&format!("[{title}]")))
+            .unwrap_or_else(|| panic!("a tree line for {title} in:\n{human}"));
+        line.chars().next().expect("a non-empty line")
+    };
+    assert_eq!(mark("Done"), '✓');
+    assert_eq!(mark("Active"), '◐');
+    assert_eq!(mark("Parked"), '‖');
+    assert_eq!(mark("Dropped"), '✗');
+    assert_eq!(mark("Ready"), '●');
+    assert_eq!(mark("Blocked"), '○');
+
+    let plain = stdout_of(dir, &["--plain", "tree"]);
+    for (id, status, title) in [
+        (&done, "completed", "Done"),
+        (&active, "in_progress", "Active"),
+        (&parked, "parked", "Parked"),
+        (&dropped, "cancelled", "Dropped"),
+        (&ready, "pending", "Ready"),
+        (&blocked, "pending", "Blocked"),
+    ] {
+        let line = format!("0\ttask\t{id}\t{status}\t{title}");
+        assert!(
+            plain.lines().any(|plain_line| plain_line == line),
+            "{line} in:\n{plain}"
+        );
+    }
+}
+
+#[test]
 fn structured_plan_check_diff_apply_and_repeat_are_deterministic() {
     let directory = initialized_directory();
     let spec = run_json(directory.path(), ["--json", "spec", "create", "Feature"].as_ref());
@@ -4890,7 +4941,7 @@ fn short_ids_select_records_and_grow_when_suffixes_collide() {
     let shown = run_json(dir, ["--json", "show", &lower].as_ref());
     assert_eq!(shown["data"]["task"]["id"], other.as_str(), "JSON keeps the full ID");
     let rooted = human_stdout(dir, &["tree", &suffix(&twin, 6)]);
-    assert_eq!(rooted.trim(), format!("task `{}` [Twin]", suffix(&twin, 5)));
+    assert_eq!(rooted.trim(), format!("● task `{}` [Twin]", suffix(&twin, 5)));
     let started = run_json(dir, ["--json", "task", "start", &suffix(&first, 5)].as_ref());
     assert_eq!(started["data"]["task"]["id"], first.as_str());
     assert_eq!(started["data"]["task"]["status"], "in_progress");

@@ -2,9 +2,10 @@
 id = "arcl-t-01M5VDDD61CZH33T5S34E02BKM"
 phase = "arcl-ph-01M5VDD6PCB2B64MKW9TX01XXG"
 title = "Show status on each arcl tree line"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 1
+evidence = "Delivered by #PR: each human arcl tree line starts with a status mark computed by StatusMark::of from the record's status and, for pending tasks, readiness; --plain and --json unchanged. Unit and CLI tests cover every status."
 +++
 
 Show each record's status on its `arcl tree` line, and readiness on open
