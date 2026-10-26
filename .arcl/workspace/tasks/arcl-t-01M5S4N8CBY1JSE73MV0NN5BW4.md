@@ -23,11 +23,11 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] Each CSS rule in a `.svelte` `<style>` block sits on its own lines,
+- [x] Each CSS rule in a `.svelte` `<style>` block sits on its own lines,
       one declaration per line
-- [ ] `pnpm format` writes and `pnpm lint` checks `apps/web` and
+- [x] `pnpm format` writes and `pnpm lint` checks `apps/web` and
       `packages/ui`
-- [ ] `just check` fails on an unformatted file in either package
+- [x] `just check` fails on an unformatted file in either package
 
 Verification:
 

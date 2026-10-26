@@ -8,7 +8,7 @@ position = 11
 
 Make the CLI's human output readable at a glance: short record IDs, and an
 `arcl tree` that shows status, folds finished work and puts the plan first.
-JSON output keeps its shape.
+`--json` nodes keep their shape.
 
 Deliverables:
 
@@ -22,4 +22,4 @@ Deliverables:
 
 Exit criterion: `arcl tree` on this repository shows what is done, in
 progress, ready and blocked in one screen, and any record can be named by its
-short ID, while `--json` output is unchanged
+short ID, while `--json` nodes keep their shape

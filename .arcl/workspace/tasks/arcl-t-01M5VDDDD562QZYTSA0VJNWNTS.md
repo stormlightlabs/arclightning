@@ -11,8 +11,8 @@ blocked-by = ["arcl-t-01M5VDDD42HZQ1FEN49X80GBA5", "arcl-t-01M5VDDD61CZH33T5S34E
 Make `arcl tree`'s default human output a box-drawing tree that folds
 finished milestones, so open work fits on one screen.
 
-Each line starts with a status mark: `✓` done, `◐` in progress, `●` ready,
-`○` pending or blocked. Phases show progress counts such as `7/11`, and
+Each line starts with the status mark that showing status on each tree
+line adds. Phases show progress counts such as `7/11`, and
 blocked tasks end with `blocked by <short ID>`. Finished milestones collapse
 into one line, such as `✓ Milestones 1–6  done · 29 tasks`, and open ones
 expand. A footer summarizes the unplaced records:
@@ -35,13 +35,14 @@ Colour only on a TTY, never with `NO_COLOR` set, and as `--color` says.
 `tree -A` does. `--all` unfolds every milestone and includes closed captures.
 `--depth N` stops after N levels.
 
-Blocked by short record IDs, status per tree line, closed captures out of
-the tree and plan first, since this view builds on all four.
+Blocked by accepting and showing short record IDs, showing status on each
+tree line, leaving closed captures out of the tree, and putting the plan
+first. This view builds on each of them.
 
 Scope:
 
-- the box-drawing renderer, status marks, progress counts and blocked-by
-  references
+- the box-drawing renderer, progress counts and blocked-by references,
+  reusing the status marks
 - folding finished milestones into one line, and the unplaced-records footer
 - `--ascii`, `--all` and `--depth N`
 - the README's `arcl tree` example, from a real run on this repository,

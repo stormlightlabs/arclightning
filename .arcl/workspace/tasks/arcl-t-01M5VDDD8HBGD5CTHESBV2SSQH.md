@@ -7,9 +7,9 @@ priority = "normal"
 position = 2
 +++
 
-Leave closed captures out of `arcl tree` by default. It lists 29 captures on
-this repository while the Inbox shows 21 open, because promoted and
-discarded captures print beside open ones.
+Leave closed captures out of `arcl tree` by default. Promoted and discarded
+captures print beside open ones today, so the tree lists more captures than
+the Inbox does.
 
 Add `--all` to include them. Promoted captures live on as the record they
 became, and discarded ones are history, so neither belongs in the default
@@ -33,5 +33,6 @@ Verification:
 
 - CLI tests with a captured, a promoted and a discarded capture, with and
   without `--all`
-- `arcl tree | grep -c capture` on this repository matches the Inbox count
+- on this repository, `arcl tree --plain | cut -f2 | grep -cx capture`
+  equals `arcl list --kind capture --status captured --plain | wc -l`
 - `just check`
