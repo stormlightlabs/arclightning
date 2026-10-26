@@ -59,8 +59,9 @@ pub(super) fn read_work(renderer: &Renderer) -> anyhow::Result<Option<String>> {
     Ok(renderer.render_planning_work(&work)?)
 }
 
-/// `arcl tree`, from the record `root` names or of every record.
-pub(super) fn read_tree(root: Option<&str>, renderer: &Renderer) -> anyhow::Result<Option<String>> {
+/// `arcl tree`, from the record `root` names or of every record, shaped by
+/// `options`.
+pub(super) fn read_tree(root: Option<&str>, options: TreeArgs, renderer: &Renderer) -> anyhow::Result<Option<String>> {
     let root = root
         .map(|root| resolve_record_id(root, None))
         .transpose()
@@ -73,7 +74,7 @@ pub(super) fn read_tree(root: Option<&str>, renderer: &Renderer) -> anyhow::Resu
         .into_iter()
         .map(|task| task.id)
         .collect();
-    let mut nodes = connected_tree(&graph, &ready, root.as_deref()).map_err(ApplicationError::from_command)?;
+    let mut nodes = connected_tree(&graph, &ready, root.as_deref(), options).map_err(ApplicationError::from_command)?;
     let ids = display_ids(&database, renderer).map_err(ApplicationError::from_command)?;
     shorten_tree(&mut nodes, &ids);
     Ok(renderer.render_connected_tree(&nodes)?)

@@ -182,7 +182,7 @@ fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Wa
         Some(Command::Skill { command }) => exec_skill(command, renderer),
         Some(Command::Show { id }) => write_output(read_show(&id, renderer)?),
         Some(Command::List { filters }) => write_output(read_list(filters, renderer)?),
-        Some(Command::Tree { id }) => write_output(read_tree(id.as_deref(), renderer)?),
+        Some(Command::Tree { id, options }) => write_output(read_tree(id.as_deref(), options, renderer)?),
         Some(Command::Explain { task_id }) => write_output(read_explain(&task_id, renderer)?),
         Some(Command::Context { task_id }) => write_output(read_context(&task_id, renderer)?),
         Some(Command::Check) => {

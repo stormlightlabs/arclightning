@@ -224,6 +224,10 @@ task ID, then a `subtask<TAB><id>` line for each completed subtask and an
 `--milestone`, and `--parent`. `ready` and `next` accept the same priority and
 association filters.
 
+`tree` leaves out promoted and discarded captures in human, `--plain` and
+`--json` output; `--all` includes them. A closed capture named as the root
+still shows. The JSON nodes keep their shape either way.
+
 See [Inspecting Work](/guides/inspect-work/) for the query workflow and context contents.
 
 ## Web app

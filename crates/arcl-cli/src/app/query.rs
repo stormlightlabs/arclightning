@@ -153,8 +153,10 @@ pub(super) fn show_record(database: &Database, id: &str, renderer: &Renderer) ->
 
 /// Builds the `arcl tree` nodes, from the record `root` names or of every
 /// record. `ready` holds the ready tasks, for the pending tasks' marks.
+/// Promoted and discarded captures appear only with `options.all` or as
+/// `root`.
 pub(super) fn connected_tree(
-    graph: &ConnectedGraph, ready: &HashSet<TaskId>, root: Option<&str>,
+    graph: &ConnectedGraph, ready: &HashSet<TaskId>, root: Option<&str>, options: TreeArgs,
 ) -> CResult<Vec<ConnectedTreeNode>> {
     let mut nodes = Vec::new();
     for release in &graph.releases {
@@ -167,7 +169,12 @@ pub(super) fn connected_tree(
             children: Vec::new(),
         });
     }
-    for capture in &graph.captures {
+    let all_captures = options.all || root.is_some();
+    for capture in graph
+        .captures
+        .iter()
+        .filter(|capture| all_captures || capture.status == CaptureStatus::Captured)
+    {
         nodes.push(ConnectedTreeNode {
             kind: "capture",
             id: capture.id.to_string(),
