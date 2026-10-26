@@ -2088,7 +2088,7 @@ fn explain_and_context_list_a_blocker_inherited_through_a_grandparent() {
         vec![format!("ancestor `{grandparent}` is blocked by `{blocker}` (pending)")]
     );
 
-    // Human and plain output show short IDs, as `show` does.
+    // Human output shows short IDs, as `show` does; plain keeps full IDs.
     let (short_blocker, short_grandparent) = (
         short_id(directory.path(), &blocker),
         short_id(directory.path(), &grandparent),
@@ -2101,7 +2101,7 @@ fn explain_and_context_list_a_blocker_inherited_through_a_grandparent() {
     let plain = stdout_of(directory.path(), &["--plain", "explain", &leaf]);
     assert!(plain.contains("blockers\t\n"), "{plain}");
     assert!(
-        plain.contains(&format!("inherited\t{short_blocker}\t{short_grandparent}")),
+        plain.contains(&format!("inherited\t{blocker}\t{grandparent}")),
         "{plain}"
     );
 
@@ -2150,8 +2150,7 @@ fn explain_json_omits_the_ancestor_of_a_direct_blocker() {
     assert_eq!(explained["data"]["inherited_blockers"], serde_json::json!([]));
 
     let plain = stdout_of(directory.path(), &["--plain", "explain", &task]);
-    let short_blocker = short_id(directory.path(), &blocker);
-    assert!(plain.contains(&format!("blockers\t{short_blocker}\n")), "{plain}");
+    assert!(plain.contains(&format!("blockers\t{blocker}\n")), "{plain}");
     assert!(!plain.contains("inherited\t"), "{plain}");
     let plain = stdout_of(directory.path(), &["--plain", "context", &task]);
     assert!(plain.contains(&format!("\nblocker\t{blocker}\tpending\n")), "{plain}");
@@ -4870,10 +4869,7 @@ fn short_ids_select_records_and_grow_when_suffixes_collide() {
         "{list}"
     );
     let plain = human_stdout(dir, &["--plain", "tree"]);
-    assert!(
-        plain.contains(&format!("0\ttask\t{}\tpending\tOther", suffix(&other, 4))),
-        "{plain}"
-    );
+    assert!(plain.contains(&format!("0\ttask\t{other}\tpending\tOther")), "{plain}");
 
     // A unique suffix selects its record, in either case and with a kind.
     let shown = human_stdout(dir, &["show", &suffix(&first, 5)]);
@@ -4965,6 +4961,15 @@ fn records_sharing_a_whole_ulid_show_their_kind_and_resolve_by_command() {
     assert_eq!(human_stdout(dir, &["task", "show", suffix]), show);
     assert_eq!(human_stdout(dir, &["task", "explain", suffix]), show);
     assert_eq!(human_stdout(dir, &["explain", suffix]), show);
+    for command in [["--plain", "show"], ["--plain", "explain"]] {
+        let plain = human_stdout(dir, &[command[0], command[1], &format!("t-{suffix}")]);
+        assert!(
+            plain.starts_with(&format!("task\t{task}\t")),
+            "plain keeps full IDs: {plain}"
+        );
+    }
+    let plain = human_stdout(dir, &["--plain", "tree"]);
+    assert!(plain.contains(&format!("\t{copy}\t")), "{plain}");
 
     // A task command reads a bare suffix as a task's, though a spec shares it.
     let started = run_json(dir, ["--json", "task", "start", suffix].as_ref());

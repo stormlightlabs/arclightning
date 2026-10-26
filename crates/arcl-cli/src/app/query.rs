@@ -80,8 +80,8 @@ impl ListFilter {
     }
 }
 
-/// Show the record `id` names, a full or short ID. Human and plain output
-/// show short IDs.
+/// Show the record `id` names, a full or short ID. Human output shows short
+/// IDs.
 pub(super) fn show_record(database: &Database, id: &str, renderer: &Renderer) -> CResult<Option<String>> {
     let id = &database.resolve_record_id(id, None)?;
     let ids = display_ids(database, renderer)?;

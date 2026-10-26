@@ -97,12 +97,12 @@ pub(super) fn parse_id<T: PrefixedId>(value: &str) -> CResult<T> {
     T::parse(&value).map_err(|error| CommandError::Domain(DomainError::InvalidId(error)))
 }
 
-/// The short IDs human and plain output show, or none for JSON and quiet
+/// The short IDs human output shows, or none for plain, JSON and quiet
 /// output, which keep full IDs.
 pub(super) fn display_ids(database: &Database, renderer: &Renderer) -> CResult<ShortIds> {
     match renderer.mode() {
-        OutputMode::Human | OutputMode::Plain => Ok(database.short_ids()?),
-        OutputMode::Json | OutputMode::Quiet => Ok(ShortIds::default()),
+        OutputMode::Human => Ok(database.short_ids()?),
+        OutputMode::Plain | OutputMode::Json | OutputMode::Quiet => Ok(ShortIds::default()),
     }
 }
 

@@ -34,12 +34,12 @@ A short ID must end exactly one record's ID. One that ends several fails with
 status 3 and lists each match's full ID and title; one that ends none fails with
 status 5.
 
-Human and `--plain` output from `show`, `list` and `tree` print each ID as its
-shortest unique suffix, at least 4 characters, compared across every record.
-`explain`, `task show` and `task explain` print the same IDs as `show`. Records
-of different kinds that share a whole ULID, as a copied workspace file can,
-print as `<kind>-<ULID>`, such as `t-01M5VDDD42HZQ1FEN49X80GBA5`. `--json`
-output keeps full IDs.
+Human output from `show`, `list`, `tree`, `explain`, `task show` and
+`task explain` prints each ID as its shortest unique suffix, at least 4
+characters, compared across every record. Records of different kinds that
+share a whole ULID, as a copied workspace file can, print as `<kind>-<ULID>`,
+such as `t-01M5VDDD42HZQ1FEN49X80GBA5`. `--plain` and `--json` output keep
+full IDs.
 
 A short ID that is unique today can match a second record later. Write full IDs
 in files, evidence, links and scripts that outlive the command.
