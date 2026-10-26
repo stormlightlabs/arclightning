@@ -35,9 +35,11 @@ Render the complete hierarchy or start at one record:
 arcl tree
 arcl tree arcl-e-01J...
 arcl tree arcl-t-01J...
+arcl tree --all
 ```
 
-Records use deterministic position and ID ordering. Each line starts with a
+Records use deterministic position and ID ordering. Promoted and discarded
+captures are left out; `--all` includes them. Each line starts with a
 status mark:
 
 | Mark | Status                                                                                    |

@@ -969,6 +969,79 @@ fn tree_lines_start_with_the_status_mark() {
 }
 
 #[test]
+fn tree_leaves_out_closed_captures_unless_all() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let open = create_capture(dir, "Open idea", "Still open");
+    let promoted = create_capture(dir, "Promoted idea", "Became a task");
+    let discarded = create_capture(dir, "Discarded idea", "Not doing it");
+    run_json(dir, ["--json", "capture", "promote", &promoted, "task"].as_ref());
+    run_json(dir, ["--json", "capture", "discard", &discarded].as_ref());
+
+    let capture_ids = |args: &[&str]| -> Vec<String> {
+        let tree = run_json(dir, args);
+        tree["data"]["nodes"]
+            .as_array()
+            .expect("tree nodes")
+            .iter()
+            .filter(|node| node["kind"] == "capture")
+            .map(|node| node["id"].as_str().expect("a node ID").to_owned())
+            .collect()
+    };
+    assert_eq!(capture_ids(&["--json", "tree"]), std::slice::from_ref(&open));
+    let mut all = capture_ids(&["--json", "tree", "--all"]);
+    all.sort();
+    let mut expected = vec![open.clone(), promoted.clone(), discarded.clone()];
+    expected.sort();
+    assert_eq!(all, expected);
+
+    let plain = stdout_of(dir, &["--plain", "tree"]);
+    assert!(
+        plain.contains(&format!("0\tcapture\t{open}\tcaptured\tOpen idea")),
+        "{plain}"
+    );
+    assert!(!plain.contains(&promoted) && !plain.contains(&discarded), "{plain}");
+    let plain_all = stdout_of(dir, &["--plain", "tree", "--all"]);
+    assert!(
+        plain_all.contains(&format!("0\tcapture\t{promoted}\tpromoted\tPromoted idea")),
+        "{plain_all}"
+    );
+    assert!(
+        plain_all.contains(&format!("0\tcapture\t{discarded}\tdiscarded\tDiscarded idea")),
+        "{plain_all}"
+    );
+
+    let human = stdout_of(dir, &["--color", "never", "tree"]);
+    let capture_lines = |output: &str| -> Vec<String> {
+        output
+            .lines()
+            .filter(|line| line.contains(" capture `"))
+            .map(str::to_owned)
+            .collect()
+    };
+    let lines = capture_lines(&human);
+    assert_eq!(lines.len(), 1, "{human}");
+    assert!(lines[0].ends_with("[Open idea]"), "{human}");
+    let human_all = stdout_of(dir, &["--color", "never", "tree", "--all"]);
+    let mark = |title: &str| {
+        let line = capture_lines(&human_all)
+            .into_iter()
+            .find(|line| line.ends_with(&format!("[{title}]")))
+            .unwrap_or_else(|| panic!("a tree line for {title} in:\n{human_all}"));
+        line.chars().next().expect("a non-empty line")
+    };
+    assert_eq!(mark("Promoted idea"), '✓');
+    assert_eq!(mark("Discarded idea"), '✗');
+
+    for closed in [&promoted, &discarded] {
+        let rooted = run_json(dir, ["--json", "tree", closed].as_ref());
+        let nodes = rooted["data"]["nodes"].as_array().expect("tree nodes");
+        assert_eq!(nodes.len(), 1, "{rooted}");
+        assert_eq!(nodes[0]["id"], closed.as_str());
+    }
+}
+
+#[test]
 fn open_containers_show_started_when_a_task_below_them_started() {
     let directory = initialized_directory();
     let dir = directory.path();

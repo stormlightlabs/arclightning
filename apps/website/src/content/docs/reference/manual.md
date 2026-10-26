@@ -209,20 +209,24 @@ task ID, then a `subtask<TAB><id>` line for each completed subtask and an
 
 ## Inspection
 
-| Command                  | Purpose                                                            |
-| ------------------------ | ------------------------------------------------------------------ |
-| `arcl show <id>`         | Show one record by its full or short ID.                           |
-| `arcl list`              | List records using kind, state, priority, and association filters. |
-| `arcl tree [<id>]`       | Show the complete hierarchy or one rooted subtree.                 |
-| `arcl explain <task-id>` | Report every condition affecting task readiness.                   |
-| `arcl context <task-id>` | Return the bounded context needed to work on a task.               |
-| `arcl check`             | Validate database and graph invariants.                            |
-| `arcl ready`             | List actionable leaf tasks in deterministic order.                 |
-| `arcl next`              | Return the first actionable task, if one exists.                   |
+| Command                    | Purpose                                                            |
+| -------------------------- | ------------------------------------------------------------------ |
+| `arcl show <id>`           | Show one record by its full or short ID.                           |
+| `arcl list`                | List records using kind, state, priority, and association filters. |
+| `arcl tree [<id>] [--all]` | Show the complete hierarchy or one rooted subtree.                 |
+| `arcl explain <task-id>`   | Report every condition affecting task readiness.                   |
+| `arcl context <task-id>`   | Return the bounded context needed to work on a task.               |
+| `arcl check`               | Validate database and graph invariants.                            |
+| `arcl ready`               | List actionable leaf tasks in deterministic order.                 |
+| `arcl next`                | Return the first actionable task, if one exists.                   |
 
 `list` accepts `--kind`, `--status`, `--priority`, `--release`, `--epic`,
 `--milestone`, and `--parent`. `ready` and `next` accept the same priority and
 association filters.
+
+`tree` leaves out promoted and discarded captures in human, `--plain` and
+`--json` output; `--all` includes them. A closed capture named as the root
+still shows. The JSON nodes keep their shape either way.
 
 See [Inspecting Work](/guides/inspect-work/) for the query workflow and context contents.
 

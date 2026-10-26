@@ -124,7 +124,7 @@ impl Reads for ServeApp {
     }
 
     fn tree(&self) -> Reply {
-        reply(read_tree(None, &self.renderer))
+        reply(read_tree(None, TreeArgs::default(), &self.renderer))
     }
 
     fn work(&self) -> Reply {

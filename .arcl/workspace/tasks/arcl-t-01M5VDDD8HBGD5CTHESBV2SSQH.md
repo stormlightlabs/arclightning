@@ -2,9 +2,10 @@
 id = "arcl-t-01M5VDDD8HBGD5CTHESBV2SSQH"
 phase = "arcl-ph-01M5VDD6PCB2B64MKW9TX01XXG"
 title = "Leave closed captures out of arcl tree by default"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 2
+evidence = "Delivered by #59: arcl tree leaves out promoted and discarded captures in human, --plain and --json output; --all includes them and a closed capture as root still shows. CLI test tree_leaves_out_closed_captures_unless_all; on this repository tree --plain shows 24 captures, matching list --status captured; just check and arcl check pass."
 +++
 
 Leave closed captures out of `arcl tree` by default. Promoted and discarded
@@ -24,10 +25,10 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] `arcl tree` lists only open captures
-- [ ] `arcl tree --all` lists every capture
-- [ ] `arcl tree <closed capture ID>` shows it
-- [ ] `--json` nodes keep their shape; only which captures appear changes
+- [x] `arcl tree` lists only open captures
+- [x] `arcl tree --all` lists every capture
+- [x] `arcl tree <closed capture ID>` shows it
+- [x] `--json` nodes keep their shape; only which captures appear changes
 
 Verification:
 

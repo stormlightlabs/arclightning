@@ -94,6 +94,8 @@ pub enum Command {
     Tree {
         /// Optional record ID or short ID to use as the tree root.
         id: Option<String>,
+        #[command(flatten)]
+        options: TreeArgs,
     },
     /// Explain every condition affecting a task's readiness.
     Explain {
@@ -772,6 +774,14 @@ pub enum WorkspaceCommand {
         #[arg(required = true, value_name = "PATH")]
         paths: Vec<PathBuf>,
     },
+}
+
+/// Options that choose what `arcl tree` shows.
+#[derive(Clone, Copy, Debug, Default, Args)]
+pub struct TreeArgs {
+    /// Include promoted and discarded captures.
+    #[arg(long)]
+    pub all: bool,
 }
 
 /// Filters accepted by broad connected-record queries.
