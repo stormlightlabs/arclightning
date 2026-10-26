@@ -5,7 +5,7 @@ title = "T24: Format apps/web and packages/ui with Prettier"
 status = "completed"
 priority = "normal"
 position = 3
-evidence = "Delivered by #PR: apps/web and packages/ui have a Prettier config with prettier-plugin-svelte and `format`/`lint` scripts; the root `pnpm lint` runs in `just check`. Collapsing a `<style>` rule in either package makes `pnpm lint` exit 1. Verified with web build, build:artifact, cargo fmt/clippy/test, pnpm lint/check/test, test:e2e (42 passed) and arcl check."
+evidence = "Delivered by #55: apps/web and packages/ui have a Prettier config with prettier-plugin-svelte and `format`/`lint` scripts; the root `pnpm lint` runs in `just check`. Collapsing a `<style>` rule in either package makes `pnpm lint` exit 1. Verified with web build, build:artifact, cargo fmt/clippy/test, pnpm lint/check/test, test:e2e (42 passed) and arcl check."
 +++
 
 Format the Svelte and TypeScript in `apps/web` and `packages/ui` with
