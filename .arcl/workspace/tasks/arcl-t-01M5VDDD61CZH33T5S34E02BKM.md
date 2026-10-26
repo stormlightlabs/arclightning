@@ -5,7 +5,7 @@ title = "Show status on each arcl tree line"
 status = "completed"
 priority = "normal"
 position = 1
-evidence = "Delivered by #PR: each human arcl tree line starts with a status mark computed by StatusMark::of from the record's status and, for pending tasks, readiness; --plain and --json unchanged. Unit and CLI tests cover every status."
+evidence = "Delivered by #58: each human arcl tree line starts with a status mark computed by StatusMark::of from the record's status and, for pending tasks, readiness; --plain and --json unchanged. Unit and CLI tests cover every status."
 +++
 
 Show each record's status on its `arcl tree` line, and readiness on open
