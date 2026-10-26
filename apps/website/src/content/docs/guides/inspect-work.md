@@ -37,9 +37,24 @@ arcl tree arcl-e-01J...
 arcl tree arcl-t-01J...
 ```
 
-Records use deterministic position and ID ordering. Container and task output
-includes descendant progress, so partially completed work is visible without
-walking each record separately.
+Records use deterministic position and ID ordering. Each line starts with a
+status mark:
+
+| Mark | Status                                                                                    |
+| ---- | ----------------------------------------------------------------------------------------- |
+| `✓`  | completed; capture promoted                                                               |
+| `✗`  | cancelled; capture discarded                                                              |
+| `◐`  | task in progress; open spec, plan or phase with a started or finished task                |
+| `‖`  | task parked                                                                               |
+| `●`  | pending task that is ready                                                                |
+| `○`  | pending task that is not ready or has subtasks; other open record; captured capture; note |
+
+A task with subtasks is never ready itself; its subtasks are. Terminals that
+draw ambiguous-width characters double-width can misalign the marks.
+
+![arcl tree with a status mark on each line](/images/arcl-tree-status.png)
+
+`--plain` and `--json` give the stored status instead.
 
 ## Explain readiness
 

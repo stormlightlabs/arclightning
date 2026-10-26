@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::cli::ColorChoice;
-use arcl_core::domain::{Capture, Note, Phase, Plan, PlanningTask, Release, ShortIds, Spec, TaskDependency};
+use arcl_core::domain::{
+    Capture, CaptureStatus, ContainerStatus, Note, Phase, Plan, PlanningTask, Release, ShortIds, Spec, TaskDependency,
+    TaskStatus,
+};
 use arcl_repo::{
     vcs::{HeadState, PathState},
     workspace::{Change, RecordSource, RecordStatusKind, WorkspaceStatus},
@@ -120,6 +123,85 @@ impl SkillFileStatus {
             Self::Unchanged => "unchanged",
             Self::Missing => "missing",
             Self::Changed => "changed",
+        }
+    }
+}
+
+/// The status a tree node's mark is computed from: the record's stored
+/// status, with readiness for tasks and started work for containers.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TreeStatus {
+    /// A task, and whether it is ready to start.
+    Task { status: TaskStatus, ready: bool },
+    /// A spec, plan or phase, and whether a task under it is in progress or
+    /// completed. A release always carries `started: false`.
+    Container { status: ContainerStatus, started: bool },
+    /// A capture.
+    Capture(CaptureStatus),
+    /// A note, which has no stored status.
+    Note,
+}
+
+/// The mark at the start of each human `arcl tree` line.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StatusMark {
+    /// Completed, or a promoted capture.
+    Done,
+    /// Cancelled, or a discarded capture.
+    Cancelled,
+    /// A task in progress, or an open container with started or finished work.
+    Active,
+    /// A parked task.
+    Parked,
+    /// A pending task that is ready.
+    Ready,
+    /// A pending task that is not ready, another open container, a captured
+    /// capture or a note.
+    Waiting,
+}
+
+impl StatusMark {
+    /// The mark for a node with `status`.
+    pub const fn of(status: TreeStatus) -> Self {
+        match status {
+            TreeStatus::Task { status: TaskStatus::Completed, .. }
+            | TreeStatus::Container { status: ContainerStatus::Completed, .. }
+            | TreeStatus::Capture(CaptureStatus::Promoted) => Self::Done,
+            TreeStatus::Task { status: TaskStatus::Cancelled, .. }
+            | TreeStatus::Container { status: ContainerStatus::Cancelled, .. }
+            | TreeStatus::Capture(CaptureStatus::Discarded) => Self::Cancelled,
+            TreeStatus::Task { status: TaskStatus::InProgress, .. }
+            | TreeStatus::Container { status: ContainerStatus::Open, started: true } => Self::Active,
+            TreeStatus::Task { status: TaskStatus::Parked, .. } => Self::Parked,
+            TreeStatus::Task { status: TaskStatus::Pending, ready: true } => Self::Ready,
+            TreeStatus::Task { status: TaskStatus::Pending, ready: false }
+            | TreeStatus::Container { status: ContainerStatus::Open, started: false }
+            | TreeStatus::Capture(CaptureStatus::Captured)
+            | TreeStatus::Note => Self::Waiting,
+        }
+    }
+
+    /// The Unicode mark.
+    pub const fn glyph(self) -> char {
+        match self {
+            Self::Done => '✓',
+            Self::Cancelled => '✗',
+            Self::Active => '◐',
+            Self::Parked => '‖',
+            Self::Ready => '●',
+            Self::Waiting => '○',
+        }
+    }
+
+    /// The ASCII form, for the `--ascii` tree view the fold task adds.
+    pub const fn ascii(self) -> char {
+        match self {
+            Self::Done => '+',
+            Self::Cancelled => 'x',
+            Self::Active => '~',
+            Self::Parked => '=',
+            Self::Ready => '*',
+            Self::Waiting => 'o',
         }
     }
 }
@@ -1145,6 +1227,10 @@ pub struct ConnectedTreeNode {
     pub title: String,
     /// The record lifecycle status.
     pub status: String,
+    /// The status mark human output leads the line with. `--plain` and
+    /// `--json` carry `status` instead.
+    #[serde(skip)]
+    pub mark: StatusMark,
     /// Child records in the planning hierarchy.
     pub children: Vec<ConnectedTreeNode>,
 }
@@ -1152,8 +1238,9 @@ pub struct ConnectedTreeNode {
 impl ConnectedTreeNode {
     fn human(&self, depth: usize) -> String {
         let mut lines = vec![format!(
-            "{}{} `{}` [{}]",
+            "{}{} {} `{}` [{}]",
             "  ".repeat(depth),
+            self.mark.glyph(),
             self.kind,
             self.id,
             self.title
@@ -1714,5 +1801,105 @@ mod tests {
                 .expect("rendering succeeds"),
             None
         );
+    }
+
+    #[test]
+    fn every_status_has_a_mark_and_its_ascii_form() {
+        let cases = [
+            (
+                TreeStatus::Task { status: TaskStatus::Completed, ready: false },
+                '✓',
+                '+',
+            ),
+            (
+                TreeStatus::Task { status: TaskStatus::Cancelled, ready: false },
+                '✗',
+                'x',
+            ),
+            (
+                TreeStatus::Task { status: TaskStatus::InProgress, ready: false },
+                '◐',
+                '~',
+            ),
+            (TreeStatus::Task { status: TaskStatus::Parked, ready: false }, '‖', '='),
+            (TreeStatus::Task { status: TaskStatus::Pending, ready: true }, '●', '*'),
+            (TreeStatus::Task { status: TaskStatus::Pending, ready: false }, '○', 'o'),
+            (
+                TreeStatus::Container { status: ContainerStatus::Completed, started: true },
+                '✓',
+                '+',
+            ),
+            (
+                TreeStatus::Container { status: ContainerStatus::Cancelled, started: true },
+                '✗',
+                'x',
+            ),
+            (
+                TreeStatus::Container { status: ContainerStatus::Open, started: true },
+                '◐',
+                '~',
+            ),
+            (
+                TreeStatus::Container { status: ContainerStatus::Open, started: false },
+                '○',
+                'o',
+            ),
+            (TreeStatus::Capture(CaptureStatus::Promoted), '✓', '+'),
+            (TreeStatus::Capture(CaptureStatus::Discarded), '✗', 'x'),
+            (TreeStatus::Capture(CaptureStatus::Captured), '○', 'o'),
+            (TreeStatus::Note, '○', 'o'),
+        ];
+        for (status, glyph, ascii) in cases {
+            let mark = StatusMark::of(status);
+            assert_eq!((mark.glyph(), mark.ascii()), (glyph, ascii), "{status:?}");
+        }
+    }
+
+    #[test]
+    fn human_tree_lines_start_with_the_mark_and_plain_and_json_omit_it() {
+        let node = ConnectedTreeNode {
+            kind: "phase",
+            id: "arcl-ph-1".to_owned(),
+            title: "Phase".to_owned(),
+            status: "open".to_owned(),
+            mark: StatusMark::Active,
+            children: vec![ConnectedTreeNode {
+                kind: "task",
+                id: "arcl-t-1".to_owned(),
+                title: "Task".to_owned(),
+                status: "pending".to_owned(),
+                mark: StatusMark::Ready,
+                children: Vec::new(),
+            }],
+        };
+        let nodes = [node];
+        let render = |mode| {
+            Renderer::new(mode, ColorChoice::Never)
+                .render_connected_tree(&nodes)
+                .expect("rendering succeeds")
+                .expect("output is not quiet")
+        };
+        assert_eq!(
+            render(OutputMode::Human),
+            "◐ phase `arcl-ph-1` [Phase]\n  ● task `arcl-t-1` [Task]"
+        );
+        assert_eq!(
+            render(OutputMode::Plain),
+            "0\tphase\tarcl-ph-1\topen\tPhase\n1\ttask\tarcl-t-1\tpending\tTask"
+        );
+        let json = serde_json::from_str::<serde_json::Value>(&render(OutputMode::Json)).expect("JSON parses");
+        let keys = |value: &serde_json::Value| {
+            let mut keys = value
+                .as_object()
+                .expect("node object")
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>();
+            keys.sort();
+            keys
+        };
+        let expected = ["children", "id", "kind", "status", "title"];
+        assert_eq!(keys(&json["data"]["nodes"][0]), expected);
+        assert_eq!(keys(&json["data"]["nodes"][0]["children"][0]), expected);
     }
 }

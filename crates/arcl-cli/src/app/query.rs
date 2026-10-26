@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use super::support::*;
 use super::*;
 
@@ -149,7 +151,11 @@ pub(super) fn show_record(database: &Database, id: &str, renderer: &Renderer) ->
     Err(CommandError::InvalidFilter { message: format!("unknown record ID `{id}`") })
 }
 
-pub(super) fn connected_tree(graph: &ConnectedGraph, root: Option<&str>) -> CResult<Vec<ConnectedTreeNode>> {
+/// Builds the `arcl tree` nodes, from the record `root` names or of every
+/// record. `ready` holds the ready tasks, for the pending tasks' marks.
+pub(super) fn connected_tree(
+    graph: &ConnectedGraph, ready: &HashSet<TaskId>, root: Option<&str>,
+) -> CResult<Vec<ConnectedTreeNode>> {
     let mut nodes = Vec::new();
     for release in &graph.releases {
         nodes.push(ConnectedTreeNode {
@@ -157,6 +163,7 @@ pub(super) fn connected_tree(graph: &ConnectedGraph, root: Option<&str>) -> CRes
             id: release.id.to_string(),
             title: release.title.clone(),
             status: release.status.as_str().to_owned(),
+            mark: StatusMark::of(TreeStatus::Container { status: release.status, started: false }),
             children: Vec::new(),
         });
     }
@@ -166,6 +173,7 @@ pub(super) fn connected_tree(graph: &ConnectedGraph, root: Option<&str>) -> CRes
             id: capture.id.to_string(),
             title: capture.title.clone(),
             status: capture.status.as_str().to_owned(),
+            mark: StatusMark::of(TreeStatus::Capture(capture.status)),
             children: Vec::new(),
         });
     }
@@ -174,7 +182,7 @@ pub(super) fn connected_tree(graph: &ConnectedGraph, root: Option<&str>) -> CRes
             .plans
             .iter()
             .filter(|plan| plan.spec_id == spec.id)
-            .map(|plan| plan_tree_node(graph, plan))
+            .map(|plan| plan_tree_node(graph, ready, plan))
             .collect::<CResult<Vec<_>>>()?;
         children.extend(
             graph
@@ -186,14 +194,16 @@ pub(super) fn connected_tree(graph: &ConnectedGraph, root: Option<&str>) -> CRes
                         && task.phase_id.is_none()
                         && task.parent_id.is_none()
                 })
-                .map(|task| task_tree_node(graph, task, &mut std::collections::HashSet::new()))
+                .map(|task| task_tree_node(graph, ready, task, &mut HashSet::new()))
                 .collect::<CResult<Vec<_>>>()?,
         );
+        let (children, started) = unzip_started(children);
         nodes.push(ConnectedTreeNode {
             kind: "spec",
             id: spec.id.to_string(),
             title: spec.title.clone(),
             status: spec.status.as_str().to_owned(),
+            mark: StatusMark::of(TreeStatus::Container { status: spec.status, started }),
             children,
         });
     }
@@ -204,7 +214,7 @@ pub(super) fn connected_tree(graph: &ConnectedGraph, root: Option<&str>) -> CRes
             .filter(|task| {
                 task.spec_id.is_none() && task.plan_id.is_none() && task.phase_id.is_none() && task.parent_id.is_none()
             })
-            .map(|task| task_tree_node(graph, task, &mut std::collections::HashSet::new()))
+            .map(|task| Ok(task_tree_node(graph, ready, task, &mut HashSet::new())?.0))
             .collect::<CResult<Vec<_>>>()?,
     );
     for note in &graph.notes {
@@ -213,6 +223,7 @@ pub(super) fn connected_tree(graph: &ConnectedGraph, root: Option<&str>) -> CRes
             id: note.id.to_string(),
             title: note.title.clone(),
             status: "available".to_owned(),
+            mark: StatusMark::of(TreeStatus::Note),
             children: Vec::new(),
         });
     }
@@ -383,7 +394,9 @@ pub(super) fn resolve_ready_filter(args: ReadyArgs) -> CResult<PlanningReadyFilt
 
 /// Builds a plan's subtree: phases in `position` order, then the plan's
 /// phaseless tasks. Tasks under a phase or a parent sort by `position`, then ID.
-fn plan_tree_node(graph: &ConnectedGraph, plan: &Plan) -> CResult<ConnectedTreeNode> {
+///
+/// Returns the node and whether a task in it is in progress or completed.
+fn plan_tree_node(graph: &ConnectedGraph, ready: &HashSet<TaskId>, plan: &Plan) -> CResult<(ConnectedTreeNode, bool)> {
     let mut phases = graph
         .phases
         .iter()
@@ -397,15 +410,18 @@ fn plan_tree_node(graph: &ConnectedGraph, plan: &Plan) -> CResult<ConnectedTreeN
                 task.phase_id == Some(phase.id) && task.parent_id.is_none()
             })
             .into_iter()
-            .map(|task| task_tree_node(graph, task, &mut std::collections::HashSet::new()))
+            .map(|task| task_tree_node(graph, ready, task, &mut HashSet::new()))
             .collect::<CResult<Vec<_>>>()?;
-            Ok(ConnectedTreeNode {
+            let (tasks, started) = unzip_started(tasks);
+            let node = ConnectedTreeNode {
                 kind: "phase",
                 id: phase.id.to_string(),
                 title: phase.title.clone(),
                 status: phase.status.as_str().to_owned(),
+                mark: StatusMark::of(TreeStatus::Container { status: phase.status, started }),
                 children: tasks,
-            })
+            };
+            Ok((node, started))
         })
         .collect::<CResult<Vec<_>>>()?;
     children.extend(
@@ -413,23 +429,28 @@ fn plan_tree_node(graph: &ConnectedGraph, plan: &Plan) -> CResult<ConnectedTreeN
             task.plan_id == Some(plan.id) && task.phase_id.is_none() && task.parent_id.is_none()
         })
         .into_iter()
-        .map(|task| task_tree_node(graph, task, &mut std::collections::HashSet::new()))
+        .map(|task| task_tree_node(graph, ready, task, &mut HashSet::new()))
         .collect::<CResult<Vec<_>>>()?,
     );
     // Stable: keeps the position order within each kind.
-    children.sort_by(|left, right| left.kind.cmp(right.kind));
-    Ok(ConnectedTreeNode {
+    children.sort_by(|left, right| left.0.kind.cmp(right.0.kind));
+    let (children, started) = unzip_started(children);
+    let node = ConnectedTreeNode {
         kind: "plan",
         id: plan.id.to_string(),
         title: plan.title.clone(),
         status: plan.status.as_str().to_owned(),
+        mark: StatusMark::of(TreeStatus::Container { status: plan.status, started }),
         children,
-    })
+    };
+    Ok((node, started))
 }
 
+/// Builds a task's subtree. Returns the node and whether the task or a subtask
+/// is in progress or completed, which marks the containers above it.
 fn task_tree_node(
-    graph: &ConnectedGraph, task: &PlanningTask, path: &mut std::collections::HashSet<TaskId>,
-) -> CResult<ConnectedTreeNode> {
+    graph: &ConnectedGraph, ready: &HashSet<TaskId>, task: &PlanningTask, path: &mut HashSet<TaskId>,
+) -> CResult<(ConnectedTreeNode, bool)> {
     if !path.insert(task.id) {
         return Err(CommandError::Storage(StorageError::InvalidPlanningTask(
             DomainError::ParentCycle { task: task.id.to_string(), parent: task.id.to_string() },
@@ -437,16 +458,27 @@ fn task_tree_node(
     }
     let children = positioned_tasks(graph, |child| child.parent_id == Some(task.id))
         .into_iter()
-        .map(|child| task_tree_node(graph, child, path))
+        .map(|child| task_tree_node(graph, ready, child, path))
         .collect::<CResult<Vec<_>>>()?;
     path.remove(&task.id);
-    Ok(ConnectedTreeNode {
+    let (children, child_started) = unzip_started(children);
+    let started = child_started || matches!(task.status, TaskStatus::InProgress | TaskStatus::Completed);
+    let node = ConnectedTreeNode {
         kind: "task",
         id: task.id.to_string(),
         title: task.title.clone(),
         status: task.status.as_str().to_owned(),
+        mark: StatusMark::of(TreeStatus::Task { status: task.status, ready: ready.contains(&task.id) }),
         children,
-    })
+    };
+    Ok((node, started))
+}
+
+/// Splits built subtrees into their nodes and whether any of them holds a
+/// started task. An open container over a started task shows as in progress.
+fn unzip_started(subtrees: Vec<(ConnectedTreeNode, bool)>) -> (Vec<ConnectedTreeNode>, bool) {
+    let started = subtrees.iter().any(|(_, started)| *started);
+    (subtrees.into_iter().map(|(node, _)| node).collect(), started)
 }
 
 /// Returns the tasks that match `keep`, sorted by `position`, then ID.

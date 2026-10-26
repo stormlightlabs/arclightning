@@ -67,7 +67,13 @@ pub(super) fn read_tree(root: Option<&str>, renderer: &Renderer) -> anyhow::Resu
         .map_err(ApplicationError::from_command)?;
     let database = open_database().map_err(ApplicationError::from_command)?;
     let graph = database.connected_graph().map_err(ApplicationError::from_command)?;
-    let mut nodes = connected_tree(&graph, root.as_deref()).map_err(ApplicationError::from_command)?;
+    let ready = database
+        .ready_planning_tasks()
+        .map_err(ApplicationError::from_command)?
+        .into_iter()
+        .map(|task| task.id)
+        .collect();
+    let mut nodes = connected_tree(&graph, &ready, root.as_deref()).map_err(ApplicationError::from_command)?;
     let ids = display_ids(&database, renderer).map_err(ApplicationError::from_command)?;
     shorten_tree(&mut nodes, &ids);
     Ok(renderer.render_connected_tree(&nodes)?)
