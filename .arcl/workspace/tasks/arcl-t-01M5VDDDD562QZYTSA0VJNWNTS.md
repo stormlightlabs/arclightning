@@ -11,8 +11,8 @@ blocked-by = ["arcl-t-01M5VDDD42HZQ1FEN49X80GBA5", "arcl-t-01M5VDDD61CZH33T5S34E
 Make `arcl tree`'s default human output a box-drawing tree that folds
 finished milestones, so open work fits on one screen.
 
-Each line starts with the status mark that showing status on each tree
-line adds. Phases show progress counts such as `7/11`, and
+Each line starts with its record's status mark, from the task that shows
+status on each tree line. Phases show progress counts such as `7/11`, and
 blocked tasks end with `blocked by <short ID>`. Finished milestones collapse
 into one line, such as `✓ Milestones 1–6  done · 29 tasks`, and open ones
 expand. A footer summarizes the unplaced records:
