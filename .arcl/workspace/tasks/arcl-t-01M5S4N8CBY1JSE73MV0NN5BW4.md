@@ -2,7 +2,7 @@
 id = "arcl-t-01M5S4N8CBY1JSE73MV0NN5BW4"
 phase = "arcl-ph-01M5NE5P5RE8Y5Y5Y84T36FMEE"
 title = "T24: Format apps/web and packages/ui with Prettier"
-status = "pending"
+status = "in_progress"
 priority = "normal"
 position = 3
 +++

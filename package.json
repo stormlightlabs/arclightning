@@ -9,6 +9,8 @@
     "dev:ui": "pnpm --filter @arclightning/ui dev",
     "dev:website": "pnpm --filter @arclightning/website dev",
     "check": "pnpm -r --if-present check",
+    "lint": "pnpm --filter @arclightning/web --filter @arclightning/ui lint",
+    "format": "pnpm --filter @arclightning/web --filter @arclightning/ui format",
     "test": "pnpm -r --if-present test",
     "build": "pnpm -r --if-present build"
   },

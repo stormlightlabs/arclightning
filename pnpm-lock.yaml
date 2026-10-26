@@ -132,6 +132,12 @@ importers:
       happy-dom:
         specifier: 'catalog:'
         version: 21.0.4
+      prettier:
+        specifier: 'catalog:'
+        version: 3.9.6
+      prettier-plugin-svelte:
+        specifier: 'catalog:'
+        version: 4.1.1(prettier@3.9.6)(svelte@5.57.0)
       svelte:
         specifier: 'catalog:'
         version: 5.57.0
@@ -287,6 +293,12 @@ importers:
       playwright:
         specifier: 'catalog:'
         version: 1.62.1
+      prettier:
+        specifier: 'catalog:'
+        version: 3.9.6
+      prettier-plugin-svelte:
+        specifier: 'catalog:'
+        version: 4.1.1(prettier@3.9.6)(svelte@5.57.0)
       storybook:
         specifier: ^10.5.2
         version: 10.5.10(@types/react@19.2.18)(prettier@3.9.6)(react@19.2.8)
