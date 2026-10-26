@@ -15,8 +15,11 @@ Each line starts with its record's status mark, from the task that shows
 status on each tree line. Phases show progress counts such as `7/11`, and
 blocked tasks end with `blocked by <short ID>`. Finished milestones collapse
 into one line, such as `✓ Milestones 1–6  done · 29 tasks`, and open ones
-expand. A footer summarizes the unplaced records:
-`Inbox: 21 open · Notes: 17 · Releases: v0.1.0, v0.2.0`.
+expand. In the default folded view, a footer summarizes the unplaced records
+in place of the Inbox, Notes and Releases sections that putting the plan
+first adds: `Inbox: 21 open · Notes: 17 · Releases: v0.1.0, v0.2.0`. `--all`
+shows those sections expanded, with their headings and records, as that task
+defines them.
 
 ```text
 Arc Lightning first release and desktop app
@@ -32,7 +35,10 @@ Inbox: 21 open · Notes: 17 · Releases: v0.1.0, v0.2.0
 
 Colour only on a TTY, never with `NO_COLOR` set, and as `--color` says.
 `--ascii` swaps the box characters for `|--`, `` `-- `` and `|`, as GNU
-`tree -A` does. `--all` unfolds every milestone and includes closed captures.
+`tree -A` does, and each status mark for its ASCII form from the task that
+shows status on each tree line. `--all` unfolds every milestone, expands the
+Inbox, Notes and Releases sections in place of the footer, and includes closed
+captures.
 `--depth N` stops after N levels.
 
 Blocked by accepting and showing short record IDs, showing status on each
@@ -44,6 +50,8 @@ Scope:
 - the box-drawing renderer, progress counts and blocked-by references,
   reusing the status marks
 - folding finished milestones into one line, and the unplaced-records footer
+- updating the plan-first task's tests of default output to expect the
+  footer, and moving its section tests to `--all`
 - `--ascii`, `--all` and `--depth N`
 - the README's `arcl tree` example, from a real run on this repository,
   trimmed if long
@@ -54,11 +62,13 @@ Acceptance criteria:
 - [ ] Phases show done/total counts, and blocked tasks name a blocker by
       short ID
 - [ ] Consecutive finished milestones fold into one line; open ones expand
-- [ ] A footer counts open captures and notes and names the releases
+- [ ] By default a footer counts open captures and notes and names the
+      releases, in place of the Inbox, Notes and Releases sections
+- [ ] `--all` shows the Inbox, Notes and Releases sections expanded
 - [ ] Colour appears only on a TTY, and never with `NO_COLOR` or
       `--color never`
-- [ ] `--ascii` uses only ASCII; `--all` unfolds everything and lists
-      closed captures; `--depth N` limits depth
+- [ ] `--ascii` uses only ASCII, status marks included; `--all` unfolds
+      everything and lists closed captures; `--depth N` limits depth
 - [ ] The README shows the output of a real `arcl tree` run on this
       repository
 - [ ] `--json` output is unchanged
@@ -67,6 +77,8 @@ Verification:
 
 - snapshot tests of the renderer for folded, unfolded, ASCII and
   depth-limited output
+- the plan-first CLI tests, updated: default output ends with the footer,
+  and `--all` shows the sections
 - CLI tests for `NO_COLOR`, a non-TTY and `--color always`
 - `arcl tree` and `arcl tree --ascii --all` on this repository
 - `just check`
