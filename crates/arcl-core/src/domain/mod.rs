@@ -19,7 +19,8 @@ pub use dependency::{
 };
 pub use error::{DomainError, validate_position, validate_title};
 pub use id::{
-    CaptureId, EpicId, IdError, IdeaId, MilestoneId, NoteId, PhaseId, PlanId, ProjectId, ReleaseId, SpecId, TaskId,
+    CaptureId, EpicId, IdError, IdeaId, MilestoneId, NoteId, PhaseId, PlanId, PrefixedId, ProjectId, ReleaseId, SpecId,
+    TaskId,
 };
 pub use lifecycle::{ContainerAction, ContainerStatus, TaskAction, TaskPriority, TaskStatus};
 pub use membership::{

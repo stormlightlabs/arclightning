@@ -27,13 +27,19 @@ takes a short ID: the end of the ULID, at least 4 characters, such as `GBA5`.
 Put the kind and a dash in front to match only that kind: `t-GBA5`. The kinds
 are `c`, `r`, `s`, `pl`, `ph`, `t` and `n`. Letters match in either case.
 
+A command that expects one kind, such as `task start` or `--spec`, matches a
+short ID without a kind only against records of that kind.
+
 A short ID must end exactly one record's ID. One that ends several fails with
 status 3 and lists each match's full ID and title; one that ends none fails with
 status 5.
 
 Human and `--plain` output from `show`, `list` and `tree` print each ID as its
 shortest unique suffix, at least 4 characters, compared across every record.
-`--json` output keeps full IDs.
+`explain`, `task show` and `task explain` print the same IDs as `show`. Records
+of different kinds that share a whole ULID, as a copied workspace file can,
+print as `<kind>-<ULID>`, such as `t-01M5VDDD42HZQ1FEN49X80GBA5`. `--json`
+output keeps full IDs.
 
 A short ID that is unique today can match a second record later. Write full IDs
 in files, evidence, links and scripts that outlive the command.

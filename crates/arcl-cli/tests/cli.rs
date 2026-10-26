@@ -2088,15 +2088,20 @@ fn explain_and_context_list_a_blocker_inherited_through_a_grandparent() {
         vec![format!("ancestor `{grandparent}` is blocked by `{blocker}` (pending)")]
     );
 
+    // Human and plain output show short IDs, as `show` does.
+    let (short_blocker, short_grandparent) = (
+        short_id(directory.path(), &blocker),
+        short_id(directory.path(), &grandparent),
+    );
     let human = stdout_of(directory.path(), &["--color", "never", "explain", &leaf]);
     assert!(
-        human.contains(&format!("Blockers: {blocker} (via `{grandparent}`)")),
+        human.contains(&format!("Blockers: {short_blocker} (via `{short_grandparent}`)")),
         "{human}"
     );
     let plain = stdout_of(directory.path(), &["--plain", "explain", &leaf]);
     assert!(plain.contains("blockers\t\n"), "{plain}");
     assert!(
-        plain.contains(&format!("inherited\t{blocker}\t{grandparent}")),
+        plain.contains(&format!("inherited\t{short_blocker}\t{short_grandparent}")),
         "{plain}"
     );
 
@@ -2145,7 +2150,8 @@ fn explain_json_omits_the_ancestor_of_a_direct_blocker() {
     assert_eq!(explained["data"]["inherited_blockers"], serde_json::json!([]));
 
     let plain = stdout_of(directory.path(), &["--plain", "explain", &task]);
-    assert!(plain.contains(&format!("blockers\t{blocker}\n")), "{plain}");
+    let short_blocker = short_id(directory.path(), &blocker);
+    assert!(plain.contains(&format!("blockers\t{short_blocker}\n")), "{plain}");
     assert!(!plain.contains("inherited\t"), "{plain}");
     let plain = stdout_of(directory.path(), &["--plain", "context", &task]);
     assert!(plain.contains(&format!("\nblocker\t{blocker}\tpending\n")), "{plain}");
@@ -4827,6 +4833,16 @@ fn human_stdout(directory: &Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).expect("output is UTF-8")
 }
 
+/// The short ID human `list` output shows for the record `id`.
+fn short_id(directory: &Path, id: &str) -> String {
+    human_stdout(directory, &["list"])
+        .lines()
+        .filter_map(|line| line.split('\t').nth(1))
+        .find(|short| id.ends_with(short))
+        .unwrap_or_else(|| panic!("`list` shows {id}"))
+        .to_owned()
+}
+
 #[test]
 fn short_ids_select_records_and_grow_when_suffixes_collide() {
     let directory = tempdir().expect("temporary directory can be created");
@@ -4907,4 +4923,52 @@ fn short_ids_select_records_and_grow_when_suffixes_collide() {
         assert_eq!(refused.status.code(), Some(3), "{input}");
         assert_eq!(json(&refused.stderr)["error"]["code"], "invalid_request", "{input}");
     }
+}
+
+#[test]
+fn records_sharing_a_whole_ulid_show_their_kind_and_resolve_by_command() {
+    let directory = tempdir().expect("temporary directory can be created");
+    let dir = directory.path();
+    run_json(dir, ["--json", "init", "--workspace"].as_ref());
+    let task = create_task(dir, "Task", None);
+    let spec = run_json(dir, ["--json", "spec", "create", "Spec"].as_ref())["data"]["spec"]["id"]
+        .as_str()
+        .expect("spec ID")
+        .to_owned();
+    // A spec file copied under the task's ULID: a workspace import loads both.
+    let ulid = task.strip_prefix("arcl-t-").expect("a task ID");
+    let copy = format!("arcl-s-{ulid}");
+    let specs = dir.join(".arcl/workspace/specs");
+    let original = fs::read_to_string(specs.join(format!("{spec}.md"))).expect("spec file reads");
+    let text = original
+        .replace(&spec, &copy)
+        .replace("title = \"Spec\"", "title = \"Copy\"");
+    fs::write(specs.join(format!("{copy}.md")), text).expect("copied spec file writes");
+    assert_success(
+        &arcl_in(dir)
+            .args(["workspace", "import"])
+            .output()
+            .expect("import runs"),
+    );
+
+    // Each record sharing the ULID shows its kind, and that short ID resolves.
+    let tree = human_stdout(dir, &["tree"]);
+    assert!(tree.contains(&format!("task `t-{ulid}` [Task]")), "{tree}");
+    assert!(tree.contains(&format!("spec `s-{ulid}` [Copy]")), "{tree}");
+    let shown = run_json(dir, ["--json", "show", &format!("s-{ulid}")].as_ref());
+    assert_eq!(shown["data"]["spec"]["id"], copy.as_str());
+
+    // `task show`, `task explain` and `explain` print the IDs `show` prints.
+    let suffix = &ulid[ulid.len() - 4..];
+    let show = human_stdout(dir, &["show", &format!("t-{suffix}")]);
+    assert!(show.starts_with(&format!("Task `t-{ulid}`")), "{show}");
+    assert_eq!(human_stdout(dir, &["task", "show", suffix]), show);
+    assert_eq!(human_stdout(dir, &["task", "explain", suffix]), show);
+    assert_eq!(human_stdout(dir, &["explain", suffix]), show);
+
+    // A task command reads a bare suffix as a task's, though a spec shares it.
+    let started = run_json(dir, ["--json", "task", "start", suffix].as_ref());
+    assert_eq!(started["data"]["task"]["id"], task.as_str());
+    let ambiguous = arcl_in(dir).args(["show", suffix]).output().expect("show runs");
+    assert_eq!(ambiguous.status.code(), Some(3), "a kindless command stays ambiguous");
 }

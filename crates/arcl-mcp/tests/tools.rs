@@ -815,7 +815,6 @@ fn stdio_serves_tool_calls() {
     assert!(child.wait().expect("the server exits").success());
 }
 
-/// A project in a temp directory, with the workspace on or off.
 #[tokio::test]
 async fn short_ids_resolve_like_the_cli() {
     let project = project(false);
@@ -874,6 +873,7 @@ async fn short_ids_resolve_like_the_cli() {
     assert_eq!((missing.code(), missing.exit_code()), ("not_found", 5));
 }
 
+/// A project in a temp directory, with the workspace on or off.
 fn project(workspace: bool) -> TempDir {
     let directory = TempDir::new().expect("temp dir");
     let arcl = directory.path().join(".arcl");

@@ -98,6 +98,8 @@ pub enum StorageError {
     /// replacing the graph would discard that write.
     #[error("the database changed after this command read it; run the command again")]
     ChangedSinceRead,
+    /// A short ID argument names no record, more than one, or is not a
+    /// short ID. No match exits 5; the rest exit 3.
     #[error(transparent)]
     ShortId(#[from] ShortIdError),
 }
@@ -459,13 +461,14 @@ impl Database {
 
     /// The full record ID `input` names. A full ID comes back unchanged,
     /// whether or not the record exists; a short ID, such as `535B` or
-    /// `t-535B`, must end exactly one record's ID.
-    pub fn resolve_record_id(&self, input: &str) -> Result<String> {
+    /// `t-535B`, must end exactly one record's ID. `expected`, a full-ID
+    /// prefix such as `arcl-t-`, narrows a short ID that names no kind.
+    pub fn resolve_record_id(&self, input: &str, expected: Option<&str>) -> Result<String> {
         if is_full_id(input) {
             return Ok(input.to_owned());
         }
         let records = self.record_refs()?;
-        Ok(resolve_short_id(input, &records)?.id.clone())
+        Ok(resolve_short_id(input, &records, expected)?.id.clone())
     }
 
     /// Load every connected planning record and explicit relationship.
@@ -974,26 +977,26 @@ mod tests {
         for id in [capture.id.to_string(), spec.id.to_string(), note.id.to_string()] {
             let short = ids.short(&id);
             assert!(short.len() >= 4 && id.ends_with(short), "{short} is a suffix of {id}");
-            assert_eq!(database.resolve_record_id(short).expect("short ID resolves"), id);
+            assert_eq!(database.resolve_record_id(short, None).expect("short ID resolves"), id);
         }
         let full = spec.id.to_string();
-        assert_eq!(database.resolve_record_id(&full).expect("full ID passes"), full);
+        assert_eq!(database.resolve_record_id(&full, None).expect("full ID passes"), full);
         let suffix = &full[full.len() - 6..];
         assert_eq!(
             database
-                .resolve_record_id(&format!("s-{suffix}"))
+                .resolve_record_id(&format!("s-{suffix}"), None)
                 .expect("kind narrows"),
             full
         );
         let error = database
-            .resolve_record_id(&format!("n-{suffix}"))
+            .resolve_record_id(&format!("n-{suffix}"), None)
             .expect_err("no note ends in the spec's suffix");
         assert!(
             matches!(error, StorageError::ShortId(ShortIdError::NotFound { .. })),
             "{error:?}"
         );
         assert_eq!(error.exit_code(), 5);
-        let error = database.resolve_record_id("AB").expect_err("too short");
+        let error = database.resolve_record_id("AB", None).expect_err("too short");
         assert_eq!(error.exit_code(), 3);
     }
 }

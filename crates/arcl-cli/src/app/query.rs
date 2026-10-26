@@ -62,11 +62,11 @@ impl ListFilter {
                 });
             }
         }
-        let release_id = parse_optional_id(args.release, ReleaseId::parse)?;
-        let spec_id = parse_optional_id(args.spec, SpecId::parse)?;
-        let plan_id = parse_optional_id(args.plan, PlanId::parse)?;
-        let phase_id = parse_optional_id(args.phase, PhaseId::parse)?;
-        let parent_id = parse_optional_id(args.parent, TaskId::parse)?;
+        let release_id = parse_optional_id::<ReleaseId>(args.release)?;
+        let spec_id = parse_optional_id::<SpecId>(args.spec)?;
+        let plan_id = parse_optional_id::<PlanId>(args.plan)?;
+        let phase_id = parse_optional_id::<PhaseId>(args.phase)?;
+        let parent_id = parse_optional_id::<TaskId>(args.parent)?;
         Ok(ListFilter {
             kind: args.kind,
             statuses: args.status,
@@ -83,7 +83,7 @@ impl ListFilter {
 /// Show the record `id` names, a full or short ID. Human and plain output
 /// show short IDs.
 pub(super) fn show_record(database: &Database, id: &str, renderer: &Renderer) -> CResult<Option<String>> {
-    let id = &database.resolve_record_id(id)?;
+    let id = &database.resolve_record_id(id, None)?;
     let ids = display_ids(database, renderer)?;
     if id.starts_with(CaptureId::PREFIX) {
         let value = parse_capture_id(id)?;
@@ -374,10 +374,10 @@ pub(super) fn resolve_ready_filter(args: ReadyArgs) -> CResult<PlanningReadyFilt
             .iter()
             .map(|value| TaskPriority::parse(value))
             .collect::<Result<Vec<_>, _>>()?,
-        spec_id: parse_optional_id(args.spec, SpecId::parse)?,
-        plan_id: parse_optional_id(args.plan, PlanId::parse)?,
-        phase_id: parse_optional_id(args.phase, PhaseId::parse)?,
-        parent_id: parse_optional_id(args.parent, TaskId::parse)?,
+        spec_id: parse_optional_id::<SpecId>(args.spec)?,
+        plan_id: parse_optional_id::<PlanId>(args.plan)?,
+        phase_id: parse_optional_id::<PhaseId>(args.phase)?,
+        parent_id: parse_optional_id::<TaskId>(args.parent)?,
     })
 }
 

@@ -84,10 +84,10 @@ pub(super) fn exec_capture(command: CaptureCommand) -> CResult<CaptureResult> {
                 Some(CapturePromotionKind::Task) => {
                     let priority = TaskPriority::parse(&priority)?;
                     let input = CaptureTaskPromotion {
-                        spec_id: parse_optional_id(spec, SpecId::parse)?,
-                        plan_id: parse_optional_id(plan, PlanId::parse)?,
-                        phase_id: parse_optional_id(phase, PhaseId::parse)?,
-                        parent_id: parse_optional_id(parent, TaskId::parse)?,
+                        spec_id: parse_optional_id::<SpecId>(spec)?,
+                        plan_id: parse_optional_id::<PlanId>(plan)?,
+                        phase_id: parse_optional_id::<PhaseId>(phase)?,
+                        parent_id: parse_optional_id::<TaskId>(parent)?,
                         title,
                         body,
                         priority,
@@ -436,10 +436,10 @@ pub(super) fn run_task(command: TaskCommand, renderer: &Renderer) -> Result<Opti
             let project_id = database.project().map_err(ApplicationError::from_command)?.id;
             let input = PlanningTaskCreate {
                 project_id,
-                spec_id: parse_optional_id(spec, SpecId::parse).map_err(ApplicationError::from_command)?,
-                plan_id: parse_optional_id(plan, PlanId::parse).map_err(ApplicationError::from_command)?,
-                phase_id: parse_optional_id(phase, PhaseId::parse).map_err(ApplicationError::from_command)?,
-                parent_id: parse_optional_id(parent, TaskId::parse).map_err(ApplicationError::from_command)?,
+                spec_id: parse_optional_id::<SpecId>(spec).map_err(ApplicationError::from_command)?,
+                plan_id: parse_optional_id::<PlanId>(plan).map_err(ApplicationError::from_command)?,
+                phase_id: parse_optional_id::<PhaseId>(phase).map_err(ApplicationError::from_command)?,
+                parent_id: parse_optional_id::<TaskId>(parent).map_err(ApplicationError::from_command)?,
                 title,
                 body: resolve_markdown(body)
                     .map_err(ApplicationError::from_command)?
@@ -460,12 +460,13 @@ pub(super) fn run_task(command: TaskCommand, renderer: &Renderer) -> Result<Opti
         TaskCommand::Show { id } => {
             let id = parse_task_id(&id).map_err(ApplicationError::from_command)?;
             let database = open_database().map_err(ApplicationError::from_command)?;
+            let ids = display_ids(&database, renderer).map_err(ApplicationError::from_command)?;
             render_output(
                 renderer.render_planning_task_view(
                     &database
                         .planning_task_view(id)
                         .map_err(ApplicationError::from_command)?,
-                    &ShortIds::default(),
+                    &ids,
                 ),
             )
         }
@@ -504,10 +505,10 @@ pub(super) fn run_task(command: TaskCommand, renderer: &Renderer) -> Result<Opti
                 body: resolve_markdown(body).map_err(ApplicationError::from_command)?,
                 priority,
                 position,
-                spec_id: relation_change(spec, no_spec, SpecId::parse).map_err(ApplicationError::from_command)?,
-                plan_id: relation_change(plan, no_plan, PlanId::parse).map_err(ApplicationError::from_command)?,
-                phase_id: relation_change(phase, no_phase, PhaseId::parse).map_err(ApplicationError::from_command)?,
-                parent_id: relation_change(parent, no_parent, TaskId::parse).map_err(ApplicationError::from_command)?,
+                spec_id: relation_change::<SpecId>(spec, no_spec).map_err(ApplicationError::from_command)?,
+                plan_id: relation_change::<PlanId>(plan, no_plan).map_err(ApplicationError::from_command)?,
+                phase_id: relation_change::<PhaseId>(phase, no_phase).map_err(ApplicationError::from_command)?,
+                parent_id: relation_change::<TaskId>(parent, no_parent).map_err(ApplicationError::from_command)?,
             };
             let mut database = open_database().map_err(ApplicationError::from_command)?;
             render_output(
@@ -575,12 +576,13 @@ pub(super) fn run_task(command: TaskCommand, renderer: &Renderer) -> Result<Opti
         TaskCommand::Explain { id } => {
             let id = parse_task_id(&id).map_err(ApplicationError::from_command)?;
             let database = open_database().map_err(ApplicationError::from_command)?;
+            let ids = display_ids(&database, renderer).map_err(ApplicationError::from_command)?;
             render_output(
                 renderer.render_planning_task_view(
                     &database
                         .planning_task_view(id)
                         .map_err(ApplicationError::from_command)?,
-                    &ShortIds::default(),
+                    &ids,
                 ),
             )
         }
@@ -727,10 +729,9 @@ fn exec_membership(command: MembershipCommand, renderer: &Renderer) -> Result<Op
         MembershipCommand::Add { release_id, kind, record_id } => {
             let release_id = parse_release_id(&release_id).map_err(ApplicationError::from_command)?;
             let kind = parse_member_kind(&kind).map_err(ApplicationError::from_command)?;
+            let record_id =
+                resolve_record_id(&record_id, Some(member_prefix(kind))).map_err(ApplicationError::from_command)?;
             let mut database = open_database().map_err(ApplicationError::from_command)?;
-            let record_id = database
-                .resolve_record_id(&record_id)
-                .map_err(ApplicationError::from_command)?;
             let membership = database
                 .add_release_membership(release_id, kind, record_id)
                 .map_err(ApplicationError::from_command)?;
@@ -743,10 +744,9 @@ fn exec_membership(command: MembershipCommand, renderer: &Renderer) -> Result<Op
         MembershipCommand::Remove { release_id, kind, record_id } => {
             let release_id = parse_release_id(&release_id).map_err(ApplicationError::from_command)?;
             let kind = parse_member_kind(&kind).map_err(ApplicationError::from_command)?;
+            let record_id =
+                resolve_record_id(&record_id, Some(member_prefix(kind))).map_err(ApplicationError::from_command)?;
             let mut database = open_database().map_err(ApplicationError::from_command)?;
-            let record_id = database
-                .resolve_record_id(&record_id)
-                .map_err(ApplicationError::from_command)?;
             let membership = database
                 .remove_release_membership(release_id, kind, &record_id)
                 .map_err(ApplicationError::from_command)?;
@@ -902,10 +902,9 @@ fn exec_note_link(command: NoteLinkCommand, renderer: &Renderer) -> anyhow::Resu
         NoteLinkCommand::Add { note_id, kind, record_id } => {
             let note_id = parse_note_id(&note_id).map_err(ApplicationError::from_command)?;
             let kind = parse_linked_kind(&kind).map_err(ApplicationError::from_command)?;
+            let record_id =
+                resolve_record_id(&record_id, Some(linked_prefix(kind))).map_err(ApplicationError::from_command)?;
             let mut database = open_database().map_err(ApplicationError::from_command)?;
-            let record_id = database
-                .resolve_record_id(&record_id)
-                .map_err(ApplicationError::from_command)?;
             let link = database
                 .add_note_link(note_id, kind, record_id)
                 .map_err(ApplicationError::from_command)?;
@@ -918,10 +917,9 @@ fn exec_note_link(command: NoteLinkCommand, renderer: &Renderer) -> anyhow::Resu
         NoteLinkCommand::Remove { note_id, kind, record_id } => {
             let note_id = parse_note_id(&note_id).map_err(ApplicationError::from_command)?;
             let kind = parse_linked_kind(&kind).map_err(ApplicationError::from_command)?;
+            let record_id =
+                resolve_record_id(&record_id, Some(linked_prefix(kind))).map_err(ApplicationError::from_command)?;
             let mut database = open_database().map_err(ApplicationError::from_command)?;
-            let record_id = database
-                .resolve_record_id(&record_id)
-                .map_err(ApplicationError::from_command)?;
             let link = database
                 .remove_note_link(note_id, kind, &record_id)
                 .map_err(ApplicationError::from_command)?;

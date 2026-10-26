@@ -23,6 +23,16 @@ pub enum IdError {
     NonCanonical { entity: &'static str, value: String },
 }
 
+/// An ID type with a fixed prefix, for code that resolves an argument into
+/// whichever kind it expects.
+pub trait PrefixedId: Sized {
+    /// The prefix every ID of this kind starts with, such as `arcl-t-`.
+    const PREFIX: &'static str;
+
+    /// Parse a full ID of this kind.
+    fn parse(value: &str) -> Result<Self, IdError>;
+}
+
 macro_rules! define_id {
     ($name:ident, $entity:literal, $prefix:literal) => {
         #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -60,6 +70,14 @@ macro_rules! define_id {
 
             pub const fn ulid(self) -> Ulid {
                 self.0
+            }
+        }
+
+        impl PrefixedId for $name {
+            const PREFIX: &'static str = $prefix;
+
+            fn parse(value: &str) -> Result<Self, IdError> {
+                $name::parse(value)
             }
         }
 

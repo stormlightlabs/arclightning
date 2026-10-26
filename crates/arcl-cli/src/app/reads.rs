@@ -29,7 +29,8 @@ pub(super) fn read_explain(task_id: &str, renderer: &Renderer) -> anyhow::Result
     let view = database
         .planning_task_view(id)
         .map_err(ApplicationError::from_command)?;
-    Ok(renderer.render_planning_task_view(&view, &ShortIds::default())?)
+    let ids = display_ids(&database, renderer).map_err(ApplicationError::from_command)?;
+    Ok(renderer.render_planning_task_view(&view, &ids)?)
 }
 
 /// `arcl context <task-id>`.
@@ -60,11 +61,11 @@ pub(super) fn read_work(renderer: &Renderer) -> anyhow::Result<Option<String>> {
 
 /// `arcl tree`, from the record `root` names or of every record.
 pub(super) fn read_tree(root: Option<&str>, renderer: &Renderer) -> anyhow::Result<Option<String>> {
-    let database = open_database().map_err(ApplicationError::from_command)?;
     let root = root
-        .map(|root| database.resolve_record_id(root))
+        .map(|root| resolve_record_id(root, None))
         .transpose()
         .map_err(ApplicationError::from_command)?;
+    let database = open_database().map_err(ApplicationError::from_command)?;
     let graph = database.connected_graph().map_err(ApplicationError::from_command)?;
     let mut nodes = connected_tree(&graph, root.as_deref()).map_err(ApplicationError::from_command)?;
     let ids = display_ids(&database, renderer).map_err(ApplicationError::from_command)?;
