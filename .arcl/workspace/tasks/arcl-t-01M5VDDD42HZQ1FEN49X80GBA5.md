@@ -5,7 +5,7 @@ title = "Accept and show short record IDs"
 status = "completed"
 priority = "normal"
 position = 0
-evidence = "Delivered by #PR: commands in the CLI and MCP server accept a unique ULID suffix (min 4 chars, optional kind such as t-535B) and refuse an ambiguous one with every match listed; show, list and tree print the shortest unique suffix in human and --plain output, JSON keeps full IDs; manual and inspect guide describe the rule. Verified with unit, CLI and MCP tests, arcl show GBA5 on this repo, and the just check steps."
+evidence = "Delivered by #56: commands in the CLI and MCP server accept a unique ULID suffix (min 4 chars, optional kind such as t-535B) and refuse an ambiguous one with every match listed; show, list and tree print the shortest unique suffix in human and --plain output, JSON keeps full IDs; manual and inspect guide describe the rule. Verified with unit, CLI and MCP tests, arcl show GBA5 on this repo, and the just check steps."
 +++
 
 Show short record IDs in human output and accept them as input. Today
