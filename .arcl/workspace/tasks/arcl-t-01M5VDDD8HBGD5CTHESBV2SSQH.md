@@ -25,10 +25,10 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] `arcl tree` lists only open captures
-- [ ] `arcl tree --all` lists every capture
-- [ ] `arcl tree <closed capture ID>` shows it
-- [ ] `--json` nodes keep their shape; only which captures appear changes
+- [x] `arcl tree` lists only open captures
+- [x] `arcl tree --all` lists every capture
+- [x] `arcl tree <closed capture ID>` shows it
+- [x] `--json` nodes keep their shape; only which captures appear changes
 
 Verification:
 
