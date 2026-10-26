@@ -46,7 +46,7 @@ use query::resolve_ready_filter;
 use reads::{read_context, read_explain, read_list, read_ready, read_show, read_tree};
 use serve::exec_serve;
 use skill::exec_skill;
-use support::{open_database, write_output};
+use support::{RecordScope, open_database, write_output};
 use web::exec_web;
 use workspace::exec_workspace;
 
@@ -162,6 +162,10 @@ fn write_warnings(mode: OutputMode, warnings: Vec<Warning>) {
 /// Run one command with no workspace sync around it. A workspace command
 /// adds its warnings to `warnings`.
 fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Warning>) -> anyhow::Result<()> {
+    // Short ID arguments resolve against one read of the records. `serve`
+    // and `web` run many reads and writes, so each of their writes opens its
+    // own scope instead.
+    let _records = (!matches!(command, Some(Command::Serve { .. } | Command::Web { .. }))).then(RecordScope::enter);
     match command {
         Some(Command::Init { workspace }) => {
             let start = std::env::current_dir().context("could not determine the current directory")?;

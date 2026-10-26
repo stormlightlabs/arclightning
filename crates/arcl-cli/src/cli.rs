@@ -82,7 +82,7 @@ pub enum Command {
     },
     /// Inspect one record selected by its typed ID prefix.
     Show {
-        /// The record identifier.
+        /// The record ID, or a short ID such as `535B` or `t-535B`.
         id: String,
     },
     /// List connected records with optional graph filters.
@@ -92,7 +92,7 @@ pub enum Command {
     },
     /// Display the connected planning hierarchy in deterministic order.
     Tree {
-        /// Optional record ID to use as the tree root.
+        /// Optional record ID or short ID to use as the tree root.
         id: Option<String>,
     },
     /// Explain every condition affecting a task's readiness.

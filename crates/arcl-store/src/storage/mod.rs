@@ -98,6 +98,10 @@ pub enum StorageError {
     /// replacing the graph would discard that write.
     #[error("the database changed after this command read it; run the command again")]
     ChangedSinceRead,
+    /// A short ID argument names no record, more than one, or is not a
+    /// short ID. No match exits 5; the rest exit 3.
+    #[error(transparent)]
+    ShortId(#[from] ShortIdError),
 }
 
 impl StorageError {
@@ -135,6 +139,13 @@ impl StorageError {
             | Self::InvalidPlanInput(_)
             | Self::NewerDatabase { .. }
             | Self::MigrationGap { .. } => 3,
+            Self::ShortId(error) => {
+                if error.is_not_found() {
+                    5
+                } else {
+                    3
+                }
+            }
             Self::ChangedSinceRead => 4,
             Self::Sqlite(_) => 1,
         }
@@ -428,6 +439,36 @@ impl Database {
     /// Read the project represented by this operational database.
     pub fn project(&self) -> Result<Project> {
         connected::project(&self.connection)
+    }
+
+    /// Read the full ID and title of every capture, release, spec, plan,
+    /// phase, task and note.
+    pub fn record_refs(&self) -> Result<Vec<RecordRef>> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, title FROM captures UNION ALL SELECT id, title FROM releases \
+             UNION ALL SELECT id, title FROM specs UNION ALL SELECT id, title FROM plans \
+             UNION ALL SELECT id, title FROM phases UNION ALL SELECT id, title FROM planning_tasks \
+             UNION ALL SELECT id, title FROM notes ORDER BY id",
+        )?;
+        let rows = statement.query_map([], |row| Ok(RecordRef { id: row.get(0)?, title: row.get(1)? }))?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    /// The short ID of every record, for human output.
+    pub fn short_ids(&self) -> Result<ShortIds> {
+        Ok(ShortIds::new(self.record_refs()?.into_iter().map(|record| record.id)))
+    }
+
+    /// The full record ID `input` names. A full ID comes back unchanged,
+    /// whether or not the record exists; a short ID, such as `535B` or
+    /// `t-535B`, must end exactly one record's ID. `expected`, a full-ID
+    /// prefix such as `arcl-t-`, narrows a short ID that names no kind.
+    pub fn resolve_record_id(&self, input: &str, expected: Option<&str>) -> Result<String> {
+        if is_full_id(input) {
+            return Ok(input.to_owned());
+        }
+        let records = self.record_refs()?;
+        Ok(resolve_short_id(input, &records, expected)?.id.clone())
     }
 
     /// Load every connected planning record and explicit relationship.
@@ -863,6 +904,7 @@ fn configure(connection: &mut Connection) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{CURRENT_VERSION, Database, StorageError};
+    use arcl_core::domain::ShortIdError;
 
     #[test]
     fn opening_a_database_applies_embedded_migrations() {
@@ -916,5 +958,45 @@ mod tests {
             .replace_graph_and_workspace_base(&graph, &[], read)
             .expect("current replacement succeeds");
         assert_eq!(reader.captures().expect("captures load").len(), 2);
+    }
+
+    #[test]
+    fn short_ids_resolve_across_every_record_kind() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let capture = database
+            .create_capture("Capture".to_owned(), String::new())
+            .expect("capture creates");
+        let spec = database
+            .create_spec("Spec".to_owned(), String::new(), String::new())
+            .expect("spec creates");
+        let note = database
+            .create_note("Note".to_owned(), String::new())
+            .expect("note creates");
+        let ids = database.short_ids().expect("short IDs compute");
+
+        for id in [capture.id.to_string(), spec.id.to_string(), note.id.to_string()] {
+            let short = ids.short(&id);
+            assert!(short.len() >= 4 && id.ends_with(short), "{short} is a suffix of {id}");
+            assert_eq!(database.resolve_record_id(short, None).expect("short ID resolves"), id);
+        }
+        let full = spec.id.to_string();
+        assert_eq!(database.resolve_record_id(&full, None).expect("full ID passes"), full);
+        let suffix = &full[full.len() - 6..];
+        assert_eq!(
+            database
+                .resolve_record_id(&format!("s-{suffix}"), None)
+                .expect("kind narrows"),
+            full
+        );
+        let error = database
+            .resolve_record_id(&format!("n-{suffix}"), None)
+            .expect_err("no note ends in the spec's suffix");
+        assert!(
+            matches!(error, StorageError::ShortId(ShortIdError::NotFound { .. })),
+            "{error:?}"
+        );
+        assert_eq!(error.exit_code(), 5);
+        let error = database.resolve_record_id("AB", None).expect_err("too short");
+        assert_eq!(error.exit_code(), 3);
     }
 }

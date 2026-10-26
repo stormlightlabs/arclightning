@@ -815,6 +815,64 @@ fn stdio_serves_tool_calls() {
     assert!(child.wait().expect("the server exits").success());
 }
 
+#[tokio::test]
+async fn short_ids_resolve_like_the_cli() {
+    let project = project(false);
+    let server = ArclServer::new(project.path().to_owned());
+    let blocker = create_task(&server, "Blocker", &[]).await;
+    let short = blocker[blocker.len() - 6..].to_owned();
+    let blocked = create_task(&server, "Blocked", &[&format!("t-{short}")]).await;
+
+    let shown = server
+        .show(
+            Parameters::from(RecordInput { id: short.to_lowercase() }),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("a short ID shows")
+        .0;
+    assert_eq!(to_json(&shown.data)["task"]["id"], blocker.as_str());
+
+    let explained = server
+        .explain(
+            Parameters::from(TaskInput { task_id: blocked[blocked.len() - 6..].to_owned() }),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("a short task ID explains")
+        .0;
+    assert_eq!(to_json(&explained.data)["blockers"][0]["task"]["id"], blocker.as_str());
+
+    let started = server
+        .task_start(
+            Parameters::from(TaskInput { task_id: short.clone() }),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("a short task ID starts")
+        .0;
+    assert_eq!(started.data.task.id.to_string(), blocker);
+
+    let refused = server
+        .show(
+            Parameters::from(RecordInput { id: "AB".to_owned() }),
+            CancellationToken::new(),
+        )
+        .await
+        .err()
+        .expect("too short");
+    assert_eq!((refused.code(), refused.exit_code()), ("invalid_request", 3));
+    let missing = server
+        .show(
+            Parameters::from(RecordInput { id: format!("n-{short}") }),
+            CancellationToken::new(),
+        )
+        .await
+        .err()
+        .expect("no note matches");
+    assert_eq!((missing.code(), missing.exit_code()), ("not_found", 5));
+}
+
 /// A project in a temp directory, with the workspace on or off.
 fn project(workspace: bool) -> TempDir {
     let directory = TempDir::new().expect("temp dir");

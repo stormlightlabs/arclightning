@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::cli::ColorChoice;
-use arcl_core::domain::{Capture, Note, Phase, Plan, PlanningTask, Release, Spec, TaskDependency};
+use arcl_core::domain::{Capture, Note, Phase, Plan, PlanningTask, Release, ShortIds, Spec, TaskDependency};
 use arcl_repo::{
     vcs::{HeadState, PathState},
     workspace::{Change, RecordSource, RecordStatusKind, WorkspaceStatus},
@@ -376,10 +376,14 @@ impl Renderer {
         )
     }
 
-    /// Render a connected task inspection view.
-    pub fn render_planning_task_view(&self, view: &PlanningTaskView) -> Result<Option<String>, OutputError> {
+    /// Render a connected task inspection view. Human output shows each
+    /// record ID as `ids` shortens it, readiness reasons included; plain and
+    /// JSON output keep full IDs.
+    pub fn render_planning_task_view(
+        &self, view: &PlanningTaskView, ids: &ShortIds,
+    ) -> Result<Option<String>, OutputError> {
         let message = match self.mode {
-            OutputMode::Human => view.human(),
+            OutputMode::Human => view.human(ids),
             OutputMode::Plain => view.plain(),
             OutputMode::Json => {
                 serde_json::to_string(&Envelope { format_version: READINESS_FORMAT_VERSION, data: view })?
@@ -643,6 +647,15 @@ impl Renderer {
             OutputMode::Quiet => return Ok(None),
         };
         Ok(Some(self.style(message)))
+    }
+
+    /// Render a record `arcl show` found. Human and plain output show `id`,
+    /// which callers shorten for human output only; JSON output holds the
+    /// record with its full ID.
+    pub fn render_shown<T: Serialize>(
+        &self, kind: &str, id: &str, title: &str, record: &T,
+    ) -> Result<Option<String>, OutputError> {
+        self.render_named_mutation("shown", kind, id, title, record)
     }
 
     fn render_named_mutation<T: Serialize>(
@@ -1214,16 +1227,16 @@ fn human_action(action: &str) -> &str {
 }
 
 trait PlanningTaskViewOutput {
-    fn human(&self) -> String;
+    fn human(&self, ids: &ShortIds) -> String;
     fn plain(&self) -> String;
 }
 
 impl PlanningTaskViewOutput for PlanningTaskView {
-    fn human(&self) -> String {
+    fn human(&self, ids: &ShortIds) -> String {
         let mut lines = vec![
             format!(
                 "Task `{}` [{}] {}",
-                self.task.id,
+                ids.short(&self.task.id.to_string()),
                 self.task.status.as_str(),
                 self.task.title
             ),
@@ -1234,8 +1247,12 @@ impl PlanningTaskViewOutput for PlanningTaskView {
                     .iter()
                     .chain(&self.inherited_blockers)
                     .map(|blocker| match blocker.ancestor {
-                        Some(ancestor) => format!("{} (via `{ancestor}`)", blocker.task.id),
-                        None => blocker.task.id.to_string(),
+                        Some(ancestor) => format!(
+                            "{} (via `{}`)",
+                            ids.short(&blocker.task.id.to_string()),
+                            ids.short(&ancestor.to_string())
+                        ),
+                        None => ids.short(&blocker.task.id.to_string()).to_owned(),
                     })
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -1244,21 +1261,26 @@ impl PlanningTaskViewOutput for PlanningTaskView {
                 "Ancestors: {}",
                 self.ancestors
                     .iter()
-                    .map(|task| task.id.to_string())
+                    .map(|task| ids.short(&task.id.to_string()).to_owned())
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
         ];
         if let Some(spec) = &self.spec {
-            lines.push(format!("Spec: {}", spec.id));
+            lines.push(format!("Spec: {}", ids.short(&spec.id.to_string())));
         }
         if let Some(plan) = &self.plan {
-            lines.push(format!("Plan: {}", plan.id));
+            lines.push(format!("Plan: {}", ids.short(&plan.id.to_string())));
         }
         if let Some(phase) = &self.phase {
-            lines.push(format!("Phase: {}", phase.id));
+            lines.push(format!("Phase: {}", ids.short(&phase.id.to_string())));
         }
-        lines.extend(self.readiness.reasons.iter().map(|reason| format!("Reason: {reason}")));
+        lines.extend(
+            self.readiness
+                .reasons
+                .iter()
+                .map(|reason| format!("Reason: {}", ids.shorten_text(&reason.message))),
+        );
         if !self.task.body.is_empty() {
             lines.push(format!("Body: {}", self.task.body));
         }

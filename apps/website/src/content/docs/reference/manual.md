@@ -19,6 +19,36 @@ These options can appear before or after a subcommand & are global:
 | `--help`                      | Print help for the current command.                                              |
 | `--version`                   | Print the installed version.                                                     |
 
+## Record IDs
+
+A full record ID is `arcl-<kind>-<ULID>`, such as
+`arcl-t-01M5VDDD42HZQ1FEN49X80GBA5`. Every command that takes a record ID also
+takes a short ID: the end of the ULID, at least 4 characters, such as `GBA5`.
+Put the kind and a dash in front to match only that kind: `t-GBA5`. The kinds
+are `c`, `r`, `s`, `pl`, `ph`, `t` and `n`. Letters match in either case.
+
+A command that expects one kind, such as `task start` or `--spec`, matches a
+short ID without a kind only against records of that kind.
+
+A short ID must end exactly one record's ID. One that ends several fails with
+status 3 and lists each match's full ID and title; one that ends none fails with
+status 5.
+
+Records made close together share the start of their IDs, so a short ID is
+always the end, never the start. Input that matches the start of any record's
+ULID, such as `01M5`, fails with status 3 and lists matching records with the
+last characters to type instead. A whole ULID still resolves.
+
+Human output from `show`, `list`, `tree`, `explain`, `task show` and
+`task explain` prints each ID, readiness reasons included, as its shortest
+suffix that ends no other record's ID and starts none, at least 4 characters.
+Records of different kinds that share a whole ULID, as a copied workspace file
+can, print as `<kind>-<ULID>`, such as `t-01M5VDDD42HZQ1FEN49X80GBA5`.
+`--plain` and `--json` output keep full IDs.
+
+A short ID that is unique today can match a second record later. Write full IDs
+in files, evidence, links and scripts that outlive the command.
+
 ## Project Initialization
 
 ### `arcl init`
@@ -181,7 +211,7 @@ task ID, then a `subtask<TAB><id>` line for each completed subtask and an
 
 | Command                  | Purpose                                                            |
 | ------------------------ | ------------------------------------------------------------------ |
-| `arcl show <id>`         | Show one record selected by its typed ID prefix.                   |
+| `arcl show <id>`         | Show one record by its full or short ID.                           |
 | `arcl list`              | List records using kind, state, priority, and association filters. |
 | `arcl tree [<id>]`       | Show the complete hierarchy or one rooted subtree.                 |
 | `arcl explain <task-id>` | Report every condition affecting task readiness.                   |

@@ -6,6 +6,7 @@
 //! `format_version` its result carries as `arcl/format_version`; `show`
 //! returns version 2 for a task and 1 for any other record, as the CLI does.
 
+use std::cell::OnceCell;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -176,7 +177,7 @@ impl ArclServer {
     ) -> Result<Json<Envelope<PlanningTaskView>>, ToolError> {
         let input = input?;
         self.call(Access::Read, READINESS_FORMAT_VERSION, cancelled, move |database| {
-            Ok(database.planning_task_view(TaskId::parse(&input.task_id)?)?)
+            Ok(database.planning_task_view(record_id::<TaskId>(database, &input.task_id)?)?)
         })
         .await
     }
@@ -193,7 +194,7 @@ impl ArclServer {
     ) -> Result<Json<Envelope<PlanningContext>>, ToolError> {
         let input = input?;
         self.call(Access::Read, READINESS_FORMAT_VERSION, cancelled, move |database| {
-            Ok(database.planning_context(TaskId::parse(&input.task_id)?)?)
+            Ok(database.planning_context(record_id::<TaskId>(database, &input.task_id)?)?)
         })
         .await
     }
@@ -264,7 +265,7 @@ impl ArclServer {
         let input = input?;
         self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
             validate_title(&input.title)?;
-            let spec_id = SpecId::parse(&input.spec)?;
+            let spec_id = record_id::<SpecId>(database, &input.spec)?;
             let plan = database.create_plan(spec_id, input.title, input.body)?;
             Ok(PlanData { action: "created".to_owned(), plan })
         })
@@ -284,12 +285,29 @@ impl ArclServer {
         let input = input?;
         self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
             validate_title(&input.title)?;
+            let records = Records::default();
             let create = PlanningTaskCreate {
                 project_id: database.project()?.id,
-                spec_id: input.spec.as_deref().map(SpecId::parse).transpose()?,
-                plan_id: input.plan.as_deref().map(PlanId::parse).transpose()?,
-                phase_id: input.phase.as_deref().map(PhaseId::parse).transpose()?,
-                parent_id: input.parent.as_deref().map(TaskId::parse).transpose()?,
+                spec_id: input
+                    .spec
+                    .as_deref()
+                    .map(|id| records.parse::<SpecId>(database, id))
+                    .transpose()?,
+                plan_id: input
+                    .plan
+                    .as_deref()
+                    .map(|id| records.parse::<PlanId>(database, id))
+                    .transpose()?,
+                phase_id: input
+                    .phase
+                    .as_deref()
+                    .map(|id| records.parse::<PhaseId>(database, id))
+                    .transpose()?,
+                parent_id: input
+                    .parent
+                    .as_deref()
+                    .map(|id| records.parse::<TaskId>(database, id))
+                    .transpose()?,
                 title: input.title,
                 body: input.body,
                 priority: input.priority,
@@ -298,7 +316,7 @@ impl ArclServer {
             let blockers = input
                 .blocked_by
                 .iter()
-                .map(|blocker| TaskId::parse(blocker))
+                .map(|blocker| records.parse::<TaskId>(database, blocker))
                 .collect::<Result<Vec<_>, _>>()?;
             let task = database.create_planning_task_with_dependencies(create, &blockers)?;
             Ok(TaskData { action: "created".to_owned(), task })
@@ -318,7 +336,7 @@ impl ArclServer {
     ) -> Result<Json<Envelope<TaskData>>, ToolError> {
         let input = input?;
         self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
-            let id = TaskId::parse(&input.task_id)?;
+            let id = record_id::<TaskId>(database, &input.task_id)?;
             if let Some(title) = &input.title {
                 validate_title(title)?;
             }
@@ -365,7 +383,7 @@ impl ArclServer {
     ) -> Result<Json<Envelope<TaskData>>, ToolError> {
         let input = input?;
         self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
-            let task = database.start_planning_task(TaskId::parse(&input.task_id)?, false)?;
+            let task = database.start_planning_task(record_id::<TaskId>(database, &input.task_id)?, false)?;
             Ok(TaskData { action: "started".to_owned(), task })
         })
         .await
@@ -383,7 +401,7 @@ impl ArclServer {
     ) -> Result<Json<Envelope<TaskData>>, ToolError> {
         let input = input?;
         self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
-            let task = database.handoff_planning_task(TaskId::parse(&input.task_id)?, input.note)?;
+            let task = database.handoff_planning_task(record_id::<TaskId>(database, &input.task_id)?, input.note)?;
             Ok(TaskData { action: "handed_off".to_owned(), task })
         })
         .await
@@ -400,7 +418,11 @@ impl ArclServer {
     ) -> Result<Json<Envelope<TaskData>>, ToolError> {
         let input = input?;
         self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
-            let task = database.transition_planning_task(TaskId::parse(&input.task_id)?, TaskAction::Unpark, false)?;
+            let task = database.transition_planning_task(
+                record_id::<TaskId>(database, &input.task_id)?,
+                TaskAction::Unpark,
+                false,
+            )?;
             Ok(TaskData { action: "unparked".to_owned(), task })
         })
         .await
@@ -423,8 +445,11 @@ impl ArclServer {
                 OpenSubtasks::Leave => arcl_store::OpenSubtasks::Leave,
                 OpenSubtasks::Complete => arcl_store::OpenSubtasks::Complete,
             };
-            let completion =
-                database.complete_planning_task(TaskId::parse(&input.task_id)?, open_subtasks, input.evidence)?;
+            let completion = database.complete_planning_task(
+                record_id::<TaskId>(database, &input.task_id)?,
+                open_subtasks,
+                input.evidence,
+            )?;
             Ok(CompletionData {
                 action: "completed".to_owned(),
                 task: completion.task,
@@ -445,6 +470,31 @@ impl ServerHandler for ArclServer {
     }
 }
 
+/// The records one tool call resolves short ID arguments against, read on
+/// first use so a call with several IDs reads them once.
+#[derive(Default)]
+struct Records(OnceCell<Vec<RecordRef>>);
+
+impl Records {
+    /// Parse a record ID argument of kind `T`. A full ID parses as it is; a
+    /// short ID, such as `535B` or `t-535B`, resolves among records of kind
+    /// `T` first, unless it names a kind.
+    fn parse<T: PrefixedId>(&self, database: &Database, input: &str) -> Result<T, ToolError> {
+        if is_full_id(input) {
+            return Ok(T::parse(input)?);
+        }
+        let records = match self.0.get() {
+            Some(records) => records,
+            None => {
+                let read = database.record_refs()?;
+                self.0.get_or_init(|| read)
+            }
+        };
+        let record = resolve_short_id(input, records, Some(T::PREFIX)).map_err(StorageError::from)?;
+        Ok(T::parse(&record.id)?)
+    }
+}
+
 /// The `_meta` object naming the `format_version` a tool's result carries.
 fn version_meta(format_version: u8) -> MetaObject {
     let mut meta = serde_json::Map::new();
@@ -460,7 +510,8 @@ fn version_meta(format_version: u8) -> MetaObject {
 /// or for a task the priority and placement IDs, then the store's own checks,
 /// title included.
 fn promote_capture(database: &mut Database, input: CapturePromoteInput) -> Result<CapturePromotionData, ToolError> {
-    let id = CaptureId::parse(&input.capture_id)?;
+    let records = Records::default();
+    let id = records.parse::<CaptureId>(database, &input.capture_id)?;
     let target = input
         .target
         .ok_or_else(|| ToolError::invalid_request("capture promotion requires a target: spec, task, or note"))?;
@@ -486,10 +537,26 @@ fn promote_capture(database: &mut Database, input: CapturePromoteInput) -> Resul
             database.promote_capture_to_task(
                 id,
                 CaptureTaskPromotion {
-                    spec_id: input.spec.as_deref().map(SpecId::parse).transpose()?,
-                    plan_id: input.plan.as_deref().map(PlanId::parse).transpose()?,
-                    phase_id: input.phase.as_deref().map(PhaseId::parse).transpose()?,
-                    parent_id: input.parent.as_deref().map(TaskId::parse).transpose()?,
+                    spec_id: input
+                        .spec
+                        .as_deref()
+                        .map(|id| records.parse::<SpecId>(database, id))
+                        .transpose()?,
+                    plan_id: input
+                        .plan
+                        .as_deref()
+                        .map(|id| records.parse::<PlanId>(database, id))
+                        .transpose()?,
+                    phase_id: input
+                        .phase
+                        .as_deref()
+                        .map(|id| records.parse::<PhaseId>(database, id))
+                        .transpose()?,
+                    parent_id: input
+                        .parent
+                        .as_deref()
+                        .map(|id| records.parse::<TaskId>(database, id))
+                        .transpose()?,
                     title,
                     body,
                     priority,
@@ -520,6 +587,8 @@ fn promote_capture(database: &mut Database, input: CapturePromoteInput) -> Resul
 
 /// Look a record up by its ID prefix. Returns the envelope version with it.
 fn show_record(database: &mut Database, id: &str) -> Result<(u8, ShowData), ToolError> {
+    let resolved = database.resolve_record_id(id, None)?;
+    let id = resolved.as_str();
     let shown = || "shown".to_owned();
     if id.starts_with(TaskId::PREFIX) {
         let view = database.planning_task_view(TaskId::parse(id)?)?;
@@ -559,6 +628,12 @@ fn show_record(database: &mut Database, id: &str) -> Result<(u8, ShowData), Tool
         return Err(ToolError::invalid_request(format!("unknown record ID `{id}`")));
     };
     Ok((FORMAT_VERSION, data))
+}
+
+/// Parse a tool call's one record ID argument of kind `T`, as
+/// [`Records::parse`] does.
+fn record_id<T: PrefixedId>(database: &Database, input: &str) -> Result<T, ToolError> {
+    Records::default().parse(database, input)
 }
 
 /// One page of record summaries matching `input`, ordered by kind, then ID.
@@ -676,12 +751,29 @@ fn list_cursor(cursor: &str) -> Result<(RecordKind, &str), ToolError> {
 fn ready_tasks(database: &mut Database, input: ReadyInput) -> Result<ReadyData, ToolError> {
     let limit = page_limit(input.limit)?;
     let after = input.cursor.as_deref().map(ready_cursor).transpose()?;
+    let records = Records::default();
     let filter = PlanningReadyFilter {
         priorities: input.priority,
-        spec_id: input.spec.as_deref().map(SpecId::parse).transpose()?,
-        plan_id: input.plan.as_deref().map(PlanId::parse).transpose()?,
-        phase_id: input.phase.as_deref().map(PhaseId::parse).transpose()?,
-        parent_id: input.parent.as_deref().map(TaskId::parse).transpose()?,
+        spec_id: input
+            .spec
+            .as_deref()
+            .map(|id| records.parse::<SpecId>(database, id))
+            .transpose()?,
+        plan_id: input
+            .plan
+            .as_deref()
+            .map(|id| records.parse::<PlanId>(database, id))
+            .transpose()?,
+        phase_id: input
+            .phase
+            .as_deref()
+            .map(|id| records.parse::<PhaseId>(database, id))
+            .transpose()?,
+        parent_id: input
+            .parent
+            .as_deref()
+            .map(|id| records.parse::<TaskId>(database, id))
+            .transpose()?,
     };
     let mut tasks = database.ready_planning_tasks_filtered(&filter)?;
     if let Some(after) = after {

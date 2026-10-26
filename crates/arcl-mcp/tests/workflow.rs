@@ -498,8 +498,9 @@ fn capture_promote_parses_target_and_priority_where_the_cli_does() {
         assert_same_failure(&failed, expected, ("not_found", 5));
     }
 
-    // A bad capture ID is reported before anything else.
-    let bad_id = ToolError::from(CaptureId::parse("bogus").expect_err("not a capture ID")).envelope();
+    // A bad capture ID is reported before anything else. `bogus` is not a
+    // full ID, so it is read as a short ID, which it cannot be.
+    let bad_id = ToolError::from(StorageError::from(ShortIdError::Invalid { input: "bogus".to_owned() })).envelope();
     for arguments in [
         json!({"capture_id": "bogus", "target": "task", "priority": "urgent"}),
         json!({"capture_id": "bogus", "target": "plan"}),

@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use super::*;
 
 pub(super) fn write_output(message: Option<String>) -> anyhow::Result<()> {
@@ -32,42 +35,128 @@ pub(super) fn parse_linked_kind(value: &str) -> CResult<LinkedRecordKind> {
     }
 }
 
-pub(super) fn parse_id<T>(value: &str, parser: impl Fn(&str) -> Result<T, IdError>) -> CResult<T> {
-    parser(value).map_err(|error| CommandError::Domain(DomainError::InvalidId(error)))
+thread_local! {
+    /// The records short ID arguments resolve against: `None` outside a
+    /// [`RecordScope`], and read on first use inside one.
+    static RECORDS: RefCell<Option<Option<Rc<[RecordRef]>>>> = const { RefCell::new(None) };
 }
 
-pub(super) fn parse_optional_id<T>(
-    value: Option<String>, parser: impl Fn(&str) -> Result<T, IdError>,
-) -> CResult<Option<T>> {
-    value.as_deref().map(|value| parse_id(value, &parser)).transpose()
+/// One command's scope, inside which every short ID argument resolves against
+/// a single read of the records. Dropping it forgets them, so the next command
+/// reads them again.
+pub(super) struct RecordScope {
+    previous: Option<Option<Rc<[RecordRef]>>>,
 }
 
-pub(super) fn relation_change<T>(
-    value: Option<String>, clear: bool, parser: impl Fn(&str) -> Result<T, IdError>,
-) -> CResult<Option<Option<T>>> {
-    if clear { Ok(Some(None)) } else { parse_optional_id(value, parser).map(|value| value.map(Some)) }
+impl RecordScope {
+    /// Start a scope. Scopes nest; dropping one restores the outer scope.
+    pub(super) fn enter() -> Self {
+        Self { previous: RECORDS.with(|records| records.replace(Some(None))) }
+    }
+}
+
+impl Drop for RecordScope {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        RECORDS.with(|records| records.replace(previous));
+    }
+}
+
+/// Every record's full ID and title: read once per [`RecordScope`], or on
+/// each call outside one.
+fn record_refs() -> CResult<Rc<[RecordRef]>> {
+    let cached = RECORDS.with(|records| records.borrow().clone());
+    if let Some(Some(records)) = cached {
+        return Ok(records);
+    }
+    let records: Rc<[RecordRef]> = open_database()?.record_refs()?.into();
+    if cached.is_some() {
+        RECORDS.with(|scoped| scoped.replace(Some(Some(Rc::clone(&records)))));
+    }
+    Ok(records)
+}
+
+/// The full record ID `value` names. A full ID comes back as it is; a short
+/// ID, such as `535B` or `t-535B`, must end one record's ID. `expected`, a
+/// full-ID prefix such as `arcl-t-`, narrows a short ID that names no kind.
+pub(super) fn resolve_record_id(value: &str, expected: Option<&str>) -> CResult<String> {
+    if is_full_id(value) {
+        return Ok(value.to_owned());
+    }
+    let records = record_refs()?;
+    Ok(resolve_short_id(value, &records, expected)
+        .map_err(StorageError::from)?
+        .id
+        .clone())
+}
+
+/// Parse a record ID argument of kind `T`. A full ID parses as it is; a short
+/// ID resolves among records of kind `T` first, unless it names a kind.
+pub(super) fn parse_id<T: PrefixedId>(value: &str) -> CResult<T> {
+    let value = resolve_record_id(value, Some(T::PREFIX))?;
+    T::parse(&value).map_err(|error| CommandError::Domain(DomainError::InvalidId(error)))
+}
+
+/// The short IDs human output shows, or none for plain, JSON and quiet
+/// output, which keep full IDs.
+pub(super) fn display_ids(database: &Database, renderer: &Renderer) -> CResult<ShortIds> {
+    match renderer.mode() {
+        OutputMode::Human => Ok(database.short_ids()?),
+        OutputMode::Plain | OutputMode::Json | OutputMode::Quiet => Ok(ShortIds::default()),
+    }
+}
+
+/// The full-ID prefix of a release member kind.
+pub(super) const fn member_prefix(kind: ReleaseMemberKind) -> &'static str {
+    match kind {
+        ReleaseMemberKind::Spec => SpecId::PREFIX,
+        ReleaseMemberKind::Plan => PlanId::PREFIX,
+        ReleaseMemberKind::Task => TaskId::PREFIX,
+        ReleaseMemberKind::Note => NoteId::PREFIX,
+    }
+}
+
+/// The full-ID prefix of a record kind a note links to.
+pub(super) const fn linked_prefix(kind: LinkedRecordKind) -> &'static str {
+    match kind {
+        LinkedRecordKind::Capture => CaptureId::PREFIX,
+        LinkedRecordKind::Spec => SpecId::PREFIX,
+        LinkedRecordKind::Plan => PlanId::PREFIX,
+        LinkedRecordKind::Phase => PhaseId::PREFIX,
+        LinkedRecordKind::Task => TaskId::PREFIX,
+        LinkedRecordKind::Note => NoteId::PREFIX,
+        LinkedRecordKind::Release => ReleaseId::PREFIX,
+    }
+}
+
+pub(super) fn parse_optional_id<T: PrefixedId>(value: Option<String>) -> CResult<Option<T>> {
+    value.as_deref().map(parse_id).transpose()
+}
+
+pub(super) fn relation_change<T: PrefixedId>(value: Option<String>, clear: bool) -> CResult<Option<Option<T>>> {
+    if clear { Ok(Some(None)) } else { parse_optional_id(value).map(|value| value.map(Some)) }
 }
 
 pub(super) fn parse_capture_id(value: &str) -> CResult<CaptureId> {
-    parse_id(value, CaptureId::parse)
+    parse_id(value)
 }
 pub(super) fn parse_release_id(value: &str) -> CResult<ReleaseId> {
-    parse_id(value, ReleaseId::parse)
+    parse_id(value)
 }
 pub(super) fn parse_spec_id(value: &str) -> CResult<SpecId> {
-    parse_id(value, SpecId::parse)
+    parse_id(value)
 }
 pub(super) fn parse_plan_id(value: &str) -> CResult<PlanId> {
-    parse_id(value, PlanId::parse)
+    parse_id(value)
 }
 pub(super) fn parse_phase_id(value: &str) -> CResult<PhaseId> {
-    parse_id(value, PhaseId::parse)
+    parse_id(value)
 }
 pub(super) fn parse_task_id(value: &str) -> CResult<TaskId> {
-    parse_id(value, TaskId::parse)
+    parse_id(value)
 }
 pub(super) fn parse_note_id(value: &str) -> CResult<NoteId> {
-    parse_id(value, NoteId::parse)
+    parse_id(value)
 }
 
 pub(super) fn resolve_markdown(args: MarkdownArgs) -> CResult<Option<String>> {

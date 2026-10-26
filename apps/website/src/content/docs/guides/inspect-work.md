@@ -21,6 +21,12 @@ arcl list --milestone arcl-m-01J... --status pending in_progress
 `--milestone`, and `--parent`. Association filters include the matching
 container and work below it where applicable.
 
+Human output from `show`, `list` and `tree` prints short IDs, the shortest
+unique end of each ID, such as `GBA5`. Any command accepts one in place of the
+full ID, with an optional kind: `arcl show GBA5` or `arcl task start t-GBA5`.
+A short ID can become ambiguous as records are added, so write full IDs in
+files and links. The [manual](/reference/manual/#record-ids) gives the rule.
+
 ## Read the Hierarchy
 
 Render the complete hierarchy or start at one record:

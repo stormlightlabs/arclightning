@@ -20,7 +20,7 @@ use arcl_serve::{
 };
 
 use super::reads::*;
-use super::support::{parse_plan_document, parse_plan_id};
+use super::support::{RecordScope, parse_plan_document, parse_plan_id};
 use super::*;
 
 /// How long a mutation waits for the project's sync lock. The CLI waits as
@@ -52,7 +52,11 @@ impl ServeApp {
     /// Run `command` as the CLI runs a write. The warnings its syncs give go
     /// in the reply and to the server's stderr.
     fn write(&self, command: impl FnOnce() -> Result<Option<String>, ApplicationError>) -> Reply {
-        match synced_write(self.lock_wait, command) {
+        let scoped = || {
+            let _records = RecordScope::enter();
+            command()
+        };
+        match synced_write(self.lock_wait, scoped) {
             Ok((body, warnings)) => {
                 let body = with_warnings(body.unwrap_or_default(), &warnings);
                 write_warnings(self.mode, warnings);
