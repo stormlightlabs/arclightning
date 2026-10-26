@@ -1105,6 +1105,28 @@ fn tree_puts_specs_first_and_unplaced_records_under_sections() {
 }
 
 #[test]
+fn rooted_tree_prints_the_record_without_a_section_heading() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let release = run_json(dir, ["--json", "release", "create", "v1"].as_ref());
+    let release_id = release["data"]["release"]["id"]
+        .as_str()
+        .expect("release ID")
+        .to_owned();
+    let capture_id = create_capture(dir, "Idea", "Later");
+
+    for (id, prefix, title) in [(&release_id, "○ release `", "v1"), (&capture_id, "○ capture `", "Idea")] {
+        let human = stdout_of(dir, &["--color", "never", "tree", id]);
+        let lines = human.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 1, "{human}");
+        assert!(
+            lines[0].starts_with(prefix) && lines[0].ends_with(&format!("[{title}]")),
+            "{human}"
+        );
+    }
+}
+
+#[test]
 fn open_containers_show_started_when_a_task_below_them_started() {
     let directory = initialized_directory();
     let dir = directory.path();

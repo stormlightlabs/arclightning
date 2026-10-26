@@ -590,9 +590,13 @@ impl Renderer {
         self.render_collection("records", records, records)
     }
 
-    /// Render the connected planning hierarchy.
-    pub fn render_connected_tree(&self, nodes: &[ConnectedTreeNode]) -> Result<Option<String>, OutputError> {
+    /// Render the connected planning hierarchy. A `rooted` tree prints its
+    /// nodes at depth `0` with no section headings.
+    pub fn render_connected_tree(
+        &self, nodes: &[ConnectedTreeNode], rooted: bool,
+    ) -> Result<Option<String>, OutputError> {
         let message = match self.mode {
+            OutputMode::Human if rooted => nodes.iter().map(|node| node.human(0)).collect::<Vec<_>>().join("\n"),
             OutputMode::Human => human_tree(nodes),
             OutputMode::Plain => nodes
                 .iter()
@@ -1908,7 +1912,7 @@ mod tests {
         let nodes = [node];
         let render = |mode| {
             Renderer::new(mode, ColorChoice::Never)
-                .render_connected_tree(&nodes)
+                .render_connected_tree(&nodes, false)
                 .expect("rendering succeeds")
                 .expect("output is not quiet")
         };
