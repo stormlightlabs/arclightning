@@ -376,14 +376,15 @@ impl Renderer {
         )
     }
 
-    /// Render a connected task inspection view. Human and plain output show
-    /// each record ID as `ids` shortens it.
+    /// Render a connected task inspection view. Human output shows each
+    /// record ID as `ids` shortens it, readiness reasons included; plain and
+    /// JSON output keep full IDs.
     pub fn render_planning_task_view(
         &self, view: &PlanningTaskView, ids: &ShortIds,
     ) -> Result<Option<String>, OutputError> {
         let message = match self.mode {
             OutputMode::Human => view.human(ids),
-            OutputMode::Plain => view.plain(ids),
+            OutputMode::Plain => view.plain(),
             OutputMode::Json => {
                 serde_json::to_string(&Envelope { format_version: READINESS_FORMAT_VERSION, data: view })?
             }
@@ -649,7 +650,8 @@ impl Renderer {
     }
 
     /// Render a record `arcl show` found. Human and plain output show `id`,
-    /// which may be a short ID; JSON output holds the record with its full ID.
+    /// which callers shorten for human output only; JSON output holds the
+    /// record with its full ID.
     pub fn render_shown<T: Serialize>(
         &self, kind: &str, id: &str, title: &str, record: &T,
     ) -> Result<Option<String>, OutputError> {
@@ -1226,7 +1228,7 @@ fn human_action(action: &str) -> &str {
 
 trait PlanningTaskViewOutput {
     fn human(&self, ids: &ShortIds) -> String;
-    fn plain(&self, ids: &ShortIds) -> String;
+    fn plain(&self) -> String;
 }
 
 impl PlanningTaskViewOutput for PlanningTaskView {
@@ -1273,7 +1275,12 @@ impl PlanningTaskViewOutput for PlanningTaskView {
         if let Some(phase) = &self.phase {
             lines.push(format!("Phase: {}", ids.short(&phase.id.to_string())));
         }
-        lines.extend(self.readiness.reasons.iter().map(|reason| format!("Reason: {reason}")));
+        lines.extend(
+            self.readiness
+                .reasons
+                .iter()
+                .map(|reason| format!("Reason: {}", ids.shorten_text(&reason.message))),
+        );
         if !self.task.body.is_empty() {
             lines.push(format!("Body: {}", self.task.body));
         }
@@ -1286,11 +1293,11 @@ impl PlanningTaskViewOutput for PlanningTaskView {
         lines.join("\n")
     }
 
-    fn plain(&self, ids: &ShortIds) -> String {
+    fn plain(&self) -> String {
         let mut lines = vec![
             format!(
                 "task\t{}\t{}\t{}\t{}\t{}",
-                ids.short(&self.task.id.to_string()),
+                self.task.id,
                 self.task.status.as_str(),
                 self.task.priority.as_str(),
                 self.readiness.ready,
@@ -1302,7 +1309,7 @@ impl PlanningTaskViewOutput for PlanningTaskView {
                 "ancestors\t{}",
                 self.ancestors
                     .iter()
-                    .map(|task| ids.short(&task.id.to_string()).to_owned())
+                    .map(|task| task.id.to_string())
                     .collect::<Vec<_>>()
                     .join(",")
             ),
@@ -1310,7 +1317,7 @@ impl PlanningTaskViewOutput for PlanningTaskView {
                 "blockers\t{}",
                 self.blockers
                     .iter()
-                    .map(|blocker| ids.short(&blocker.task.id.to_string()).to_owned())
+                    .map(|blocker| blocker.task.id.to_string())
                     .collect::<Vec<_>>()
                     .join(",")
             ),
@@ -1318,13 +1325,9 @@ impl PlanningTaskViewOutput for PlanningTaskView {
             format!("evidence\t{}", plain_escape(&self.task.evidence)),
         ];
         lines.extend(self.inherited_blockers.iter().filter_map(|blocker| {
-            blocker.ancestor.map(|ancestor| {
-                format!(
-                    "inherited\t{}\t{}",
-                    ids.short(&blocker.task.id.to_string()),
-                    ids.short(&ancestor.to_string())
-                )
-            })
+            blocker
+                .ancestor
+                .map(|ancestor| format!("inherited\t{}\t{ancestor}", blocker.task.id))
         }));
         lines.extend(
             self.readiness

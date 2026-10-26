@@ -5,6 +5,10 @@
 //! share a long prefix. The last 16 are random, so a suffix tells records
 //! apart. A short ID is such a suffix, optionally after the record's kind, as
 //! in `535B` or `t-535B`.
+//!
+//! Since records share their first characters, input that matches the start
+//! of a record's ULID is refused rather than read as a suffix, so a prefix
+//! typed out of habit never acts on a record that happens to end in it.
 
 use std::collections::HashMap;
 
@@ -26,6 +30,9 @@ const KINDS: [&str; 7] = ["c", "r", "s", "pl", "ph", "t", "n"];
 /// The Crockford base32 alphabet ULIDs use.
 const CROCKFORD: &str = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
+/// How many records a [`ShortIdError::Prefix`] message lists.
+const PREFIX_EXAMPLES: usize = 3;
+
 /// Why a short ID names no record, or more than one.
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum ShortIdError {
@@ -38,6 +45,10 @@ pub enum ShortIdError {
     /// A kind before the dash that no record ID uses.
     #[error("short ID `{input}` names unknown kind `{kind}`; use c, r, s, pl, ph, t or n")]
     UnknownKind { input: String, kind: String },
+    /// The input matches the start of a record's ULID, not only its end.
+    /// `matches` lists the records whose ULIDs start with it.
+    #[error("`{input}` is the start of a record ID, but a short ID is the end of one; give the last characters instead:{}", list_suffixes(.matches))]
+    Prefix { input: String, matches: Vec<RecordRef> },
     /// No record of the requested kind ends in the short ID.
     #[error("no record matches short ID `{input}`")]
     NotFound { input: String },
@@ -92,6 +103,9 @@ impl ShortIds {
             })
             .collect::<Vec<_>>();
         reversed.sort();
+        let mut forward = reversed.iter().map(|(_, id)| ulid_part(id)).collect::<Vec<_>>();
+        forward.sort_unstable();
+        forward.dedup();
         let common = |left: &str, right: &str| left.bytes().zip(right.bytes()).take_while(|(a, b)| a == b).count();
         let mut lengths = HashMap::with_capacity(reversed.len());
         for (index, (key, id)) in reversed.iter().enumerate() {
@@ -102,7 +116,12 @@ impl ShortIds {
             } else {
                 let before = previous.map_or(0, |previous| common(key, previous));
                 let after = next.map_or(0, |next| common(key, next));
-                (before.max(after) + 1).max(MIN_SHORT_ID_LEN).min(key.len())
+                let mut length = (before.max(after) + 1).max(MIN_SHORT_ID_LEN).min(key.len());
+                let ulid = ulid_part(id);
+                while length < ulid.len() && starts_some_ulid(&forward, &ulid[ulid.len() - length..]) {
+                    length += 1;
+                }
+                length
             };
             lengths.insert(id.clone(), length);
         }
@@ -116,12 +135,40 @@ impl ShortIds {
             None => id,
         }
     }
+
+    /// `text` with each known full record ID in it replaced by its short ID,
+    /// for messages such as readiness reasons that name records.
+    pub fn shorten_text(&self, text: &str) -> String {
+        if self.lengths.is_empty() {
+            return text.to_owned();
+        }
+        let mut shortened = String::with_capacity(text.len());
+        let mut rest = text;
+        while let Some(start) = rest.find(FULL_ID_PREFIX) {
+            shortened.push_str(&rest[..start]);
+            let candidate = &rest[start..];
+            let known = KINDS.into_iter().find_map(|kind| {
+                candidate
+                    .get(..FULL_ID_PREFIX.len() + kind.len() + 1 + ULID_LEN)
+                    .filter(|id| self.lengths.contains_key(*id))
+            });
+            let taken = known.unwrap_or(FULL_ID_PREFIX);
+            shortened.push_str(self.short(taken));
+            rest = &candidate[taken.len()..];
+        }
+        shortened.push_str(rest);
+        shortened
+    }
 }
 
 /// Whether `input` is written as a full record ID, `arcl-<kind>-<ULID>`,
 /// rather than a short ID. A full ID is parsed as it is, never resolved.
+/// The `arcl-` prefix matches in any case, so `ARCL-T-…` reaches the full-ID
+/// parser and fails there with its prefix error.
 pub fn is_full_id(input: &str) -> bool {
-    input.starts_with(FULL_ID_PREFIX)
+    input
+        .get(..FULL_ID_PREFIX.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(FULL_ID_PREFIX))
 }
 
 /// Find the one record whose ID ends in the short ID `input`.
@@ -134,6 +181,9 @@ pub fn is_full_id(input: &str) -> bool {
 /// `expected` is the full-ID prefix the caller wants, such as `arcl-t-`.
 /// When `input` names no kind, only records with that prefix match, so
 /// `535B` finds the task even when a spec ends in `535B` too.
+///
+/// Input that also starts any record's ULID, such as `01M5`, fails with
+/// [`ShortIdError::Prefix`] unless it is that whole ULID.
 pub fn resolve_short_id<'a>(
     input: &str, records: &'a [RecordRef], expected: Option<&str>,
 ) -> Result<&'a RecordRef, ShortIdError> {
@@ -152,6 +202,17 @@ pub fn resolve_short_id<'a>(
     if suffix.len() < MIN_SHORT_ID_LEN {
         return Err(ShortIdError::TooShort { input: input.to_owned() });
     }
+    let starting = records
+        .iter()
+        .filter(|record| {
+            let ulid = ulid_part(&record.id);
+            ulid.starts_with(&suffix) && ulid != suffix
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if !starting.is_empty() {
+        return Err(ShortIdError::Prefix { input: input.to_owned(), matches: starting });
+    }
     let prefix = kind.map(|kind| format!("{FULL_ID_PREFIX}{kind}-"));
     let prefix = prefix.as_deref().or(expected);
     let matches = records
@@ -169,6 +230,15 @@ pub fn resolve_short_id<'a>(
 /// The ULID at the end of a full ID: the text after its last dash.
 fn ulid_part(id: &str) -> &str {
     id.rsplit('-').next().unwrap_or(id)
+}
+
+/// Whether `text` starts some ULID in `sorted` other than `text` itself.
+fn starts_some_ulid(sorted: &[&str], text: &str) -> bool {
+    let index = sorted.partition_point(|ulid| *ulid < text);
+    sorted[index..]
+        .iter()
+        .take_while(|ulid| ulid.starts_with(text))
+        .any(|ulid| *ulid != text)
 }
 
 /// `suffix` in canonical Crockford form, or `None` when it has a character
@@ -195,9 +265,27 @@ fn list_matches(matches: &[RecordRef]) -> String {
         .collect()
 }
 
+/// The records whose ULIDs start with typed input, each as its last
+/// [`MIN_SHORT_ID_LEN`] characters, full ID and title, up to
+/// [`PREFIX_EXAMPLES`] of them.
+fn list_suffixes(matches: &[RecordRef]) -> String {
+    let mut listed = matches
+        .iter()
+        .take(PREFIX_EXAMPLES)
+        .map(|record| {
+            let suffix = &record.id[record.id.len().saturating_sub(MIN_SHORT_ID_LEN)..];
+            format!("\n  {suffix}  {}  {}", record.id, record.title)
+        })
+        .collect::<String>();
+    if matches.len() > PREFIX_EXAMPLES {
+        listed.push_str(&format!("\n  and {} more", matches.len() - PREFIX_EXAMPLES));
+    }
+    listed
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{RecordRef, ShortIdError, ShortIds, resolve_short_id};
+    use super::{RecordRef, ShortIdError, ShortIds, is_full_id, resolve_short_id};
 
     fn record(id: &str, title: &str) -> RecordRef {
         RecordRef { id: id.to_owned(), title: title.to_owned() }
@@ -376,5 +464,64 @@ mod tests {
         let records = records();
         let found = resolve_short_id("01M5VDDD42HZQ1FEN49X80GBA5", &records, None).expect("whole ULID matches");
         assert_eq!(found.id, "arcl-t-01M5VDDD42HZQ1FEN49X80GBA5");
+    }
+
+    #[test]
+    fn input_that_starts_an_id_is_refused_with_suffixes_to_use() {
+        let records = records();
+        for input in ["01M5", "01m5v", "t-01M5VDDD"] {
+            let error = resolve_short_id(input, &records, Some("arcl-t-")).expect_err("a prefix is refused");
+            let ShortIdError::Prefix { matches, .. } = &error else {
+                panic!("expected a prefix refusal for {input}, got {error:?}")
+            };
+            assert_eq!(matches.len(), 3, "{input}");
+            let message = error.to_string();
+            assert!(message.contains("the end of one"), "{message}");
+            assert!(
+                message.contains("GBA5  arcl-t-01M5VDDD42HZQ1FEN49X80GBA5  Second task"),
+                "{message}"
+            );
+        }
+    }
+
+    #[test]
+    fn short_ids_grow_past_the_start_of_another_id() {
+        let ids = ShortIds::new(["arcl-t-01M5VDDD42HZQ1FEN49X8001M5", "arcl-t-01M5VDDD42HZQ1FEN49X80GBA5"]);
+        assert_eq!(ids.short("arcl-t-01M5VDDD42HZQ1FEN49X8001M5"), "001M5");
+        let records = vec![
+            record("arcl-t-01M5VDDD42HZQ1FEN49X8001M5", "Ends in the shared start"),
+            record("arcl-t-01M5VDDD42HZQ1FEN49X80GBA5", "Other"),
+        ];
+        assert_eq!(
+            resolve_short_id("001M5", &records, None).map(|record| record.title.as_str()),
+            Ok("Ends in the shared start")
+        );
+        assert!(matches!(
+            resolve_short_id("01M5", &records, None),
+            Err(ShortIdError::Prefix { .. })
+        ));
+    }
+
+    #[test]
+    fn shorten_text_replaces_known_ids_only() {
+        let ids = ShortIds::new(records().into_iter().map(|record| record.id));
+        assert_eq!(
+            ids.shorten_text(
+                "ancestor `arcl-t-01M5VDDD42HZQ1FEN49X80GBA5` is blocked by `arcl-t-01M5VDDD42HZQ1FEN49X80535B` (pending), not arcl-n-01M5VDDD42HZQ1FEN49X80ZZZZ"
+            ),
+            "ancestor `GBA5` is blocked by `0535B` (pending), not arcl-n-01M5VDDD42HZQ1FEN49X80ZZZZ"
+        );
+        assert_eq!(
+            ShortIds::default().shorten_text("`arcl-t-01M5VDDD42HZQ1FEN49X80GBA5`"),
+            "`arcl-t-01M5VDDD42HZQ1FEN49X80GBA5`"
+        );
+    }
+
+    #[test]
+    fn a_full_id_prefix_matches_in_any_case() {
+        assert!(is_full_id("arcl-t-01M5VDDD42HZQ1FEN49X80GBA5"));
+        assert!(is_full_id("ARCL-T-01M5VDDD42HZQ1FEN49X80GBA5"));
+        assert!(!is_full_id("t-GBA5"));
+        assert!(!is_full_id("arc"));
     }
 }
