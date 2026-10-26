@@ -5,7 +5,7 @@ title = "Put the plan first in arcl tree"
 status = "completed"
 priority = "normal"
 position = 3
-evidence = "Delivered by #PR: specs print first in arcl tree, with captures, notes and releases under Inbox, Notes and Releases headings."
+evidence = "Delivered by #60: specs print first in arcl tree, with captures, notes and releases under Inbox, Notes and Releases headings."
 +++
 
 Put the plan first in `arcl tree`. Unplaced captures, notes and releases
