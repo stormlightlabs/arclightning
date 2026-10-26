@@ -1026,7 +1026,7 @@ fn open_containers_show_started_when_a_task_below_them_started() {
     assert_eq!(mark("Feature"), '◐', "and the spec above that");
     assert_eq!(mark("Nested"), '◐', "a completed subtask starts its phase");
     assert_eq!(mark("Nested plan"), '◐');
-    assert_eq!(mark("Parent"), '○', "a parent with an open subtask is not ready");
+    assert_eq!(mark("Parent"), '○', "a task with subtasks is never ready itself");
     assert_eq!(mark("Idle"), '○', "cancelled and parked tasks do not start a phase");
     assert_eq!(mark("Closed"), '✓', "a completed phase stays completed");
 }

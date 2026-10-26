@@ -133,8 +133,8 @@ impl SkillFileStatus {
 pub enum TreeStatus {
     /// A task, and whether it is ready to start.
     Task { status: TaskStatus, ready: bool },
-    /// A spec, plan, phase or release, and whether a task under it is in
-    /// progress or completed.
+    /// A spec, plan or phase, and whether a task under it is in progress or
+    /// completed. A release always carries `started: false`.
     Container { status: ContainerStatus, started: bool },
     /// A capture.
     Capture(CaptureStatus),
@@ -142,8 +142,7 @@ pub enum TreeStatus {
     Note,
 }
 
-/// The mark at the start of each human `arcl tree` line. Every tree style
-/// shows the same mark for the same status.
+/// The mark at the start of each human `arcl tree` line.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StatusMark {
     /// Completed, or a promoted capture.
@@ -194,7 +193,7 @@ impl StatusMark {
         }
     }
 
-    /// The ASCII form of the mark.
+    /// The ASCII form, for the `--ascii` tree view the fold task adds.
     pub const fn ascii(self) -> char {
         match self {
             Self::Done => '+',
