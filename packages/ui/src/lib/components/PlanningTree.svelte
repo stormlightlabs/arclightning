@@ -1,7 +1,12 @@
 <script module lang="ts">
   import type { PlanningTreeNode as PlanningNode } from "../types";
   /** Props for a collapsible application-supplied planning hierarchy. */
-  export interface PlanningTreeProps { label?: string; nodes: PlanningNode[]; selectedId?: string; onselect?: (node: PlanningNode) => void; }
+  export interface PlanningTreeProps {
+    label?: string;
+    nodes: PlanningNode[];
+    selectedId?: string;
+    onselect?: (node: PlanningNode) => void;
+  }
 </script>
 
 <script lang="ts">
@@ -18,6 +23,11 @@
 </nav>
 
 <style>
-  .arcl-tree { color: var(--arcl-text); }
-  ul { margin: 0; padding: 0; }
+  .arcl-tree {
+    color: var(--arcl-text);
+  }
+  ul {
+    margin: 0;
+    padding: 0;
+  }
 </style>

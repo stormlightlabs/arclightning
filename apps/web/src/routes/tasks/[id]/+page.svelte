@@ -52,7 +52,16 @@
         viewKeys: true,
         run: () => (panelOpen = !panelOpen),
       },
-      { id: "task-view:back", label: "Back to Work", scope: "view", group: "Task", keys: ["Escape"], viewKeys: true, icon: "arrowLeft", run: () => goto(workHref(id, from)) },
+      {
+        id: "task-view:back",
+        label: "Back to Work",
+        scope: "view",
+        group: "Task",
+        keys: ["Escape"],
+        viewKeys: true,
+        icon: "arrowLeft",
+        run: () => goto(workHref(id, from)),
+      },
     ],
   }));
 
@@ -122,5 +131,7 @@
 {/if}
 
 <style>
-  .loading { color: var(--arcl-text-muted); }
+  .loading {
+    color: var(--arcl-text-muted);
+  }
 </style>

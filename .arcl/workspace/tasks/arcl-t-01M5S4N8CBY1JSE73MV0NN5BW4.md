@@ -2,9 +2,10 @@
 id = "arcl-t-01M5S4N8CBY1JSE73MV0NN5BW4"
 phase = "arcl-ph-01M5NE5P5RE8Y5Y5Y84T36FMEE"
 title = "T24: Format apps/web and packages/ui with Prettier"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 3
+evidence = "Delivered by #55: apps/web and packages/ui have a Prettier config with prettier-plugin-svelte and `format`/`lint` scripts; the root `pnpm lint` runs in `just check`. Collapsing a `<style>` rule in either package makes `pnpm lint` exit 1. Verified with web build, build:artifact, cargo fmt/clippy/test, pnpm lint/check/test, test:e2e (42 passed) and arcl check."
 +++
 
 Format the Svelte and TypeScript in `apps/web` and `packages/ui` with
@@ -22,11 +23,11 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] Each CSS rule in a `.svelte` `<style>` block sits on its own lines,
+- [x] Each CSS rule in a `.svelte` `<style>` block sits on its own lines,
       one declaration per line
-- [ ] `pnpm format` writes and `pnpm lint` checks `apps/web` and
+- [x] `pnpm format` writes and `pnpm lint` checks `apps/web` and
       `packages/ui`
-- [ ] `just check` fails on an unformatted file in either package
+- [x] `just check` fails on an unformatted file in either package
 
 Verification:
 

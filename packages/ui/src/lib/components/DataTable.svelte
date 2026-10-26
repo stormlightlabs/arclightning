@@ -73,7 +73,9 @@
     <thead>
       <tr>
         {#each columns as column (column.id)}
-          <th scope="col" style:width={column.width} data-hide-narrow={column.hideNarrow || undefined}>{column.label}</th>
+          <th scope="col" style:width={column.width} data-hide-narrow={column.hideNarrow || undefined}
+            >{column.label}</th
+          >
         {/each}
       </tr>
     </thead>
@@ -84,7 +86,13 @@
           {#each columns as column, index (column.id)}
             <td data-hide-narrow={column.hideNarrow || undefined}>
               {#if index === 0}
-                <button type="button" data-row-id={id} aria-current={id === selectedId ? "true" : undefined} tabindex={id === tabbableId ? 0 : -1} onkeydown={(event) => onkeydown(event, id)}>
+                <button
+                  type="button"
+                  data-row-id={id}
+                  aria-current={id === selectedId ? "true" : undefined}
+                  tabindex={id === tabbableId ? 0 : -1}
+                  onkeydown={(event) => onkeydown(event, id)}
+                >
                   {@render cell(row, column)}
                 </button>
               {:else}
@@ -99,18 +107,80 @@
 </div>
 
 <style>
-  .arcl-data-table { container-type: inline-size; min-width: 0; overflow: auto; font-size: var(--arcl-type-sm); }
-  table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
-  th { position: sticky; z-index: 1; top: 0; padding: var(--arcl-space-2) var(--arcl-space-3); border-bottom: var(--arcl-border-width) solid var(--arcl-border); color: var(--arcl-text-muted); background: var(--arcl-surface); font: 600 var(--arcl-type-xs) / 1.4 var(--arcl-font-ui); text-align: start; white-space: nowrap; }
-  td { height: 2.5rem; padding: 0 var(--arcl-space-3); overflow: hidden; border-bottom: var(--arcl-border-width) solid var(--arcl-surface-subtle); color: var(--arcl-text-muted); text-overflow: ellipsis; white-space: nowrap; }
-  td:first-child { padding: 0; }
-  tr { cursor: pointer; }
-  tbody tr:hover { background: var(--arcl-surface-hover); }
-  tr[data-selected] { background: var(--arcl-surface-subtle); }
-  tr[data-selected] td:first-child { box-shadow: inset 2px 0 0 var(--arcl-focus); }
-  button { display: block; width: 100%; height: 2.5rem; padding: 0 var(--arcl-space-3); overflow: hidden; border: 0; color: var(--arcl-text); background: transparent; font: 500 var(--arcl-type-sm) / 2.5rem var(--arcl-font-ui); text-align: start; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+  .arcl-data-table {
+    container-type: inline-size;
+    min-width: 0;
+    overflow: auto;
+    font-size: var(--arcl-type-sm);
+  }
+  table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: fixed;
+  }
+  th {
+    position: sticky;
+    z-index: 1;
+    top: 0;
+    padding: var(--arcl-space-2) var(--arcl-space-3);
+    border-bottom: var(--arcl-border-width) solid var(--arcl-border);
+    color: var(--arcl-text-muted);
+    background: var(--arcl-surface);
+    font: 600 var(--arcl-type-xs) / 1.4 var(--arcl-font-ui);
+    text-align: start;
+    white-space: nowrap;
+  }
+  td {
+    height: 2.5rem;
+    padding: 0 var(--arcl-space-3);
+    overflow: hidden;
+    border-bottom: var(--arcl-border-width) solid var(--arcl-surface-subtle);
+    color: var(--arcl-text-muted);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  td:first-child {
+    padding: 0;
+  }
+  tr {
+    cursor: pointer;
+  }
+  tbody tr:hover {
+    background: var(--arcl-surface-hover);
+  }
+  tr[data-selected] {
+    background: var(--arcl-surface-subtle);
+  }
+  tr[data-selected] td:first-child {
+    box-shadow: inset 2px 0 0 var(--arcl-focus);
+  }
+  button {
+    display: block;
+    width: 100%;
+    height: 2.5rem;
+    padding: 0 var(--arcl-space-3);
+    overflow: hidden;
+    border: 0;
+    color: var(--arcl-text);
+    background: transparent;
+    font: 500 var(--arcl-type-sm) / 2.5rem var(--arcl-font-ui);
+    text-align: start;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+  }
   /* The focus ring goes round the whole row, inside the table's scroll box. */
-  button:focus-visible { outline: none; }
-  tr:has(button:focus-visible) { outline: var(--arcl-focus-width) solid var(--arcl-focus); outline-offset: calc(-1 * var(--arcl-focus-width)); }
-  @container (max-width: 32rem) { [data-hide-narrow] { display: none; } }
+  button:focus-visible {
+    outline: none;
+  }
+  tr:has(button:focus-visible) {
+    outline: var(--arcl-focus-width) solid var(--arcl-focus);
+    outline-offset: calc(-1 * var(--arcl-focus-width));
+  }
+  @container (max-width: 32rem) {
+    [data-hide-narrow] {
+      display: none;
+    }
+  }
 </style>

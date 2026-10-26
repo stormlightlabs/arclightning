@@ -21,7 +21,9 @@ function stubSource(detail: Detail) {
     parkTask: vi.fn(async () => changed(detail.task)),
     unparkTask: vi.fn(async () => changed(detail.task)),
     handOffTask: vi.fn(async () => changed(detail.task)),
-    completeTask: vi.fn(async () => changed({ task: detail.task, completed_subtasks: [] as string[], unblocked: [] as string[] })),
+    completeTask: vi.fn(async () =>
+      changed({ task: detail.task, completed_subtasks: [] as string[], unblocked: [] as string[] }),
+    ),
   };
   setDataSource(source as unknown as DataSource);
   return source;
@@ -96,7 +98,9 @@ describe("TaskDetail changes", () => {
 
   it("lists the tasks a completion unblocked as links", async () => {
     const source = stubSource(inProgress());
-    source.completeTask.mockResolvedValueOnce(changed({ task: inProgress().task, completed_subtasks: [], unblocked: ["t-10.5", "t-99"] }));
+    source.completeTask.mockResolvedValueOnce(
+      changed({ task: inProgress().task, completed_subtasks: [], unblocked: ["t-10.5", "t-99"] }),
+    );
     const root = view(inProgress());
     button(root, "Complete").click();
     flushSync();
@@ -104,7 +108,10 @@ describe("TaskDetail changes", () => {
     button(form as HTMLElement, "Complete").click();
     await settle();
     expect(source.completeTask).toHaveBeenCalledWith("t-10.4", {});
-    const links = [...root.querySelectorAll('[aria-label="Completed"] a')].map((link) => [link.getAttribute("href"), link.textContent]);
+    const links = [...root.querySelectorAll('[aria-label="Completed"] a')].map((link) => [
+      link.getAttribute("href"),
+      link.textContent,
+    ]);
     expect(links).toEqual([
       ["/tasks/t-10.5", "T10.5: Document the MCP tools"],
       ["/tasks/t-99", "t-99"],
@@ -131,7 +138,10 @@ describe("TaskDetail changes", () => {
 
   it("clears the last change's warnings when the next change saves without any", async () => {
     const source = stubSource(inProgress());
-    source.parkTask.mockResolvedValueOnce({ value: inProgress().task, warnings: [{ code: "blocker_edge", message: "loaded" }] });
+    source.parkTask.mockResolvedValueOnce({
+      value: inProgress().task,
+      warnings: [{ code: "blocker_edge", message: "loaded" }],
+    });
     const root = view(inProgress());
     button(root, "Park").click();
     await settle();
@@ -163,7 +173,10 @@ describe("TaskDetail changes", () => {
     it(`choosing ${label} again only refocuses its open form's editor`, async () => {
       const source = stubSource(inProgress());
       const root = view(inProgress());
-      const run = () => registeredCommands().find((command) => command.id === `task:${action}`)!.run();
+      const run = () =>
+        registeredCommands()
+          .find((command) => command.id === `task:${action}`)!
+          .run();
       run();
       await settle();
       const form = root.querySelector<HTMLElement>(`form[aria-label="${label}"]`)!;
@@ -197,7 +210,9 @@ describe("TaskDetail changes", () => {
   it("sends nothing on a second click while a change runs", async () => {
     const source = stubSource(inProgress());
     let finish = () => {};
-    source.parkTask.mockImplementationOnce(() => new Promise((resolve) => (finish = () => resolve(changed(inProgress().task)))));
+    source.parkTask.mockImplementationOnce(
+      () => new Promise((resolve) => (finish = () => resolve(changed(inProgress().task)))),
+    );
     const root = view(inProgress());
     button(root, "Park").click();
     flushSync();

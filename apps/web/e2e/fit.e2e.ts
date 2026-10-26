@@ -149,7 +149,9 @@ test.describe("a 390 by 260 px window", () => {
       ...first,
       task: { ...first.task, id: `arcl-t-${100 + index}`, title: `Task ${index + 1}`, position: index },
     }));
-    await page.route("**/api/work", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(work) }));
+    await page.route("**/api/work", (route) =>
+      route.fulfill({ contentType: "application/json", body: JSON.stringify(work) }),
+    );
     await open(page, VIEWS[1]);
 
     for (let step = 0; step < 10; step++) await page.keyboard.press("j");

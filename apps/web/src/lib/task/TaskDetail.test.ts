@@ -33,7 +33,9 @@ describe("TaskDetail", () => {
     expect(direct).toContain('href="/tasks/t-10.3"');
     expect(direct).toContain(">In progress<");
     expect(blockers).toMatch(/Inherited from <a href="\/tasks\/t-10">T10: Add the MCP server<\/a>/);
-    expect(slice(blockers, 'aria-label="Inherited from T10: Add the MCP server"', "</ul>")).toContain('href="/tasks/t-17"');
+    expect(slice(blockers, 'aria-label="Inherited from T10: Add the MCP server"', "</ul>")).toContain(
+      'href="/tasks/t-17"',
+    );
   });
 
   it("lists completed blockers apart, as done, with their evidence as Markdown", () => {
@@ -45,7 +47,9 @@ describe("TaskDetail", () => {
     expect(done).toMatch(/href="\/tasks\/t-10\.2">T10\.2: Define the tool schema<\/a>/);
     expect(done).toContain(">Completed<");
     expect(done).toContain("Landed in <strong>#38</strong>.");
-    expect(done).toMatch(/T9: Ship the store[^]*Inherited from <a href="\/tasks\/t-10">T10: Add the MCP server<\/a>[^]*No evidence recorded\./);
+    expect(done).toMatch(
+      /T9: Ship the store[^]*Inherited from <a href="\/tasks\/t-10">T10: Add the MCP server<\/a>[^]*No evidence recorded\./,
+    );
   });
 
   it("shows the latest handoff and the evidence as Markdown", () => {
@@ -81,7 +85,11 @@ describe("TaskDetail", () => {
     const buttons = (status: "pending" | "in_progress" | "parked" | "completed") => {
       const detail = blockedDetail();
       detail.task.status = status;
-      return [...slice(show({}, detail), 'aria-label="Task actions"', "</div>").matchAll(/<button[^>]*>\s*<span>([^<]*)<\/span>/g)].map((match) => match[1].trim());
+      return [
+        ...slice(show({}, detail), 'aria-label="Task actions"', "</div>").matchAll(
+          /<button[^>]*>\s*<span>([^<]*)<\/span>/g,
+        ),
+      ].map((match) => match[1].trim());
     };
     expect(buttons("pending")).toEqual(["Start", "Park", "Edit", "Edit file"]);
     expect(buttons("in_progress")).toEqual(["Complete", "Hand off", "Park", "Edit", "Edit file"]);

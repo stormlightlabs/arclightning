@@ -7,7 +7,10 @@ import { moveSelection, visibleSelection, workKeyAction, type WorkKey } from "./
 
 /** A stand-in element that matches the selectors in `matching`. */
 function element(...matching: string[]): EventTarget {
-  return { closest: (selector: string) => (matching.some((tag) => selector.split(", ").some((part) => part.startsWith(tag))) ? {} : null) } as unknown as EventTarget;
+  return {
+    closest: (selector: string) =>
+      matching.some((tag) => selector.split(", ").some((part) => part.startsWith(tag))) ? {} : null,
+  } as unknown as EventTarget;
 }
 
 function press(key: string, fields: Partial<WorkKey> = {}): WorkKey {

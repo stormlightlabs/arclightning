@@ -45,7 +45,9 @@
         const tasks = parsed.tokens.some((token) => token.kind !== "priority") ? await dataSource().taskIndex() : [];
         const result = taskOf(parsed, tasks);
         if ("problems" in result) {
-          const names = result.problems.map(({ ref, problem }) => `\`${ref}\` ${problem === "missing" ? "names no task" : "names more than one task"}`);
+          const names = result.problems.map(
+            ({ ref, problem }) => `\`${ref}\` ${problem === "missing" ? "names no task" : "names more than one task"}`,
+          );
           failure = { code: "invalid_reference", message: names.join("; ") };
           return;
         }
@@ -81,17 +83,17 @@
       placeholder="Show unblocked tasks after completing !high after:T18.4"
       autofocus
       bind:value={text}
-      {onkeydown}
-    ></textarea>
+      {onkeydown}></textarea>
     <p class="tokens" id="capture-tokens" aria-live="polite">
       {#if parsed.tokens.length}
         {mod}+Enter files a task: {parsed.tokens.map(describeToken).join(", ")}.
       {:else}
-        <code>!high</code> sets the priority, <code>^T18</code> the parent and <code>after:T18.4</code> a blocker when {mod}+Enter files a task.
+        <code>!high</code> sets the priority, <code>^T18</code> the parent and <code>after:T18.4</code> a blocker when {mod}+Enter
+        files a task.
       {/if}
     </p>
     <div class="buttons">
-      <Button type="submit" variant="primary" label="Capture" busy={busy} disabled={busy || parsed.line === ""} />
+      <Button type="submit" variant="primary" label="Capture" {busy} disabled={busy || parsed.line === ""} />
       <Button label="Create task" disabled={busy || parsed.title === ""} onclick={() => file(true)} />
       <span class="keys" aria-hidden="true"><kbd>↵</kbd> capture <kbd>{mod}</kbd><kbd>↵</kbd> task</span>
     </div>
@@ -102,12 +104,60 @@
 </Dialog>
 
 <style>
-  .capture { display: grid; gap: var(--arcl-space-3); }
-  textarea { width: 100%; box-sizing: border-box; padding: var(--arcl-space-2) var(--arcl-space-3); border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-control); color: var(--arcl-text); background: var(--arcl-surface); font: var(--arcl-type-base) / 1.5 var(--arcl-font-body); resize: vertical; }
-  textarea:focus { border-color: var(--arcl-focus); outline: var(--arcl-focus-width) solid color-mix(in srgb, var(--arcl-focus) 30%, transparent); }
-  .tokens { margin: 0; color: var(--arcl-text-muted); font-size: var(--arcl-type-sm); }
-  .tokens code { padding: 0 0.25rem; border-radius: 4px; background: var(--arcl-surface-subtle); font: var(--arcl-type-xs) var(--arcl-font-code); }
-  .buttons { display: flex; flex-wrap: wrap; align-items: center; gap: var(--arcl-space-2); }
-  .keys { display: inline-flex; align-items: center; gap: var(--arcl-space-1); margin-inline-start: auto; color: var(--arcl-text-muted); font-size: var(--arcl-type-xs); }
-  kbd { display: inline-flex; min-width: 1.125rem; height: 1.125rem; align-items: center; justify-content: center; padding: 0 0.25rem; border: var(--arcl-border-width) solid var(--arcl-border); border-radius: 4px; background: var(--arcl-surface); font: 500 var(--arcl-type-xs) / 1 var(--arcl-font-ui); }
+  .capture {
+    display: grid;
+    gap: var(--arcl-space-3);
+  }
+  textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: var(--arcl-space-2) var(--arcl-space-3);
+    border: var(--arcl-border-width) solid var(--arcl-border);
+    border-radius: var(--arcl-radius-control);
+    color: var(--arcl-text);
+    background: var(--arcl-surface);
+    font: var(--arcl-type-base) / 1.5 var(--arcl-font-body);
+    resize: vertical;
+  }
+  textarea:focus {
+    border-color: var(--arcl-focus);
+    outline: var(--arcl-focus-width) solid color-mix(in srgb, var(--arcl-focus) 30%, transparent);
+  }
+  .tokens {
+    margin: 0;
+    color: var(--arcl-text-muted);
+    font-size: var(--arcl-type-sm);
+  }
+  .tokens code {
+    padding: 0 0.25rem;
+    border-radius: 4px;
+    background: var(--arcl-surface-subtle);
+    font: var(--arcl-type-xs) var(--arcl-font-code);
+  }
+  .buttons {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--arcl-space-2);
+  }
+  .keys {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--arcl-space-1);
+    margin-inline-start: auto;
+    color: var(--arcl-text-muted);
+    font-size: var(--arcl-type-xs);
+  }
+  kbd {
+    display: inline-flex;
+    min-width: 1.125rem;
+    height: 1.125rem;
+    align-items: center;
+    justify-content: center;
+    padding: 0 0.25rem;
+    border: var(--arcl-border-width) solid var(--arcl-border);
+    border-radius: 4px;
+    background: var(--arcl-surface);
+    font: 500 var(--arcl-type-xs) / 1 var(--arcl-font-ui);
+  }
 </style>

@@ -15,10 +15,27 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { useCommands, type Command } from "$lib/commands";
-  import { dataSource, latestRead, type ChangeWarning, type NewTask, type TaskPriority, type TaskStatus, type WorkList } from "$lib/data";
+  import {
+    dataSource,
+    latestRead,
+    type ChangeWarning,
+    type NewTask,
+    type TaskPriority,
+    type TaskStatus,
+    type WorkList,
+  } from "$lib/data";
   import { failureNotice } from "$lib/notice";
   import { appUrl, appUrlHref } from "$lib/route";
-  import { ACTION_KEYS, ACTION_LABELS, ACTION_TEXT, actionsFor, failureOf, runAction, type ActionFailure, type TaskAction } from "$lib/task";
+  import {
+    ACTION_KEYS,
+    ACTION_LABELS,
+    ACTION_TEXT,
+    actionsFor,
+    failureOf,
+    runAction,
+    type ActionFailure,
+    type TaskAction,
+  } from "$lib/task";
   import WorkBoard from "$lib/work/WorkBoard.svelte";
   import {
     NO_MILESTONE,
@@ -73,7 +90,12 @@
   const any: SelectOption = { value: "", label: "Any" };
   let options = $derived<Record<FilterName, SelectOption[]>>({
     status: [any, ...STATUSES.map((status) => ({ value: status, label: formatStatus(status) }))],
-    readiness: [any, { value: "ready", label: "Ready" }, { value: "blocked", label: "Blocked" }, { value: "waiting", label: "Waiting" }],
+    readiness: [
+      any,
+      { value: "ready", label: "Ready" },
+      { value: "blocked", label: "Blocked" },
+      { value: "waiting", label: "Waiting" },
+    ],
     priority: [any, ...PRIORITIES.map((priority) => ({ value: priority, label: capitalize(priority) }))],
     milestone: [
       any,
@@ -110,7 +132,10 @@
   // and to the layout shown, so the URL names what the page shows.
   $effect(() => {
     if (list === null) return;
-    const shown = withKnownMilestone(filters, list.milestones.map((milestone) => milestone.id));
+    const shown = withKnownMilestone(
+      filters,
+      list.milestones.map((milestone) => milestone.id),
+    );
     const search = writeView(view, writeFilters(shown, route.searchParams));
     if (search.toString() !== route.searchParams.toString()) showSearch(search);
   });
@@ -121,7 +146,15 @@
       ...(selectedTask === null
         ? []
         : [
-            { id: "work:open", label: "Open task", scope: "selection", keys: ["Enter"], viewKeys: true, icon: "arrowRight", run: () => goto(taskHref(selectedTask.id)) } satisfies Command,
+            {
+              id: "work:open",
+              label: "Open task",
+              scope: "selection",
+              keys: ["Enter"],
+              viewKeys: true,
+              icon: "arrowRight",
+              run: () => goto(taskHref(selectedTask.id)),
+            } satisfies Command,
             ...(actionBusy ? [] : actionsFor(selectedTask.status)).map((action): Command => {
               const id = selectedTask.id;
               return {
@@ -135,14 +168,62 @@
             }),
           ]),
       ...(view === "board" && selectedTask !== null && !actionBusy
-        ? [{ id: "work:move", label: "Move", scope: "selection", keys: ["m"], icon: "arrowRight", run: () => board?.move(selected ?? "") } satisfies Command]
+        ? [
+            {
+              id: "work:move",
+              label: "Move",
+              scope: "selection",
+              keys: ["m"],
+              icon: "arrowRight",
+              run: () => board?.move(selected ?? ""),
+            } satisfies Command,
+          ]
         : []),
-      { id: "work:view", label: view === "board" ? "Show as list" : "Show as board", scope: "view", group: "Work", keys: ["v"], run: () => setView(view === "board" ? "list" : "board") },
-      { id: "work:new", label: "New task", scope: "view", group: "Work", keys: ["n"], icon: "capture", run: openCreate },
-      { id: "work:next", label: "Select the next task", scope: "view", group: "Work", keys: ["j"], viewKeys: true, run: () => (selectedId = moveSelection(order, selectedId, 1)) },
-      { id: "work:previous", label: "Select the previous task", scope: "view", group: "Work", keys: ["k"], viewKeys: true, run: () => (selectedId = moveSelection(order, selectedId, -1)) },
+      {
+        id: "work:view",
+        label: view === "board" ? "Show as list" : "Show as board",
+        scope: "view",
+        group: "Work",
+        keys: ["v"],
+        run: () => setView(view === "board" ? "list" : "board"),
+      },
+      {
+        id: "work:new",
+        label: "New task",
+        scope: "view",
+        group: "Work",
+        keys: ["n"],
+        icon: "capture",
+        run: openCreate,
+      },
+      {
+        id: "work:next",
+        label: "Select the next task",
+        scope: "view",
+        group: "Work",
+        keys: ["j"],
+        viewKeys: true,
+        run: () => (selectedId = moveSelection(order, selectedId, 1)),
+      },
+      {
+        id: "work:previous",
+        label: "Select the previous task",
+        scope: "view",
+        group: "Work",
+        keys: ["k"],
+        viewKeys: true,
+        run: () => (selectedId = moveSelection(order, selectedId, -1)),
+      },
       ...(isFiltered(filters)
-        ? [{ id: "work:clear", label: "Clear filters", scope: "view", group: "Work", run: () => showFilters({ status: [], readiness: [], priority: [], milestone: [] }) } satisfies Command]
+        ? [
+            {
+              id: "work:clear",
+              label: "Clear filters",
+              scope: "view",
+              group: "Work",
+              run: () => showFilters({ status: [], readiness: [], priority: [], milestone: [] }),
+            } satisfies Command,
+          ]
         : []),
     ],
   }));
@@ -222,7 +303,9 @@
     createBusy = true;
     createFailure = null;
     try {
-      const { value: task, warnings } = await dataSource().createTask(body === "" ? { title, priority } : { title, body, priority });
+      const { value: task, warnings } = await dataSource().createTask(
+        body === "" ? { title, priority } : { title, body, priority },
+      );
       creating = null;
       // The Task view shows the create's warnings.
       await goto(taskHref(task.id), { state: { warnings } });
@@ -281,7 +364,12 @@
   </div>
   <form class="filters" aria-label="Filters" onsubmit={(event) => event.preventDefault()}>
     {#each [["status", "Status"], ["readiness", "Readiness"], ["priority", "Priority"], ["milestone", "Milestone"]] as const as [name, label] (name)}
-      <SelectMenu {label} options={options[name]} value={filters[name][0] ?? ""} onchange={(value) => setFilter(name, value)} />
+      <SelectMenu
+        {label}
+        options={options[name]}
+        value={filters[name][0] ?? ""}
+        onchange={(value) => setFilter(name, value)}
+      />
     {/each}
   </form>
 </header>
@@ -297,7 +385,12 @@
       onchange={(value) => creating && (creating.priority = value as TaskPriority)}
     />
     <span class="label">Description</span>
-    <MarkdownEditor value={creating.body} label="Description Markdown" readonly={false} onchange={(value) => creating && (creating.body = value)} />
+    <MarkdownEditor
+      value={creating.body}
+      label="Description Markdown"
+      readonly={false}
+      onchange={(value) => creating && (creating.body = value)}
+    />
     <div class="buttons">
       <Button type="submit" variant="primary" label="Create" busy={createBusy} disabled={createBusy} />
       <Button label="Cancel" variant="ghost" disabled={createBusy} onclick={() => (creating = null)} />
@@ -316,12 +409,21 @@
   </Feedback>
 {/if}
 {#if actionFailure !== null}
-  <Feedback {...failureNotice(actionFailure.failure, `Could not ${ACTION_LABELS[actionFailure.action].toLowerCase()} ${actionFailure.title}`)} />
+  <Feedback
+    {...failureNotice(
+      actionFailure.failure,
+      `Could not ${ACTION_LABELS[actionFailure.action].toLowerCase()} ${actionFailure.title}`,
+    )}
+  />
 {/if}
 {#each actionWarnings as warning, index (index)}
   <Feedback tone="warning" title="The change is saved, with a warning" message={`${warning.message} (${warning.code})`}>
     {#snippet actions()}
-      <Button label="Dismiss" variant="ghost" onclick={() => (actionWarnings = actionWarnings.filter((_, other) => other !== index))} />
+      <Button
+        label="Dismiss"
+        variant="ghost"
+        onclick={() => (actionWarnings = actionWarnings.filter((_, other) => other !== index))}
+      />
     {/snippet}
   </Feedback>
 {/each}
@@ -335,32 +437,109 @@
 {:else if list === null}
   <p class="loading" role="status">Loading tasks…</p>
 {:else if list.items.length === 0}
-  <EmptyState title="No tasks yet" message="Tasks appear here once you create one with New task or arcl task create, or apply a plan." />
+  <EmptyState
+    title="No tasks yet"
+    message="Tasks appear here once you create one with New task or arcl task create, or apply a plan."
+  />
 {:else if order.length === 0}
   <EmptyState title="No tasks match these filters" message="Change or clear the filters to see more tasks.">
     {#snippet actions()}
-      <Button label="Clear filters" onclick={() => showFilters({ status: [], readiness: [], priority: [], milestone: [] })} />
+      <Button
+        label="Clear filters"
+        onclick={() => showFilters({ status: [], readiness: [], priority: [], milestone: [] })}
+      />
     {/snippet}
   </EmptyState>
 {:else if view === "board"}
-  <WorkBoard bind:this={board} {columns} selectedId={selected} busyId={movingId} locked={actionBusy} onselect={(id) => (selectedId = id)} onmove={move} onrefuse={refuse} />
+  <WorkBoard
+    bind:this={board}
+    {columns}
+    selectedId={selected}
+    busyId={movingId}
+    locked={actionBusy}
+    onselect={(id) => (selectedId = id)}
+    onmove={move}
+    onrefuse={refuse}
+  />
 {:else}
   <TaskList {groups} href={taskHref} selectedId={selected} onselect={(id) => (selectedId = id)} label="Work" />
 {/if}
 
 <style>
-  header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: var(--arcl-space-4); margin-bottom: var(--arcl-space-4); }
-  .title { display: flex; align-items: center; gap: var(--arcl-space-3); }
-  .create { display: grid; gap: var(--arcl-space-3); max-width: 48rem; margin-bottom: var(--arcl-space-5); padding: var(--arcl-space-4); border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-md); background: var(--arcl-surface); }
-  .create h2 { margin: 0; color: var(--arcl-heading); font: 600 var(--arcl-type-base) / 1.3 var(--arcl-font-ui); }
-  .label { color: var(--arcl-text-muted); font: 600 var(--arcl-type-sm) / 1.3 var(--arcl-font-ui); }
-  .buttons { display: flex; gap: var(--arcl-space-2); }
-  h1 { margin: 0; color: var(--arcl-heading); font: 650 var(--arcl-type-xl) / 1.2 var(--arcl-font-ui); }
-  .layout { display: inline-flex; overflow: hidden; border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-control); }
-  .layout button { min-height: 2.25rem; padding-inline: var(--arcl-space-3); border: 0; color: var(--arcl-text-muted); background: var(--arcl-surface); font: 600 var(--arcl-type-sm) var(--arcl-font-ui); cursor: pointer; }
-  .layout button + button { border-inline-start: var(--arcl-border-width) solid var(--arcl-border); }
-  .layout button:hover { background: var(--arcl-surface-hover); }
-  .layout button[aria-pressed="true"] { color: var(--arcl-heading); background: var(--arcl-surface-subtle); box-shadow: inset 0 -2px 0 var(--arcl-link); }
-  .filters { display: flex; flex-wrap: wrap; gap: var(--arcl-space-3); font-size: var(--arcl-type-sm); }
-  .loading { color: var(--arcl-text-muted); }
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    justify-content: space-between;
+    gap: var(--arcl-space-4);
+    margin-bottom: var(--arcl-space-4);
+  }
+  .title {
+    display: flex;
+    align-items: center;
+    gap: var(--arcl-space-3);
+  }
+  .create {
+    display: grid;
+    gap: var(--arcl-space-3);
+    max-width: 48rem;
+    margin-bottom: var(--arcl-space-5);
+    padding: var(--arcl-space-4);
+    border: var(--arcl-border-width) solid var(--arcl-border);
+    border-radius: var(--arcl-radius-md);
+    background: var(--arcl-surface);
+  }
+  .create h2 {
+    margin: 0;
+    color: var(--arcl-heading);
+    font: 600 var(--arcl-type-base) / 1.3 var(--arcl-font-ui);
+  }
+  .label {
+    color: var(--arcl-text-muted);
+    font: 600 var(--arcl-type-sm) / 1.3 var(--arcl-font-ui);
+  }
+  .buttons {
+    display: flex;
+    gap: var(--arcl-space-2);
+  }
+  h1 {
+    margin: 0;
+    color: var(--arcl-heading);
+    font: 650 var(--arcl-type-xl) / 1.2 var(--arcl-font-ui);
+  }
+  .layout {
+    display: inline-flex;
+    overflow: hidden;
+    border: var(--arcl-border-width) solid var(--arcl-border);
+    border-radius: var(--arcl-radius-control);
+  }
+  .layout button {
+    min-height: 2.25rem;
+    padding-inline: var(--arcl-space-3);
+    border: 0;
+    color: var(--arcl-text-muted);
+    background: var(--arcl-surface);
+    font: 600 var(--arcl-type-sm) var(--arcl-font-ui);
+    cursor: pointer;
+  }
+  .layout button + button {
+    border-inline-start: var(--arcl-border-width) solid var(--arcl-border);
+  }
+  .layout button:hover {
+    background: var(--arcl-surface-hover);
+  }
+  .layout button[aria-pressed="true"] {
+    color: var(--arcl-heading);
+    background: var(--arcl-surface-subtle);
+    box-shadow: inset 0 -2px 0 var(--arcl-link);
+  }
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--arcl-space-3);
+    font-size: var(--arcl-type-sm);
+  }
+  .loading {
+    color: var(--arcl-text-muted);
+  }
 </style>

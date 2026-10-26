@@ -36,7 +36,9 @@
   {type}
 >
   {#if busy}<span class="arcl-button__spinner" aria-hidden="true"></span>{/if}
-  <span>{#if children}{@render children()}{:else}{label}{/if}</span>
+  <span
+    >{#if children}{@render children()}{:else}{label}{/if}</span
+  >
 </button>
 
 <style>
@@ -60,13 +62,34 @@
       transform var(--arcl-duration-fast) var(--arcl-ease-out);
   }
 
-  .arcl-button:hover:not(:disabled) { background: var(--arcl-surface-hover); }
-  .arcl-button:active:not(:disabled) { transform: scale(0.98); }
-  .arcl-button:disabled { opacity: 0.58; cursor: not-allowed; }
-  .arcl-button[data-variant="primary"] { color: var(--arcl-on-accent); background: var(--arcl-accent); border-color: var(--arcl-accent); }
-  .arcl-button[data-variant="primary"]:hover:not(:disabled) { background: var(--arcl-accent-hover); }
-  .arcl-button[data-variant="ghost"] { border-color: transparent; background: transparent; box-shadow: none; }
-  .arcl-button[data-variant="danger"] { color: white; background: var(--arcl-danger); border-color: var(--arcl-danger); }
+  .arcl-button:hover:not(:disabled) {
+    background: var(--arcl-surface-hover);
+  }
+  .arcl-button:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+  .arcl-button:disabled {
+    opacity: 0.58;
+    cursor: not-allowed;
+  }
+  .arcl-button[data-variant="primary"] {
+    color: var(--arcl-on-accent);
+    background: var(--arcl-accent);
+    border-color: var(--arcl-accent);
+  }
+  .arcl-button[data-variant="primary"]:hover:not(:disabled) {
+    background: var(--arcl-accent-hover);
+  }
+  .arcl-button[data-variant="ghost"] {
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+  }
+  .arcl-button[data-variant="danger"] {
+    color: white;
+    background: var(--arcl-danger);
+    border-color: var(--arcl-danger);
+  }
 
   .arcl-button__spinner {
     width: 1rem;
@@ -77,5 +100,9 @@
     animation: spin 700ms linear infinite;
   }
 
-  @keyframes spin { to { transform: rotate(1turn); } }
+  @keyframes spin {
+    to {
+      transform: rotate(1turn);
+    }
+  }
 </style>

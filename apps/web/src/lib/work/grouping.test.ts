@@ -28,7 +28,10 @@ describe("groupWork", () => {
 
   it("orders milestones by plan before position", () => {
     const later: Milestone = { id: "ph-1", plan_id: "pl-2", title: "Later plan", status: "open", position: 1 };
-    const list = { milestones: [later, web, agents], items: [ready("t-1", later), ready("t-2", web), ready("t-3", agents)] };
+    const list = {
+      milestones: [later, web, agents],
+      items: [ready("t-1", later), ready("t-2", web), ready("t-3", agents)],
+    };
     expect(groupWork(list, none).map((group) => group.id)).toEqual(["ph-5", "ph-10", "ph-1"]);
   });
 
@@ -84,7 +87,11 @@ describe("glyphOf", () => {
 describe("describeReason", () => {
   it("names a milestone by title", () => {
     const list = { milestones: [web], items: [closed("t-1", "parked", web)] };
-    list.items[0].readiness.reasons.push({ kind: "closed_container", message: "phase `ph-10` is `completed`", container: "ph-10" });
+    list.items[0].readiness.reasons.push({
+      kind: "closed_container",
+      message: "phase `ph-10` is `completed`",
+      container: "ph-10",
+    });
     expect(groupWork(list, none)[0].sections[0].rows[0].reasons).toEqual([
       "task status is parked",
       "phase Milestone 7: Local web app is completed",

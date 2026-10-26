@@ -10,13 +10,17 @@ const SURFACES = ["canvas", "surface", "surface-subtle", "surface-hover"];
 
 /** Each `[foreground, background, minimum]` pair the components draw. */
 const PAIRS: [string, string, number][] = [
-  ...["text", "text-muted", "heading", "link"].flatMap((fg) => SURFACES.map((bg): [string, string, number] => [fg, bg, TEXT])),
+  ...["text", "text-muted", "heading", "link"].flatMap((fg) =>
+    SURFACES.map((bg): [string, string, number] => [fg, bg, TEXT]),
+  ),
   ["on-accent", "accent", TEXT],
   ["on-accent", "accent-hover", TEXT],
   ...["info", "success", "warning", "danger"].flatMap((tone) =>
     [`${tone}-surface`, "surface", "canvas"].map((bg): [string, string, number] => [tone, bg, TEXT]),
   ),
-  ...["border", "border-strong", "focus", "accent"].flatMap((fg) => SURFACES.map((bg): [string, string, number] => [fg, bg, UI])),
+  ...["border", "border-strong", "focus", "accent"].flatMap((fg) =>
+    SURFACES.map((bg): [string, string, number] => [fg, bg, UI]),
+  ),
 ];
 
 const css = readFileSync(new URL("./tokens.css", import.meta.url), "utf8");
@@ -27,7 +31,9 @@ function block(selector: string): Record<string, string> {
   if (start < 0) throw new Error(`tokens.css has no ${selector}`);
   const open = css.indexOf("{", start + selector.length);
   const body = css.slice(open + 1, css.indexOf("}", open));
-  return Object.fromEntries([...body.matchAll(/--arcl-([a-z-]+):\s*([^;]+);/g)].map(([, name, value]) => [name, value.trim()]));
+  return Object.fromEntries(
+    [...body.matchAll(/--arcl-([a-z-]+):\s*([^;]+);/g)].map(([, name, value]) => [name, value.trim()]),
+  );
 }
 
 /** The relative luminance of a `#rrggbb` color. */

@@ -49,7 +49,11 @@ function inputHash(name) {
 /** Run `command`, and resolve with its exit code and output, which shows once it ends. */
 function run(command, args, options = {}) {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { cwd: WEB, env: { ...process.env, ...options.env }, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, {
+      cwd: WEB,
+      env: { ...process.env, ...options.env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let output = "";
     child.stdout.on("data", (chunk) => (output += chunk));
     child.stderr.on("data", (chunk) => (output += chunk));
@@ -63,7 +67,9 @@ function run(command, args, options = {}) {
 const names = process.argv.slice(2);
 const unknown = names.filter((name) => name !== "arcl" && !(name in BUILDS));
 if (names.length === 0 || unknown.length) {
-  console.error(`usage: e2e-build.mjs web|artifact|arcl...${unknown.length ? ` (unknown: ${unknown.join(", ")})` : ""}`);
+  console.error(
+    `usage: e2e-build.mjs web|artifact|arcl...${unknown.length ? ` (unknown: ${unknown.join(", ")})` : ""}`,
+  );
   process.exit(2);
 }
 
@@ -81,10 +87,17 @@ if (stale.length) {
   // `.svelte-kit/tsconfig.json`, which `tsconfig.json` extends. The artifact
   // build syncs only `.svelte-kit/artifact/`, and two builds that each synced
   // would write the same files at once.
-  for (const args of [["--filter", "@arclightning/ui", "exec", "svelte-kit", "sync"], ["exec", "svelte-kit", "sync"]]) {
+  for (const args of [
+    ["--filter", "@arclightning/ui", "exec", "svelte-kit", "sync"],
+    ["exec", "svelte-kit", "sync"],
+  ]) {
     if ((await run("pnpm", args)) !== 0) process.exit(1);
   }
-  const codes = await Promise.all(stale.map(({ name }) => run("pnpm", ["exec", "vite", "build"], { env: { VITE_ARCL_TARGET: BUILDS[name].target ?? "" } })));
+  const codes = await Promise.all(
+    stale.map(({ name }) =>
+      run("pnpm", ["exec", "vite", "build"], { env: { VITE_ARCL_TARGET: BUILDS[name].target ?? "" } }),
+    ),
+  );
   if (codes.some((code) => code !== 0)) process.exit(1);
   for (const { stamp, hash } of stale) writeFileSync(stamp, hash);
 }

@@ -5,7 +5,9 @@ import { closedRecords, describeProgress, planningView, planTemplate, visibleRow
 describe("planningView", () => {
   it("lists each spec's plans and each plan's milestones in tree order", () => {
     const specs = planningView(planning());
-    expect(specs.map((spec) => [spec.id, spec.plans.map((plan) => [plan.id, plan.milestones.map((row) => row.id)])])).toEqual([
+    expect(
+      specs.map((spec) => [spec.id, spec.plans.map((plan) => [plan.id, plan.milestones.map((row) => row.id)])]),
+    ).toEqual([
       ["s-1", [["pl-1", ["ph-1", "ph-2"]]]],
       ["s-2", [["pl-2", []]]],
       ["s-3", []],

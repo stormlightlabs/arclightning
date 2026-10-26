@@ -48,9 +48,19 @@ describe("menuGroups", () => {
     const groups = menuGroups(input({ query: "st" }));
     expect(groups.map((group) => group.label)).toEqual(["Actions on T2: Add capture", "Tasks"]);
     expect(groups[0].items.map((item) => item.label)).toEqual(["Start"]);
-    expect(groups[1].items).toEqual([{ id: `${TASK_RESULT_PREFIX}t-1`, label: "T1: Start the server", detail: "Completed", icon: "task" }]);
-    expect(menuGroups(input({ query: "add CAPTURE" })).at(-1)?.items.map((item) => item.label)).toEqual(["T2: Add capture"]);
-    expect(menuGroups(input({ query: "t-2" })).at(-1)?.items.map((item) => item.id)).toEqual([`${TASK_RESULT_PREFIX}t-2`]);
+    expect(groups[1].items).toEqual([
+      { id: `${TASK_RESULT_PREFIX}t-1`, label: "T1: Start the server", detail: "Completed", icon: "task" },
+    ]);
+    expect(
+      menuGroups(input({ query: "add CAPTURE" }))
+        .at(-1)
+        ?.items.map((item) => item.label),
+    ).toEqual(["T2: Add capture"]);
+    expect(
+      menuGroups(input({ query: "t-2" }))
+        .at(-1)
+        ?.items.map((item) => item.id),
+    ).toEqual([`${TASK_RESULT_PREFIX}t-2`]);
   });
 
   it("lists no tasks until the query has text", () => {
@@ -59,14 +69,23 @@ describe("menuGroups", () => {
   });
 
   it("names ⌘ on macOS", () => {
-    expect(menuGroups(input({ mac: true, commands: [{ id: "x", label: "X", scope: "global", keys: ["Mod", "k"], run }] }))[0].items[0].keys).toEqual(["⌘", "K"]);
+    expect(
+      menuGroups(input({ mac: true, commands: [{ id: "x", label: "X", scope: "global", keys: ["Mod", "k"], run }] }))[0]
+        .items[0].keys,
+    ).toEqual(["⌘", "K"]);
   });
 });
 
 describe("boundCommands", () => {
   it("binds shortcuts the view does not answer itself, the selection's only with a selection", () => {
     const ids = (context: MenuInput["context"]) => boundCommands(commands, context).map((command) => command.id);
-    expect(ids({ id: "t-2", label: "T2" })).toEqual(["global:capture", "global:go-w", "work:new", "work:start", "work:park"]);
+    expect(ids({ id: "t-2", label: "T2" })).toEqual([
+      "global:capture",
+      "global:go-w",
+      "work:new",
+      "work:start",
+      "work:park",
+    ]);
     expect(ids(null)).toEqual(["global:capture", "global:go-w", "work:new"]);
   });
 });
@@ -74,7 +93,9 @@ describe("boundCommands", () => {
 describe("shortcuts", () => {
   it("finds two commands that share keys", () => {
     expect(clashes(commands)).toEqual([]);
-    expect(clashes([...commands, { id: "x", label: "Something", scope: "view", keys: ["q"], run }])).toEqual(["q → Quick capture, Something"]);
+    expect(clashes([...commands, { id: "x", label: "Something", scope: "view", keys: ["q"], run }])).toEqual([
+      "q → Quick capture, Something",
+    ]);
   });
 
   it("gives each task action its own key, apart from the app's other keys", () => {

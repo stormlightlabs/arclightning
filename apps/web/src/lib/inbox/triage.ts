@@ -66,11 +66,15 @@ export function formFor(to: PromotionTarget, title: string, tasks: TaskSummary[]
   const parent = parsed.tokens.findLast((token) => token.kind === "parent");
   for (const token of parsed.tokens) {
     if (token.kind === "priority") form.priority = token.priority;
-    else if (token.kind === "blocker") form.notes.push(`\`${token.text}\` is not set: add the blocker after promoting, with arcl dependency add.`);
+    else if (token.kind === "blocker")
+      form.notes.push(`\`${token.text}\` is not set: add the blocker after promoting, with arcl dependency add.`);
     else if (token === parent) {
       const found = resolveRef(token.ref, tasks);
       if (typeof found === "string") form.parent = found;
-      else form.notes.push(`\`${token.text}\` ${found.problem === "missing" ? "names no task" : "names more than one task"}, so no parent is set.`);
+      else
+        form.notes.push(
+          `\`${token.text}\` ${found.problem === "missing" ? "names no task" : "names more than one task"}, so no parent is set.`,
+        );
     }
   }
   return form;
@@ -86,7 +90,9 @@ export function promotionOf(form: PromotionForm): CapturePromotion {
       return promotion;
     }
     case "spec":
-      return form.acceptance.trim() === "" ? { to: "spec", title: form.title } : { to: "spec", title: form.title, acceptance_criteria: form.acceptance };
+      return form.acceptance.trim() === ""
+        ? { to: "spec", title: form.title }
+        : { to: "spec", title: form.title, acceptance_criteria: form.acceptance };
     case "note":
       return { to: "note", title: form.title };
   }

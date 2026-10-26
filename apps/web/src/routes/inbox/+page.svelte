@@ -1,5 +1,15 @@
 <script lang="ts">
-  import { Button, DataTable, Dialog, EmptyState, Feedback, Markdown, type DataTableColumn, type IconName, type SelectOption } from "@arclightning/ui";
+  import {
+    Button,
+    DataTable,
+    Dialog,
+    EmptyState,
+    Feedback,
+    Markdown,
+    type DataTableColumn,
+    type IconName,
+    type SelectOption,
+  } from "@arclightning/ui";
   import { onMount, tick, untrack } from "svelte";
   import { formatKeys, useCommands, type Command } from "$lib/commands";
   import {
@@ -69,7 +79,11 @@
   let pane = $state<HTMLElement>();
 
   let phases = $derived<SelectOption[]>(
-    work ? orderMilestones(work).filter((phase) => phase.status === "open").map((phase) => ({ value: phase.id, label: phase.title })) : [],
+    work
+      ? orderMilestones(work)
+          .filter((phase) => phase.status === "open")
+          .map((phase) => ({ value: phase.id, label: phase.title }))
+      : [],
   );
   let parents = $derived<SelectOption[]>(
     work
@@ -118,18 +132,32 @@
     commands: [
       ...(selectedCapture === null || busy
         ? []
-        : ACTIONS.map(
-            (action): Command => ({
-              id: `inbox:${action}`,
-              label: TRIAGE_LABELS[action],
-              scope: "selection",
-              keys: [TRIAGE_KEYS[action]],
-              icon: ICONS[action],
-              run: () => triage(action),
-            }),
-          )),
-      { id: "inbox:next", label: "Select the next capture", scope: "view", group: "Inbox", keys: ["j"], viewKeys: true, run: () => move(1) },
-      { id: "inbox:previous", label: "Select the previous capture", scope: "view", group: "Inbox", keys: ["k"], viewKeys: true, run: () => move(-1) },
+        : ACTIONS.map((action): Command => ({
+            id: `inbox:${action}`,
+            label: TRIAGE_LABELS[action],
+            scope: "selection",
+            keys: [TRIAGE_KEYS[action]],
+            icon: ICONS[action],
+            run: () => triage(action),
+          }))),
+      {
+        id: "inbox:next",
+        label: "Select the next capture",
+        scope: "view",
+        group: "Inbox",
+        keys: ["j"],
+        viewKeys: true,
+        run: () => move(1),
+      },
+      {
+        id: "inbox:previous",
+        label: "Select the previous capture",
+        scope: "view",
+        group: "Inbox",
+        keys: ["k"],
+        viewKeys: true,
+        run: () => move(-1),
+      },
     ],
   }));
 
@@ -270,9 +298,17 @@
   function promotedNotice(capture: CaptureSummary, made: Promoted) {
     switch (made.kind) {
       case "task":
-        return { text: `Promoted “${capture.title}” to the task “${made.title}”.`, href: taskHref(made.id), label: "Open task" };
+        return {
+          text: `Promoted “${capture.title}” to the task “${made.title}”.`,
+          href: taskHref(made.id),
+          label: "Open task",
+        };
       case "spec":
-        return { text: `Promoted “${capture.title}” to the spec “${made.title}”.`, href: appHref("/planning"), label: "Open Planning" };
+        return {
+          text: `Promoted “${capture.title}” to the spec “${made.title}”.`,
+          href: appHref("/planning"),
+          label: "Open Planning",
+        };
       case "note":
         return { text: `Made the note “${made.title}” (${made.id}) from “${capture.title}”.` };
     }
@@ -305,7 +341,9 @@
 
 <header>
   <h1>Inbox</h1>
-  {#if captures !== null}<span class="count">{captures.length === 1 ? "1 open capture" : `${captures.length} open captures`}</span>{/if}
+  {#if captures !== null}<span class="count"
+      >{captures.length === 1 ? "1 open capture" : `${captures.length} open captures`}</span
+    >{/if}
 </header>
 
 {#if notice !== null}
@@ -324,7 +362,11 @@
 {#each warnings as warning, index (index)}
   <Feedback tone="warning" title="The change is saved, with a warning" message={`${warning.message} (${warning.code})`}>
     {#snippet actions()}
-      <Button label="Dismiss" variant="ghost" onclick={() => (warnings = warnings.filter((_, other) => other !== index))} />
+      <Button
+        label="Dismiss"
+        variant="ghost"
+        onclick={() => (warnings = warnings.filter((_, other) => other !== index))}
+      />
     {/snippet}
   </Feedback>
 {/each}
@@ -338,11 +380,21 @@
 {:else if captures === null}
   <p class="loading" role="status">Loading captures…</p>
 {:else if captures.length === 0}
-  <EmptyState title="The Inbox is empty" message="Press Q to capture an idea. Captures wait here until you promote or discard them." />
+  <EmptyState
+    title="The Inbox is empty"
+    message="Press Q to capture an idea. Captures wait here until you promote or discard them."
+  />
 {:else}
   <div class="inbox">
     <div class="columns">
-      <DataTable rows={captures} columns={COLUMNS} rowId={(capture) => capture.id} selectedId={selected} onselect={select} label="Captures">
+      <DataTable
+        rows={captures}
+        columns={COLUMNS}
+        rowId={(capture) => capture.id}
+        selectedId={selected}
+        onselect={select}
+        label="Captures"
+      >
         {#snippet cell(capture, column)}
           {@const date = column.id === "created" ? createdAt(capture.id) : null}
           {#if column.id === "title"}
@@ -355,7 +407,9 @@
 
       <section class="triage" aria-label="Triage" bind:this={pane}>
         {#if selectedCapture !== null}
-          <p class="meta">Capture{#if detail !== null && created(detail)}{` · ${created(detail)}`}{/if}</p>
+          <p class="meta">
+            Capture{#if detail !== null && created(detail)}{` · ${created(detail)}`}{/if}
+          </p>
           <h2>{detail?.title ?? selectedCapture.title}</h2>
           {#if detailFailure !== null}
             <Feedback tone="danger" title="Could not load this capture" message={detailFailure}>
@@ -393,7 +447,11 @@
   </div>
 {/if}
 
-<Dialog bind:open={confirming} title="Discard this capture?" description="A discarded capture leaves the Inbox for good.">
+<Dialog
+  bind:open={confirming}
+  title="Discard this capture?"
+  description="A discarded capture leaves the Inbox for good."
+>
   <div class="confirm">
     <p>{selectedCapture?.title}</p>
     <div class="buttons">
@@ -405,26 +463,112 @@
 </Dialog>
 
 <style>
-  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--arcl-space-3); margin-bottom: var(--arcl-space-4); }
-  h1 { margin: 0; color: var(--arcl-heading); font: 650 var(--arcl-type-xl) / 1.2 var(--arcl-font-ui); }
-  .count, .meta, .loading { margin: 0; color: var(--arcl-text-muted); font-size: var(--arcl-type-sm); }
-  .notice { display: flex; flex-wrap: wrap; gap: var(--arcl-space-2); margin: 0 0 var(--arcl-space-4); padding: var(--arcl-space-2) var(--arcl-space-3); border-inline-start: 4px solid var(--arcl-success); border-radius: var(--arcl-radius-sm); background: var(--arcl-success-surface); font-size: var(--arcl-type-sm); }
-  .notice a { color: var(--arcl-link); }
-  /* The list and the selected capture sit side by side when the Inbox is wide enough, and stack when it is not. */
-  .inbox { container-type: inline-size; }
-  .columns { display: grid; grid-template-columns: minmax(0, 1fr); border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-md); background: var(--arcl-surface); }
-  /* The table scrolls inside its own box, so the triage pane stays in view, and rounds with the container's corners. */
-  .columns > :global(.arcl-data-table) { max-height: min(20rem, 45dvh); border-bottom: var(--arcl-border-width) solid var(--arcl-border); border-radius: calc(var(--arcl-radius-md) - var(--arcl-border-width)) calc(var(--arcl-radius-md) - var(--arcl-border-width)) 0 0; }
-  .triage { display: grid; align-content: start; gap: var(--arcl-space-4); min-width: 0; padding: var(--arcl-space-4); }
-  @container (min-width: 40rem) {
-    .columns { grid-template-columns: minmax(0, 3fr) minmax(18rem, 2fr); }
-    .columns > :global(.arcl-data-table) { max-height: calc(100dvh - 10rem); border-bottom: 0; border-radius: calc(var(--arcl-radius-md) - var(--arcl-border-width)) 0 0 calc(var(--arcl-radius-md) - var(--arcl-border-width)); }
-    .triage { padding: var(--arcl-space-5); border-inline-start: var(--arcl-border-width) solid var(--arcl-border); }
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--arcl-space-3);
+    margin-bottom: var(--arcl-space-4);
   }
-  h2 { margin: 0; color: var(--arcl-heading); font: 650 var(--arcl-type-lg) / 1.3 var(--arcl-font-ui); }
-  .actions { display: flex; flex-wrap: wrap; gap: var(--arcl-space-2); }
-  kbd { display: inline-flex; min-width: 1.125rem; height: 1.125rem; align-items: center; justify-content: center; margin-inline-end: var(--arcl-space-1); padding: 0 0.25rem; border: var(--arcl-border-width) solid currentColor; border-radius: 4px; font: 500 var(--arcl-type-xs) / 1 var(--arcl-font-ui); opacity: 0.8; }
-  .confirm { display: grid; gap: var(--arcl-space-4); }
-  .confirm p { margin: 0; font-weight: 600; }
-  .buttons { display: flex; gap: var(--arcl-space-2); }
+  h1 {
+    margin: 0;
+    color: var(--arcl-heading);
+    font: 650 var(--arcl-type-xl) / 1.2 var(--arcl-font-ui);
+  }
+  .count,
+  .meta,
+  .loading {
+    margin: 0;
+    color: var(--arcl-text-muted);
+    font-size: var(--arcl-type-sm);
+  }
+  .notice {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--arcl-space-2);
+    margin: 0 0 var(--arcl-space-4);
+    padding: var(--arcl-space-2) var(--arcl-space-3);
+    border-inline-start: 4px solid var(--arcl-success);
+    border-radius: var(--arcl-radius-sm);
+    background: var(--arcl-success-surface);
+    font-size: var(--arcl-type-sm);
+  }
+  .notice a {
+    color: var(--arcl-link);
+  }
+  /* The list and the selected capture sit side by side when the Inbox is wide enough, and stack when it is not. */
+  .inbox {
+    container-type: inline-size;
+  }
+  .columns {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    border: var(--arcl-border-width) solid var(--arcl-border);
+    border-radius: var(--arcl-radius-md);
+    background: var(--arcl-surface);
+  }
+  /* The table scrolls inside its own box, so the triage pane stays in view, and rounds with the container's corners. */
+  .columns > :global(.arcl-data-table) {
+    max-height: min(20rem, 45dvh);
+    border-bottom: var(--arcl-border-width) solid var(--arcl-border);
+    border-radius: calc(var(--arcl-radius-md) - var(--arcl-border-width))
+      calc(var(--arcl-radius-md) - var(--arcl-border-width)) 0 0;
+  }
+  .triage {
+    display: grid;
+    align-content: start;
+    gap: var(--arcl-space-4);
+    min-width: 0;
+    padding: var(--arcl-space-4);
+  }
+  @container (min-width: 40rem) {
+    .columns {
+      grid-template-columns: minmax(0, 3fr) minmax(18rem, 2fr);
+    }
+    .columns > :global(.arcl-data-table) {
+      max-height: calc(100dvh - 10rem);
+      border-bottom: 0;
+      border-radius: calc(var(--arcl-radius-md) - var(--arcl-border-width)) 0 0
+        calc(var(--arcl-radius-md) - var(--arcl-border-width));
+    }
+    .triage {
+      padding: var(--arcl-space-5);
+      border-inline-start: var(--arcl-border-width) solid var(--arcl-border);
+    }
+  }
+  h2 {
+    margin: 0;
+    color: var(--arcl-heading);
+    font: 650 var(--arcl-type-lg) / 1.3 var(--arcl-font-ui);
+  }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--arcl-space-2);
+  }
+  kbd {
+    display: inline-flex;
+    min-width: 1.125rem;
+    height: 1.125rem;
+    align-items: center;
+    justify-content: center;
+    margin-inline-end: var(--arcl-space-1);
+    padding: 0 0.25rem;
+    border: var(--arcl-border-width) solid currentColor;
+    border-radius: 4px;
+    font: 500 var(--arcl-type-xs) / 1 var(--arcl-font-ui);
+    opacity: 0.8;
+  }
+  .confirm {
+    display: grid;
+    gap: var(--arcl-space-4);
+  }
+  .confirm p {
+    margin: 0;
+    font-weight: 600;
+  }
+  .buttons {
+    display: flex;
+    gap: var(--arcl-space-2);
+  }
 </style>

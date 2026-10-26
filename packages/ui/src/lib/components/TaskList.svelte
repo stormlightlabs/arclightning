@@ -46,7 +46,13 @@
         <TaskGroupHeader level={3} title={section.title} detail={String(section.rows.length)} />
         <ul aria-label={`${group.title}: ${section.title}`}>
           {#each section.rows as row (row.id)}
-            <TaskRow {row} href={href(row.id)} selected={row.id === selectedId} tabbable={row.id === tabbableId} {onselect} />
+            <TaskRow
+              {row}
+              href={href(row.id)}
+              selected={row.id === selectedId}
+              tabbable={row.id === tabbableId}
+              {onselect}
+            />
           {/each}
         </ul>
       {/each}
@@ -55,7 +61,18 @@
 </div>
 
 <style>
-  .arcl-task-list { overflow: visible; border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-md); background: var(--arcl-surface); }
-  section + section { border-top: var(--arcl-border-width) solid var(--arcl-border); }
-  ul { margin: 0; padding: 0; list-style: none; }
+  .arcl-task-list {
+    overflow: visible;
+    border: var(--arcl-border-width) solid var(--arcl-border);
+    border-radius: var(--arcl-radius-md);
+    background: var(--arcl-surface);
+  }
+  section + section {
+    border-top: var(--arcl-border-width) solid var(--arcl-border);
+  }
+  ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
 </style>

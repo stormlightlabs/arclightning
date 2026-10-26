@@ -41,7 +41,14 @@ export function isMac(platform: string): boolean {
  */
 export function opensMenu(event: ShortcutKey, mac: boolean): boolean {
   const modifier = mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
-  return modifier && !event.altKey && !event.repeat && event.key.toLowerCase() === "k" && !event.defaultPrevented && !inField(event.target);
+  return (
+    modifier &&
+    !event.altKey &&
+    !event.repeat &&
+    event.key.toLowerCase() === "k" &&
+    !event.defaultPrevented &&
+    !inField(event.target)
+  );
 }
 
 /**
@@ -70,7 +77,9 @@ export function shortcutStep<T extends Bound>(pending: string[], key: string, co
   const attempt = (sequence: string[]): ShortcutStep<T> | null => {
     const match = commands.find((command) => sameKeys(command.keys, sequence));
     if (match) return { match, pending: [] };
-    const longer = commands.some((command) => command.keys.length > sequence.length && sameKeys(command.keys.slice(0, sequence.length), sequence));
+    const longer = commands.some(
+      (command) => command.keys.length > sequence.length && sameKeys(command.keys.slice(0, sequence.length), sequence),
+    );
     return longer ? { match: null, pending: sequence } : null;
   };
   return (pending.length ? attempt([...pending, key]) : null) ?? attempt([key]) ?? { match: null, pending: [] };
@@ -78,7 +87,13 @@ export function shortcutStep<T extends Bound>(pending: string[], key: string, co
 
 /** `keys` as the menu shows them, with `Mod` as `⌘` on macOS and `Ctrl` elsewhere. */
 export function formatKeys(keys: string[], mac: boolean): string[] {
-  const names: Record<string, string> = { Mod: mac ? "⌘" : "Ctrl", Enter: "↵", Escape: "Esc", Shift: "⇧", Backspace: "⌫" };
+  const names: Record<string, string> = {
+    Mod: mac ? "⌘" : "Ctrl",
+    Enter: "↵",
+    Escape: "Esc",
+    Shift: "⇧",
+    Backspace: "⌫",
+  };
   return keys.map((key) => names[key] ?? (key.length === 1 ? key.toUpperCase() : key));
 }
 

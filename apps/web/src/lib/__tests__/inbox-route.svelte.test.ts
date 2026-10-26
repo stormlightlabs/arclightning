@@ -31,8 +31,14 @@ function source(answers: Partial<DataSource> = {}) {
   const made = fakeSource({
     captures: async () => summaries,
     capture: async (id) => captureOf(id),
-    work: async () => ({ milestones: [], items: [{ task: { ...task, id: "t-18", title: "T18: Serve the web app" }, readiness, milestone: null }] }),
-    promoteCapture: async (_id, input) => ({ value: { kind: input.to, id: `${input.to}-1`, title: input.title ?? "" }, warnings: [] }),
+    work: async () => ({
+      milestones: [],
+      items: [{ task: { ...task, id: "t-18", title: "T18: Serve the web app" }, readiness, milestone: null }],
+    }),
+    promoteCapture: async (_id, input) => ({
+      value: { kind: input.to, id: `${input.to}-1`, title: input.title ?? "" },
+      warnings: [],
+    }),
     discardCapture: async (id) => ({ value: { ...captureOf(id), status: "discarded" }, warnings: [] }),
     ...answers,
   });
@@ -92,14 +98,19 @@ describe("Inbox route", () => {
     await userEvent.keyboard("{End}");
     await expect.element(screen.getByRole("button", { name: "Stray thought" })).toHaveAttribute("aria-current", "true");
     await userEvent.keyboard("{Home}");
-    await expect.element(screen.getByRole("button", { name: summaries[0].title })).toHaveAttribute("aria-current", "true");
+    await expect
+      .element(screen.getByRole("button", { name: summaries[0].title }))
+      .toHaveAttribute("aria-current", "true");
   });
 
   it("counts the Created column's ages on from the current time", async () => {
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     vi.setSystemTime(new Date("2026-10-25T12:00:00Z"));
     const fresh = { id: idAt(Date.now() - 10_000), title: "Fresh idea", status: "captured" as const };
-    source({ captures: async () => [fresh], capture: async () => ({ ...fresh, body: "Body", created_at: new Date().toISOString() }) });
+    source({
+      captures: async () => [fresh],
+      capture: async () => ({ ...fresh, body: "Body", created_at: new Date().toISOString() }),
+    });
     await render(InboxRoute);
     await expect.element(screen.getByRole("cell", { name: "just now" })).toBeVisible();
     vi.advanceTimersByTime(60_000);
@@ -115,9 +126,15 @@ describe("Inbox route", () => {
     await expect.element(title).toHaveFocus();
     await expect.element(screen.getByRole("combobox", { name: /Priority/ })).toHaveTextContent("High");
     await screen.getByRole("button", { name: "Create task" }).click();
-    await expect.element(screen.getByRole("status").filter({ hasText: "Promoted" })).toHaveTextContent("Promoted “Show unblocked tasks !high ^T18” to the task “Show unblocked tasks”.");
+    await expect
+      .element(screen.getByRole("status").filter({ hasText: "Promoted" }))
+      .toHaveTextContent("Promoted “Show unblocked tasks !high ^T18” to the task “Show unblocked tasks”.");
     await expect.element(screen.getByRole("link", { name: "Open task" })).toHaveAttribute("href", "/tasks/task-1");
-    expect(calls).toContainEqual(["promoteCapture", "c-1", { to: "task", title: "Show unblocked tasks", priority: "high", parent: "t-18" }]);
+    expect(calls).toContainEqual([
+      "promoteCapture",
+      "c-1",
+      { to: "task", title: "Show unblocked tasks", priority: "high", parent: "t-18" },
+    ]);
     await expect.element(screen.getByText("2 open captures")).toBeVisible();
     await expect.element(screen.getByText("Body of c-2")).toBeVisible();
   });
@@ -146,12 +163,16 @@ describe("Inbox route", () => {
     const dialog = screen.getByRole("dialog", { name: "Discard this capture?" });
     await expect.element(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "Discard" }).click();
-    await expect.element(screen.getByRole("status").filter({ hasText: "Discarded" })).toHaveTextContent("Discarded “Show unblocked tasks !high ^T18”.");
+    await expect
+      .element(screen.getByRole("status").filter({ hasText: "Discarded" }))
+      .toHaveTextContent("Discarded “Show unblocked tasks !high ^T18”.");
     expect(calls).toContainEqual(["discardCapture", "c-1"]);
   });
 
   it("shows the CLI's refusal next to the form and keeps the capture", async () => {
-    source({ promoteCapture: async () => Promise.reject(new DataError("invalid_request", "task title cannot be empty")) });
+    source({
+      promoteCapture: async () => Promise.reject(new DataError("invalid_request", "task title cannot be empty")),
+    });
     await render(InboxRoute);
     await screen.getByRole("button", { name: "Make a note" }).click();
     await screen.getByRole("button", { name: "Create note" }).click();
@@ -172,7 +193,9 @@ describe("Inbox route", () => {
       ["inbox:note", ["3"]],
       ["inbox:discard", ["Backspace"]],
     ]);
-    registeredCommands().find((command) => command.id === "inbox:spec")?.run();
+    registeredCommands()
+      .find((command) => command.id === "inbox:spec")
+      ?.run();
     await expect.element(screen.getByRole("heading", { level: 3, name: "Promote to spec" })).toBeVisible();
     await userEvent.keyboard("{Escape}");
     await expect.element(screen.getByRole("heading", { level: 3, name: "Promote to spec" })).not.toBeInTheDocument();
@@ -186,7 +209,9 @@ describe("Inbox route", () => {
     source();
     await render(InboxRoute);
     await expect.element(screen.getByText("Body of c-1")).toBeVisible();
-    registeredCommands().find((command) => command.id === `inbox:${action}`)?.run();
+    registeredCommands()
+      .find((command) => command.id === `inbox:${action}`)
+      ?.run();
     const heading = screen.getByRole("heading", { level: 3 });
     await expect.element(heading).toBeVisible();
     const label = heading.element().textContent ?? "";
@@ -197,7 +222,9 @@ describe("Inbox route", () => {
     await expect.element(input).toHaveValue("Edited");
     // Another triage key takes focus back to the form instead of replacing it.
     (document.activeElement as HTMLElement).blur();
-    registeredCommands().find((command) => command.id === other)?.run();
+    registeredCommands()
+      .find((command) => command.id === other)
+      ?.run();
     await expect.element(screen.getByRole("heading", { level: 3 })).toHaveTextContent(label);
     await expect.element(screen.getByRole("textbox", { name: "Title" })).toHaveFocus();
     await expect.element(input).toHaveValue("Edited");
@@ -217,7 +244,9 @@ describe("Inbox route", () => {
     await screen.getByRole("button", { name: "Planned idea" }).click();
     await expect.element(title).toHaveFocus();
     await expect.element(title).toHaveValue("Edited");
-    await expect.element(screen.getByRole("button", { name: summaries[0].title })).toHaveAttribute("aria-current", "true");
+    await expect
+      .element(screen.getByRole("button", { name: summaries[0].title }))
+      .toHaveAttribute("aria-current", "true");
     await expect.element(screen.getByText("Body of c-1")).toBeVisible();
   });
 
@@ -233,7 +262,9 @@ describe("Inbox route", () => {
     // Escape does not close the form whose request is in flight.
     await userEvent.keyboard("{Escape}");
     await expect.element(screen.getByRole("heading", { level: 3, name: "Make a note" })).toBeVisible();
-    await expect.element(screen.getByRole("button", { name: summaries[0].title })).toHaveAttribute("aria-current", "true");
+    await expect
+      .element(screen.getByRole("button", { name: summaries[0].title }))
+      .toHaveAttribute("aria-current", "true");
     reply.resolve({ value: { kind: "note", id: "n-1", title: summaries[0].title }, warnings: [] });
     await expect.element(screen.getByText("2 open captures")).toBeVisible();
     await expect.element(screen.getByRole("button", { name: "Planned idea" })).toHaveAttribute("aria-current", "true");
@@ -251,7 +282,9 @@ describe("Inbox route", () => {
     reply.reject(new DataError("unavailable", "the server stopped"));
     const message = screen.getByText("the server stopped (unavailable)");
     await expect.element(message).toBeVisible();
-    await expect.element(screen.getByRole("button", { name: summaries[0].title })).toHaveAttribute("aria-current", "true");
+    await expect
+      .element(screen.getByRole("button", { name: summaries[0].title }))
+      .toHaveAttribute("aria-current", "true");
     await userEvent.keyboard("j");
     await expect.element(screen.getByText("Body of c-2")).toBeVisible();
     await expect.element(message).not.toBeInTheDocument();
@@ -276,7 +309,9 @@ describe("Inbox route", () => {
       await screen.getByRole("button", { name: "Discard", exact: true }).click();
       await screen.getByRole("dialog").getByRole("button", { name: "Discard" }).click();
     }
-    await expect.element(screen.getByText(`changed elsewhere: capture \`c-1\` is not open (${code})`, { exact: false })).toBeVisible();
+    await expect
+      .element(screen.getByText(`changed elsewhere: capture \`c-1\` is not open (${code})`, { exact: false }))
+      .toBeVisible();
     await expect.element(screen.getByText("2 open captures")).toBeVisible();
     await expect.element(screen.getByText("Body of c-2")).toBeVisible();
     expect(calls.filter(([name]) => name === "captures")).toHaveLength(2);
@@ -305,7 +340,11 @@ describe("Inbox route", () => {
 });
 
 describe("Inbox layout", () => {
-  const many: CaptureSummary[] = Array.from({ length: 40 }, (_, index) => ({ id: `c-${index + 1}`, title: `Capture number ${index + 1} with a title long enough to need truncating in its cell`, status: "captured" }));
+  const many: CaptureSummary[] = Array.from({ length: 40 }, (_, index) => ({
+    id: `c-${index + 1}`,
+    title: `Capture number ${index + 1} with a title long enough to need truncating in its cell`,
+    status: "captured",
+  }));
 
   function layout() {
     const box = (element: Element) => element.getBoundingClientRect();
@@ -316,7 +355,16 @@ describe("Inbox layout", () => {
   }
 
   beforeEach(() => {
-    source({ captures: async () => many, capture: async (id) => ({ id, title: `Title of ${id}`, status: "captured", body: "", created_at: "2026-10-23T03:51:43Z" }) });
+    source({
+      captures: async () => many,
+      capture: async (id) => ({
+        id,
+        title: `Title of ${id}`,
+        status: "captured",
+        body: "",
+        created_at: "2026-10-23T03:51:43Z",
+      }),
+    });
   });
   afterEach(() => screen.viewport(1024, 768));
 
@@ -337,7 +385,10 @@ describe("Inbox layout", () => {
     // j moves the selection down the table and keeps its row in view.
     for (let step = 0; step < 30; step++) await userEvent.keyboard("j");
     await expect.element(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Title of c-31");
-    const row = screen.getByRole("button", { name: /^Capture number 31 / }).element().getBoundingClientRect();
+    const row = screen
+      .getByRole("button", { name: /^Capture number 31 / })
+      .element()
+      .getBoundingClientRect();
     expect(row.top).toBeGreaterThanOrEqual(table.top);
     expect(row.bottom).toBeLessThanOrEqual(table.bottom + 1);
   });

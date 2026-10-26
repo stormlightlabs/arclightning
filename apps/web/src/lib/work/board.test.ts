@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { BOARD_STATUSES, VIEW_STORAGE_KEY, boardColumns, boardOrder, moveAction, moveTargets, refusal, rememberView, viewOf, writeView } from "./board";
+import {
+  BOARD_STATUSES,
+  VIEW_STORAGE_KEY,
+  boardColumns,
+  boardOrder,
+  moveAction,
+  moveTargets,
+  refusal,
+  rememberView,
+  viewOf,
+  writeView,
+} from "./board";
 import { sampleList } from "./fixtures";
 import type { WorkFilters } from "./filters";
 
@@ -8,7 +19,11 @@ const none: WorkFilters = { status: [], readiness: [], priority: [], milestone: 
 /** A stand-in for local storage. */
 function memory(initial: Record<string, string> = {}) {
   const values = new Map(Object.entries(initial));
-  return { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => void values.set(key, value), values };
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => void values.set(key, value),
+    values,
+  };
 }
 
 describe("boardColumns", () => {
@@ -26,13 +41,27 @@ describe("boardColumns", () => {
 
   it("puts readiness, priority and the reasons with titles on each card", () => {
     const pending = boardColumns(sampleList(), none)[0].cards;
-    expect(pending.find((card) => card.id === "t-3")).toMatchObject({ readiness: "blocked", glyph: "blocked", reasons: ["blocked by Task t-2 (pending)"] });
-    expect(pending.find((card) => card.id === "t-2")).toMatchObject({ readiness: "ready", glyph: "ready", priority: "high" });
+    expect(pending.find((card) => card.id === "t-3")).toMatchObject({
+      readiness: "blocked",
+      glyph: "blocked",
+      reasons: ["blocked by Task t-2 (pending)"],
+    });
+    expect(pending.find((card) => card.id === "t-2")).toMatchObject({
+      readiness: "ready",
+      glyph: "ready",
+      priority: "high",
+    });
   });
 
   it("follows the filters and keeps every column", () => {
     const columns = boardColumns(sampleList(), { ...none, readiness: ["ready"], milestone: ["ph-5"] });
-    expect(columns.map((column) => column.cards.map((card) => card.id))).toEqual([["t-8", "t-7", "t-2"], [], [], [], []]);
+    expect(columns.map((column) => column.cards.map((card) => card.id))).toEqual([
+      ["t-8", "t-7", "t-2"],
+      [],
+      [],
+      [],
+      [],
+    ]);
     expect(columns.map((column) => column.status)).toEqual([...BOARD_STATUSES]);
   });
 });
@@ -60,12 +89,18 @@ describe("moves", () => {
   });
 
   it("says why a move is refused and where the task can go", () => {
-    expect(refusal("parked", "completed")).toBe("No task command moves a task from Parked to Completed. It can move to Pending.");
-    expect(refusal("completed", "pending")).toBe("No task command moves a task from Completed to Pending. A task there does not move.");
+    expect(refusal("parked", "completed")).toBe(
+      "No task command moves a task from Parked to Completed. It can move to Pending.",
+    );
+    expect(refusal("completed", "pending")).toBe(
+      "No task command moves a task from Completed to Pending. A task there does not move.",
+    );
     expect(refusal("pending", "cancelled")).toBe(
       "The web app has no cancel action; run `arcl task cancel` to cancel a task. It can move to In progress or Parked or Completed.",
     );
-    expect(refusal("completed", "cancelled")).toBe("No task command moves a task from Completed to Cancelled. A task there does not move.");
+    expect(refusal("completed", "cancelled")).toBe(
+      "No task command moves a task from Completed to Cancelled. A task there does not move.",
+    );
   });
 });
 

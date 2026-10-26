@@ -3,11 +3,23 @@ import { formatKeys, isMac, opensMenu, shortcutStep, takesShortcut, type Shortcu
 
 /** A stand-in element that matches the selectors in `matching`. */
 function element(...matching: string[]): EventTarget {
-  return { closest: (selector: string) => (matching.some((tag) => selector.split(", ").some((part) => part.startsWith(tag))) ? {} : null) } as unknown as EventTarget;
+  return {
+    closest: (selector: string) =>
+      matching.some((tag) => selector.split(", ").some((part) => part.startsWith(tag))) ? {} : null,
+  } as unknown as EventTarget;
 }
 
 function press(key: string, fields: Partial<ShortcutKey> = {}): ShortcutKey {
-  return { key, altKey: false, ctrlKey: false, metaKey: false, repeat: false, defaultPrevented: false, target: null, ...fields };
+  return {
+    key,
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    repeat: false,
+    defaultPrevented: false,
+    target: null,
+    ...fields,
+  };
 }
 
 const commands = [
@@ -65,14 +77,20 @@ describe("takesShortcut", () => {
 
   it("takes symbols typed with AltGr, or with Option on macOS, but not letters", () => {
     const altGraph = (on: boolean) => (name: string) => name === "AltGraph" && on;
-    expect(takesShortcut(press("[", { ctrlKey: true, altKey: true, getModifierState: altGraph(true) }), false)).toBe(true);
+    expect(takesShortcut(press("[", { ctrlKey: true, altKey: true, getModifierState: altGraph(true) }), false)).toBe(
+      true,
+    );
     expect(takesShortcut(press("[", { ctrlKey: true, altKey: true }), false)).toBe(true);
     expect(takesShortcut(press("[", { altKey: true, getModifierState: altGraph(false) }), true)).toBe(true);
     expect(takesShortcut(press("[", { altKey: true, getModifierState: altGraph(false) }), false)).toBe(false);
-    expect(takesShortcut(press("[", { ctrlKey: true, altKey: true, getModifierState: altGraph(false) }), false)).toBe(false);
+    expect(takesShortcut(press("[", { ctrlKey: true, altKey: true, getModifierState: altGraph(false) }), false)).toBe(
+      false,
+    );
     expect(takesShortcut(press("[", { altKey: true, metaKey: true }), true)).toBe(false);
     expect(takesShortcut(press("[", { ctrlKey: true, getModifierState: altGraph(false) }), false)).toBe(false);
-    expect(takesShortcut(press("q", { ctrlKey: true, altKey: true, getModifierState: altGraph(true) }), false)).toBe(false);
+    expect(takesShortcut(press("q", { ctrlKey: true, altKey: true, getModifierState: altGraph(true) }), false)).toBe(
+      false,
+    );
     expect(takesShortcut(press("q", { altKey: true }), true)).toBe(false);
     expect(takesShortcut(press("Enter", { altKey: true }), true)).toBe(false);
   });
@@ -101,7 +119,15 @@ describe("formatKeys", () => {
   it("names Mod for the platform and capitalizes letters", () => {
     expect(formatKeys(["Mod", "k"], true)).toEqual(["⌘", "K"]);
     expect(formatKeys(["Mod", "k"], false)).toEqual(["Ctrl", "K"]);
-    expect(formatKeys(["g", "w", "Enter", "Escape", "]", "Backspace", "1"], false)).toEqual(["G", "W", "↵", "Esc", "]", "⌫", "1"]);
+    expect(formatKeys(["g", "w", "Enter", "Escape", "]", "Backspace", "1"], false)).toEqual([
+      "G",
+      "W",
+      "↵",
+      "Esc",
+      "]",
+      "⌫",
+      "1",
+    ]);
   });
 
   it("tells macOS by its platform string", () => {

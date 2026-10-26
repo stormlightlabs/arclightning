@@ -81,7 +81,9 @@ export function planningView({ tree, work }: Planning): SpecRow[] {
 export function visibleRows(specs: SpecRow[], collapsed: ReadonlySet<string>): PlanningRow[] {
   return specs.flatMap((spec) => [
     spec,
-    ...(collapsed.has(spec.id) ? [] : spec.plans.flatMap((plan) => [plan, ...(collapsed.has(plan.id) ? [] : plan.milestones)])),
+    ...(collapsed.has(spec.id)
+      ? []
+      : spec.plans.flatMap((plan) => [plan, ...(collapsed.has(plan.id) ? [] : plan.milestones)])),
   ]);
 }
 
@@ -119,7 +121,9 @@ export function planTemplate(): string {
 }
 
 function planRow(plan: TreeNode, readiness: Map<string, Readiness>): PlanRow {
-  const milestones = plan.children.filter((node) => node.kind === "phase").map((phase) => milestoneRow(phase, readiness));
+  const milestones = plan.children
+    .filter((node) => node.kind === "phase")
+    .map((phase) => milestoneRow(phase, readiness));
   const loose = plan.children.filter((node) => node.kind === "task");
   return {
     kind: "plan",
@@ -128,7 +132,10 @@ function planRow(plan: TreeNode, readiness: Map<string, Readiness>): PlanRow {
     status: plan.status,
     milestones,
     tasks: loose.map(treeNode),
-    ...progressOf([...plan.children.filter((node) => node.kind === "phase").flatMap((phase) => phase.children), ...loose]),
+    ...progressOf([
+      ...plan.children.filter((node) => node.kind === "phase").flatMap((phase) => phase.children),
+      ...loose,
+    ]),
   };
 }
 

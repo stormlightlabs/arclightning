@@ -20,8 +20,20 @@ export function task(id: string, fields: Partial<Task> = {}): Task {
 }
 
 // The IDs sort opposite to the positions, so a test that passes on ID order fails.
-export const agents: Milestone = { id: "ph-5", plan_id: "pl-1", title: "Milestone 5: Agent interface", status: "open", position: 5 };
-export const web: Milestone = { id: "ph-10", plan_id: "pl-1", title: "Milestone 7: Local web app", status: "open", position: 7 };
+export const agents: Milestone = {
+  id: "ph-5",
+  plan_id: "pl-1",
+  title: "Milestone 5: Agent interface",
+  status: "open",
+  position: 5,
+};
+export const web: Milestone = {
+  id: "ph-10",
+  plan_id: "pl-1",
+  title: "Milestone 7: Local web app",
+  status: "open",
+  position: 7,
+};
 
 /** A ready, pending task. */
 export function ready(id: string, milestone: Milestone | null, fields: Partial<Task> = {}): WorkItem {
@@ -29,7 +41,12 @@ export function ready(id: string, milestone: Milestone | null, fields: Partial<T
 }
 
 /** A pending task blocked by `blocker`. */
-export function blocked(id: string, blocker: string, milestone: Milestone | null, fields: Partial<Task> = {}): WorkItem {
+export function blocked(
+  id: string,
+  blocker: string,
+  milestone: Milestone | null,
+  fields: Partial<Task> = {},
+): WorkItem {
   return {
     task: task(id, fields),
     readiness: {
@@ -42,10 +59,19 @@ export function blocked(id: string, blocker: string, milestone: Milestone | null
 }
 
 /** A task that is not ready because of its status. */
-export function closed(id: string, status: Task["status"], milestone: Milestone | null, fields: Partial<Task> = {}): WorkItem {
+export function closed(
+  id: string,
+  status: Task["status"],
+  milestone: Milestone | null,
+  fields: Partial<Task> = {},
+): WorkItem {
   return {
     task: task(id, { status, ...fields }),
-    readiness: { ready: false, blocked: false, reasons: [{ kind: "status", message: `task status is \`${status}\``, task: id }] },
+    readiness: {
+      ready: false,
+      blocked: false,
+      reasons: [{ kind: "status", message: `task status is \`${status}\``, task: id }],
+    },
     milestone,
   };
 }

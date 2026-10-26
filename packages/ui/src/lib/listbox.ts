@@ -55,7 +55,13 @@ export interface ListboxStep {
 export function listboxKey(event: ListboxKey, state: ListboxState, options: ListboxOption[]): ListboxStep | null {
   if (event.ctrlKey || event.metaKey) return null;
   const { open, active } = state;
-  const step = (fields: Partial<ListboxStep>): ListboxStep => ({ open, active, commit: false, prevent: true, ...fields });
+  const step = (fields: Partial<ListboxStep>): ListboxStep => ({
+    open,
+    active,
+    commit: false,
+    prevent: true,
+    ...fields,
+  });
   const first = nextEnabled(options, -1, 1);
   const last = nextEnabled(options, options.length, -1);
   const printable = event.key.length === 1 && !event.altKey && (event.key !== " " || state.searching);

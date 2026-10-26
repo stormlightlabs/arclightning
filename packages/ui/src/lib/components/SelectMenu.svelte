@@ -21,7 +21,15 @@
   import { TYPEAHEAD_TIMEOUT, listboxKey, typeahead } from "../listbox";
 
   const generatedId = $props.id();
-  let { id = generatedId, label, options, value = $bindable(""), onchange, disabled = false, placeholder = "" }: SelectMenuProps = $props();
+  let {
+    id = generatedId,
+    label,
+    options,
+    value = $bindable(""),
+    onchange,
+    disabled = false,
+    placeholder = "",
+  }: SelectMenuProps = $props();
 
   let open = $state(false);
   let active = $state(0);
@@ -44,7 +52,8 @@
       const gutter = 8;
       const trigger = root.getBoundingClientRect();
       const width = element.offsetWidth;
-      alignEnd = trigger.left + width > document.documentElement.clientWidth - gutter && trigger.right - width >= gutter;
+      alignEnd =
+        trigger.left + width > document.documentElement.clientWidth - gutter && trigger.right - width >= gutter;
     };
     place();
     // The listbox can change width while open, such as when its options change.
@@ -106,7 +115,11 @@
   }
 </script>
 
-<svelte:window onpointerdown={(event) => { if (open && !root.contains(event.target as Node)) hide(); }} />
+<svelte:window
+  onpointerdown={(event) => {
+    if (open && !root.contains(event.target as Node)) hide();
+  }}
+/>
 
 <div class="arcl-select-menu" bind:this={root}>
   <div
@@ -120,9 +133,13 @@
     aria-haspopup="listbox"
     aria-activedescendant={open && options[active] ? optionId(active) : undefined}
     aria-disabled={disabled || undefined}
-    onclick={() => { if (!disabled) (open ? hide() : show()); }}
+    onclick={() => {
+      if (!disabled) open ? hide() : show();
+    }}
     {onkeydown}
-    onfocusout={(event) => { if (open && !root.contains(event.relatedTarget as Node)) hide(); }}
+    onfocusout={(event) => {
+      if (open && !root.contains(event.relatedTarget as Node)) hide();
+    }}
   >
     <span class="arcl-select-menu__label" id={labelId}>{label}</span>
     <span class="arcl-select-menu__value">{options[selectedIndex]?.label ?? placeholder}</span>
@@ -172,21 +189,106 @@
 </div>
 
 <style>
-  .arcl-select-menu { position: relative; display: inline-block; font-family: var(--arcl-font-ui); font-size: var(--arcl-type-sm); }
-  .arcl-select-menu__trigger { display: inline-flex; min-height: 2rem; align-items: center; gap: var(--arcl-space-2); padding: 0 var(--arcl-space-2) 0 var(--arcl-space-3); border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-control); color: var(--arcl-text); background: var(--arcl-surface); box-shadow: var(--arcl-shadow-control); cursor: pointer; user-select: none; white-space: nowrap; }
-  .arcl-select-menu__trigger:hover { background: var(--arcl-surface-hover); }
-  .arcl-select-menu__trigger[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
-  .arcl-select-menu__label { color: var(--arcl-text-muted); }
-  .arcl-select-menu__value { max-width: 16rem; overflow: hidden; font-weight: 600; text-overflow: ellipsis; }
-  .arcl-select-menu__trigger :global(.arcl-icon) { color: var(--arcl-text-muted); }
-  .arcl-select-menu__listbox { position: absolute; z-index: 20; top: calc(100% + var(--arcl-space-1)); left: 0; display: grid; min-width: max(100%, 12rem); max-width: min(24rem, calc(100vw - 2rem)); max-height: 18rem; overflow-y: auto; padding: var(--arcl-space-1); border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-md); background: var(--arcl-surface); box-shadow: var(--arcl-shadow-overlay); animation: arcl-select-menu-in var(--arcl-duration-fast) var(--arcl-ease-out); }
-  .arcl-select-menu__listbox[data-align="end"] { right: 0; left: auto; }
-  .arcl-select-menu__option { display: flex; min-height: 2rem; align-items: center; justify-content: space-between; gap: var(--arcl-space-3); padding-inline: var(--arcl-space-2); border-radius: var(--arcl-radius-sm); color: var(--arcl-text); cursor: pointer; }
-  .arcl-select-menu__option > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .arcl-select-menu__option[data-active] { background: var(--arcl-surface-hover); box-shadow: inset 2px 0 0 var(--arcl-focus); }
-  .arcl-select-menu__option[aria-selected="true"] { font-weight: 600; }
-  .arcl-select-menu__option[aria-selected="true"] :global(.arcl-icon) { color: var(--arcl-focus); }
-  .arcl-select-menu__option[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
-  @keyframes arcl-select-menu-in { from { opacity: 0; transform: translateY(-0.25rem); } }
-  @media (prefers-reduced-motion: reduce) { .arcl-select-menu__listbox { animation: none; } }
+  .arcl-select-menu {
+    position: relative;
+    display: inline-block;
+    font-family: var(--arcl-font-ui);
+    font-size: var(--arcl-type-sm);
+  }
+  .arcl-select-menu__trigger {
+    display: inline-flex;
+    min-height: 2rem;
+    align-items: center;
+    gap: var(--arcl-space-2);
+    padding: 0 var(--arcl-space-2) 0 var(--arcl-space-3);
+    border: var(--arcl-border-width) solid var(--arcl-border);
+    border-radius: var(--arcl-radius-control);
+    color: var(--arcl-text);
+    background: var(--arcl-surface);
+    box-shadow: var(--arcl-shadow-control);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+  .arcl-select-menu__trigger:hover {
+    background: var(--arcl-surface-hover);
+  }
+  .arcl-select-menu__trigger[aria-disabled="true"] {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .arcl-select-menu__label {
+    color: var(--arcl-text-muted);
+  }
+  .arcl-select-menu__value {
+    max-width: 16rem;
+    overflow: hidden;
+    font-weight: 600;
+    text-overflow: ellipsis;
+  }
+  .arcl-select-menu__trigger :global(.arcl-icon) {
+    color: var(--arcl-text-muted);
+  }
+  .arcl-select-menu__listbox {
+    position: absolute;
+    z-index: 20;
+    top: calc(100% + var(--arcl-space-1));
+    left: 0;
+    display: grid;
+    min-width: max(100%, 12rem);
+    max-width: min(24rem, calc(100vw - 2rem));
+    max-height: 18rem;
+    overflow-y: auto;
+    padding: var(--arcl-space-1);
+    border: var(--arcl-border-width) solid var(--arcl-border);
+    border-radius: var(--arcl-radius-md);
+    background: var(--arcl-surface);
+    box-shadow: var(--arcl-shadow-overlay);
+    animation: arcl-select-menu-in var(--arcl-duration-fast) var(--arcl-ease-out);
+  }
+  .arcl-select-menu__listbox[data-align="end"] {
+    right: 0;
+    left: auto;
+  }
+  .arcl-select-menu__option {
+    display: flex;
+    min-height: 2rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--arcl-space-3);
+    padding-inline: var(--arcl-space-2);
+    border-radius: var(--arcl-radius-sm);
+    color: var(--arcl-text);
+    cursor: pointer;
+  }
+  .arcl-select-menu__option > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .arcl-select-menu__option[data-active] {
+    background: var(--arcl-surface-hover);
+    box-shadow: inset 2px 0 0 var(--arcl-focus);
+  }
+  .arcl-select-menu__option[aria-selected="true"] {
+    font-weight: 600;
+  }
+  .arcl-select-menu__option[aria-selected="true"] :global(.arcl-icon) {
+    color: var(--arcl-focus);
+  }
+  .arcl-select-menu__option[aria-disabled="true"] {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  @keyframes arcl-select-menu-in {
+    from {
+      opacity: 0;
+      transform: translateY(-0.25rem);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .arcl-select-menu__listbox {
+      animation: none;
+    }
+  }
 </style>

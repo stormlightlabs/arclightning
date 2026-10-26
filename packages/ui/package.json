@@ -3,13 +3,17 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "sideEffects": ["**/*.css"],
+  "sideEffects": [
+    "**/*.css"
+  ],
   "scripts": {
     "dev": "storybook dev -p 6006",
     "build": "pnpm icons:generate && svelte-kit sync && svelte-package",
     "build:review": "storybook build",
     "icons:generate": "node scripts/generate-icons.mjs",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "lint": "prettier --check .",
+    "format": "prettier --write .",
     "test": "vitest run --project unit",
     "test:browser": "vitest run --project browser",
     "test:ui": "vitest --project unit --project browser",
@@ -29,7 +33,9 @@
     "./inter.css": "./src/lib/styles/inter.css",
     "./uno.config": "./uno.config.mjs"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "peerDependencies": {
     "svelte": "catalog:"
   },
@@ -64,6 +70,8 @@
     "@sveltejs/vite-plugin-svelte": "catalog:",
     "@vitest/browser-playwright": "catalog:",
     "playwright": "catalog:",
+    "prettier": "catalog:",
+    "prettier-plugin-svelte": "catalog:",
     "svelte": "catalog:",
     "storybook": "^10.5.2",
     "svelte-check": "catalog:",

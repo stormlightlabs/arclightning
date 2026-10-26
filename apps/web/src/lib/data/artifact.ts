@@ -54,7 +54,10 @@ export interface ArtifactDocument {
 /** A query over one collection. */
 export interface ArtifactQuery {
   limit(count: number): ArtifactQuery;
-  onSnapshot(next: (snapshot: { docs: ArtifactSnapshot[] }) => void, error?: (error: ArtifactDbError) => void): () => void;
+  onSnapshot(
+    next: (snapshot: { docs: ArtifactSnapshot[] }) => void,
+    error?: (error: ArtifactDbError) => void,
+  ): () => void;
 }
 
 /** A collection: a query over everything in it, plus its documents. */
@@ -94,7 +97,8 @@ export interface ArtifactOptions {
 }
 
 /** What a queued change's {@link DataError} says. */
-export const QUEUED_MESSAGE = "An agent applies this edit with arcl on the next sync. This page shows the change after that.";
+export const QUEUED_MESSAGE =
+  "An agent applies this edit with arcl on the next sync. This page shows the change after that.";
 
 /** The queued edits {@link ArtifactSource.watch} follows, at most. */
 const QUEUE_LIMIT = 200;
@@ -134,7 +138,10 @@ export function artifactSource(db: ArtifactDb, options: ArtifactOptions = {}): D
 
   /** Read the document at `path`, joining its parts when it is chunked. */
   async function read(path: string, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
-    const snapshot = await abortable(call(() => db.doc(path).get()), signal);
+    const snapshot = await abortable(
+      call(() => db.doc(path).get()),
+      signal,
+    );
     const body = snapshot.exists ? snapshot.data() : undefined;
     if (body === undefined) return null;
     const parts = chunkCount(path, body.chunked);
@@ -159,7 +166,10 @@ export function artifactSource(db: ArtifactDb, options: ArtifactOptions = {}): D
   async function view<T>(path: string, signal?: AbortSignal): Promise<T> {
     const body = await read(path, signal);
     if (body === null || !isRecord(body.data)) {
-      throw new DataError("not_synced", `The artifact has no \`${path}\` yet. Run \`arcl web export\` and copy its documents into the artifact.`);
+      throw new DataError(
+        "not_synced",
+        `The artifact has no \`${path}\` yet. Run \`arcl web export\` and copy its documents into the artifact.`,
+      );
     }
     return body.data as T;
   }
@@ -167,7 +177,8 @@ export function artifactSource(db: ArtifactDb, options: ArtifactOptions = {}): D
   /** The `data` of one record's `arcl show` envelope. */
   async function record<T>(id: string, signal?: AbortSignal): Promise<T> {
     const body = await read(recordPath("records", id), signal);
-    if (body === null || !isRecord(body.data)) throw new DataError("not_found", `No record with the ID \`${id}\` was in the last sync.`);
+    if (body === null || !isRecord(body.data))
+      throw new DataError("not_found", `No record with the ID \`${id}\` was in the last sync.`);
     return body.data as T;
   }
 
@@ -185,19 +196,28 @@ export function artifactSource(db: ArtifactDb, options: ArtifactOptions = {}): D
     // Check the one limit an edit can break, so a refusal after this is about access.
     const size = new TextEncoder().encode(JSON.stringify(entry)).length;
     if (size > MAX_EDIT_BYTES) {
-      throw new DataError("too_large", `The edit is ${Math.ceil(size / 1024)} KiB, over the ${MAX_EDIT_BYTES / 1024} KiB the artifact queues. Make it smaller, or make it with arcl.`);
+      throw new DataError(
+        "too_large",
+        `The edit is ${Math.ceil(size / 1024)} KiB, over the ${MAX_EDIT_BYTES / 1024} KiB the artifact queues. Make it smaller, or make it with arcl.`,
+      );
     }
     await call(() => db.collection("queue").doc().set(entry)).catch((error: unknown) => {
       // The database refuses a write the viewer may not make as `invalid_argument`, with no code of its own.
       if (error instanceof DataError && error.code === "invalid_argument") {
-        throw new DataError("not_allowed", `The artifact did not queue the edit: ${error.message}. Queuing edits needs Contributor access or above.`);
+        throw new DataError(
+          "not_allowed",
+          `The artifact did not queue the edit: ${error.message}. Queuing edits needs Contributor access or above.`,
+        );
       }
       throw error;
     });
     throw new DataError(QUEUED, QUEUED_MESSAGE);
   }
 
-  const queueTask = (op: string) => (id: string, input: object = {}) => queue(op, id, input);
+  const queueTask =
+    (op: string) =>
+    (id: string, input: object = {}) =>
+      queue(op, id, input);
 
   async function work(signal?: AbortSignal) {
     return workOf(await view<Work>("views/work", signal));
@@ -239,7 +259,10 @@ export function artifactSource(db: ArtifactDb, options: ArtifactOptions = {}): D
       const path = recordPath("sources", id);
       const body = await read(path, signal);
       if (body === null || !isRecord(body.data)) {
-        throw new DataError("not_synced", `The artifact has no \`${path}\` yet. Run \`arcl web export\` and copy its documents into the artifact.`);
+        throw new DataError(
+          "not_synced",
+          `The artifact has no \`${path}\` yet. Run \`arcl web export\` and copy its documents into the artifact.`,
+        );
       }
       return body.data as unknown as RecordSource;
     },
@@ -268,7 +291,10 @@ export function artifactSource(db: ArtifactDb, options: ArtifactOptions = {}): D
               if (ended) return;
               const code = isRecord(error) && typeof error.code === "string" ? error.code : "unavailable";
               if (TERMINAL_CODES.has(code)) {
-                status.stopped ??= { code, message: isRecord(error) && typeof error.message === "string" ? error.message : code };
+                status.stopped ??= {
+                  code,
+                  message: isRecord(error) && typeof error.message === "string" ? error.message : code,
+                };
                 report();
                 return;
               }
@@ -320,7 +346,8 @@ export function artifactSource(db: ArtifactDb, options: ArtifactOptions = {}): D
 
 /** The database path of one record's document in `collection`: `records` for its `arcl show` envelope, `sources` for its file. */
 function recordPath(collection: "records" | "sources", id: string): string {
-  if (!/^[A-Za-z0-9_\-.~:@+]+$/.test(id) || id === "." || id === "..") throw new DataError("not_found", `\`${id}\` is not a record ID.`);
+  if (!/^[A-Za-z0-9_\-.~:@+]+$/.test(id) || id === "." || id === "..")
+    throw new DataError("not_found", `\`${id}\` is not a record ID.`);
   return `${collection}/${id}`;
 }
 
@@ -352,7 +379,10 @@ function chunkCount(path: string, header: unknown): number | null {
   if (!isRecord(header)) return null;
   const parts = header.parts;
   if (typeof parts !== "number" || !Number.isInteger(parts) || parts < 1 || parts > MAX_PARTS) {
-    throw new DataError("bad_document", `\`${path}\` is split into ${String(parts)} parts; this page reads 1 to ${MAX_PARTS}. Run \`arcl web export --full\` and sync again.`);
+    throw new DataError(
+      "bad_document",
+      `\`${path}\` is split into ${String(parts)} parts; this page reads 1 to ${MAX_PARTS}. Run \`arcl web export --full\` and sync again.`,
+    );
   }
   return parts;
 }
@@ -389,7 +419,10 @@ export function digest(text: string): string {
 
 /** The error for a chunked document whose parts do not join. */
 function midSync(path: string): DataError {
-  return new DataError("unavailable", `\`${path}\` is changing while an agent syncs the artifact. Try again in a moment.`);
+  return new DataError(
+    "unavailable",
+    `\`${path}\` is changing while an agent syncs the artifact. Try again in a moment.`,
+  );
 }
 
 /**
@@ -399,8 +432,15 @@ function midSync(path: string): DataError {
  */
 function queuedEdit(snapshot: ArtifactSnapshot): QueuedEdit | null {
   const body = snapshot.data();
-  if (!body || typeof body.op !== "string" || (body.status !== "queued" && body.status !== "applying" && body.status !== "failed")) return null;
-  const error = isRecord(body.error) ? { code: String(body.error.code ?? ""), message: String(body.error.message ?? "") } : null;
+  if (
+    !body ||
+    typeof body.op !== "string" ||
+    (body.status !== "queued" && body.status !== "applying" && body.status !== "failed")
+  )
+    return null;
+  const error = isRecord(body.error)
+    ? { code: String(body.error.code ?? ""), message: String(body.error.message ?? "") }
+    : null;
   return {
     id: snapshot.id,
     op: body.op,

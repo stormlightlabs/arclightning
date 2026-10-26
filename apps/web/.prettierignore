@@ -1,0 +1,9 @@
+build/
+build-artifact/
+.svelte-kit/
+node_modules/
+test-results/
+playwright-report/
+e2e/*-snapshots/
+.vitest-attachments/
+src/lib/__tests__/__screenshots__/

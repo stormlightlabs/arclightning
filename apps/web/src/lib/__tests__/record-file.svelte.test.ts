@@ -71,10 +71,14 @@ describe("Raw record file editor", () => {
     expect([...editor.element().querySelectorAll("span")].some((span) => span.textContent === "title")).toBe(true);
     const save = screen.getByRole("button", { name: "Save file" });
     await expect.element(save).toBeDisabled();
-    await type("+++\nid = \"t-10.4\"\ntitle = \"Renamed\"\n+++\n");
+    await type('+++\nid = "t-10.4"\ntitle = "Renamed"\n+++\n');
     await save.click();
     await expect.element(screen.getByRole("textbox", { name: "Record file" })).not.toBeInTheDocument();
-    expect(calls).toContainEqual(["saveRecordSource", "t-10.4", { source: '+++\nid = "t-10.4"\ntitle = "Renamed"\n+++\n', revision: "r1" }]);
+    expect(calls).toContainEqual([
+      "saveRecordSource",
+      "t-10.4",
+      { source: '+++\nid = "t-10.4"\ntitle = "Renamed"\n+++\n', revision: "r1" },
+    ]);
   });
 
   it("shows the CLI's refusal and keeps the edit, with a reload for a stale file", async () => {
@@ -82,7 +86,10 @@ describe("Raw record file editor", () => {
     source({
       saveRecordSource: async () => {
         refusals++;
-        throw new DataError("conflict", "workspace file `tasks/t-10.4.md` changed since it was opened; reload it and make the edit again");
+        throw new DataError(
+          "conflict",
+          "workspace file `tasks/t-10.4.md` changed since it was opened; reload it and make the edit again",
+        );
       },
     });
     await render(TaskRoute);
@@ -105,12 +112,14 @@ describe("Raw record file editor", () => {
     });
     await render(TaskRoute);
     await screen.getByRole("button", { name: "Edit file" }).click();
-    await type("+++\nid = \"t-10.4\"\ntitle = \"Typo\"\n+++\n");
+    await type('+++\nid = "t-10.4"\ntitle = "Typo"\n+++\n');
     await screen.getByRole("button", { name: "Save file" }).click();
     await expect.element(screen.getByText("Queued for the next sync")).toBeVisible();
     await expect.element(screen.getByRole("textbox", { name: "Record file" })).not.toBeInTheDocument();
     await expect.element(screen.getByRole("button", { name: "Edit file" })).toBeDisabled();
-    await expect.element(screen.getByText("An edit to this task waits for the next sync.", { exact: false })).toBeVisible();
+    await expect
+      .element(screen.getByText("An edit to this task waits for the next sync.", { exact: false }))
+      .toBeVisible();
     expect(calls.filter(([name]) => name === "saveRecordSource")).toHaveLength(1);
   });
 
@@ -121,13 +130,20 @@ describe("Raw record file editor", () => {
     await expect.element(screen.getByRole("button", { name: "Edit file" })).toBeDisabled();
     queueHolds(entry("start_task", "t-10.4", "failed"));
     await expect.element(screen.getByRole("button", { name: "Edit file" })).toBeEnabled();
-    await expect.element(screen.getByText("An edit to this task waits for the next sync.", { exact: false })).not.toBeInTheDocument();
+    await expect
+      .element(screen.getByText("An edit to this task waits for the next sync.", { exact: false }))
+      .not.toBeInTheDocument();
   });
 
   it("is not offered by a source that cannot save a file, as in the artifact build", async () => {
     // `fakeSource` offers every method; take the raw file methods away.
     const { source: base } = fakeSource({ task: async () => blockedDetail() });
-    setDataSource(new Proxy(base, { get: (target, key) => (key === "recordSource" || key === "saveRecordSource" ? undefined : Reflect.get(target, key)) }));
+    setDataSource(
+      new Proxy(base, {
+        get: (target, key) =>
+          key === "recordSource" || key === "saveRecordSource" ? undefined : Reflect.get(target, key),
+      }),
+    );
     await render(TaskRoute);
     await expect.element(screen.getByRole("button", { name: "Edit", exact: true })).toBeVisible();
     await expect.element(screen.getByRole("button", { name: "Edit file" })).not.toBeInTheDocument();
@@ -136,7 +152,9 @@ describe("Raw record file editor", () => {
 
 describe("A queued task edit", () => {
   it("closes the Edit task form with the queued notice, so it is not queued twice", async () => {
-    const { calls } = source({ updateTask: () => Promise.reject(new DataError(QUEUED, "An agent applies this edit with arcl on the next sync.")) });
+    const { calls } = source({
+      updateTask: () => Promise.reject(new DataError(QUEUED, "An agent applies this edit with arcl on the next sync.")),
+    });
     await render(TaskRoute);
     await screen.getByRole("button", { name: "Edit", exact: true }).click();
     await screen.getByRole("textbox", { name: "Title" }).fill("Renamed");

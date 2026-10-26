@@ -4,12 +4,18 @@ import { agents, blocked, closed, ready } from "./fixtures";
 
 describe("parseFilters", () => {
   it("takes the first value of each parameter", () => {
-    const filters = parseFilters(new URLSearchParams("status=pending&status=completed&readiness=ready&priority=high&priority=low&milestone=ph-5&milestone=ph-6"));
+    const filters = parseFilters(
+      new URLSearchParams(
+        "status=pending&status=completed&readiness=ready&priority=high&priority=low&milestone=ph-5&milestone=ph-6",
+      ),
+    );
     expect(filters).toEqual({ status: ["pending"], readiness: ["ready"], priority: ["high"], milestone: ["ph-5"] });
   });
 
   it("drops an unknown or empty first value", () => {
-    const filters = parseFilters(new URLSearchParams("status=bogus&status=pending&readiness=&priority=urgent&milestone="));
+    const filters = parseFilters(
+      new URLSearchParams("status=bogus&status=pending&readiness=&priority=urgent&milestone="),
+    );
     expect(filters).toEqual({ status: [], readiness: [], priority: [], milestone: [] });
   });
 });
@@ -17,7 +23,12 @@ describe("parseFilters", () => {
 describe("withKnownMilestone", () => {
   it("drops a milestone the list does not have and keeps the rest", () => {
     const bogus = parseFilters(new URLSearchParams("status=pending&milestone=bogus"));
-    expect(withKnownMilestone(bogus, ["ph-5"])).toEqual({ status: ["pending"], readiness: [], priority: [], milestone: [] });
+    expect(withKnownMilestone(bogus, ["ph-5"])).toEqual({
+      status: ["pending"],
+      readiness: [],
+      priority: [],
+      milestone: [],
+    });
     const known = parseFilters(new URLSearchParams("milestone=ph-5"));
     expect(withKnownMilestone(known, ["ph-5"])).toBe(known);
     const none = parseFilters(new URLSearchParams("milestone=none"));

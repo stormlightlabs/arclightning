@@ -110,7 +110,10 @@ export function blockersOf(detail: TaskDetail): Blockers {
     ...detail.blockers.filter((blocker) => blocker.completed).map((blocker) => ({ blocker, ancestor: null })),
     ...detail.inherited_blockers
       .filter((blocker) => blocker.completed)
-      .map((blocker) => ({ blocker, ancestor: { id: blocker.ancestor, title: titles.get(blocker.ancestor) ?? blocker.ancestor } })),
+      .map((blocker) => ({
+        blocker,
+        ancestor: { id: blocker.ancestor, title: titles.get(blocker.ancestor) ?? blocker.ancestor },
+      })),
   ];
   return { direct: detail.blockers.filter((blocker) => !blocker.completed), inherited: inheritedGroups(detail), done };
 }
@@ -131,7 +134,11 @@ export function propertiesOf(detail: TaskDetail): PropertyItem[] {
     { label: "Priority", value: task.priority, priority: task.priority },
     task.parent_id === null
       ? { label: "Parent", value: null }
-      : { label: "Parent", value: parent?.id === task.parent_id ? parent.title : task.parent_id, href: taskHref(task.parent_id) },
+      : {
+          label: "Parent",
+          value: parent?.id === task.parent_id ? parent.title : task.parent_id,
+          href: taskHref(task.parent_id),
+        },
     { label: "Spec", value: detail.spec?.title ?? null },
     { label: "Plan", value: detail.plan?.title ?? null },
     { label: "Phase", value: detail.phase?.title ?? null },

@@ -41,6 +41,8 @@ describe("surfaces", () => {
     await render(SelectMenu, { label: "Status", options: [{ value: "", label: "Any" }], value: "" });
     expect(getComputedStyle(page.getByRole("combobox", { name: /Status/ }).element()).borderRadius).toBe("6px");
     await render(Badge, { label: "High" });
-    expect(parseFloat(getComputedStyle(page.getByText("High").element().closest(".arcl-badge")!).borderRadius)).toBeGreaterThan(100);
+    expect(
+      parseFloat(getComputedStyle(page.getByText("High").element().closest(".arcl-badge")!).borderRadius),
+    ).toBeGreaterThan(100);
   });
 });

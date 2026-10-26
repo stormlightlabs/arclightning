@@ -19,8 +19,14 @@ vi.mock("$app/navigation", async () => {
 function source(answers: Partial<DataSource> = {}) {
   const made = fakeSource({
     planning: async () => planning(),
-    createSpec: async (input) => ({ value: { id: "s-9", title: input.title, body: "", acceptance_criteria: "", status: "open" }, warnings: [] }),
-    createPlan: async (input) => ({ value: { id: "pl-9", spec_id: input.spec, title: input.title, body: "", status: "open" }, warnings: [] }),
+    createSpec: async (input) => ({
+      value: { id: "s-9", title: input.title, body: "", acceptance_criteria: "", status: "open" },
+      warnings: [],
+    }),
+    createPlan: async (input) => ({
+      value: { id: "pl-9", spec_id: input.spec, title: input.title, body: "", status: "open" },
+      warnings: [],
+    }),
     applyPlan: async (id) => ({
       value: { plan: { id, spec_id: "s-1", title: "plan pl-1", body: "", status: "open" }, phases: [], tasks: [] },
       warnings: [{ code: "workspace_sync", message: "the workspace was not updated" }],
@@ -41,7 +47,9 @@ describe("Planning route", () => {
     await expect.element(first).toHaveTextContent("1 of 4 done");
     await expect.element(first).toHaveTextContent("1 ready · 1 blocked");
     await expect.element(first.getByRole("img", { name: "Open" })).toBeVisible();
-    await expect.element(screen.getByRole("button", { name: /phase ph-2/ }).getByRole("img", { name: "Done" })).toBeVisible();
+    await expect
+      .element(screen.getByRole("button", { name: /phase ph-2/ }).getByRole("img", { name: "Done" }))
+      .toBeVisible();
     await expect.element(screen.getByRole("button", { name: /plan pl-1/ })).toHaveTextContent("Plan · 2 of 6 done");
     // A closed spec starts collapsed; a spec with no plan says so.
     await expect.element(screen.getByRole("button", { name: /spec s-2/ })).toHaveAttribute("aria-expanded", "false");
@@ -96,7 +104,9 @@ describe("Planning route", () => {
 
     await expect.element(screen.getByRole("button", { name: /spec s-1/ })).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: /spec s-1/ }));
-    registeredCommands().find((command) => command.id === "planning:new-plan")?.run();
+    registeredCommands()
+      .find((command) => command.id === "planning:new-plan")
+      ?.run();
     await expect.element(screen.getByRole("heading", { name: "New plan" })).toBeVisible();
     await userEvent.keyboard("Delivery{Enter}");
     await expect.element(screen.getByRole("status")).toHaveTextContent("Created the plan “Delivery”.");
@@ -119,7 +129,10 @@ describe("Planning route", () => {
     source();
     await render(PlanningRoute);
     await expect.element(screen.getByRole("button", { name: /spec s-1/ })).toBeVisible();
-    const added = () => registeredCommands().filter((command) => command.keys?.[0] === "a").map((command) => command.id);
+    const added = () =>
+      registeredCommands()
+        .filter((command) => command.keys?.[0] === "a")
+        .map((command) => command.id);
     await userEvent.keyboard("j");
     expect(added()).toEqual(["planning:new-plan"]);
     await userEvent.keyboard("j");
@@ -137,7 +150,11 @@ describe("Planning route", () => {
     await render(PlanningRoute);
     await expect.element(screen.getByRole("button", { name: /spec s-1/ })).toBeVisible();
     if (kind === "spec") await screen.getByRole("button", { name: "New spec" }).click();
-    else await screen.getByRole("button", { name: kind === "plan" ? "New plan" : "Apply plan" }).first().click();
+    else
+      await screen
+        .getByRole("button", { name: kind === "plan" ? "New plan" : "Apply plan" })
+        .first()
+        .click();
     const form = screen.getByRole("form", { name: heading });
     const input = form.getByRole("textbox", { name: field });
     await input.fill("Edited");
@@ -150,7 +167,9 @@ describe("Planning route", () => {
     for (const step of ["j", "j"]) {
       (document.activeElement as HTMLElement).blur();
       await userEvent.keyboard(step);
-      for (const command of registeredCommands().filter(({ id }) => ["planning:new-spec", "planning:new-plan", "planning:apply"].includes(id))) {
+      for (const command of registeredCommands().filter(({ id }) =>
+        ["planning:new-spec", "planning:new-plan", "planning:apply"].includes(id),
+      )) {
         opens.add(command.id);
         (document.activeElement as HTMLElement).blur();
         command.run();
@@ -174,10 +193,19 @@ describe("Planning route", () => {
     (document.activeElement as HTMLElement).blur();
     // Escape and New spec leave the form that sent the request in place.
     await userEvent.keyboard("{Escape}");
-    registeredCommands().find((command) => command.id === "planning:new-spec")?.run();
+    registeredCommands()
+      .find((command) => command.id === "planning:new-spec")
+      ?.run();
     await expect.element(form).toBeVisible();
     await expect.element(screen.getByRole("form", { name: "New spec" })).not.toBeInTheDocument();
-    settle({ value: { plan: { id: "pl-1", spec_id: "s-1", title: "plan pl-1", body: "", status: "open" }, phases: [], tasks: [] }, warnings: [] });
+    settle({
+      value: {
+        plan: { id: "pl-1", spec_id: "s-1", title: "plan pl-1", body: "", status: "open" },
+        phases: [],
+        tasks: [],
+      },
+      warnings: [],
+    });
     await expect.element(screen.getByRole("status")).toHaveTextContent("Applied “plan pl-1”");
     await expect.element(form).not.toBeInTheDocument();
   });

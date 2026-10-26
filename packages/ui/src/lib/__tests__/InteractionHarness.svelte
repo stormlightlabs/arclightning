@@ -19,11 +19,19 @@
 </script>
 
 <div data-arcl-theme="light">
-  <Button label="Open dialog" onclick={() => dialogOpen = true} />
+  <Button label="Open dialog" onclick={() => (dialogOpen = true)} />
   <Field label="Name" bind:value={name} />
   <output>{name}</output>
-  <Menu items={[{ id: "promote", label: "Promote to task" }, { id: "disabled", label: "Archive", disabled: true }]} onselect={(item) => result = item.label} />
+  <Menu
+    items={[
+      { id: "promote", label: "Promote to task" },
+      { id: "disabled", label: "Archive", disabled: true },
+    ]}
+    onselect={(item) => (result = item.label)}
+  />
   <output>{result}</output>
   <Tabs label="Test views" items={tabs} />
-  <Dialog bind:open={dialogOpen} title="Confirm promotion"><Button label="Done" onclick={() => dialogOpen = false} /></Dialog>
+  <Dialog bind:open={dialogOpen} title="Confirm promotion"
+    ><Button label="Done" onclick={() => (dialogOpen = false)} /></Dialog
+  >
 </div>

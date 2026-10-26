@@ -9,7 +9,13 @@ const options: ListboxOption[] = [
   { label: "Completed" },
 ];
 
-const press = (key: string, fields: Partial<ListboxKey> = {}): ListboxKey => ({ key, altKey: false, ctrlKey: false, metaKey: false, ...fields });
+const press = (key: string, fields: Partial<ListboxKey> = {}): ListboxKey => ({
+  key,
+  altKey: false,
+  ctrlKey: false,
+  metaKey: false,
+  ...fields,
+});
 const closed: ListboxState = { open: false, active: 1, searching: false };
 const open = (active: number, searching = false): ListboxState => ({ open: true, active, searching });
 
@@ -63,11 +69,21 @@ describe("listboxKey while open", () => {
   });
 
   it("closes without choosing on Escape", () => {
-    expect(listboxKey(press("Escape"), open(3), options)).toEqual({ open: false, active: 3, commit: false, prevent: true });
+    expect(listboxKey(press("Escape"), open(3), options)).toEqual({
+      open: false,
+      active: 3,
+      commit: false,
+      prevent: true,
+    });
   });
 
   it("chooses on Tab and lets focus move on", () => {
-    expect(listboxKey(press("Tab"), open(3), options)).toEqual({ open: false, active: 3, commit: true, prevent: false });
+    expect(listboxKey(press("Tab"), open(3), options)).toEqual({
+      open: false,
+      active: 3,
+      commit: true,
+      prevent: false,
+    });
   });
 });
 

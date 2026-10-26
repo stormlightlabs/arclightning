@@ -29,16 +29,27 @@ async function serve(page: Page): Promise<string[]> {
       posts.push(`${url.pathname} ${request.postData() ?? ""}`);
       const body = JSON.parse(request.postData() ?? "{}");
       if (url.pathname.endsWith("/promote")) {
-        return route.fulfill({ body: envelope({ capture: {}, promotion: {}, [body.to]: { id: `arcl-${body.to}-1`, title: body.title } }) });
+        return route.fulfill({
+          body: envelope({ capture: {}, promotion: {}, [body.to]: { id: `arcl-${body.to}-1`, title: body.title } }),
+        });
       }
-      if (url.pathname.endsWith("/discard")) return route.fulfill({ body: envelope({ action: "discarded", capture: {} }) });
-      return route.fulfill({ body: envelope({ action: "created", plan: { id: "arcl-pl-2", spec_id: "arcl-s-1", title: body.title, body: "", status: "open" } }) });
+      if (url.pathname.endsWith("/discard"))
+        return route.fulfill({ body: envelope({ action: "discarded", capture: {} }) });
+      return route.fulfill({
+        body: envelope({
+          action: "created",
+          plan: { id: "arcl-pl-2", spec_id: "arcl-s-1", title: body.title, body: "", status: "open" },
+        }),
+      });
     }
-    if (path === "/api/records?kind=capture&status=captured") return route.fulfill({ body: envelope({ records: captures }) });
+    if (path === "/api/records?kind=capture&status=captured")
+      return route.fulfill({ body: envelope({ records: captures }) });
     if (path.startsWith("/api/records/arcl-c-")) {
       const id = url.pathname.split("/").at(-1);
       const capture = captures.find((entry) => entry.id === id);
-      return route.fulfill({ body: envelope({ action: "shown", capture: { ...capture, body: "", created_at: "2026-10-24T00:00:00Z" } }) });
+      return route.fulfill({
+        body: envelope({ action: "shown", capture: { ...capture, body: "", created_at: "2026-10-24T00:00:00Z" } }),
+      });
     }
     if (path === "/api/work") return route.fulfill({ body: envelope({ tasks: [], phases: [] }) });
     if (path === "/api/tree") return route.fulfill({ body: envelope({ nodes: tree }) });

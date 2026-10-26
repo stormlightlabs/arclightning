@@ -27,12 +27,28 @@
 </script>
 
 <script lang="ts">
-  import { Button, Dialog, MarkdownEditor, PriorityBadge, TaskGlyph, formatGlyph, formatStatus } from "@arclightning/ui";
+  import {
+    Button,
+    Dialog,
+    MarkdownEditor,
+    PriorityBadge,
+    TaskGlyph,
+    formatGlyph,
+    formatStatus,
+  } from "@arclightning/ui";
   import { tick } from "svelte";
   import { moveAction, moveTargets } from "./board";
   import { taskHref } from "./links";
 
-  let { columns, selectedId = null, busyId = null, locked = false, onselect, onmove, onrefuse }: WorkBoardProps = $props();
+  let {
+    columns,
+    selectedId = null,
+    busyId = null,
+    locked = false,
+    onselect,
+    onmove,
+    onrefuse,
+  }: WorkBoardProps = $props();
   const baseId = $props.id();
   let root: HTMLDivElement;
 
@@ -156,7 +172,11 @@
               <code>{card.id}</code>
               <PriorityBadge priority={card.priority} />
             </div>
-            <a href={taskHref(card.id)} aria-current={card.id === selectedId ? "true" : undefined} onfocus={() => onselect?.(card.id)}>{card.title}</a>
+            <a
+              href={taskHref(card.id)}
+              aria-current={card.id === selectedId ? "true" : undefined}
+              onfocus={() => onselect?.(card.id)}>{card.title}</a
+            >
             <div class="bottom">
               <span class="readiness" title={card.reasons.join("\n") || undefined}>
                 <TaskGlyph kind={card.glyph} />
@@ -182,12 +202,22 @@
 
 <Dialog
   bind:open={dialogOpen}
-  title={moving === null ? "Move task" : moving.completing ? `Complete ${moving.card.title}` : `Move ${moving.card.title}`}
+  title={moving === null
+    ? "Move task"
+    : moving.completing
+      ? `Complete ${moving.card.title}`
+      : `Move ${moving.card.title}`}
   description={moving === null ? undefined : `In ${formatStatus(moving.card.status)}`}
 >
   {#if moving !== null && moving.completing}
     <form class="complete" aria-label="Complete" onsubmit={complete}>
-      <MarkdownEditor bind:this={evidenceEditor} value={evidence} label="Evidence Markdown" readonly={false} onchange={(value) => (evidence = value)} />
+      <MarkdownEditor
+        bind:this={evidenceEditor}
+        value={evidence}
+        label="Evidence Markdown"
+        readonly={false}
+        onchange={(value) => (evidence = value)}
+      />
       <div class="buttons">
         <Button type="submit" variant="primary" label="Complete" />
         <Button label="Cancel" variant="ghost" onclick={() => (dialogOpen = false)} />
@@ -201,7 +231,13 @@
     {:else}
       <ul class="targets" aria-label="Move to">
         {#each targets as target (target)}
-          <li><Button label={formatStatus(target)} variant={target === targets[0] ? "primary" : "secondary"} onclick={() => moveTo(card, target)} /></li>
+          <li>
+            <Button
+              label={formatStatus(target)}
+              variant={target === targets[0] ? "primary" : "secondary"}
+              onclick={() => moveTo(card, target)}
+            />
+          </li>
         {/each}
       </ul>
     {/if}
@@ -209,26 +245,133 @@
 </Dialog>
 
 <style>
-  .board { display: grid; grid-auto-columns: minmax(11.5rem, 1fr); grid-auto-flow: column; gap: var(--arcl-space-2); overflow-x: auto; padding-bottom: var(--arcl-space-2); }
-  .column { display: flex; min-width: 0; max-height: calc(100dvh - 13rem); min-height: 12rem; flex-direction: column; border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-md); background: var(--arcl-surface); }
-  .column[data-over] { outline: var(--arcl-focus-width) dashed var(--arcl-focus); outline-offset: -2px; }
-  h2 { display: flex; align-items: center; gap: var(--arcl-space-2); margin: 0; padding: var(--arcl-space-3) var(--arcl-space-3) var(--arcl-space-2); color: var(--arcl-heading); font: 600 var(--arcl-type-sm) / 1.3 var(--arcl-font-ui); }
-  .count { color: var(--arcl-text-muted); font-weight: 500; }
-  ul { margin: 0; padding: 0; list-style: none; }
-  .column ul { display: grid; flex: 1; align-content: start; gap: var(--arcl-space-2); overflow-y: auto; padding: 0 var(--arcl-space-2) var(--arcl-space-2); }
-  .card { display: grid; gap: var(--arcl-space-1); padding: var(--arcl-space-2) var(--arcl-space-3); border: var(--arcl-border-width) solid var(--arcl-surface-hover); border-radius: var(--arcl-radius-sm); background: var(--arcl-surface-subtle); font-size: var(--arcl-type-sm); cursor: grab; }
-  .card:hover { border-color: var(--arcl-border); }
-  .card[data-selected] { border-color: var(--arcl-link); box-shadow: inset 2px 0 0 var(--arcl-link); }
-  .card[aria-busy="true"] { opacity: 0.6; cursor: progress; }
-  .top, .bottom { display: flex; align-items: center; justify-content: space-between; gap: var(--arcl-space-2); }
-  code { overflow: hidden; color: var(--arcl-text-muted); font: var(--arcl-type-xs) var(--arcl-font-code); text-overflow: ellipsis; white-space: nowrap; }
-  .card a { color: var(--arcl-text); font-weight: 550; text-decoration: none; overflow-wrap: anywhere; }
-  .card a:hover { text-decoration: underline; }
-  .readiness { display: inline-flex; align-items: center; gap: var(--arcl-space-1); color: var(--arcl-text-muted); font-size: var(--arcl-type-xs); }
-  .bottom :global(.move) { min-height: 1.75rem; padding-inline: var(--arcl-space-2); font-size: var(--arcl-type-xs); }
-  .targets { display: flex; flex-wrap: wrap; gap: var(--arcl-space-2); }
-  .complete { display: grid; gap: var(--arcl-space-3); }
-  .buttons { display: flex; gap: var(--arcl-space-2); }
-  .muted { margin: 0; color: var(--arcl-text-muted); }
-  .hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .board {
+    display: grid;
+    grid-auto-columns: minmax(11.5rem, 1fr);
+    grid-auto-flow: column;
+    gap: var(--arcl-space-2);
+    overflow-x: auto;
+    padding-bottom: var(--arcl-space-2);
+  }
+  .column {
+    display: flex;
+    min-width: 0;
+    max-height: calc(100dvh - 13rem);
+    min-height: 12rem;
+    flex-direction: column;
+    border: var(--arcl-border-width) solid var(--arcl-border);
+    border-radius: var(--arcl-radius-md);
+    background: var(--arcl-surface);
+  }
+  .column[data-over] {
+    outline: var(--arcl-focus-width) dashed var(--arcl-focus);
+    outline-offset: -2px;
+  }
+  h2 {
+    display: flex;
+    align-items: center;
+    gap: var(--arcl-space-2);
+    margin: 0;
+    padding: var(--arcl-space-3) var(--arcl-space-3) var(--arcl-space-2);
+    color: var(--arcl-heading);
+    font: 600 var(--arcl-type-sm) / 1.3 var(--arcl-font-ui);
+  }
+  .count {
+    color: var(--arcl-text-muted);
+    font-weight: 500;
+  }
+  ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .column ul {
+    display: grid;
+    flex: 1;
+    align-content: start;
+    gap: var(--arcl-space-2);
+    overflow-y: auto;
+    padding: 0 var(--arcl-space-2) var(--arcl-space-2);
+  }
+  .card {
+    display: grid;
+    gap: var(--arcl-space-1);
+    padding: var(--arcl-space-2) var(--arcl-space-3);
+    border: var(--arcl-border-width) solid var(--arcl-surface-hover);
+    border-radius: var(--arcl-radius-sm);
+    background: var(--arcl-surface-subtle);
+    font-size: var(--arcl-type-sm);
+    cursor: grab;
+  }
+  .card:hover {
+    border-color: var(--arcl-border);
+  }
+  .card[data-selected] {
+    border-color: var(--arcl-link);
+    box-shadow: inset 2px 0 0 var(--arcl-link);
+  }
+  .card[aria-busy="true"] {
+    opacity: 0.6;
+    cursor: progress;
+  }
+  .top,
+  .bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--arcl-space-2);
+  }
+  code {
+    overflow: hidden;
+    color: var(--arcl-text-muted);
+    font: var(--arcl-type-xs) var(--arcl-font-code);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .card a {
+    color: var(--arcl-text);
+    font-weight: 550;
+    text-decoration: none;
+    overflow-wrap: anywhere;
+  }
+  .card a:hover {
+    text-decoration: underline;
+  }
+  .readiness {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--arcl-space-1);
+    color: var(--arcl-text-muted);
+    font-size: var(--arcl-type-xs);
+  }
+  .bottom :global(.move) {
+    min-height: 1.75rem;
+    padding-inline: var(--arcl-space-2);
+    font-size: var(--arcl-type-xs);
+  }
+  .targets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--arcl-space-2);
+  }
+  .complete {
+    display: grid;
+    gap: var(--arcl-space-3);
+  }
+  .buttons {
+    display: flex;
+    gap: var(--arcl-space-2);
+  }
+  .muted {
+    margin: 0;
+    color: var(--arcl-text-muted);
+  }
+  .hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
 </style>
