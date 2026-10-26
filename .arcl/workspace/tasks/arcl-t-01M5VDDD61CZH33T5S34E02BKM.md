@@ -24,7 +24,7 @@ a mark, with an ASCII form for `--ascii`:
 | `◐` | `~` | task in progress; open spec, plan or phase with a started or finished task |
 | `‖` | `=` | task parked |
 | `●` | `*` | pending task that is ready |
-| `○` | `o` | pending task that is blocked; other open containers; captured capture; note |
+| `○` | `o` | pending task that is not ready; other open containers; captured capture; note |
 
 Notes have no stored status, and `--plain` shows them as `available`. The
 current human line starts with the mark. The folded view and the full and
@@ -40,11 +40,11 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] Each human `arcl tree` line starts with the record's status mark
-- [ ] Every task, container and capture status, and notes, map to a mark
+- [x] Each human `arcl tree` line starts with the record's status mark
+- [x] Every task, container and capture status, and notes, map to a mark
       in the table, and each mark has its ASCII form
-- [ ] Pending tasks show `●` when ready and `○` when blocked
-- [ ] `--plain` and `--json` output are unchanged
+- [x] Pending tasks show `●` when ready and `○` when not ready
+- [x] `--plain` and `--json` output are unchanged
 
 Verification:
 

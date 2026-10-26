@@ -156,8 +156,8 @@ pub enum StatusMark {
     Parked,
     /// A pending task that is ready.
     Ready,
-    /// A blocked pending task, another open container, a captured capture or
-    /// a note.
+    /// A pending task that is not ready, another open container, a captured
+    /// capture or a note.
     Waiting,
 }
 

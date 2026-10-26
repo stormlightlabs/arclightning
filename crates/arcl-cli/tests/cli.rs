@@ -969,6 +969,69 @@ fn tree_lines_start_with_the_status_mark() {
 }
 
 #[test]
+fn open_containers_show_started_when_a_task_below_them_started() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let spec = run_json(dir, ["--json", "spec", "create", "Feature"].as_ref());
+    let spec_id = spec["data"]["spec"]["id"].as_str().expect("spec ID").to_owned();
+    let create_plan = |title: &str| {
+        let plan = run_json(dir, ["--json", "plan", "create", title, "--spec", &spec_id].as_ref());
+        plan["data"]["plan"]["id"].as_str().expect("plan ID").to_owned()
+    };
+    let create_phase = |title: &str, plan: &str| {
+        let phase = run_json(
+            dir,
+            ["--json", "plan", "phase", "create", title, "--plan", plan].as_ref(),
+        );
+        phase["data"]["phase"]["id"].as_str().expect("phase ID").to_owned()
+    };
+    let create_in = |title: &str, flag: &str, container: &str| {
+        let task = run_json(dir, ["--json", "task", "create", title, flag, container].as_ref());
+        task["data"]["task"]["id"].as_str().expect("task ID").to_owned()
+    };
+    let complete = |task: &str| {
+        run_json(
+            dir,
+            ["--json", "task", "complete", task, "--evidence", "Verified"].as_ref(),
+        );
+    };
+
+    let direct = create_plan("Direct");
+    let started = create_phase("Started", &direct);
+    complete(&create_in("Shipped", "--phase", &started));
+    let idle = create_phase("Idle", &direct);
+    let dropped = create_in("Dropped", "--phase", &idle);
+    run_json(dir, ["--json", "task", "cancel", &dropped].as_ref());
+    let parked = create_in("Parked", "--phase", &idle);
+    run_json(dir, ["--json", "task", "park", &parked].as_ref());
+    let closed = create_phase("Closed", &direct);
+    complete(&create_in("Finished", "--phase", &closed));
+    run_json(dir, ["--json", "plan", "phase", "complete", &closed].as_ref());
+
+    let nested_plan = create_plan("Nested plan");
+    let nested = create_phase("Nested", &nested_plan);
+    let parent = create_in("Parent", "--phase", &nested);
+    complete(&create_task(dir, "Child", Some(&parent)));
+
+    let human = stdout_of(dir, &["--color", "never", "tree"]);
+    let mark = |title: &str| {
+        let line = human
+            .lines()
+            .find(|line| line.ends_with(&format!("[{title}]")))
+            .unwrap_or_else(|| panic!("a tree line for {title} in:\n{human}"));
+        line.trim_start().chars().next().expect("a non-empty line")
+    };
+    assert_eq!(mark("Started"), '◐', "a completed task starts its phase");
+    assert_eq!(mark("Direct"), '◐', "and the plan above it");
+    assert_eq!(mark("Feature"), '◐', "and the spec above that");
+    assert_eq!(mark("Nested"), '◐', "a completed subtask starts its phase");
+    assert_eq!(mark("Nested plan"), '◐');
+    assert_eq!(mark("Parent"), '○', "a parent with an open subtask is not ready");
+    assert_eq!(mark("Idle"), '○', "cancelled and parked tasks do not start a phase");
+    assert_eq!(mark("Closed"), '✓', "a completed phase stays completed");
+}
+
+#[test]
 fn structured_plan_check_diff_apply_and_repeat_are_deterministic() {
     let directory = initialized_directory();
     let spec = run_json(directory.path(), ["--json", "spec", "create", "Feature"].as_ref());

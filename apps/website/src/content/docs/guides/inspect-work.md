@@ -47,7 +47,9 @@ status mark:
 | `◐`  | task in progress; open spec, plan or phase with a started or finished task |
 | `‖`  | task parked                                                                |
 | `●`  | pending task that is ready                                                 |
-| `○`  | pending task that is blocked; other open record; captured capture; note    |
+| `○`  | pending task that is not ready; other open record; captured capture; note  |
+
+![arcl tree with a status mark on each line](/images/arcl-tree-status.png)
 
 `--plain` and `--json` give the stored status instead.
 
