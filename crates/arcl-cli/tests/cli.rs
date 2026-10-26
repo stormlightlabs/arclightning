@@ -988,7 +988,7 @@ fn tree_leaves_out_closed_captures_unless_all() {
             .map(|node| node["id"].as_str().expect("a node ID").to_owned())
             .collect()
     };
-    assert_eq!(capture_ids(&["--json", "tree"]), [open.clone()]);
+    assert_eq!(capture_ids(&["--json", "tree"]), std::slice::from_ref(&open));
     let mut all = capture_ids(&["--json", "tree", "--all"]);
     all.sort();
     let mut expected = vec![open.clone(), promoted.clone(), discarded.clone()];
