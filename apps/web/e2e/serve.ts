@@ -6,7 +6,9 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
 /** The `arcl` binary the tests run: `ARCL_BIN`, or the debug build in Cargo's target directory. */
-export const ARCL = process.env.ARCL_BIN ?? join(process.env.CARGO_TARGET_DIR ?? fileURLToPath(new URL("../../../target", import.meta.url)), "debug", "arcl");
+export const ARCL =
+  process.env.ARCL_BIN ??
+  join(process.env.CARGO_TARGET_DIR ?? fileURLToPath(new URL("../../../target", import.meta.url)), "debug", "arcl");
 
 /** `arcl serve` on a scratch project, with the CLI pointed at the same project. */
 export interface Served {
@@ -57,7 +59,14 @@ export async function serveScratch(): Promise<Served> {
   };
   live.add(stop);
   const cli = (...args: string[]) =>
-    JSON.parse(execFileSync(ARCL, [...args, "--json"], { cwd: dir, encoding: "utf8", timeout: SETUP_TIMEOUT, killSignal: "SIGKILL" })).data;
+    JSON.parse(
+      execFileSync(ARCL, [...args, "--json"], {
+        cwd: dir,
+        encoding: "utf8",
+        timeout: SETUP_TIMEOUT,
+        killSignal: "SIGKILL",
+      }),
+    ).data;
   // Clean up when setup fails partway, since the caller gets no `stop` then.
   try {
     cli("init");
@@ -68,7 +77,9 @@ export async function serveScratch(): Promise<Served> {
     const line = await new Promise<string>((done, fail) => {
       timer = setTimeout(() => fail(new Error(`arcl serve printed no URL within ${SETUP_TIMEOUT} ms`)), SETUP_TIMEOUT);
       child.once("error", fail);
-      child.once("exit", (code: number | null) => fail(new Error(`arcl serve exited with ${code} before printing its URL`)));
+      child.once("exit", (code: number | null) =>
+        fail(new Error(`arcl serve exited with ${code} before printing its URL`)),
+      );
       createInterface({ input: child.stdout! }).once("line", done);
     }).finally(() => clearTimeout(timer));
     return { url: JSON.parse(line).data.url, cli, stop };

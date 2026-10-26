@@ -30,7 +30,11 @@ function installHost(seed: { documents: Record<string, unknown> | null }) {
   };
   const snapshot = (path: string) => {
     const body = store.get(path);
-    return { id: path.split("/").at(-1), exists: body !== undefined, data: () => (body === undefined ? undefined : structuredClone(body)) };
+    return {
+      id: path.split("/").at(-1),
+      exists: body !== undefined,
+      data: () => (body === undefined ? undefined : structuredClone(body)),
+    };
   };
   const doc = (path: string) => ({
     id: path.split("/").at(-1),
@@ -50,7 +54,14 @@ function installHost(seed: { documents: Record<string, unknown> | null }) {
       orderBy: () => query,
       limit: () => query,
       onSnapshot: (next: (snap: unknown) => void) =>
-        listen(() => next({ docs: [...store.keys()].filter((key) => key.startsWith(`${path}/`)).sort().map(snapshot) })),
+        listen(() =>
+          next({
+            docs: [...store.keys()]
+              .filter((key) => key.startsWith(`${path}/`))
+              .sort()
+              .map(snapshot),
+          }),
+        ),
       doc: (id?: string) => doc(`${path}/${id ?? `q${++minted}`}`),
     };
     return query;
@@ -77,7 +88,9 @@ async function openArtifact(page: Page, documents: Record<string, unknown> | nul
   });
   page.on("request", (request) => requests.push(request.url()));
   await page.route("**/*", (route) =>
-    route.request().url() === PAGE ? route.fulfill({ contentType: "text/html", body: HTML }) : route.fulfill({ status: 404, body: "" }),
+    route.request().url() === PAGE
+      ? route.fulfill({ contentType: "text/html", body: HTML })
+      : route.fulfill({ status: 404, body: "" }),
   );
   await page.addInitScript(installHost, { documents });
   await page.goto(PAGE);
@@ -85,7 +98,11 @@ async function openArtifact(page: Page, documents: Record<string, unknown> | nul
 }
 
 const queue = (page: Page) =>
-  page.evaluate(() => [...(window as unknown as { artifactStore: Map<string, unknown> }).artifactStore].filter(([path]) => path.startsWith("queue/")).map(([, body]) => body));
+  page.evaluate(() =>
+    [...(window as unknown as { artifactStore: Map<string, unknown> }).artifactStore]
+      .filter(([path]) => path.startsWith("queue/"))
+      .map(([, body]) => body),
+  );
 
 test("the artifact renders Work, Task, Inbox and Planning from its database and queues a triage", async ({ page }) => {
   const requests = await openArtifact(page, recorded.documents);
@@ -107,7 +124,14 @@ test("the artifact renders Work, Task, Inbox and Planning from its database and 
   await expect(page.getByText("1 edit waits for the next sync.")).toBeVisible();
   await expect(page.getByRole("list", { name: "Queued edits" })).toHaveText(`Discard the capture ${CAPTURE}`);
   expect(await queue(page)).toEqual([
-    { op: "discard_capture", target: CAPTURE, input: {}, created_at: expect.any(String), created_by: "u_viewer", status: "queued" },
+    {
+      op: "discard_capture",
+      target: CAPTURE,
+      input: {},
+      created_at: expect.any(String),
+      created_by: "u_viewer",
+      status: "queued",
+    },
   ]);
 
   await page.getByRole("link", { name: "Planning" }).click();
@@ -118,7 +142,10 @@ test("the artifact renders Work, Task, Inbox and Planning from its database and 
   await page.getByRole("link", { name: "Inbox" }).click();
   await expect(page.getByRole("heading", { level: 2, name: "Try the artifact" })).toBeVisible();
   await page.evaluate((capture) => {
-    const host = window as unknown as { artifactStore: Map<string, Record<string, unknown>>; artifactWrite: (path: string, body: unknown) => void };
+    const host = window as unknown as {
+      artifactStore: Map<string, Record<string, unknown>>;
+      artifactWrite: (path: string, body: unknown) => void;
+    };
     const meta = host.artifactStore.get("meta/sync") ?? {};
     host.artifactWrite(`records/${capture}`, null);
     host.artifactWrite("views/captures", { format_version: 1, data: { records: [] } });
@@ -137,12 +164,18 @@ test("the artifact renders Work, Task, Inbox and Planning from its database and 
 test("the artifact queues a raw record edit that arcl web apply saves, and refuses it once stale", async ({ page }) => {
   const dir = mkdtempSync(join(tmpdir(), "arcl-e2e-artifact-"));
   try {
-    const arcl = (...args: string[]) => JSON.parse(execFileSync(ARCL, [...args, "--json"], { cwd: dir, encoding: "utf8", timeout: SETUP_TIMEOUT })).data;
+    const arcl = (...args: string[]) =>
+      JSON.parse(execFileSync(ARCL, [...args, "--json"], { cwd: dir, encoding: "utf8", timeout: SETUP_TIMEOUT })).data;
     arcl("init");
     const task = arcl("task", "create", "Raw edit target").task.id as string;
     const out = join(dir, "export");
     const manifest = arcl("web", "export", out);
-    const documents = Object.fromEntries((manifest.documents as string[]).map((path) => [path, JSON.parse(readFileSync(join(out, `${path}.json`), "utf8"))]));
+    const documents = Object.fromEntries(
+      (manifest.documents as string[]).map((path) => [
+        path,
+        JSON.parse(readFileSync(join(out, `${path}.json`), "utf8")),
+      ]),
+    );
     const { source, revision } = documents[`sources/${task}`].data;
     await openArtifact(page, documents);
 
@@ -163,7 +196,14 @@ test("the artifact queues a raw record edit that arcl web apply saves, and refus
     await expect(page.getByText("An edit to this task waits for the next sync.")).toBeVisible();
     const queued = await queue(page);
     expect(queued).toEqual([
-      { op: "update_source", target: task, input: { source: edited, revision }, created_at: expect.any(String), created_by: "u_viewer", status: "queued" },
+      {
+        op: "update_source",
+        target: task,
+        input: { source: edited, revision },
+        created_at: expect.any(String),
+        created_by: "u_viewer",
+        status: "queued",
+      },
     ]);
 
     // An agent applies the queue: the edit saves once, and a second run from the same revision is stale.
@@ -178,13 +218,18 @@ test("the artifact queues a raw record edit that arcl web apply saves, and refus
     arcl("web", "export", out);
     const synced = JSON.parse(readFileSync(join(out, `sources/${task}.json`), "utf8"));
     await page.evaluate(
-      ([path, body]) => (window as unknown as { artifactWrite: (path: string, body: unknown) => void }).artifactWrite(path, body),
+      ([path, body]) =>
+        (window as unknown as { artifactWrite: (path: string, body: unknown) => void }).artifactWrite(path, body),
       [`sources/${task}`, synced] as const,
     );
     await expect(page.getByRole("button", { name: "Edit file" })).toBeDisabled();
     await page.evaluate(() => {
-      const host = window as unknown as { artifactStore: Map<string, unknown>; artifactWrite: (path: string, body: unknown) => void };
-      for (const key of [...host.artifactStore.keys()].filter((key) => key.startsWith("queue/"))) host.artifactWrite(key, null);
+      const host = window as unknown as {
+        artifactStore: Map<string, unknown>;
+        artifactWrite: (path: string, body: unknown) => void;
+      };
+      for (const key of [...host.artifactStore.keys()].filter((key) => key.startsWith("queue/")))
+        host.artifactWrite(key, null);
     });
     await page.getByRole("button", { name: "Edit file" }).click();
     await expect(editor).toContainText('title = "Edited in the artifact"');

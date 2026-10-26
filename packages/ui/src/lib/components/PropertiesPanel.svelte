@@ -68,22 +68,94 @@
 </aside>
 
 <style>
-  .arcl-properties { border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-md); background: var(--arcl-surface); font-size: var(--arcl-type-sm); }
-  h2 { margin: 0; font: inherit; }
-  button { display: flex; align-items: center; gap: var(--arcl-space-2); width: 100%; padding: var(--arcl-space-2) var(--arcl-space-3); border: 0; border-radius: calc(var(--arcl-radius-md) - var(--arcl-border-width)); color: var(--arcl-heading); background: transparent; font: 600 var(--arcl-type-sm) / 1.4 var(--arcl-font-ui); text-align: start; cursor: pointer; }
-  button:hover { background: var(--arcl-surface-hover); }
+  .arcl-properties {
+    border: var(--arcl-border-width) solid var(--arcl-border);
+    border-radius: var(--arcl-radius-md);
+    background: var(--arcl-surface);
+    font-size: var(--arcl-type-sm);
+  }
+  h2 {
+    margin: 0;
+    font: inherit;
+  }
+  button {
+    display: flex;
+    align-items: center;
+    gap: var(--arcl-space-2);
+    width: 100%;
+    padding: var(--arcl-space-2) var(--arcl-space-3);
+    border: 0;
+    border-radius: calc(var(--arcl-radius-md) - var(--arcl-border-width));
+    color: var(--arcl-heading);
+    background: transparent;
+    font: 600 var(--arcl-type-sm) / 1.4 var(--arcl-font-ui);
+    text-align: start;
+    cursor: pointer;
+  }
+  button:hover {
+    background: var(--arcl-surface-hover);
+  }
   /* The open panel's values sit below the header, so only its top corners round. */
-  [data-open="true"] button { border-end-start-radius: 0; border-end-end-radius: 0; }
-  .arcl-properties__chevron { width: 0.4rem; height: 0.4rem; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform var(--arcl-duration-fast) var(--arcl-ease-out); }
-  [data-open="true"] .arcl-properties__chevron { transform: rotate(45deg); }
-  kbd { margin-inline-start: auto; padding: 0 0.3rem; border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-sm); color: var(--arcl-text-muted); font: 500 var(--arcl-type-xs) / 1.4 var(--arcl-font-code); }
-  dl { display: grid; margin: 0; padding: var(--arcl-space-1) var(--arcl-space-3) var(--arcl-space-3); border-top: var(--arcl-border-width) solid var(--arcl-surface-subtle); }
-  dl[hidden] { display: none; }
-  dl > div { display: grid; grid-template-columns: 6rem minmax(0, 1fr); align-items: center; gap: var(--arcl-space-2); min-height: 2rem; }
-  dt { color: var(--arcl-text-muted); }
-  dd { margin: 0; overflow-wrap: anywhere; color: var(--arcl-text); }
-  a { color: var(--arcl-link); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  .arcl-properties__none { color: var(--arcl-text-muted); }
-  @media (prefers-reduced-motion: reduce) { .arcl-properties__chevron { transition: none; } }
+  [data-open="true"] button {
+    border-end-start-radius: 0;
+    border-end-end-radius: 0;
+  }
+  .arcl-properties__chevron {
+    width: 0.4rem;
+    height: 0.4rem;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: rotate(-45deg);
+    transition: transform var(--arcl-duration-fast) var(--arcl-ease-out);
+  }
+  [data-open="true"] .arcl-properties__chevron {
+    transform: rotate(45deg);
+  }
+  kbd {
+    margin-inline-start: auto;
+    padding: 0 0.3rem;
+    border: var(--arcl-border-width) solid var(--arcl-border);
+    border-radius: var(--arcl-radius-sm);
+    color: var(--arcl-text-muted);
+    font: 500 var(--arcl-type-xs) / 1.4 var(--arcl-font-code);
+  }
+  dl {
+    display: grid;
+    margin: 0;
+    padding: var(--arcl-space-1) var(--arcl-space-3) var(--arcl-space-3);
+    border-top: var(--arcl-border-width) solid var(--arcl-surface-subtle);
+  }
+  dl[hidden] {
+    display: none;
+  }
+  dl > div {
+    display: grid;
+    grid-template-columns: 6rem minmax(0, 1fr);
+    align-items: center;
+    gap: var(--arcl-space-2);
+    min-height: 2rem;
+  }
+  dt {
+    color: var(--arcl-text-muted);
+  }
+  dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+    color: var(--arcl-text);
+  }
+  a {
+    color: var(--arcl-link);
+    text-decoration: none;
+  }
+  a:hover {
+    text-decoration: underline;
+  }
+  .arcl-properties__none {
+    color: var(--arcl-text-muted);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .arcl-properties__chevron {
+      transition: none;
+    }
+  }
 </style>

@@ -16,7 +16,18 @@ const task = {
   evidence: "",
 };
 const readiness = { ready: true, blocked: false, reasons: [] };
-const detail = { task, readiness, blockers: [], inherited_blockers: [], dependents: [], children: [], ancestors: [], spec: null, plan: null, phase: null };
+const detail = {
+  task,
+  readiness,
+  blockers: [],
+  inherited_blockers: [],
+  dependents: [],
+  children: [],
+  ancestors: [],
+  spec: null,
+  plan: null,
+  phase: null,
+};
 const envelope = (data: unknown) => JSON.stringify({ format_version: 1, data });
 
 /** Answer the API from fixtures and record each POST as `path body`. */
@@ -34,18 +45,34 @@ async function serve(page: Page, status = "pending"): Promise<string[]> {
       posts.push(`${url.pathname} ${request.postData() ?? ""}`);
       const body = JSON.parse(request.postData() ?? "{}");
       if (url.pathname === "/api/captures") {
-        return route.fulfill({ body: envelope({ action: "created", capture: { id: "arcl-c-1", title: body.title, body: body.body ?? "", status: "captured", created_at: "" } }) });
+        return route.fulfill({
+          body: envelope({
+            action: "created",
+            capture: { id: "arcl-c-1", title: body.title, body: body.body ?? "", status: "captured", created_at: "" },
+          }),
+        });
       }
       if (url.pathname === "/api/tasks") {
-        return route.fulfill({ body: envelope({ action: "created", task: { ...task, id: "arcl-t-2", title: body.title } }) });
+        return route.fulfill({
+          body: envelope({ action: "created", task: { ...task, id: "arcl-t-2", title: body.title } }),
+        });
       }
       if (url.pathname.endsWith("/complete")) {
-        return route.fulfill({ body: envelope({ action: "completed", task: { ...task, status: "completed" }, completed_subtasks: [], unblocked: [] }) });
+        return route.fulfill({
+          body: envelope({
+            action: "completed",
+            task: { ...task, status: "completed" },
+            completed_subtasks: [],
+            unblocked: [],
+          }),
+        });
       }
       return route.fulfill({ body: envelope({ action: "started", task: { ...task, status: "in_progress" } }) });
     }
-    if (path === "/api/records?kind=task") return route.fulfill({ body: envelope({ records: [{ id: task.id, kind: "task", status, title: task.title }] }) });
-    if (path === "/api/work") return route.fulfill({ body: envelope({ tasks: [{ task: shown, readiness, phase_id: null }], phases: [] }) });
+    if (path === "/api/records?kind=task")
+      return route.fulfill({ body: envelope({ records: [{ id: task.id, kind: "task", status, title: task.title }] }) });
+    if (path === "/api/work")
+      return route.fulfill({ body: envelope({ tasks: [{ task: shown, readiness, phase_id: null }], phases: [] }) });
     if (path.startsWith("/api/records/arcl-t-")) return route.fulfill({ body: envelope({ ...detail, task: shown }) });
     return route.fulfill({ status: 404, body: "{}" });
   });

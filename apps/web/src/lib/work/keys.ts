@@ -53,7 +53,9 @@ export function moveSelection(order: string[], current: string | null, step: 1 |
  */
 export function inField(target: EventTarget | null): boolean {
   return Boolean(
-    closestOf(target)?.closest("input, textarea, select, dialog, [role=combobox], [role=listbox], [contenteditable]:not([contenteditable='false'])"),
+    closestOf(target)?.closest(
+      "input, textarea, select, dialog, [role=combobox], [role=listbox], [contenteditable]:not([contenteditable='false'])",
+    ),
   );
 }
 

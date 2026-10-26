@@ -50,7 +50,10 @@ test("dragging a card to In progress starts the task in arcl", async ({ page }) 
   await expect.poll(() => served!.cli("task", "show", id).task.status).toBe("in_progress");
 
   // A move no task command makes is refused, and arcl keeps the status.
-  await column(page, "In progress").getByRole("listitem").filter({ hasText: "Board task" }).dragTo(column(page, "Pending"));
+  await column(page, "In progress")
+    .getByRole("listitem")
+    .filter({ hasText: "Board task" })
+    .dragTo(column(page, "Pending"));
   await expect(page.getByRole("alert")).toContainText("No task command moves a task from In progress to Pending.");
   expect(served!.cli("task", "show", id).task.status).toBe("in_progress");
 

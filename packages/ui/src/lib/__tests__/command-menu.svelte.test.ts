@@ -19,7 +19,9 @@ describe("CommandMenu", () => {
     await expect.element(page.getByRole("dialog", { name: "Command menu" })).toBeVisible();
     await expect.element(page.getByText("T10.1 · Add the skill", { exact: true })).toBeVisible();
     await expect.element(page.getByRole("group", { name: "Actions on T10.1" })).toBeVisible();
-    await expect.element(search()).toHaveAttribute("aria-activedescendant", page.getByRole("option", { name: /Start/ }).element().id);
+    await expect
+      .element(search())
+      .toHaveAttribute("aria-activedescendant", page.getByRole("option", { name: /Start/ }).element().id);
     await expect.element(page.getByRole("option", { name: /Start/ })).toHaveTextContent("S");
   });
 

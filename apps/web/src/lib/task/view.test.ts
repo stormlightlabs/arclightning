@@ -115,7 +115,9 @@ describe("taskKeyAction", () => {
 
   it("toggles the panel on ] typed with AltGr or Option", () => {
     const altGraph = (on: boolean) => (name: string) => name === "AltGraph" && on;
-    expect(taskKeyAction(key("]", { ctrlKey: true, altKey: true, getModifierState: altGraph(true) }))).toBe("properties");
+    expect(taskKeyAction(key("]", { ctrlKey: true, altKey: true, getModifierState: altGraph(true) }))).toBe(
+      "properties",
+    );
     expect(taskKeyAction(key("]", { ctrlKey: true, altKey: true }))).toBe("properties");
     expect(taskKeyAction(key("]", { altKey: true, getModifierState: altGraph(false) }))).toBe("properties");
     expect(taskKeyAction(key("]", { ctrlKey: true, altKey: true, getModifierState: altGraph(false) }))).toBeNull();
@@ -126,7 +128,9 @@ describe("taskKeyAction", () => {
     expect(taskKeyAction(key("]", { metaKey: true }))).toBeNull();
     expect(taskKeyAction(key("]", { ctrlKey: true }))).toBeNull();
     expect(taskKeyAction(key("Escape", { altKey: true }))).toBeNull();
-    const editor = { closest: (selector: string) => (selector.includes("contenteditable") ? {} : null) } as unknown as EventTarget;
+    const editor = {
+      closest: (selector: string) => (selector.includes("contenteditable") ? {} : null),
+    } as unknown as EventTarget;
     expect(taskKeyAction(key("Escape", { target: editor }))).toBeNull();
   });
 });

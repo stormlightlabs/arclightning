@@ -71,10 +71,13 @@ export function menuGroups({ commands, query, context, tasks, mac }: MenuInput):
   });
 
   const groups: CommandGroup[] = [];
-  const shown = commands.filter((command) => matches(command.label) && (command.scope !== "selection" || context !== null));
+  const shown = commands.filter(
+    (command) => matches(command.label) && (command.scope !== "selection" || context !== null),
+  );
   if (context !== null) {
     const selection = shown.filter((command) => command.scope === "selection");
-    if (selection.length) groups.push({ id: "selection", label: `Actions on ${context.label}`, items: selection.map(item) });
+    if (selection.length)
+      groups.push({ id: "selection", label: `Actions on ${context.label}`, items: selection.map(item) });
   }
   for (const scope of ["view", "global"] as const) {
     const byGroup = new Map<string, Command[]>();
@@ -82,15 +85,23 @@ export function menuGroups({ commands, query, context, tasks, mac }: MenuInput):
       const name = command.group ?? (scope === "view" ? "This view" : "General");
       byGroup.set(name, [...(byGroup.get(name) ?? []), command]);
     }
-    for (const [name, members] of byGroup) groups.push({ id: `${scope}:${name}`, label: name, items: members.map(item) });
+    for (const [name, members] of byGroup)
+      groups.push({ id: `${scope}:${name}`, label: name, items: members.map(item) });
   }
   if (words.length) {
-    const found = tasks.filter((task) => matches(task.title) || task.id.toLowerCase() === query.trim().toLowerCase()).slice(0, TASK_RESULTS);
+    const found = tasks
+      .filter((task) => matches(task.title) || task.id.toLowerCase() === query.trim().toLowerCase())
+      .slice(0, TASK_RESULTS);
     if (found.length) {
       groups.push({
         id: "tasks",
         label: "Tasks",
-        items: found.map((task) => ({ id: `${TASK_RESULT_PREFIX}${task.id}`, label: task.title, detail: formatStatus(task.status), icon: "task" })),
+        items: found.map((task) => ({
+          id: `${TASK_RESULT_PREFIX}${task.id}`,
+          label: task.title,
+          detail: formatStatus(task.status),
+          icon: "task",
+        })),
       });
     }
   }

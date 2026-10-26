@@ -69,7 +69,12 @@
   let listId = $derived(`${id}-listbox`);
   const optionId = (index: number) => `${id}-option-${index}`;
   /** The flat index of each group's first item. */
-  let starts = $derived(groups.reduce<number[]>((all, group, index) => [...all, index === 0 ? 0 : all[index - 1] + groups[index - 1].items.length], []));
+  let starts = $derived(
+    groups.reduce<number[]>(
+      (all, group, index) => [...all, index === 0 ? 0 : all[index - 1] + groups[index - 1].items.length],
+      [],
+    ),
+  );
 
   // A new search or a new list starts at the top.
   $effect(() => {
@@ -177,9 +182,15 @@
               data-index={index}
             >
               <Icon name={item.icon ?? "arrowRight"} size="1rem" />
-              <span class="arcl-command-menu__label">{before}<b>{match}</b>{after}{#if item.detail}<span class="arcl-command-menu__detail"> · {item.detail}</span>{/if}</span>
+              <span class="arcl-command-menu__label"
+                >{before}<b>{match}</b>{after}{#if item.detail}<span class="arcl-command-menu__detail">
+                    · {item.detail}</span
+                  >{/if}</span
+              >
               {#if item.keys?.length}
-                <span class="arcl-command-menu__keys">{#each item.keys as key, keyIndex (keyIndex)}<kbd>{key}</kbd>{/each}</span>
+                <span class="arcl-command-menu__keys"
+                  >{#each item.keys as key, keyIndex (keyIndex)}<kbd>{key}</kbd>{/each}</span
+                >
               {/if}
             </div>
           {/each}
@@ -198,24 +209,129 @@
 </Dialog>
 
 <style>
-  .arcl-command-menu { display: grid; font-family: var(--arcl-font-ui); }
-  .arcl-command-menu__context { padding: var(--arcl-space-3) var(--arcl-space-4) 0; }
-  .arcl-command-menu__context span { display: inline-flex; max-width: 100%; align-items: center; min-height: 1.375rem; padding: 0 var(--arcl-space-2); overflow: hidden; border-radius: 999px; color: var(--arcl-text); background: var(--arcl-surface-subtle); font-size: var(--arcl-type-xs); text-overflow: ellipsis; white-space: nowrap; }
-  .arcl-command-menu__search { display: flex; align-items: center; gap: var(--arcl-space-3); padding: var(--arcl-space-3) var(--arcl-space-4); border-bottom: var(--arcl-border-width) solid var(--arcl-border); color: var(--arcl-text-muted); }
-  .arcl-command-menu__search input { flex: 1; min-width: 0; border: 0; outline: none; color: var(--arcl-text); background: transparent; font: inherit; font-size: var(--arcl-type-base); }
-  .arcl-command-menu__list { display: grid; max-height: min(24rem, 55vh); overflow-y: auto; padding: var(--arcl-space-1); outline: none; }
-  .arcl-command-menu__group { padding: var(--arcl-space-2) var(--arcl-space-3) var(--arcl-space-1); color: var(--arcl-text-muted); font-size: var(--arcl-type-xs); font-weight: 600; }
-  .arcl-command-menu__option { display: grid; grid-template-columns: 1rem minmax(0, 1fr) auto; align-items: center; gap: var(--arcl-space-3); min-height: 2.25rem; padding: 0 var(--arcl-space-3); border-radius: var(--arcl-radius-sm); color: var(--arcl-text); font-size: var(--arcl-type-sm); cursor: pointer; }
-  .arcl-command-menu__option :global(.arcl-icon) { color: var(--arcl-text-muted); }
-  .arcl-command-menu__option[aria-selected="true"] { background: var(--arcl-surface-hover); box-shadow: inset 2px 0 0 var(--arcl-focus); }
-  .arcl-command-menu__option[aria-selected="true"] :global(.arcl-icon) { color: var(--arcl-focus); }
-  .arcl-command-menu__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .arcl-command-menu__label b { font-weight: 650; }
-  .arcl-command-menu__detail { color: var(--arcl-text-muted); }
-  .arcl-command-menu__keys { display: flex; gap: var(--arcl-space-1); }
-  kbd { display: inline-flex; min-width: 1.125rem; height: 1.125rem; align-items: center; justify-content: center; padding: 0 0.25rem; border: var(--arcl-border-width) solid var(--arcl-border); border-radius: 4px; color: var(--arcl-text-muted); background: var(--arcl-surface); font: 500 var(--arcl-type-xs) / 1 var(--arcl-font-ui); }
-  .arcl-command-menu__empty { margin: 0; padding: var(--arcl-space-4); color: var(--arcl-text-muted); font-size: var(--arcl-type-sm); }
-  .arcl-command-menu__hints { display: flex; flex-wrap: wrap; gap: var(--arcl-space-4); padding: var(--arcl-space-2) var(--arcl-space-4); border-top: var(--arcl-border-width) solid var(--arcl-border); color: var(--arcl-text-muted); font-size: var(--arcl-type-xs); }
-  .arcl-command-menu__hints span { display: inline-flex; align-items: center; gap: var(--arcl-space-1); }
-  .arcl-command-menu__end { margin-inline-start: auto; }
+  .arcl-command-menu {
+    display: grid;
+    font-family: var(--arcl-font-ui);
+  }
+  .arcl-command-menu__context {
+    padding: var(--arcl-space-3) var(--arcl-space-4) 0;
+  }
+  .arcl-command-menu__context span {
+    display: inline-flex;
+    max-width: 100%;
+    align-items: center;
+    min-height: 1.375rem;
+    padding: 0 var(--arcl-space-2);
+    overflow: hidden;
+    border-radius: 999px;
+    color: var(--arcl-text);
+    background: var(--arcl-surface-subtle);
+    font-size: var(--arcl-type-xs);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .arcl-command-menu__search {
+    display: flex;
+    align-items: center;
+    gap: var(--arcl-space-3);
+    padding: var(--arcl-space-3) var(--arcl-space-4);
+    border-bottom: var(--arcl-border-width) solid var(--arcl-border);
+    color: var(--arcl-text-muted);
+  }
+  .arcl-command-menu__search input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    outline: none;
+    color: var(--arcl-text);
+    background: transparent;
+    font: inherit;
+    font-size: var(--arcl-type-base);
+  }
+  .arcl-command-menu__list {
+    display: grid;
+    max-height: min(24rem, 55vh);
+    overflow-y: auto;
+    padding: var(--arcl-space-1);
+    outline: none;
+  }
+  .arcl-command-menu__group {
+    padding: var(--arcl-space-2) var(--arcl-space-3) var(--arcl-space-1);
+    color: var(--arcl-text-muted);
+    font-size: var(--arcl-type-xs);
+    font-weight: 600;
+  }
+  .arcl-command-menu__option {
+    display: grid;
+    grid-template-columns: 1rem minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--arcl-space-3);
+    min-height: 2.25rem;
+    padding: 0 var(--arcl-space-3);
+    border-radius: var(--arcl-radius-sm);
+    color: var(--arcl-text);
+    font-size: var(--arcl-type-sm);
+    cursor: pointer;
+  }
+  .arcl-command-menu__option :global(.arcl-icon) {
+    color: var(--arcl-text-muted);
+  }
+  .arcl-command-menu__option[aria-selected="true"] {
+    background: var(--arcl-surface-hover);
+    box-shadow: inset 2px 0 0 var(--arcl-focus);
+  }
+  .arcl-command-menu__option[aria-selected="true"] :global(.arcl-icon) {
+    color: var(--arcl-focus);
+  }
+  .arcl-command-menu__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .arcl-command-menu__label b {
+    font-weight: 650;
+  }
+  .arcl-command-menu__detail {
+    color: var(--arcl-text-muted);
+  }
+  .arcl-command-menu__keys {
+    display: flex;
+    gap: var(--arcl-space-1);
+  }
+  kbd {
+    display: inline-flex;
+    min-width: 1.125rem;
+    height: 1.125rem;
+    align-items: center;
+    justify-content: center;
+    padding: 0 0.25rem;
+    border: var(--arcl-border-width) solid var(--arcl-border);
+    border-radius: 4px;
+    color: var(--arcl-text-muted);
+    background: var(--arcl-surface);
+    font: 500 var(--arcl-type-xs) / 1 var(--arcl-font-ui);
+  }
+  .arcl-command-menu__empty {
+    margin: 0;
+    padding: var(--arcl-space-4);
+    color: var(--arcl-text-muted);
+    font-size: var(--arcl-type-sm);
+  }
+  .arcl-command-menu__hints {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--arcl-space-4);
+    padding: var(--arcl-space-2) var(--arcl-space-4);
+    border-top: var(--arcl-border-width) solid var(--arcl-border);
+    color: var(--arcl-text-muted);
+    font-size: var(--arcl-type-xs);
+  }
+  .arcl-command-menu__hints span {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--arcl-space-1);
+  }
+  .arcl-command-menu__end {
+    margin-inline-start: auto;
+  }
 </style>

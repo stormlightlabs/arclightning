@@ -32,7 +32,16 @@
 
 <script lang="ts">
   import { tick, untrack } from "svelte";
-  import { Button, Feedback, Field, Markdown, MarkdownEditor, PropertiesPanel, SelectMenu, StatusBadge } from "@arclightning/ui";
+  import {
+    Button,
+    Feedback,
+    Field,
+    Markdown,
+    MarkdownEditor,
+    PropertiesPanel,
+    SelectMenu,
+    StatusBadge,
+  } from "@arclightning/ui";
   import { useCommands, type Command } from "$lib/commands";
   import { QUEUED, dataSource, type Task } from "$lib/data";
   import { failureNotice } from "$lib/notice";
@@ -88,7 +97,10 @@
   const source = dataSource();
   const canEditFile = source.recordSource !== undefined && source.saveRecordSource !== undefined;
 
-  const priorities = PRIORITIES.map((priority) => ({ value: priority, label: priority[0].toUpperCase() + priority.slice(1) }));
+  const priorities = PRIORITIES.map((priority) => ({
+    value: priority,
+    label: priority[0].toUpperCase() + priority.slice(1),
+  }));
 
   let task = $derived(detail.task);
   let titles = $derived(titlesOf(detail));
@@ -105,24 +117,51 @@
   let fileQueued = $derived(editWaitsFor(syncStatus(), task.id));
 
   $effect(() => {
-    unsaved = (asking !== null && text.trim() !== "") || Object.keys(edit).length > 0 || (file !== null && file.text !== file.source);
+    unsaved =
+      (asking !== null && text.trim() !== "") ||
+      Object.keys(edit).length > 0 ||
+      (file !== null && file.text !== file.source);
   });
 
   // The menu and the shortcuts run the same `choose` as the buttons.
   useCommands(() => ({
     context: { id: task.id, label: task.title },
-    commands: busy !== null ? [] : [
-      ...actions.map((action): Command => ({
-        id: `task:${action}`,
-        label: ACTION_LABELS[action],
-        scope: "selection",
-        keys: [ACTION_KEYS[action]],
-        icon: action === "complete" ? "check" : "task",
-        run: () => choose(action),
-      })),
-      ...(draft === null ? [{ id: "task:edit", label: "Edit", scope: "selection", keys: [EDIT_KEY], icon: "markdown", run: openEdit } satisfies Command] : []),
-      ...(canEditFile && file === null && !fileQueued ? [{ id: "task:edit-file", label: "Edit file", scope: "selection", icon: "markdown", run: openFile } satisfies Command] : []),
-    ],
+    commands:
+      busy !== null
+        ? []
+        : [
+            ...actions.map((action): Command => ({
+              id: `task:${action}`,
+              label: ACTION_LABELS[action],
+              scope: "selection",
+              keys: [ACTION_KEYS[action]],
+              icon: action === "complete" ? "check" : "task",
+              run: () => choose(action),
+            })),
+            ...(draft === null
+              ? [
+                  {
+                    id: "task:edit",
+                    label: "Edit",
+                    scope: "selection",
+                    keys: [EDIT_KEY],
+                    icon: "markdown",
+                    run: openEdit,
+                  } satisfies Command,
+                ]
+              : []),
+            ...(canEditFile && file === null && !fileQueued
+              ? [
+                  {
+                    id: "task:edit-file",
+                    label: "Edit file",
+                    scope: "selection",
+                    icon: "markdown",
+                    run: openFile,
+                  } satisfies Command,
+                ]
+              : []),
+          ],
   }));
 
   // Only open the form: an initial action never runs a change by itself.
@@ -165,7 +204,11 @@
     const { text: edited, revision } = file;
     failure = null;
     unblocked = null;
-    void perform("file", () => save(task.id, { source: edited, revision }), () => (file = null));
+    void perform(
+      "file",
+      () => save(task.id, { source: edited, revision }),
+      () => (file = null),
+    );
   }
 
   /**
@@ -180,7 +223,11 @@
     }
     failure = null;
     unblocked = null;
-    void perform(action, () => runAction(dataSource(), task.id, action), () => (asking = null));
+    void perform(
+      action,
+      () => runAction(dataSource(), task.id, action),
+      () => (asking = null),
+    );
   }
 
   /** Open `action`'s Markdown form, or keep the one open, and focus its editor. */
@@ -216,7 +263,11 @@
     event.preventDefault();
     failure = null;
     unblocked = null;
-    void perform("edit", () => dataSource().updateTask(task.id, edit), () => (draft = null));
+    void perform(
+      "edit",
+      () => dataSource().updateTask(task.id, edit),
+      () => (draft = null),
+    );
   }
 
   /**
@@ -309,7 +360,13 @@
           <Button label="Edit" variant="ghost" disabled={busy !== null} onclick={openEdit} />
         {/if}
         {#if canEditFile && file === null}
-          <Button label="Edit file" variant="ghost" busy={busy === "file"} disabled={busy !== null || fileQueued} onclick={openFile} />
+          <Button
+            label="Edit file"
+            variant="ghost"
+            busy={busy === "file"}
+            disabled={busy !== null || fileQueued}
+            onclick={openFile}
+          />
         {/if}
       </div>
       {#if canEditFile && fileQueued}
@@ -318,24 +375,56 @@
       {#if asking !== null}
         {@const label = ACTION_TEXT[asking] ?? ""}
         <form class="ask" aria-label={ACTION_LABELS[asking]} onsubmit={submitAsk}>
-          <MarkdownEditor bind:this={askEditor} value={text} label={`${label} Markdown`} readonly={false} onchange={(value) => (text = value)} />
+          <MarkdownEditor
+            bind:this={askEditor}
+            value={text}
+            label={`${label} Markdown`}
+            readonly={false}
+            onchange={(value) => (text = value)}
+          />
           <div class="buttons">
-            <Button type="submit" variant="primary" label={ACTION_LABELS[asking]} busy={busy === asking} disabled={busy !== null} />
-            <Button label="Cancel" variant="ghost" disabled={busy !== null} onclick={() => ((asking = null), (failure = null))} />
+            <Button
+              type="submit"
+              variant="primary"
+              label={ACTION_LABELS[asking]}
+              busy={busy === asking}
+              disabled={busy !== null}
+            />
+            <Button
+              label="Cancel"
+              variant="ghost"
+              disabled={busy !== null}
+              onclick={() => ((asking = null), (failure = null))}
+            />
           </div>
         </form>
       {/if}
       {#each warnings as warning, index (index)}
-        <Feedback tone="warning" title="The change is saved, with a warning" message={`${warning.message} (${warning.code})`}>
+        <Feedback
+          tone="warning"
+          title="The change is saved, with a warning"
+          message={`${warning.message} (${warning.code})`}
+        >
           {#snippet actions()}
-            <Button label="Dismiss" variant="ghost" onclick={() => (warnings = warnings.filter((_, other) => other !== index))} />
+            <Button
+              label="Dismiss"
+              variant="ghost"
+              onclick={() => (warnings = warnings.filter((_, other) => other !== index))}
+            />
           {/snippet}
         </Feedback>
       {/each}
       {#if stale !== null}
-        <Feedback tone="warning" title="The change is saved, but this view did not reload" message={`${stale.message} (${stale.code})`} />
+        <Feedback
+          tone="warning"
+          title="The change is saved, but this view did not reload"
+          message={`${stale.message} (${stale.code})`}
+        />
       {/if}
-      {#each actions as action (action)}{@render failed(action, `${ACTION_LABELS[action].toLowerCase()} this task`)}{/each}
+      {#each actions as action (action)}{@render failed(
+          action,
+          `${ACTION_LABELS[action].toLowerCase()} this task`,
+        )}{/each}
       {#if file === null}{@render failed("file", "open the file")}{/if}
       {#if draft === null}{@render failed("edit", "save the task")}{/if}
       {#if unblocked !== null}
@@ -365,7 +454,8 @@
           {#each reasons as reason}
             <li data-kind={reason.kind}>
               {#each reasonSegments(reason, titles) as segment, part (part)}
-                {#if "href" in segment}<a href={segment.href} title={segment.id}>{segment.label}</a>{:else}{segment.text}{/if}
+                {#if "href" in segment}<a href={segment.href} title={segment.id}>{segment.label}</a
+                  >{:else}{segment.text}{/if}
               {/each}
               <code class="kind">{reason.kind}</code>
             </li>
@@ -380,11 +470,31 @@
           <h2 id="task-file">Edit file</h2>
           <code class="path">{file.path}</code>
         </div>
-        <p class="muted">TOML front matter between the <code>+++</code> lines, then the Markdown body. <code>arcl</code> checks the file as it checks a workspace file it imports.</p>
-        <MarkdownEditor value={file.text} label="Record file" frontMatter readonly={false} onchange={(value) => file && (file.text = value)} />
+        <p class="muted">
+          TOML front matter between the <code>+++</code> lines, then the Markdown body. <code>arcl</code> checks the file
+          as it checks a workspace file it imports.
+        </p>
+        <MarkdownEditor
+          value={file.text}
+          label="Record file"
+          frontMatter
+          readonly={false}
+          onchange={(value) => file && (file.text = value)}
+        />
         <div class="buttons">
-          <Button type="submit" variant="primary" label="Save file" busy={busy === "file"} disabled={busy !== null || fileQueued || file.text === file.source} />
-          <Button label="Cancel" variant="ghost" disabled={busy !== null} onclick={() => ((file = null), (failure = null))} />
+          <Button
+            type="submit"
+            variant="primary"
+            label="Save file"
+            busy={busy === "file"}
+            disabled={busy !== null || fileQueued || file.text === file.source}
+          />
+          <Button
+            label="Cancel"
+            variant="ghost"
+            disabled={busy !== null}
+            onclick={() => ((file = null), (failure = null))}
+          />
         </div>
         {#if failure?.action === "file"}
           <Feedback {...failureNotice(failure.failure, "Could not save the file")}>
@@ -398,12 +508,33 @@
       <form class="edit" aria-labelledby="task-edit" onsubmit={saveEdit}>
         <h2 id="task-edit">Edit task</h2>
         <Field label="Title" bind:value={draft.title} required />
-        <SelectMenu label="Priority" options={priorities} value={draft.priority} onchange={(value) => draft && (draft.priority = value as TaskDraft["priority"])} />
+        <SelectMenu
+          label="Priority"
+          options={priorities}
+          value={draft.priority}
+          onchange={(value) => draft && (draft.priority = value as TaskDraft["priority"])}
+        />
         <span class="label">Description</span>
-        <MarkdownEditor value={draft.body} label="Description Markdown" readonly={false} onchange={(value) => draft && (draft.body = value)} />
+        <MarkdownEditor
+          value={draft.body}
+          label="Description Markdown"
+          readonly={false}
+          onchange={(value) => draft && (draft.body = value)}
+        />
         <div class="buttons">
-          <Button type="submit" variant="primary" label="Save" busy={busy === "edit"} disabled={busy !== null || Object.keys(edit).length === 0} />
-          <Button label="Cancel" variant="ghost" disabled={busy !== null} onclick={() => ((draft = null), (failure = null))} />
+          <Button
+            type="submit"
+            variant="primary"
+            label="Save"
+            busy={busy === "edit"}
+            disabled={busy !== null || Object.keys(edit).length === 0}
+          />
+          <Button
+            label="Cancel"
+            variant="ghost"
+            disabled={busy !== null}
+            onclick={() => ((draft = null), (failure = null))}
+          />
         </div>
         {@render failed("edit", "save the task")}
       </form>
@@ -412,7 +543,12 @@
         <div class="section-head">
           <h2 id="task-description">Description</h2>
           {#if task.body}
-            <button type="button" class="link-button" aria-pressed={showSource} onclick={() => (showSource = !showSource)}>
+            <button
+              type="button"
+              class="link-button"
+              aria-pressed={showSource}
+              onclick={() => (showSource = !showSource)}
+            >
               {showSource ? "Show rendered" : "View Markdown"}
             </button>
           {/if}
@@ -448,7 +584,9 @@
       <section aria-labelledby="task-done-blockers">
         <h2 id="task-done-blockers">Completed blockers</h2>
         <ul class="relations done">
-          {#each blockers.done as entry (`${entry.ancestor?.id ?? ""}/${entry.blocker.task.id}`)}{@render done(entry)}{/each}
+          {#each blockers.done as entry (`${entry.ancestor?.id ?? ""}/${entry.blocker.task.id}`)}{@render done(
+              entry,
+            )}{/each}
         </ul>
       </section>
     {/if}
@@ -477,11 +615,15 @@
       <h2 id="task-activity">Activity</h2>
       <div class="entry" aria-labelledby="task-handoff">
         <h3 id="task-handoff">Latest handoff</h3>
-        {#if task.handoff}<Markdown source={task.handoff} label="Latest handoff" />{:else}<p class="muted">No handoff recorded.</p>{/if}
+        {#if task.handoff}<Markdown source={task.handoff} label="Latest handoff" />{:else}<p class="muted">
+            No handoff recorded.
+          </p>{/if}
       </div>
       <div class="entry" aria-labelledby="task-evidence">
         <h3 id="task-evidence">Evidence</h3>
-        {#if task.evidence}<Markdown source={task.evidence} label="Evidence" />{:else}<p class="muted">No evidence recorded.</p>{/if}
+        {#if task.evidence}<Markdown source={task.evidence} label="Evidence" />{:else}<p class="muted">
+            No evidence recorded.
+          </p>{/if}
       </div>
     </section>
   </article>
@@ -492,55 +634,244 @@
 </div>
 
 <style>
-  .breadcrumb ol { display: flex; flex-wrap: wrap; gap: var(--arcl-space-2); margin: 0 0 var(--arcl-space-4); padding: 0; color: var(--arcl-text-muted); font-size: var(--arcl-type-sm); list-style: none; }
-  .breadcrumb li + li::before { content: "/"; margin-inline-end: var(--arcl-space-2); color: var(--arcl-border-strong); }
-  .breadcrumb a { color: inherit; text-decoration: none; }
-  .breadcrumb a:hover { color: var(--arcl-text); text-decoration: underline; }
-  .breadcrumb [aria-current] { color: var(--arcl-text); }
-  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 18rem; align-items: start; gap: var(--arcl-space-6); }
-  .layout[data-panel="closed"] { grid-template-columns: minmax(0, 1fr) 10rem; }
-  .panel { position: sticky; top: var(--arcl-space-4); }
-  article { display: grid; gap: var(--arcl-space-5); min-width: 0; }
-  header { display: grid; gap: var(--arcl-space-1); }
-  .id { color: var(--arcl-text-muted); font: var(--arcl-type-sm) var(--arcl-font-code); }
-  h1 { margin: 0; color: var(--arcl-heading); font: 650 var(--arcl-type-xl) / 1.25 var(--arcl-font-ui); text-wrap: balance; }
-  h2 { margin: 0 0 var(--arcl-space-2); color: var(--arcl-heading); font: 600 var(--arcl-type-base) / 1.3 var(--arcl-font-ui); }
-  h3 { margin: var(--arcl-space-3) 0 var(--arcl-space-2); color: var(--arcl-text-muted); font: 600 var(--arcl-type-sm) / 1.3 var(--arcl-font-ui); }
-  h3 a, .relations a, .readiness a { color: var(--arcl-link); text-decoration: none; }
-  h3 a:hover, .relations a:hover, .readiness a:hover { text-decoration: underline; }
-  .muted { margin: 0; color: var(--arcl-text-muted); }
-  .readiness { padding: var(--arcl-space-3) var(--arcl-space-4); border: var(--arcl-border-width) solid var(--arcl-warning); border-radius: var(--arcl-radius-sm); background: var(--arcl-warning-surface); }
-  .readiness[data-ready="true"] { border-color: var(--arcl-success); background: var(--arcl-success-surface); }
-  .readiness p { margin: 0; }
-  .readiness strong { color: var(--arcl-heading); font-family: var(--arcl-font-ui); }
-  .readiness ul { margin: var(--arcl-space-2) 0 0; padding-inline-start: 1.25rem; }
-  .readiness li { color: var(--arcl-text); }
-  .kind { margin-inline-start: var(--arcl-space-2); color: var(--arcl-text-muted); font: var(--arcl-type-xs) var(--arcl-font-code); }
-  .path { overflow: hidden; color: var(--arcl-text-muted); font: var(--arcl-type-xs) var(--arcl-font-code); text-overflow: ellipsis; white-space: nowrap; }
-  .edit .muted code { font: var(--arcl-type-xs) var(--arcl-font-code); }
-  .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--arcl-space-3); }
-  .link-button { padding: 0; border: 0; color: var(--arcl-link); background: none; font: inherit; font-size: var(--arcl-type-sm); cursor: pointer; }
-  .link-button:hover { text-decoration: underline; }
-  .relations { margin: 0; padding: 0; border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-md); background: var(--arcl-surface); list-style: none; }
-  .relations li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--arcl-space-3); min-height: 2.25rem; padding: 0 var(--arcl-space-3); font-size: var(--arcl-type-sm); }
-  .relations li + li { border-top: var(--arcl-border-width) solid var(--arcl-surface-subtle); }
-  .relations a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .relations code { color: var(--arcl-text-muted); font: var(--arcl-type-xs) var(--arcl-font-code); }
-  .done li { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--arcl-space-1); padding: var(--arcl-space-2) var(--arcl-space-3); }
-  .done .row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--arcl-space-3); }
-  .done .via { font-size: var(--arcl-type-xs); }
-  .done .via a { color: var(--arcl-link); text-decoration: none; }
-  .entry + .entry { margin-top: var(--arcl-space-2); }
-  .actions, .buttons { display: flex; flex-wrap: wrap; gap: var(--arcl-space-2); margin-top: var(--arcl-space-2); }
-  .ask, .edit { display: grid; gap: var(--arcl-space-3); margin-top: var(--arcl-space-2); }
-  .edit .buttons { margin-top: 0; }
-  .label { color: var(--arcl-text-muted); font: 600 var(--arcl-type-sm) / 1.3 var(--arcl-font-ui); }
-  .notice { margin-top: var(--arcl-space-2); padding: var(--arcl-space-3) var(--arcl-space-4); border-inline-start: 4px solid var(--arcl-success); border-radius: var(--arcl-radius-sm); background: var(--arcl-success-surface); font-size: var(--arcl-type-sm); }
-  .notice ul { margin: var(--arcl-space-1) 0 0; padding-inline-start: 1.25rem; }
-  .notice a { color: var(--arcl-link); }
-  .notice code { color: var(--arcl-text-muted); font: var(--arcl-type-xs) var(--arcl-font-code); }
+  .breadcrumb ol {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--arcl-space-2);
+    margin: 0 0 var(--arcl-space-4);
+    padding: 0;
+    color: var(--arcl-text-muted);
+    font-size: var(--arcl-type-sm);
+    list-style: none;
+  }
+  .breadcrumb li + li::before {
+    content: "/";
+    margin-inline-end: var(--arcl-space-2);
+    color: var(--arcl-border-strong);
+  }
+  .breadcrumb a {
+    color: inherit;
+    text-decoration: none;
+  }
+  .breadcrumb a:hover {
+    color: var(--arcl-text);
+    text-decoration: underline;
+  }
+  .breadcrumb [aria-current] {
+    color: var(--arcl-text);
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 18rem;
+    align-items: start;
+    gap: var(--arcl-space-6);
+  }
+  .layout[data-panel="closed"] {
+    grid-template-columns: minmax(0, 1fr) 10rem;
+  }
+  .panel {
+    position: sticky;
+    top: var(--arcl-space-4);
+  }
+  article {
+    display: grid;
+    gap: var(--arcl-space-5);
+    min-width: 0;
+  }
+  header {
+    display: grid;
+    gap: var(--arcl-space-1);
+  }
+  .id {
+    color: var(--arcl-text-muted);
+    font: var(--arcl-type-sm) var(--arcl-font-code);
+  }
+  h1 {
+    margin: 0;
+    color: var(--arcl-heading);
+    font: 650 var(--arcl-type-xl) / 1.25 var(--arcl-font-ui);
+    text-wrap: balance;
+  }
+  h2 {
+    margin: 0 0 var(--arcl-space-2);
+    color: var(--arcl-heading);
+    font: 600 var(--arcl-type-base) / 1.3 var(--arcl-font-ui);
+  }
+  h3 {
+    margin: var(--arcl-space-3) 0 var(--arcl-space-2);
+    color: var(--arcl-text-muted);
+    font: 600 var(--arcl-type-sm) / 1.3 var(--arcl-font-ui);
+  }
+  h3 a,
+  .relations a,
+  .readiness a {
+    color: var(--arcl-link);
+    text-decoration: none;
+  }
+  h3 a:hover,
+  .relations a:hover,
+  .readiness a:hover {
+    text-decoration: underline;
+  }
+  .muted {
+    margin: 0;
+    color: var(--arcl-text-muted);
+  }
+  .readiness {
+    padding: var(--arcl-space-3) var(--arcl-space-4);
+    border: var(--arcl-border-width) solid var(--arcl-warning);
+    border-radius: var(--arcl-radius-sm);
+    background: var(--arcl-warning-surface);
+  }
+  .readiness[data-ready="true"] {
+    border-color: var(--arcl-success);
+    background: var(--arcl-success-surface);
+  }
+  .readiness p {
+    margin: 0;
+  }
+  .readiness strong {
+    color: var(--arcl-heading);
+    font-family: var(--arcl-font-ui);
+  }
+  .readiness ul {
+    margin: var(--arcl-space-2) 0 0;
+    padding-inline-start: 1.25rem;
+  }
+  .readiness li {
+    color: var(--arcl-text);
+  }
+  .kind {
+    margin-inline-start: var(--arcl-space-2);
+    color: var(--arcl-text-muted);
+    font: var(--arcl-type-xs) var(--arcl-font-code);
+  }
+  .path {
+    overflow: hidden;
+    color: var(--arcl-text-muted);
+    font: var(--arcl-type-xs) var(--arcl-font-code);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .edit .muted code {
+    font: var(--arcl-type-xs) var(--arcl-font-code);
+  }
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--arcl-space-3);
+  }
+  .link-button {
+    padding: 0;
+    border: 0;
+    color: var(--arcl-link);
+    background: none;
+    font: inherit;
+    font-size: var(--arcl-type-sm);
+    cursor: pointer;
+  }
+  .link-button:hover {
+    text-decoration: underline;
+  }
+  .relations {
+    margin: 0;
+    padding: 0;
+    border: var(--arcl-border-width) solid var(--arcl-border);
+    border-radius: var(--arcl-radius-md);
+    background: var(--arcl-surface);
+    list-style: none;
+  }
+  .relations li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: var(--arcl-space-3);
+    min-height: 2.25rem;
+    padding: 0 var(--arcl-space-3);
+    font-size: var(--arcl-type-sm);
+  }
+  .relations li + li {
+    border-top: var(--arcl-border-width) solid var(--arcl-surface-subtle);
+  }
+  .relations a {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .relations code {
+    color: var(--arcl-text-muted);
+    font: var(--arcl-type-xs) var(--arcl-font-code);
+  }
+  .done li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--arcl-space-1);
+    padding: var(--arcl-space-2) var(--arcl-space-3);
+  }
+  .done .row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: var(--arcl-space-3);
+  }
+  .done .via {
+    font-size: var(--arcl-type-xs);
+  }
+  .done .via a {
+    color: var(--arcl-link);
+    text-decoration: none;
+  }
+  .entry + .entry {
+    margin-top: var(--arcl-space-2);
+  }
+  .actions,
+  .buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--arcl-space-2);
+    margin-top: var(--arcl-space-2);
+  }
+  .ask,
+  .edit {
+    display: grid;
+    gap: var(--arcl-space-3);
+    margin-top: var(--arcl-space-2);
+  }
+  .edit .buttons {
+    margin-top: 0;
+  }
+  .label {
+    color: var(--arcl-text-muted);
+    font: 600 var(--arcl-type-sm) / 1.3 var(--arcl-font-ui);
+  }
+  .notice {
+    margin-top: var(--arcl-space-2);
+    padding: var(--arcl-space-3) var(--arcl-space-4);
+    border-inline-start: 4px solid var(--arcl-success);
+    border-radius: var(--arcl-radius-sm);
+    background: var(--arcl-success-surface);
+    font-size: var(--arcl-type-sm);
+  }
+  .notice ul {
+    margin: var(--arcl-space-1) 0 0;
+    padding-inline-start: 1.25rem;
+  }
+  .notice a {
+    color: var(--arcl-link);
+  }
+  .notice code {
+    color: var(--arcl-text-muted);
+    font: var(--arcl-type-xs) var(--arcl-font-code);
+  }
   @media (max-width: 60rem) {
-    .layout, .layout[data-panel="closed"] { grid-template-columns: minmax(0, 1fr); }
-    .panel { position: static; grid-row: 1; }
+    .layout,
+    .layout[data-panel="closed"] {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .panel {
+      position: static;
+      grid-row: 1;
+    }
   }
 </style>

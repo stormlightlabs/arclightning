@@ -27,16 +27,24 @@
 
 <section class="sync" aria-label="Sync">
   <p class="line">
-    {synced === null ? "Not synced yet." : `Synced ${synced}`}{#if status.commit}{` at ${status.commit.slice(0, 7)}`}{/if}.
+    {synced === null
+      ? "Not synced yet."
+      : `Synced ${synced}`}{#if status.commit}{` at ${status.commit.slice(0, 7)}`}{/if}.
     {#if queued.length}{queued.length === 1 ? " 1 edit waits" : ` ${queued.length} edits wait`} for the next sync.{/if}
   </p>
   {#if queued.length}
     <ul aria-label="Queued edits">
-      {#each queued as edit (edit.id)}<li>{describeEdit(edit)}{edit.status === "applying" ? " (applying now)" : ""}</li>{/each}
+      {#each queued as edit (edit.id)}<li>
+          {describeEdit(edit)}{edit.status === "applying" ? " (applying now)" : ""}
+        </li>{/each}
     </ul>
   {/if}
   {#if status.stopped}
-    <Feedback tone="warning" title="This page stopped following syncs" message={`Reload the page to see new syncs and queued edits. (${status.stopped.code})`} />
+    <Feedback
+      tone="warning"
+      title="This page stopped following syncs"
+      message={`Reload the page to see new syncs and queued edits. (${status.stopped.code})`}
+    />
   {/if}
   {#if stale}
     <Feedback tone="info" title="The project synced" message="This view shows the records from before the sync.">
@@ -44,14 +52,30 @@
     </Feedback>
   {/if}
   {#each failed as edit (edit.id)}
-    <Feedback tone="danger" title={`Not applied: ${describeEdit(edit)}`} message={edit.error ? `${edit.error.message} (${edit.error.code})` : "arcl refused it."}>
+    <Feedback
+      tone="danger"
+      title={`Not applied: ${describeEdit(edit)}`}
+      message={edit.error ? `${edit.error.message} (${edit.error.code})` : "arcl refused it."}
+    >
       {#snippet actions()}<Button label="Dismiss" variant="ghost" onclick={() => ondismiss?.(edit.id)} />{/snippet}
     </Feedback>
   {/each}
 </section>
 
 <style>
-  .sync { display: grid; gap: var(--arcl-space-2); margin-bottom: var(--arcl-space-4); font-size: var(--arcl-type-sm); }
-  .line { margin: 0; color: var(--arcl-text-muted); }
-  ul { margin: 0; padding-inline-start: var(--arcl-space-5); color: var(--arcl-text-muted); }
+  .sync {
+    display: grid;
+    gap: var(--arcl-space-2);
+    margin-bottom: var(--arcl-space-4);
+    font-size: var(--arcl-type-sm);
+  }
+  .line {
+    margin: 0;
+    color: var(--arcl-text-muted);
+  }
+  ul {
+    margin: 0;
+    padding-inline-start: var(--arcl-space-5);
+    color: var(--arcl-text-muted);
+  }
 </style>

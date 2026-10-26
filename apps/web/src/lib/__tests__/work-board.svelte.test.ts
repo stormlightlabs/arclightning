@@ -40,7 +40,8 @@ function source(list: WorkList = sampleList(), answers: Partial<DataSource> = {}
 }
 
 /** The column for `title`, found by its heading. */
-const column = (title: string) => screen.getByRole("region", { name: "Board" }).getByRole("list", { name: new RegExp(`^${title}`) });
+const column = (title: string) =>
+  screen.getByRole("region", { name: "Board" }).getByRole("list", { name: new RegExp(`^${title}`) });
 
 beforeEach(() => {
   reset();
@@ -80,7 +81,10 @@ describe("Work board", () => {
     await expect.element(screen.getByRole("region", { name: "Work" })).toBeVisible();
     await screen.getByRole("button", { name: "Board" }).click();
     expect(window.localStorage.getItem(VIEW_STORAGE_KEY)).toBe("board");
-    expect(goto).toHaveBeenLastCalledWith("/?status=pending&view=board", expect.objectContaining({ replaceState: true }));
+    expect(goto).toHaveBeenLastCalledWith(
+      "/?status=pending&view=board",
+      expect.objectContaining({ replaceState: true }),
+    );
   });
 
   it("moves a card with the keyboard through its Move dialog", async () => {
@@ -119,7 +123,9 @@ describe("Work board", () => {
     await render(WorkRoute);
     await expect.element(column("Parked").getByRole("listitem")).toHaveLength(1);
     await expect.poll(() => registeredCommands().find((command) => command.id === "work:move")?.keys).toEqual(["m"]);
-    registeredCommands().find((command) => command.id === "work:move")?.run();
+    registeredCommands()
+      .find((command) => command.id === "work:move")
+      ?.run();
     const dialog = screen.getByRole("dialog", { name: "Move Task t-6" });
     await expect.element(dialog.getByRole("button", { name: "Pending" })).toBeVisible();
   });
@@ -131,7 +137,9 @@ describe("Work board", () => {
     const card = column("Parked").getByRole("listitem").filter({ hasText: "Task t-6" });
     await expect.element(card).toBeVisible();
     await userEvent.dragAndDrop(card, column("Completed"));
-    await expect.element(screen.getByRole("alert")).toHaveTextContent("No task command moves a task from Parked to Completed. It can move to Pending.");
+    await expect
+      .element(screen.getByRole("alert"))
+      .toHaveTextContent("No task command moves a task from Parked to Completed. It can move to Pending.");
     await expect.element(column("Parked").getByRole("listitem").filter({ hasText: "Task t-6" })).toBeVisible();
     expect(calls.filter(([name]) => name !== "work")).toEqual([]);
   });
@@ -158,7 +166,9 @@ describe("Work board", () => {
     await render(WorkRoute);
     await screen.getByRole("button", { name: "Move Task t-7" }).click();
     await screen.getByRole("dialog").getByRole("button", { name: "In progress" }).click();
-    await expect.element(column("Pending").getByRole("listitem").filter({ hasText: "Task t-7" })).toHaveAttribute("aria-busy", "true");
+    await expect
+      .element(column("Pending").getByRole("listitem").filter({ hasText: "Task t-7" }))
+      .toHaveAttribute("aria-busy", "true");
 
     await expect.element(screen.getByRole("button", { name: "Move Task t-2" })).toBeDisabled();
     const other = column("Pending").getByRole("listitem").filter({ hasText: "Task t-5" });
@@ -176,7 +186,9 @@ describe("Work board", () => {
   });
 
   it("keeps a card in place when its move fails or queues", async () => {
-    source(sampleList(), { startTask: () => Promise.reject(new DataError(QUEUED, "An agent applies this edit with arcl on the next sync.")) });
+    source(sampleList(), {
+      startTask: () => Promise.reject(new DataError(QUEUED, "An agent applies this edit with arcl on the next sync.")),
+    });
     show("/?view=board");
     await render(WorkRoute);
     await screen.getByRole("button", { name: "Move Task t-2" }).click();
@@ -188,7 +200,11 @@ describe("Work board", () => {
   it("scrolls a long column inside itself", async () => {
     const list: WorkList = { milestones: [], items: [] };
     for (let index = 0; index < 40; index++) {
-      list.items.push({ task: task(`t-${index}`), readiness: { ready: true, blocked: false, reasons: [] }, milestone: null });
+      list.items.push({
+        task: task(`t-${index}`),
+        readiness: { ready: true, blocked: false, reasons: [] },
+        milestone: null,
+      });
     }
     source(list);
     show("/?view=board");

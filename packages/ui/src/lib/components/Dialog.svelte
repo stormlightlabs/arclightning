@@ -99,13 +99,21 @@
   aria-labelledby={titleId}
   aria-describedby={description ? descriptionId : undefined}
   onclose={handleClose}
-  oncancel={(event) => { event.preventDefault(); requestClose(); }}
+  oncancel={(event) => {
+    event.preventDefault();
+    requestClose();
+  }}
   onkeydown={(event) => {
     // Close on Escape here, since the browser skips `cancel` for a repeated
     // close request without user activation and closes a task later.
-    if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); requestClose(); }
+    if (event.key === "Escape" && !event.defaultPrevented) {
+      event.preventDefault();
+      requestClose();
+    }
   }}
-  onclick={(event) => { if (event.target === dialog) requestClose(); }}
+  onclick={(event) => {
+    if (event.target === dialog) requestClose();
+  }}
 >
   {#if bare}
     <h2 class="arcl-dialog__hidden" id={titleId}>{title}</h2>
@@ -123,18 +131,82 @@
 </dialog>
 
 <style>
-  .arcl-dialog { width: min(34rem, calc(100% - 2rem)); max-height: calc(100dvh - 2rem); padding: 0; border: 1px solid var(--arcl-border); border-radius: var(--arcl-radius-lg); color: var(--arcl-text); background: var(--arcl-surface); box-shadow: var(--arcl-shadow-overlay); animation: enter var(--arcl-duration-overlay) var(--arcl-ease-out); }
-  .arcl-dialog::backdrop { background: var(--arcl-overlay); }
-  header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--arcl-space-4); padding: var(--arcl-space-5); border-bottom: 1px solid var(--arcl-border); }
-  h2, p { margin: 0; }
-  h2 { color: var(--arcl-heading); font: 650 var(--arcl-type-lg) / 1.25 var(--arcl-font-ui); }
-  p { margin-top: var(--arcl-space-1); color: var(--arcl-text-muted); }
-  header button { display: grid; width: 2.75rem; height: 2.75rem; place-items: center; border: 0; border-radius: var(--arcl-radius-control); color: var(--arcl-text); background: transparent; font-size: 1.5rem; cursor: pointer; }
-  header button:hover { background: var(--arcl-surface-hover); }
-  .arcl-dialog__body { padding: var(--arcl-space-5); }
-  .arcl-dialog[data-bare] { width: min(40rem, calc(100% - 2rem)); margin-top: min(12vh, 7.5rem); }
-  .arcl-dialog[data-bare] .arcl-dialog__body { padding: 0; }
-  .arcl-dialog__hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  @media (prefers-reduced-motion: reduce) { .arcl-dialog { animation: none; } }
-  @keyframes enter { from { opacity: 0; transform: translateY(-0.5rem); } }
+  .arcl-dialog {
+    width: min(34rem, calc(100% - 2rem));
+    max-height: calc(100dvh - 2rem);
+    padding: 0;
+    border: 1px solid var(--arcl-border);
+    border-radius: var(--arcl-radius-lg);
+    color: var(--arcl-text);
+    background: var(--arcl-surface);
+    box-shadow: var(--arcl-shadow-overlay);
+    animation: enter var(--arcl-duration-overlay) var(--arcl-ease-out);
+  }
+  .arcl-dialog::backdrop {
+    background: var(--arcl-overlay);
+  }
+  header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--arcl-space-4);
+    padding: var(--arcl-space-5);
+    border-bottom: 1px solid var(--arcl-border);
+  }
+  h2,
+  p {
+    margin: 0;
+  }
+  h2 {
+    color: var(--arcl-heading);
+    font: 650 var(--arcl-type-lg) / 1.25 var(--arcl-font-ui);
+  }
+  p {
+    margin-top: var(--arcl-space-1);
+    color: var(--arcl-text-muted);
+  }
+  header button {
+    display: grid;
+    width: 2.75rem;
+    height: 2.75rem;
+    place-items: center;
+    border: 0;
+    border-radius: var(--arcl-radius-control);
+    color: var(--arcl-text);
+    background: transparent;
+    font-size: 1.5rem;
+    cursor: pointer;
+  }
+  header button:hover {
+    background: var(--arcl-surface-hover);
+  }
+  .arcl-dialog__body {
+    padding: var(--arcl-space-5);
+  }
+  .arcl-dialog[data-bare] {
+    width: min(40rem, calc(100% - 2rem));
+    margin-top: min(12vh, 7.5rem);
+  }
+  .arcl-dialog[data-bare] .arcl-dialog__body {
+    padding: 0;
+  }
+  .arcl-dialog__hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .arcl-dialog {
+      animation: none;
+    }
+  }
+  @keyframes enter {
+    from {
+      opacity: 0;
+      transform: translateY(-0.5rem);
+    }
+  }
 </style>

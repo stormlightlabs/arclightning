@@ -19,11 +19,21 @@
   let groups = $derived(
     all
       .filter((group) => context !== undefined || group.id !== "selection")
-      .map((group) => ({ ...group, items: group.items.filter((item) => item.label.toLowerCase().includes(query.toLowerCase())) }))
+      .map((group) => ({
+        ...group,
+        items: group.items.filter((item) => item.label.toLowerCase().includes(query.toLowerCase())),
+      }))
       .filter((group) => group.items.length),
   );
 </script>
 
 <button type="button" onclick={() => (open = true)}>Open menu</button>
-<CommandMenu bind:open bind:query {groups} {context} onclearcontext={() => (context = undefined)} onrun={(id) => (ran = [...ran, id])} />
+<CommandMenu
+  bind:open
+  bind:query
+  {groups}
+  {context}
+  onclearcontext={() => (context = undefined)}
+  onrun={(id) => (ran = [...ran, id])}
+/>
 <output data-testid="ran">{ran.join(",")}</output>

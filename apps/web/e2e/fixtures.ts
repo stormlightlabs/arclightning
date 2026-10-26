@@ -31,6 +31,9 @@ export async function serveFixtures(page: Page) {
 export async function open(page: Page, view: (typeof VIEWS)[number]) {
   await page.goto(view.path);
   await page.getByRole("heading", { level: 1, name: view.heading }).waitFor();
-  await page.getByRole("status").filter({ hasText: /^Loading/ }).waitFor({ state: "detached" });
+  await page
+    .getByRole("status")
+    .filter({ hasText: /^Loading/ })
+    .waitFor({ state: "detached" });
   await page.evaluate(() => document.fonts.ready);
 }

@@ -3,7 +3,9 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "sideEffects": ["**/*.css"],
+  "sideEffects": [
+    "**/*.css"
+  ],
   "scripts": {
     "dev": "storybook dev -p 6006",
     "build": "pnpm icons:generate && svelte-kit sync && svelte-package",
@@ -31,7 +33,9 @@
     "./inter.css": "./src/lib/styles/inter.css",
     "./uno.config": "./uno.config.mjs"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "peerDependencies": {
     "svelte": "catalog:"
   },

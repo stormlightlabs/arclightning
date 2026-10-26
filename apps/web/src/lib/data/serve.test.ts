@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { DataError, dataSource, latestRead, serveSource, setDataSource, type DataSource } from "./index";
 
-const phase = (id: string, position: number) => ({ id, project_id: "pj", plan_id: "pl", title: `Milestone ${position}`, body: "", status: "open", position });
+const phase = (id: string, position: number) => ({
+  id,
+  project_id: "pj",
+  plan_id: "pl",
+  title: `Milestone ${position}`,
+  body: "",
+  status: "open",
+  position,
+});
 
 function item(id: string, phaseId: string | null) {
   return {
@@ -13,8 +21,13 @@ function item(id: string, phaseId: string | null) {
 
 /** A fetch that answers from `routes` and records each request. */
 function fakeFetch(routes: Record<string, { status?: number; body: unknown }>) {
-  const calls: { path: string; headers: Record<string, string>; method?: string; body?: unknown; signal?: AbortSignal | null }[] =
-    [];
+  const calls: {
+    path: string;
+    headers: Record<string, string>;
+    method?: string;
+    body?: unknown;
+    signal?: AbortSignal | null;
+  }[] = [];
   const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     const call: (typeof calls)[number] = { path, headers: (init?.headers ?? {}) as Record<string, string> };
@@ -29,7 +42,10 @@ function fakeFetch(routes: Record<string, { status?: number; body: unknown }>) {
   return { fetch, calls };
 }
 
-const listing = (records: { id: string; kind: string; status: string; title: string }[]) => ({ format_version: 1, data: { records } });
+const listing = (records: { id: string; kind: string; status: string; title: string }[]) => ({
+  format_version: 1,
+  data: { records },
+});
 
 /** A fetch that never answers and rejects when its signal aborts, as the browser's does. */
 function hangingFetch() {
@@ -49,7 +65,13 @@ describe("serveSource", () => {
     const file = { id: "t 1", kind: "task", path: "tasks/t 1.md", source: "+++\n+++\n", revision: "r1" };
     const { fetch, calls } = fakeFetch({
       "/api/records/t%201/source": { body: { format_version: 1, data: file } },
-      "/api/records/t%201/edit": { body: { format_version: 1, data: { ...file, revision: "r2" }, warnings: [{ code: "blocker_edge", message: "m" }] } },
+      "/api/records/t%201/edit": {
+        body: {
+          format_version: 1,
+          data: { ...file, revision: "r2" },
+          warnings: [{ code: "blocker_edge", message: "m" }],
+        },
+      },
     });
     const source = serveSource({ fetch, headers: () => ({ "X-Arcl-Token": "abc" }) });
 
@@ -62,17 +84,28 @@ describe("serveSource", () => {
 
   it("fails a refused edit with the CLI's error", async () => {
     const { fetch } = fakeFetch({
-      "/api/records/t-1/edit": { status: 409, body: { format_version: 1, error: { code: "conflict", message: "changed since it was opened", exit_code: 4 } } },
+      "/api/records/t-1/edit": {
+        status: 409,
+        body: { format_version: 1, error: { code: "conflict", message: "changed since it was opened", exit_code: 4 } },
+      },
     });
-    const error = await serveSource({ fetch, headers: () => ({}) }).saveRecordSource?.("t-1", { source: "", revision: "r" }).catch((caught: unknown) => caught);
+    const error = await serveSource({ fetch, headers: () => ({}) })
+      .saveRecordSource?.("t-1", { source: "", revision: "r" })
+      .catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(DataError);
-    expect([(error as DataError).code, (error as DataError).message]).toEqual(["conflict", "changed since it was opened"]);
+    expect([(error as DataError).code, (error as DataError).message]).toEqual([
+      "conflict",
+      "changed since it was opened",
+    ]);
   });
 
   it("builds the Work list from one request, with the token on it", async () => {
     const { fetch, calls } = fakeFetch({
       "/api/work": {
-        body: { format_version: 2, data: { tasks: [item("t-2", "ph-7"), item("t-1", null)], phases: [phase("ph-7", 7), phase("ph-8", 8)] } },
+        body: {
+          format_version: 2,
+          data: { tasks: [item("t-2", "ph-7"), item("t-1", null)], phases: [phase("ph-7", 7), phase("ph-8", 8)] },
+        },
       },
     });
 
@@ -86,16 +119,27 @@ describe("serveSource", () => {
       ["t-2", "ph-7"],
       ["t-1", null],
     ]);
-    expect(work.items[0].milestone).toEqual({ id: "ph-7", plan_id: "pl", title: "Milestone 7", status: "open", position: 7 });
+    expect(work.items[0].milestone).toEqual({
+      id: "ph-7",
+      plan_id: "pl",
+      title: "Milestone 7",
+      status: "open",
+      position: 7,
+    });
     expect(calls.map((call) => call.path)).toEqual(["/api/work"]);
     expect(calls[0].headers["X-Arcl-Token"]).toBe("abc");
   });
 
   it("raises the CLI's error code and message", async () => {
     const { fetch } = fakeFetch({
-      "/api/work": { status: 401, body: { format_version: 1, error: { code: "unauthorized", message: "the X-Arcl-Token header is missing" } } },
+      "/api/work": {
+        status: 401,
+        body: { format_version: 1, error: { code: "unauthorized", message: "the X-Arcl-Token header is missing" } },
+      },
     });
-    const failure = await serveSource({ fetch, headers: () => ({}) }).work().catch((error: unknown) => error);
+    const failure = await serveSource({ fetch, headers: () => ({}) })
+      .work()
+      .catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(DataError);
     expect(failure).toMatchObject({ code: "unauthorized", message: "the X-Arcl-Token header is missing" });
   });
@@ -131,7 +175,10 @@ describe("latestRead", () => {
 
   it("reports the newest read's value or failure", async () => {
     const reported: unknown[] = [];
-    const report = { loaded: (value: unknown) => reported.push(value), failed: (error: unknown) => reported.push(error) };
+    const report = {
+      loaded: (value: unknown) => reported.push(value),
+      failed: (error: unknown) => reported.push(error),
+    };
     latestRead(() => Promise.resolve("list"), report).start();
     latestRead(() => Promise.reject(new Error("database is locked")), report).start();
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -163,22 +210,31 @@ describe("serveSource.task", () => {
 
   it("refuses a record that is not a task", async () => {
     const { fetch } = fakeFetch({ "/api/records/ph-7": { body: { format_version: 1, data: { phase } } } });
-    const failure = await serveSource({ fetch, headers: () => ({}) }).task("ph-7").catch((error: unknown) => error);
+    const failure = await serveSource({ fetch, headers: () => ({}) })
+      .task("ph-7")
+      .catch((error: unknown) => error);
     expect(failure).toMatchObject({ code: "not_a_task", message: "`ph-7` is not a task" });
   });
 
   it("raises not_found for a missing task", async () => {
     const { fetch } = fakeFetch({
-      "/api/records/t-9": { status: 404, body: { format_version: 1, error: { code: "not_found", message: "task `t-9` was not found" } } },
+      "/api/records/t-9": {
+        status: 404,
+        body: { format_version: 1, error: { code: "not_found", message: "task `t-9` was not found" } },
+      },
     });
-    const failure = await serveSource({ fetch, headers: () => ({}) }).task("t-9").catch((error: unknown) => error);
+    const failure = await serveSource({ fetch, headers: () => ({}) })
+      .task("t-9")
+      .catch((error: unknown) => error);
     expect(failure).toMatchObject({ code: "not_found" });
   });
 });
 
 describe("serveSource changes", () => {
   const task = (id: string, status: string) => ({ id, title: `Task ${id}`, status });
-  const mutation = (action: string, id: string, status: string) => ({ body: { format_version: 1, data: { action, task: task(id, status) } } });
+  const mutation = (action: string, id: string, status: string) => ({
+    body: { format_version: 1, data: { action, task: task(id, status) } },
+  });
   const auth = () => ({ "X-Arcl-Token": "abc" });
   const posted = { "X-Arcl-Token": "abc", "Content-Type": "application/json" };
 
@@ -218,10 +274,20 @@ describe("serveSource changes", () => {
   it("returns a completion with the tasks it unblocked", async () => {
     const { fetch, calls } = fakeFetch({
       "/api/tasks/t-1/complete": {
-        body: { format_version: 2, data: { action: "completed", task: task("t-1", "completed"), completed_subtasks: [], unblocked: ["t-2", "t-4"] } },
+        body: {
+          format_version: 2,
+          data: {
+            action: "completed",
+            task: task("t-1", "completed"),
+            completed_subtasks: [],
+            unblocked: ["t-2", "t-4"],
+          },
+        },
       },
     });
-    const completion = await serveSource({ fetch, headers: auth }).completeTask("t-1", { evidence: "Delivered by #41." });
+    const completion = await serveSource({ fetch, headers: auth }).completeTask("t-1", {
+      evidence: "Delivered by #41.",
+    });
     expect(completion).toEqual({
       value: { task: task("t-1", "completed"), completed_subtasks: [], unblocked: ["t-2", "t-4"] },
       warnings: [],
@@ -232,7 +298,9 @@ describe("serveSource changes", () => {
   it("returns the warnings a saved change's syncs gave", async () => {
     const warning = { code: "workspace_sync", message: "the change is saved, but the workspace was not updated" };
     const { fetch } = fakeFetch({
-      "/api/tasks/t-1/park": { body: { format_version: 1, data: { action: "parked", task: task("t-1", "parked") }, warnings: [warning] } },
+      "/api/tasks/t-1/park": {
+        body: { format_version: 1, data: { action: "parked", task: task("t-1", "parked") }, warnings: [warning] },
+      },
     });
     const parked = await serveSource({ fetch, headers: auth }).parkTask("t-1");
     expect(parked).toEqual({ value: task("t-1", "parked"), warnings: [warning] });
@@ -242,21 +310,38 @@ describe("serveSource changes", () => {
     const { fetch } = fakeFetch({
       "/api/tasks/t-1/start": {
         status: 400,
-        body: { format_version: 1, error: { code: "invalid_request", message: "invalid project or record: task `t-1` is blocked", exit_code: 3 } },
+        body: {
+          format_version: 1,
+          error: { code: "invalid_request", message: "invalid project or record: task `t-1` is blocked", exit_code: 3 },
+        },
       },
     });
-    const failure = await serveSource({ fetch, headers: auth }).startTask("t-1").catch((error: unknown) => error);
+    const failure = await serveSource({ fetch, headers: auth })
+      .startTask("t-1")
+      .catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(DataError);
-    expect(failure).toMatchObject({ code: "invalid_request", message: "invalid project or record: task `t-1` is blocked" });
+    expect(failure).toMatchObject({
+      code: "invalid_request",
+      message: "invalid project or record: task `t-1` is blocked",
+    });
   });
 });
 
 describe("serveSource captures and search", () => {
   it("posts a capture and lists tasks for search", async () => {
-    const capture = { id: "c-1", title: "Idea", body: "More", status: "captured", created_at: "2026-10-24T00:00:00Z", project_id: "pj" };
+    const capture = {
+      id: "c-1",
+      title: "Idea",
+      body: "More",
+      status: "captured",
+      created_at: "2026-10-24T00:00:00Z",
+      project_id: "pj",
+    };
     const { fetch, calls } = fakeFetch({
       "/api/captures": { body: { format_version: 1, data: { action: "created", capture } } },
-      "/api/records?kind=task": { body: listing([{ id: "t-1", kind: "task", status: "in_progress", title: "T1: First" }]) },
+      "/api/records?kind=task": {
+        body: listing([{ id: "t-1", kind: "task", status: "in_progress", title: "T1: First" }]),
+      },
     });
     const source = serveSource({ fetch, headers: () => ({ "X-Arcl-Token": "abc" }) });
 
@@ -275,11 +360,20 @@ describe("serveSource captures and search", () => {
 describe("serveSource triage and planning", () => {
   const auth = () => ({ "X-Arcl-Token": "abc" });
   const posted = { "X-Arcl-Token": "abc", "Content-Type": "application/json" };
-  const capture = { id: "c 1", title: "Idea !high", body: "More", status: "captured", created_at: "2026-10-24T00:00:00Z", project_id: "pj" };
+  const capture = {
+    id: "c 1",
+    title: "Idea !high",
+    body: "More",
+    status: "captured",
+    created_at: "2026-10-24T00:00:00Z",
+    project_id: "pj",
+  };
 
   it("lists open captures and reads one with its body", async () => {
     const { fetch, calls } = fakeFetch({
-      "/api/records?kind=capture&status=captured": { body: listing([{ id: "c 1", kind: "capture", status: "captured", title: "Idea !high" }]) },
+      "/api/records?kind=capture&status=captured": {
+        body: listing([{ id: "c 1", kind: "capture", status: "captured", title: "Idea !high" }]),
+      },
       "/api/records/c%201": { body: { format_version: 1, data: { action: "shown", capture } } },
       "/api/records/t-1": { body: { format_version: 2, data: { task: {} } } },
     });
@@ -287,16 +381,29 @@ describe("serveSource triage and planning", () => {
     expect(await source.captures()).toEqual([{ id: "c 1", title: "Idea !high", status: "captured" }]);
     expect(await source.capture("c 1")).toEqual(capture);
     await expect(source.capture("t-1")).rejects.toMatchObject({ code: "not_a_capture" });
-    expect(calls.map((call) => call.path)).toEqual(["/api/records?kind=capture&status=captured", "/api/records/c%201", "/api/records/t-1"]);
+    expect(calls.map((call) => call.path)).toEqual([
+      "/api/records?kind=capture&status=captured",
+      "/api/records/c%201",
+      "/api/records/t-1",
+    ]);
   });
 
   it("promotes and discards a capture, naming the record a promotion made", async () => {
     const promoted = (kind: string) => ({
-      body: { format_version: 1, data: { capture: { ...capture, status: "promoted" }, promotion: {}, [kind]: { id: `${kind}-1`, title: "Idea" } } },
+      body: {
+        format_version: 1,
+        data: {
+          capture: { ...capture, status: "promoted" },
+          promotion: {},
+          [kind]: { id: `${kind}-1`, title: "Idea" },
+        },
+      },
     });
     const { fetch, calls } = fakeFetch({
       "/api/captures/c%201/promote": promoted("spec"),
-      "/api/captures/c%201/discard": { body: { format_version: 1, data: { action: "discarded", capture: { ...capture, status: "discarded" } } } },
+      "/api/captures/c%201/discard": {
+        body: { format_version: 1, data: { action: "discarded", capture: { ...capture, status: "discarded" } } },
+      },
     });
     const source = serveSource({ fetch, headers: auth });
     expect(await source.promoteCapture("c 1", { to: "spec", acceptance_criteria: "- works" })).toEqual({
@@ -305,7 +412,12 @@ describe("serveSource triage and planning", () => {
     });
     expect((await source.discardCapture("c 1")).value.status).toBe("discarded");
     expect(calls).toEqual([
-      { path: "/api/captures/c%201/promote", method: "POST", headers: posted, body: { to: "spec", acceptance_criteria: "- works" } },
+      {
+        path: "/api/captures/c%201/promote",
+        method: "POST",
+        headers: posted,
+        body: { to: "spec", acceptance_criteria: "- works" },
+      },
       { path: "/api/captures/c%201/discard", method: "POST", headers: posted, body: {} },
     ]);
   });
@@ -332,7 +444,9 @@ describe("serveSource triage and planning", () => {
     const { fetch, calls } = fakeFetch({
       "/api/specs": { body: { format_version: 1, data: { action: "created", spec } } },
       "/api/plans": { body: { format_version: 1, data: { action: "created", plan } } },
-      "/api/plans/pl%201/apply": { body: { format_version: 1, data: { plan, phases: [phase("ph-1", 1)], tasks: [], dependencies: [], diff: {} } } },
+      "/api/plans/pl%201/apply": {
+        body: { format_version: 1, data: { plan, phases: [phase("ph-1", 1)], tasks: [], dependencies: [], diff: {} } },
+      },
     });
     const source = serveSource({ fetch, headers: auth });
     expect((await source.createSpec({ title: "Spec" })).value).toEqual(spec);

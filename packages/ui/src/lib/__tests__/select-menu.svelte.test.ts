@@ -20,7 +20,9 @@ describe("SelectMenu", () => {
     combobox().element().focus();
     await userEvent.keyboard("{ArrowDown}");
     await expect.element(page.getByRole("listbox", { name: "Status" })).toBeVisible();
-    await expect.element(combobox()).toHaveAttribute("aria-activedescendant", page.getByRole("option", { name: "Any" }).element().id);
+    await expect
+      .element(combobox())
+      .toHaveAttribute("aria-activedescendant", page.getByRole("option", { name: "Any" }).element().id);
     await userEvent.keyboard("{ArrowDown}{ArrowDown}");
     await expect.element(page.getByRole("option", { name: "Planned" })).toHaveAttribute("data-active", "true");
     await userEvent.keyboard("{Enter}");
@@ -89,7 +91,10 @@ describe("SelectMenu", () => {
   });
 
   it("shows a visible focus ring in the accent color in both themes", async () => {
-    for (const [theme, color] of [["light", "rgb(37, 99, 235)"], ["dark", "rgb(76, 141, 255)"]] as const) {
+    for (const [theme, color] of [
+      ["light", "rgb(37, 99, 235)"],
+      ["dark", "rgb(76, 141, 255)"],
+    ] as const) {
       const screen = await render(SelectMenuHarness, { theme });
       combobox().element().focus();
       await userEvent.keyboard("{Escape}");

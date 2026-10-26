@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import recorded from "./artifact.fixture.json";
-import { type ArtifactDb, type ArtifactDbError, type ArtifactDocument, type ArtifactHost, type ArtifactQuery, type ArtifactSnapshot, digest } from "./artifact";
+import {
+  type ArtifactDb,
+  type ArtifactDbError,
+  type ArtifactDocument,
+  type ArtifactHost,
+  type ArtifactQuery,
+  type ArtifactSnapshot,
+  digest,
+} from "./artifact";
 import {
   DataError,
   OPEN_IN_CLAUDE,
@@ -59,7 +67,8 @@ class FakeDb implements ArtifactDb {
 
   doc(path: string): ArtifactDocument {
     const segments = path.split("/");
-    if (segments.length % 2 !== 0 || segments.some((segment) => segment === "")) throw new TypeError(`bad document path ${path}`);
+    if (segments.length % 2 !== 0 || segments.some((segment) => segment === ""))
+      throw new TypeError(`bad document path ${path}`);
     const id = segments.at(-1) ?? "";
     const snapshot = (): ArtifactSnapshot => {
       const body = this.documents.get(path);
@@ -89,7 +98,9 @@ class FakeDb implements ArtifactDb {
               const body = this.documents.get(`${path}/${ref.id}`);
               return { id: ref.id, exists: true, data: () => body };
             })
-            .sort((a, b) => String(a.data()?.[field ?? ""] ?? a.id).localeCompare(String(b.data()?.[field ?? ""] ?? b.id)))
+            .sort((a, b) =>
+              String(a.data()?.[field ?? ""] ?? a.id).localeCompare(String(b.data()?.[field ?? ""] ?? b.id)),
+            )
             .slice(0, count);
           next({ docs });
         }, fail),
@@ -161,7 +172,12 @@ describe("artifactSource reads", () => {
   it("reads a record's file and revision for the raw editor", async () => {
     const artifact = source();
     const file = await artifact.recordSource?.(BLOCKED);
-    expect(file).toMatchObject({ id: BLOCKED, kind: "task", path: `tasks/${BLOCKED}.md`, revision: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    expect(file).toMatchObject({
+      id: BLOCKED,
+      kind: "task",
+      path: `tasks/${BLOCKED}.md`,
+      revision: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
     expect(file?.source).toContain('title = "Sync the database"');
     expect((await failure(source(new FakeDb({})).recordSource!(BLOCKED))).code).toBe("not_synced");
     expect((await failure(artifact.recordSource!("../views/work"))).code).toBe("not_found");
@@ -230,7 +246,11 @@ describe("artifactSource reads", () => {
   it("says a sync is half written when the parts join into JSON the header's digest does not match", async () => {
     const db = new FakeDb();
     const old = JSON.stringify(DOCUMENTS[`records/${BLOCKED}`]);
-    const next = JSON.stringify({ ...DOCUMENTS[`records/${BLOCKED}`], format_version: 1, data: { task: { id: BLOCKED, title: "Renamed" } } });
+    const next = JSON.stringify({
+      ...DOCUMENTS[`records/${BLOCKED}`],
+      format_version: 1,
+      data: { task: { id: BLOCKED, title: "Renamed" } },
+    });
     // The old parts are still there, and the new header names the new text.
     const middle = Math.floor(old.length / 2);
     db.write(`chunks/records~${BLOCKED}~0`, { part: old.slice(0, middle) });
@@ -254,7 +274,12 @@ describe("artifactSource changes", () => {
     const artifact = source(db);
     const before = structuredClone(Object.fromEntries(db.documents));
     const changes: [Promise<unknown>, string, string | null, Body][] = [
-      [artifact.createTask({ title: "New", priority: "high" }), "create_task", null, { title: "New", priority: "high" }],
+      [
+        artifact.createTask({ title: "New", priority: "high" }),
+        "create_task",
+        null,
+        { title: "New", priority: "high" },
+      ],
       [artifact.updateTask(TASK, { title: "Renamed", body: undefined }), "update_task", TASK, { title: "Renamed" }],
       [artifact.startTask(TASK, { force: true }), "start_task", TASK, { force: true }],
       [artifact.parkTask(TASK), "park_task", TASK, {}],
@@ -262,12 +287,32 @@ describe("artifactSource changes", () => {
       [artifact.handOffTask(TASK, "Resume here"), "hand_off_task", TASK, { note: "Resume here" }],
       [artifact.completeTask(TASK, { evidence: "Done." }), "complete_task", TASK, { evidence: "Done." }],
       [artifact.createCapture({ title: "Idea" }), "create_capture", null, { title: "Idea" }],
-      [artifact.promoteCapture(CAPTURE, { to: "task", priority: "low" }), "promote_capture", CAPTURE, { to: "task", priority: "low" }],
+      [
+        artifact.promoteCapture(CAPTURE, { to: "task", priority: "low" }),
+        "promote_capture",
+        CAPTURE,
+        { to: "task", priority: "low" },
+      ],
       [artifact.discardCapture(CAPTURE), "discard_capture", CAPTURE, {}],
       [artifact.createSpec({ title: "Spec" }), "create_spec", null, { title: "Spec" }],
-      [artifact.createPlan({ title: "Plan", spec: "arcl-s-1" }), "create_plan", null, { title: "Plan", spec: "arcl-s-1" }],
-      [artifact.applyPlan("arcl-pl-1", "format-version = 1"), "apply_plan", "arcl-pl-1", { document: "format-version = 1" }],
-      [artifact.saveRecordSource!(TASK, { source: "+++\n", revision: "r1" }), "update_source", TASK, { source: "+++\n", revision: "r1" }],
+      [
+        artifact.createPlan({ title: "Plan", spec: "arcl-s-1" }),
+        "create_plan",
+        null,
+        { title: "Plan", spec: "arcl-s-1" },
+      ],
+      [
+        artifact.applyPlan("arcl-pl-1", "format-version = 1"),
+        "apply_plan",
+        "arcl-pl-1",
+        { document: "format-version = 1" },
+      ],
+      [
+        artifact.saveRecordSource!(TASK, { source: "+++\n", revision: "r1" }),
+        "update_source",
+        TASK,
+        { source: "+++\n", revision: "r1" },
+      ],
     ];
     const queued = [];
     for (const [change, op, target, input] of changes) {
@@ -307,7 +352,9 @@ describe("artifactSource changes", () => {
     expect(error.code).toBe("too_large");
     expect(error.message).toMatch(/^The edit is 203 KiB, over the 200 KiB the artifact queues\./);
     expect([...db.documents.keys()].some((path) => path.startsWith("queue/"))).toBe(false);
-    expect((await failure(artifact.saveRecordSource!(TASK, { source: "x".repeat(190 * 1024), revision: "r1" }))).code).toBe(QUEUED);
+    expect(
+      (await failure(artifact.saveRecordSource!(TASK, { source: "x".repeat(190 * 1024), revision: "r1" }))).code,
+    ).toBe(QUEUED);
   });
 });
 
@@ -317,17 +364,64 @@ describe("artifactSource.watch", () => {
     const artifact = source(db);
     const seen: SyncStatus[] = [];
     const stop = artifact.watch?.((status) => seen.push(status));
-    expect(seen.at(-1)).toMatchObject({ syncedAt: DOCUMENTS["meta/sync"].synced_at, revision: DOCUMENTS["meta/sync"].revision, edits: [] });
+    expect(seen.at(-1)).toMatchObject({
+      syncedAt: DOCUMENTS["meta/sync"].synced_at,
+      revision: DOCUMENTS["meta/sync"].revision,
+      edits: [],
+    });
 
     await failure(artifact.discardCapture(CAPTURE));
-    db.write("queue/zz-failed", { op: "park_task", target: TASK, input: {}, created_at: "2026-10-25T07:00:00Z", status: "failed", error: { code: "conflict", message: "already parked" } });
-    db.write("queue/zz-applied", { op: "park_task", target: TASK, input: {}, created_at: "2026-10-25T07:00:00Z", status: "applied" });
+    db.write("queue/zz-failed", {
+      op: "park_task",
+      target: TASK,
+      input: {},
+      created_at: "2026-10-25T07:00:00Z",
+      status: "failed",
+      error: { code: "conflict", message: "already parked" },
+    });
+    db.write("queue/zz-applied", {
+      op: "park_task",
+      target: TASK,
+      input: {},
+      created_at: "2026-10-25T07:00:00Z",
+      status: "applied",
+    });
     db.write("queue/zz-junk", { op: 7, status: "queued" });
-    db.write("queue/q0-applying", { op: "park_task", target: TASK, input: {}, created_at: "2026-10-25T05:00:00Z", status: "applying" });
+    db.write("queue/q0-applying", {
+      op: "park_task",
+      target: TASK,
+      input: {},
+      created_at: "2026-10-25T05:00:00Z",
+      status: "applying",
+    });
     expect(seen.at(-1)?.edits).toEqual([
-      { id: "q0-applying", op: "park_task", target: TASK, input: {}, created_at: "2026-10-25T05:00:00Z", status: "applying", error: null },
-      { id: "q1", op: "discard_capture", target: CAPTURE, input: {}, created_at: NOW.toISOString(), status: "queued", error: null },
-      { id: "zz-failed", op: "park_task", target: TASK, input: {}, created_at: "2026-10-25T07:00:00Z", status: "failed", error: { code: "conflict", message: "already parked" } },
+      {
+        id: "q0-applying",
+        op: "park_task",
+        target: TASK,
+        input: {},
+        created_at: "2026-10-25T05:00:00Z",
+        status: "applying",
+        error: null,
+      },
+      {
+        id: "q1",
+        op: "discard_capture",
+        target: CAPTURE,
+        input: {},
+        created_at: NOW.toISOString(),
+        status: "queued",
+        error: null,
+      },
+      {
+        id: "zz-failed",
+        op: "park_task",
+        target: TASK,
+        input: {},
+        created_at: "2026-10-25T07:00:00Z",
+        status: "failed",
+        error: { code: "conflict", message: "already parked" },
+      },
     ]);
 
     db.write("meta/sync", { ...DOCUMENTS["meta/sync"], revision: "next" });
@@ -404,7 +498,11 @@ describe("artifactSource.watch", () => {
 
 describe("connectArtifact", () => {
   it("reads nothing without the artifact's database", async () => {
-    const hosts: (ArtifactHost | undefined)[] = [undefined, { use: async () => null } as ArtifactHost, { use: () => Promise.reject(new Error("not granted")) } as ArtifactHost];
+    const hosts: (ArtifactHost | undefined)[] = [
+      undefined,
+      { use: async () => null } as ArtifactHost,
+      { use: () => Promise.reject(new Error("not granted")) } as ArtifactHost,
+    ];
     for (const host of hosts) {
       expect(await connectArtifact(host)).toBe(false);
       const error = await failure(dataSource().work());
@@ -427,6 +525,8 @@ describe("connectArtifact", () => {
     expect(dataSource().saveRecordSource).toBeDefined();
     expect((await dataSource().captures()).map((capture) => capture.id)).toEqual([CAPTURE]);
     await failure(dataSource().discardCapture(CAPTURE));
-    expect([...db.documents].find(([path]) => path.startsWith("queue/"))?.[1]).toMatchObject({ created_by: "u_person" });
+    expect([...db.documents].find(([path]) => path.startsWith("queue/"))?.[1]).toMatchObject({
+      created_by: "u_person",
+    });
   });
 });

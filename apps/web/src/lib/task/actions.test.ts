@@ -49,7 +49,10 @@ describe("runAction", () => {
     await runAction(source, "t-1", "park");
     await runAction(source, "t-1", "unpark");
     await runAction(source, "t-1", "handoff", "Resume at the tests");
-    expect(await runAction(source, "t-1", "complete", "Delivered by #41.")).toEqual({ unblocked: ["t-10.5"], warnings: [] });
+    expect(await runAction(source, "t-1", "complete", "Delivered by #41.")).toEqual({
+      unblocked: ["t-10.5"],
+      warnings: [],
+    });
     expect(await runAction(source, "t-1", "complete", "  \n")).toEqual({ unblocked: ["t-10.5"], warnings: [] });
     expect(calls).toEqual([
       ["startTask", "t-1"],
@@ -73,13 +76,19 @@ describe("editOf", () => {
     const original = task("t-1", { title: "Title", body: "Body", priority: "normal" });
     expect(editOf(original, draftOf(original))).toEqual({});
     expect(editOf(original, { ...draftOf(original), title: "  " })).toEqual({ title: "  " });
-    expect(editOf(original, { title: "Title", body: "New", priority: "high" })).toEqual({ body: "New", priority: "high" });
+    expect(editOf(original, { title: "Title", body: "New", priority: "high" })).toEqual({
+      body: "New",
+      priority: "high",
+    });
   });
 });
 
 describe("failureOf", () => {
   it("keeps the CLI's code and message", () => {
-    expect(failureOf(new DataError("conflict", "changed since read"))).toEqual({ code: "conflict", message: "changed since read" });
+    expect(failureOf(new DataError("conflict", "changed since read"))).toEqual({
+      code: "conflict",
+      message: "changed since read",
+    });
     expect(failureOf(new TypeError("Failed to fetch"))).toEqual({ code: "unavailable", message: "Failed to fetch" });
   });
 });

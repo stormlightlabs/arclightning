@@ -82,21 +82,68 @@
     context: selectedRow && { id: selectedRow.id, label: selectedRow.title },
     commands: [
       ...(selectedRow === null ? [] : selectionCommands(selectedRow)),
-      { id: "planning:new-spec", label: "New spec", scope: "view", group: "Planning", keys: [PLANNING_KEYS.newSpec], icon: "spec", run: () => openForm({ kind: "spec", title: "", body: "", acceptance: "" }) },
-      { id: "planning:next", label: "Select the next row", scope: "view", group: "Planning", keys: ["j"], viewKeys: true, run: () => move(1) },
-      { id: "planning:previous", label: "Select the previous row", scope: "view", group: "Planning", keys: ["k"], viewKeys: true, run: () => move(-1) },
+      {
+        id: "planning:new-spec",
+        label: "New spec",
+        scope: "view",
+        group: "Planning",
+        keys: [PLANNING_KEYS.newSpec],
+        icon: "spec",
+        run: () => openForm({ kind: "spec", title: "", body: "", acceptance: "" }),
+      },
+      {
+        id: "planning:next",
+        label: "Select the next row",
+        scope: "view",
+        group: "Planning",
+        keys: ["j"],
+        viewKeys: true,
+        run: () => move(1),
+      },
+      {
+        id: "planning:previous",
+        label: "Select the previous row",
+        scope: "view",
+        group: "Planning",
+        keys: ["k"],
+        viewKeys: true,
+        run: () => move(-1),
+      },
     ],
   }));
 
   function selectionCommands(row: PlanningRow): Command[] {
     const open = isOpen(row);
     const toggleLabel = row.kind === "milestone" ? (open ? "Hide tasks" : "Show tasks") : open ? "Collapse" : "Expand";
-    const commands: Command[] = [{ id: "planning:toggle", label: toggleLabel, scope: "selection", keys: ["Enter"], viewKeys: true, run: () => toggle(row) }];
+    const commands: Command[] = [
+      {
+        id: "planning:toggle",
+        label: toggleLabel,
+        scope: "selection",
+        keys: ["Enter"],
+        viewKeys: true,
+        run: () => toggle(row),
+      },
+    ];
     if (row.kind === "spec") {
-      commands.push({ id: "planning:new-plan", label: "New plan", scope: "selection", keys: [PLANNING_KEYS.add], icon: "plan", run: () => openForm({ kind: "plan", spec: row.id, title: "", body: "" }) });
+      commands.push({
+        id: "planning:new-plan",
+        label: "New plan",
+        scope: "selection",
+        keys: [PLANNING_KEYS.add],
+        icon: "plan",
+        run: () => openForm({ kind: "plan", spec: row.id, title: "", body: "" }),
+      });
     }
     if (row.kind === "plan") {
-      commands.push({ id: "planning:apply", label: "Apply plan", scope: "selection", keys: [PLANNING_KEYS.add], icon: "plan", run: () => openForm({ kind: "apply", plan: row.id, document: planTemplate() }) });
+      commands.push({
+        id: "planning:apply",
+        label: "Apply plan",
+        scope: "selection",
+        keys: [PLANNING_KEYS.add],
+        icon: "plan",
+        run: () => openForm({ kind: "apply", plan: row.id, document: planTemplate() }),
+      });
     }
     return commands;
   }
@@ -133,7 +180,8 @@
       await tick();
     }
     const element = document.querySelector<HTMLElement>("form.planning-form");
-    if (element && !element.contains(document.activeElement)) element.querySelector<HTMLElement>("input, textarea")?.focus();
+    if (element && !element.contains(document.activeElement))
+      element.querySelector<HTMLElement>("input, textarea")?.focus();
   }
 
   function closeForm() {
@@ -215,7 +263,12 @@
       return;
     }
     // A held Enter or Space on a row clicks it once, not on each repeat.
-    if (event.repeat && (event.key === "Enter" || event.key === " ") && event.target instanceof Element && event.target.closest("[data-row-id]")) {
+    if (
+      event.repeat &&
+      (event.key === "Enter" || event.key === " ") &&
+      event.target instanceof Element &&
+      event.target.closest("[data-row-id]")
+    ) {
       event.preventDefault();
       return;
     }
@@ -257,7 +310,13 @@
       />
     {/if}
     <div class="buttons">
-      <Button type="submit" variant="primary" label={current.kind === "apply" ? "Apply" : "Create"} {busy} disabled={busy} />
+      <Button
+        type="submit"
+        variant="primary"
+        label={current.kind === "apply" ? "Apply" : "Create"}
+        {busy}
+        disabled={busy}
+      />
       <Button label="Cancel" variant="ghost" disabled={busy} onclick={closeForm} />
     </div>
     {#if formFailure !== null}
@@ -268,14 +327,22 @@
 
 <header>
   <h1>Planning</h1>
-  <Button label="New spec" variant="primary" onclick={() => openForm({ kind: "spec", title: "", body: "", acceptance: "" })} />
+  <Button
+    label="New spec"
+    variant="primary"
+    onclick={() => openForm({ kind: "spec", title: "", body: "", acceptance: "" })}
+  />
 </header>
 
 {#if notice !== null}<p class="notice" role="status">{notice}</p>{/if}
 {#each warnings as warning, index (index)}
   <Feedback tone="warning" title="The change is saved, with a warning" message={`${warning.message} (${warning.code})`}>
     {#snippet actions()}
-      <Button label="Dismiss" variant="ghost" onclick={() => (warnings = warnings.filter((_, other) => other !== index))} />
+      <Button
+        label="Dismiss"
+        variant="ghost"
+        onclick={() => (warnings = warnings.filter((_, other) => other !== index))}
+      />
     {/snippet}
   </Feedback>
 {/each}
@@ -290,7 +357,10 @@
 {:else if planning === null}
   <p class="muted" role="status">Loading plans…</p>
 {:else if specs.length === 0}
-  <EmptyState title="No specs yet" message="Create a spec with New spec, or promote a capture to one from the Inbox. Its plans and milestones appear here." />
+  <EmptyState
+    title="No specs yet"
+    message="Create a spec with New spec, or promote a capture to one from the Inbox. Its plans and milestones appear here."
+  />
 {:else}
   <div class="planning" bind:this={root}>
     {#each specs as spec (spec.id)}
@@ -309,7 +379,12 @@
             <span class="detail">Spec · {count(spec.plans.length, "plan")}</span>
           </button>
           <Badge label={statusLabel(spec.status)} tone={tones[spec.status] ?? "neutral"} />
-          <Button label="New plan" variant="ghost" aria-keyshortcuts="A" onclick={() => openForm({ kind: "plan", spec: spec.id, title: "", body: "" })} />
+          <Button
+            label="New plan"
+            variant="ghost"
+            aria-keyshortcuts="A"
+            onclick={() => openForm({ kind: "plan", spec: spec.id, title: "", body: "" })}
+          />
         </div>
         {#if form?.kind === "plan" && form.spec === spec.id}{@render formFor(form)}{/if}
         {#if !collapsed.has(spec.id)}
@@ -331,7 +406,12 @@
                 <span class="detail">Plan · {describeProgress(plan)}</span>
               </button>
               <Badge label={statusLabel(plan.status)} tone={tones[plan.status] ?? "neutral"} />
-              <Button label="Apply plan" variant="ghost" aria-keyshortcuts="A" onclick={() => openForm({ kind: "apply", plan: plan.id, document: planTemplate() })} />
+              <Button
+                label="Apply plan"
+                variant="ghost"
+                aria-keyshortcuts="A"
+                onclick={() => openForm({ kind: "apply", plan: plan.id, document: planTemplate() })}
+              />
             </div>
             {#if form?.kind === "apply" && form.plan === plan.id}{@render formFor(form)}{/if}
             {#if !collapsed.has(plan.id)}
@@ -351,22 +431,42 @@
                         onfocus={() => (selectedId = row.id)}
                         onclick={() => toggle(row)}
                       >
-                        <svg class="ring" width="18" height="18" viewBox="0 0 20 20" role="img" aria-label={row.status === "completed" ? "Done" : row.status === "cancelled" ? "Cancelled" : "Open"}>
+                        <svg
+                          class="ring"
+                          width="18"
+                          height="18"
+                          viewBox="0 0 20 20"
+                          role="img"
+                          aria-label={row.status === "completed"
+                            ? "Done"
+                            : row.status === "cancelled"
+                              ? "Cancelled"
+                              : "Open"}
+                        >
                           {#if row.status === "completed"}
                             <circle cx="10" cy="10" r="9" fill="currentColor" />
-                            <path d="m6.2 10.2 2.6 2.6 5-5.3" fill="none" stroke="var(--arcl-surface)" stroke-width="1.8" />
+                            <path
+                              d="m6.2 10.2 2.6 2.6 5-5.3"
+                              fill="none"
+                              stroke="var(--arcl-surface)"
+                              stroke-width="1.8"
+                            />
                           {:else}
                             <circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2" />
                           {/if}
                         </svg>
                         <span class="title">{row.title}</span>
                         <span class="progress">
-                          <span class="bar" aria-hidden="true"><span style:width={`${row.total ? (100 * row.done) / row.total : 0}%`}></span></span>
+                          <span class="bar" aria-hidden="true"
+                            ><span style:width={`${row.total ? (100 * row.done) / row.total : 0}%`}></span></span
+                          >
                           <span class="detail">{describeProgress(row)}</span>
                         </span>
                         <span class="now">
                           {#if row.ready}<span class="ready">{row.ready} ready</span>{/if}
-                          {#if row.ready && row.blocked} · {/if}
+                          {#if row.ready && row.blocked}
+                            ·
+                          {/if}
                           {#if row.blocked}<span class="blocked">{row.blocked} blocked</span>{/if}
                           {#if !row.ready && !row.blocked}<span class="detail">{readiness(row)}</span>{/if}
                         </span>
@@ -374,7 +474,11 @@
                       {#if expanded.has(row.id)}
                         <div class="tree">
                           {#if row.tree.length}
-                            <PlanningTree label={`Tasks in ${row.title}`} nodes={row.tree} onselect={(node) => goto(taskHref(node.id))} />
+                            <PlanningTree
+                              label={`Tasks in ${row.title}`}
+                              nodes={row.tree}
+                              onselect={(node) => goto(taskHref(node.id))}
+                            />
                           {:else}
                             <p class="muted">No tasks in this milestone.</p>
                           {/if}
@@ -387,7 +491,11 @@
               {#if plan.tasks.length}
                 <div class="tree loose">
                   <p class="muted">Outside a milestone</p>
-                  <PlanningTree label={`Tasks in ${plan.title} outside a milestone`} nodes={plan.tasks} onselect={(node) => goto(taskHref(node.id))} />
+                  <PlanningTree
+                    label={`Tasks in ${plan.title} outside a milestone`}
+                    nodes={plan.tasks}
+                    onselect={(node) => goto(taskHref(node.id))}
+                  />
                 </div>
               {/if}
             {/if}
@@ -399,44 +507,202 @@
 {/if}
 
 <style>
-  header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--arcl-space-3); margin-bottom: var(--arcl-space-4); }
-  h1 { margin: 0; color: var(--arcl-heading); font: 650 var(--arcl-type-xl) / 1.2 var(--arcl-font-ui); }
-  .muted { margin: 0; color: var(--arcl-text-muted); font-size: var(--arcl-type-sm); }
-  .notice { margin: 0 0 var(--arcl-space-4); padding: var(--arcl-space-2) var(--arcl-space-3); border-inline-start: 4px solid var(--arcl-success); border-radius: var(--arcl-radius-sm); background: var(--arcl-success-surface); font-size: var(--arcl-type-sm); }
-  .planning { display: grid; gap: var(--arcl-space-4); }
-  .spec { overflow: hidden; border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-md); background: var(--arcl-surface); }
-  .head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--arcl-space-2); padding: var(--arcl-space-1) var(--arcl-space-3); }
-  .head.plan { padding-inline-start: var(--arcl-space-6); border-top: var(--arcl-border-width) solid var(--arcl-surface-subtle); background: var(--arcl-canvas); }
-  .head[data-selected], .milestone[data-selected] { background: var(--arcl-surface-subtle); box-shadow: inset 2px 0 0 var(--arcl-focus); }
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--arcl-space-3);
+    margin-bottom: var(--arcl-space-4);
+  }
+  h1 {
+    margin: 0;
+    color: var(--arcl-heading);
+    font: 650 var(--arcl-type-xl) / 1.2 var(--arcl-font-ui);
+  }
+  .muted {
+    margin: 0;
+    color: var(--arcl-text-muted);
+    font-size: var(--arcl-type-sm);
+  }
+  .notice {
+    margin: 0 0 var(--arcl-space-4);
+    padding: var(--arcl-space-2) var(--arcl-space-3);
+    border-inline-start: 4px solid var(--arcl-success);
+    border-radius: var(--arcl-radius-sm);
+    background: var(--arcl-success-surface);
+    font-size: var(--arcl-type-sm);
+  }
+  .planning {
+    display: grid;
+    gap: var(--arcl-space-4);
+  }
+  .spec {
+    overflow: hidden;
+    border: var(--arcl-border-width) solid var(--arcl-border);
+    border-radius: var(--arcl-radius-md);
+    background: var(--arcl-surface);
+  }
+  .head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--arcl-space-2);
+    padding: var(--arcl-space-1) var(--arcl-space-3);
+  }
+  .head.plan {
+    padding-inline-start: var(--arcl-space-6);
+    border-top: var(--arcl-border-width) solid var(--arcl-surface-subtle);
+    background: var(--arcl-canvas);
+  }
+  .head[data-selected],
+  .milestone[data-selected] {
+    background: var(--arcl-surface-subtle);
+    box-shadow: inset 2px 0 0 var(--arcl-focus);
+  }
   /* A head too narrow for its title wraps the badge and buttons below it. */
-  .toggle { display: flex; flex: 1 1 14rem; align-items: baseline; gap: var(--arcl-space-2); min-width: 0; padding: var(--arcl-space-2) 0; border: 0; color: var(--arcl-text); background: transparent; font: inherit; text-align: start; cursor: pointer; }
-  .chevron { width: 1rem; color: var(--arcl-text-muted); }
-  .title { overflow: hidden; color: var(--arcl-heading); font: 600 var(--arcl-type-sm) / 1.4 var(--arcl-font-ui); text-overflow: ellipsis; }
-  .spec-title .title { font-size: var(--arcl-type-base); }
-  .detail { color: var(--arcl-text-muted); font-size: var(--arcl-type-xs); white-space: nowrap; }
-  .empty { padding: var(--arcl-space-3) var(--arcl-space-6); border-top: var(--arcl-border-width) solid var(--arcl-surface-subtle); }
-  .milestones { margin: 0; padding: 0; list-style: none; }
-  .milestone { display: grid; grid-template-columns: 1.25rem minmax(0, 1fr) minmax(7rem, 9rem) minmax(6rem, 9rem); align-items: center; gap: var(--arcl-space-3); width: 100%; min-height: 3rem; padding: var(--arcl-space-2) var(--arcl-space-4) var(--arcl-space-2) var(--arcl-space-8); border: 0; border-top: var(--arcl-border-width) solid var(--arcl-surface-subtle); color: var(--arcl-text); background: transparent; font: inherit; text-align: start; cursor: pointer; }
-  .milestone:hover { background: var(--arcl-surface-hover); }
-  .ring { color: var(--arcl-info); }
-  .milestone[data-done] .ring { color: var(--arcl-success); }
-  .milestone[data-done] .title { color: var(--arcl-text-muted); font-weight: 500; }
-  .progress { display: grid; gap: var(--arcl-space-1); }
-  .bar { display: block; height: 4px; overflow: hidden; border-radius: 2px; background: var(--arcl-surface-subtle); }
-  .bar span { display: block; height: 4px; background: var(--arcl-success); }
-  .now { font-size: var(--arcl-type-xs); }
-  .ready { color: var(--arcl-info); }
-  .blocked { color: var(--arcl-danger); }
-  .tree { padding: var(--arcl-space-2) var(--arcl-space-4) var(--arcl-space-3) var(--arcl-space-8); border-top: var(--arcl-border-width) solid var(--arcl-surface-subtle); background: var(--arcl-canvas); }
-  .loose { display: grid; gap: var(--arcl-space-2); }
-  .planning-form { display: grid; gap: var(--arcl-space-3); max-width: 48rem; margin: var(--arcl-space-3) 0 var(--arcl-space-4); padding: var(--arcl-space-4); border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-md); background: var(--arcl-surface); }
-  .spec .planning-form { margin: var(--arcl-space-3) var(--arcl-space-4); }
-  .planning-form h2 { margin: 0; color: var(--arcl-heading); font: 600 var(--arcl-type-base) / 1.3 var(--arcl-font-ui); }
-  .planning-form :global(textarea[spellcheck="false"]) { min-height: 16rem; font: var(--arcl-type-sm) / 1.5 var(--arcl-font-code); }
-  .buttons { display: flex; gap: var(--arcl-space-2); }
+  .toggle {
+    display: flex;
+    flex: 1 1 14rem;
+    align-items: baseline;
+    gap: var(--arcl-space-2);
+    min-width: 0;
+    padding: var(--arcl-space-2) 0;
+    border: 0;
+    color: var(--arcl-text);
+    background: transparent;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+  }
+  .chevron {
+    width: 1rem;
+    color: var(--arcl-text-muted);
+  }
+  .title {
+    overflow: hidden;
+    color: var(--arcl-heading);
+    font: 600 var(--arcl-type-sm) / 1.4 var(--arcl-font-ui);
+    text-overflow: ellipsis;
+  }
+  .spec-title .title {
+    font-size: var(--arcl-type-base);
+  }
+  .detail {
+    color: var(--arcl-text-muted);
+    font-size: var(--arcl-type-xs);
+    white-space: nowrap;
+  }
+  .empty {
+    padding: var(--arcl-space-3) var(--arcl-space-6);
+    border-top: var(--arcl-border-width) solid var(--arcl-surface-subtle);
+  }
+  .milestones {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .milestone {
+    display: grid;
+    grid-template-columns: 1.25rem minmax(0, 1fr) minmax(7rem, 9rem) minmax(6rem, 9rem);
+    align-items: center;
+    gap: var(--arcl-space-3);
+    width: 100%;
+    min-height: 3rem;
+    padding: var(--arcl-space-2) var(--arcl-space-4) var(--arcl-space-2) var(--arcl-space-8);
+    border: 0;
+    border-top: var(--arcl-border-width) solid var(--arcl-surface-subtle);
+    color: var(--arcl-text);
+    background: transparent;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+  }
+  .milestone:hover {
+    background: var(--arcl-surface-hover);
+  }
+  .ring {
+    color: var(--arcl-info);
+  }
+  .milestone[data-done] .ring {
+    color: var(--arcl-success);
+  }
+  .milestone[data-done] .title {
+    color: var(--arcl-text-muted);
+    font-weight: 500;
+  }
+  .progress {
+    display: grid;
+    gap: var(--arcl-space-1);
+  }
+  .bar {
+    display: block;
+    height: 4px;
+    overflow: hidden;
+    border-radius: 2px;
+    background: var(--arcl-surface-subtle);
+  }
+  .bar span {
+    display: block;
+    height: 4px;
+    background: var(--arcl-success);
+  }
+  .now {
+    font-size: var(--arcl-type-xs);
+  }
+  .ready {
+    color: var(--arcl-info);
+  }
+  .blocked {
+    color: var(--arcl-danger);
+  }
+  .tree {
+    padding: var(--arcl-space-2) var(--arcl-space-4) var(--arcl-space-3) var(--arcl-space-8);
+    border-top: var(--arcl-border-width) solid var(--arcl-surface-subtle);
+    background: var(--arcl-canvas);
+  }
+  .loose {
+    display: grid;
+    gap: var(--arcl-space-2);
+  }
+  .planning-form {
+    display: grid;
+    gap: var(--arcl-space-3);
+    max-width: 48rem;
+    margin: var(--arcl-space-3) 0 var(--arcl-space-4);
+    padding: var(--arcl-space-4);
+    border: var(--arcl-border-width) solid var(--arcl-border);
+    border-radius: var(--arcl-radius-md);
+    background: var(--arcl-surface);
+  }
+  .spec .planning-form {
+    margin: var(--arcl-space-3) var(--arcl-space-4);
+  }
+  .planning-form h2 {
+    margin: 0;
+    color: var(--arcl-heading);
+    font: 600 var(--arcl-type-base) / 1.3 var(--arcl-font-ui);
+  }
+  .planning-form :global(textarea[spellcheck="false"]) {
+    min-height: 16rem;
+    font: var(--arcl-type-sm) / 1.5 var(--arcl-font-code);
+  }
+  .buttons {
+    display: flex;
+    gap: var(--arcl-space-2);
+  }
   @media (max-width: 48rem) {
-    .milestone { grid-template-columns: 1.25rem minmax(0, 1fr); padding-inline-start: var(--arcl-space-4); }
-    .progress, .now { grid-column: 2; }
-    .head.plan, .tree, .empty { padding-inline-start: var(--arcl-space-4); }
+    .milestone {
+      grid-template-columns: 1.25rem minmax(0, 1fr);
+      padding-inline-start: var(--arcl-space-4);
+    }
+    .progress,
+    .now {
+      grid-column: 2;
+    }
+    .head.plan,
+    .tree,
+    .empty {
+      padding-inline-start: var(--arcl-space-4);
+    }
   }
 </style>

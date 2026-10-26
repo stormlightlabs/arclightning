@@ -59,7 +59,8 @@ export function orderMilestones(list: WorkList): Milestone[] {
  */
 export function orderTasks(items: WorkItem[], milestones: Milestone[]): WorkItem[] {
   const rank = new Map(milestones.map((milestone, index) => [milestone.id, index]));
-  const rankOf = (item: WorkItem) => (item.milestone ? (rank.get(item.milestone.id) ?? milestones.length) : milestones.length + 1);
+  const rankOf = (item: WorkItem) =>
+    item.milestone ? (rank.get(item.milestone.id) ?? milestones.length) : milestones.length + 1;
   const byPosition = (left: WorkItem, right: WorkItem) =>
     left.task.position - right.task.position || compare(left.task.id, right.task.id);
 
@@ -86,7 +87,10 @@ export function orderTasks(items: WorkItem[], milestones: Milestone[]): WorkItem
   };
   roots.forEach(visit);
   // A parent cycle leaves its tasks unreached from any root; keep them, by position.
-  items.filter((item) => !seen.has(item.task.id)).sort(byPosition).forEach(visit);
+  items
+    .filter((item) => !seen.has(item.task.id))
+    .sort(byPosition)
+    .forEach(visit);
   return ordered;
 }
 

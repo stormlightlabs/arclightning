@@ -28,5 +28,8 @@
 ></span>
 
 <style>
-  .arcl-icon { width: var(--arcl-icon-size); height: var(--arcl-icon-size); }
+  .arcl-icon {
+    width: var(--arcl-icon-size);
+    height: var(--arcl-icon-size);
+  }
 </style>

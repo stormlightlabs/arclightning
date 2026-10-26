@@ -39,7 +39,8 @@ export const frontMatter: MarkdownConfig = {
         while (cx.nextLine()) {
           if (contentStart < 0) contentStart = cx.lineStart;
           if (line.text === DELIMITER) {
-            if (cx.lineStart > contentStart) children.push(cx.elt("FrontMatterContent", contentStart, cx.lineStart - 1));
+            if (cx.lineStart > contentStart)
+              children.push(cx.elt("FrontMatterContent", contentStart, cx.lineStart - 1));
             children.push(cx.elt("FrontMatterMark", cx.lineStart, cx.lineStart + DELIMITER.length));
             end = cx.lineStart + DELIMITER.length;
             closed = true;
@@ -48,7 +49,8 @@ export const frontMatter: MarkdownConfig = {
           }
           end = cx.lineStart + line.text.length;
         }
-        if (!closed && contentStart >= 0 && end > contentStart) children.push(cx.elt("FrontMatterContent", contentStart, end));
+        if (!closed && contentStart >= 0 && end > contentStart)
+          children.push(cx.elt("FrontMatterContent", contentStart, end));
         cx.addElement(cx.elt("FrontMatter", start, end, children));
         return true;
       },

@@ -2,7 +2,11 @@
   import type { HTMLSelectAttributes } from "svelte/elements";
 
   /** A value and label displayed by the shared selector. */
-  export interface SelectOption { value: string; label: string; disabled?: boolean; }
+  export interface SelectOption {
+    value: string;
+    label: string;
+    disabled?: boolean;
+  }
   /** Props for a labelled native selector. */
   export interface SelectProps extends Omit<HTMLSelectAttributes, "value"> {
     label: string;
@@ -27,6 +31,21 @@
 </div>
 
 <style>
-  .arcl-select { display: grid; gap: var(--arcl-space-2); color: var(--arcl-text); font-family: var(--arcl-font-ui); font-weight: 650; }
-  select { min-height: var(--arcl-control-height); padding-inline: var(--arcl-space-3); border: 1px solid var(--arcl-border); border-radius: var(--arcl-radius-control); color: var(--arcl-text); background: var(--arcl-surface); font-family: var(--arcl-font-body); font-weight: 400; }
+  .arcl-select {
+    display: grid;
+    gap: var(--arcl-space-2);
+    color: var(--arcl-text);
+    font-family: var(--arcl-font-ui);
+    font-weight: 650;
+  }
+  select {
+    min-height: var(--arcl-control-height);
+    padding-inline: var(--arcl-space-3);
+    border: 1px solid var(--arcl-border);
+    border-radius: var(--arcl-radius-control);
+    color: var(--arcl-text);
+    background: var(--arcl-surface);
+    font-family: var(--arcl-font-body);
+    font-weight: 400;
+  }
 </style>

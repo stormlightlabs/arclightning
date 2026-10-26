@@ -22,7 +22,15 @@
     useCommands,
     type Command,
   } from "$lib/commands";
-  import { ARTIFACT_BUILD, OPEN_IN_CLAUDE, connectArtifact, dataSource, type ChangeWarning, type SyncStatus as Sync, type TaskSummary } from "$lib/data";
+  import {
+    ARTIFACT_BUILD,
+    OPEN_IN_CLAUDE,
+    connectArtifact,
+    dataSource,
+    type ChangeWarning,
+    type SyncStatus as Sync,
+    type TaskSummary,
+  } from "$lib/data";
   import { appHref, appUrl } from "$lib/route";
   import { SIDEBAR_KEY, rememberSidebar, sidebarCollapsed } from "$lib/sidebar";
   import { setSyncStatus, syncStatus } from "$lib/sync";
@@ -77,7 +85,15 @@
 
   useCommands(() => ({
     commands: [
-      { id: "global:capture", label: "Quick capture", scope: "global", group: "Create", keys: ["q"], icon: "capture", run: () => (captureOpen = true) },
+      {
+        id: "global:capture",
+        label: "Quick capture",
+        scope: "global",
+        group: "Create",
+        keys: ["q"],
+        icon: "capture",
+        run: () => (captureOpen = true),
+      },
       // Narrow windows show the top bar, where collapsing would change nothing.
       ...(wide.current
         ? [
@@ -151,7 +167,9 @@
       goto(taskHref(id.slice(TASK_RESULT_PREFIX.length)));
       return;
     }
-    registeredCommands().find((command) => command.id === id)?.run();
+    registeredCommands()
+      .find((command) => command.id === id)
+      ?.run();
   }
 
   function onkeydown(event: KeyboardEvent) {
@@ -234,19 +252,40 @@
       >
         <Icon name={collapsed ? "sidebarExpand" : "sidebarCollapse"} size="1.125rem" />
       </button>
-      <button type="button" class="menu-toggle" bind:this={navToggle} aria-expanded={navOpen} aria-controls="views-menu" onclick={() => (navOpen = !navOpen)}>
+      <button
+        type="button"
+        class="menu-toggle"
+        bind:this={navToggle}
+        aria-expanded={navOpen}
+        aria-controls="views-menu"
+        onclick={() => (navOpen = !navOpen)}
+      >
         <Icon name={navOpen ? "close" : "menu"} size="1.125rem" />
         <span>Menu</span>
       </button>
     </div>
     <div class="menu" id="views-menu" data-open={navOpen ? "" : undefined}>
       <div class="tools">
-        <button type="button" class="tool" aria-keyshortcuts={mac ? "Meta+K" : "Control+K"} title={collapsed ? `Search (${menuKeys.join("")})` : undefined} onclick={openMenu}>
+        <button
+          type="button"
+          class="tool"
+          aria-keyshortcuts={mac ? "Meta+K" : "Control+K"}
+          title={collapsed ? `Search (${menuKeys.join("")})` : undefined}
+          onclick={openMenu}
+        >
           <Icon name="search" size="1rem" />
           <span class="label">Search</span>
-          <span class="keys" aria-hidden="true">{#each menuKeys as key (key)}<kbd>{key}</kbd>{/each}</span>
+          <span class="keys" aria-hidden="true"
+            >{#each menuKeys as key (key)}<kbd>{key}</kbd>{/each}</span
+          >
         </button>
-        <button type="button" class="tool" aria-keyshortcuts="Q" title={collapsed ? "Capture (Q)" : undefined} onclick={() => (captureOpen = true)}>
+        <button
+          type="button"
+          class="tool"
+          aria-keyshortcuts="Q"
+          title={collapsed ? "Capture (Q)" : undefined}
+          onclick={() => (captureOpen = true)}
+        >
           <Icon name="capture" size="1rem" />
           <span class="label">Capture</span>
           <span class="keys" aria-hidden="true"><kbd>Q</kbd></span>
@@ -255,7 +294,11 @@
       <ul>
         {#each views as view (view.path)}
           <li>
-            <a href={appHref(view.path)} aria-current={appUrl(page.url).pathname === view.path ? "page" : undefined} title={collapsed ? view.label : undefined}>
+            <a
+              href={appHref(view.path)}
+              aria-current={appUrl(page.url).pathname === view.path ? "page" : undefined}
+              title={collapsed ? view.label : undefined}
+            >
               <Icon name={view.icon} size="1.125rem" />
               <span class="label">{view.label}</span>
             </a>
@@ -267,9 +310,17 @@
   <main>
     {#if filed !== null}<p class="filed" role="status">{filed}</p>{/if}
     {#each captureWarnings as warning, index (index)}
-      <Feedback tone="warning" title="The capture is saved, with a warning" message={`${warning.message} (${warning.code})`}>
+      <Feedback
+        tone="warning"
+        title="The capture is saved, with a warning"
+        message={`${warning.message} (${warning.code})`}
+      >
         {#snippet actions()}
-          <Button label="Dismiss" variant="ghost" onclick={() => (captureWarnings = captureWarnings.filter((_, other) => other !== index))} />
+          <Button
+            label="Dismiss"
+            variant="ghost"
+            onclick={() => (captureWarnings = captureWarnings.filter((_, other) => other !== index))}
+          />
         {/snippet}
       </Feedback>
     {/each}
@@ -297,52 +348,224 @@
 <QuickCapture
   bind:open={captureOpen}
   {mac}
-  oncaptured={(capture, warnings) => ((filed = `Captured “${capture.title}” in the Inbox.`), (captureWarnings = warnings))}
-  oncreated={(task, warnings) => ((filed = `Created “${task.title}”.`), (captureWarnings = []), goto(taskHref(task.id), { state: { warnings } }))}
+  oncaptured={(capture, warnings) => (
+    (filed = `Captured “${capture.title}” in the Inbox.`),
+    (captureWarnings = warnings)
+  )}
+  oncreated={(task, warnings) => (
+    (filed = `Created “${task.title}”.`),
+    (captureWarnings = []),
+    goto(taskHref(task.id), { state: { warnings } })
+  )}
 />
 
 <style>
-  .shell { display: grid; grid-template-columns: 15rem 1fr; min-height: 100vh; }
-  .sidebar { display: grid; align-content: start; gap: var(--arcl-space-4); padding: var(--arcl-space-4) var(--arcl-space-3); border-right: var(--arcl-border-width) solid var(--arcl-border); background: var(--arcl-surface); font-family: var(--arcl-font-ui); }
-  .bar { display: flex; align-items: center; justify-content: space-between; gap: var(--arcl-space-2); }
-  .menu { display: grid; gap: var(--arcl-space-4); }
-  .menu-toggle { display: none; align-items: center; gap: var(--arcl-space-1); padding: var(--arcl-space-1) var(--arcl-space-2); border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-sm); color: var(--arcl-text); background: var(--arcl-canvas); font: inherit; font-size: var(--arcl-type-sm); cursor: pointer; }
-  .brand { padding: 0 var(--arcl-space-2); color: var(--arcl-heading); font-weight: 650; text-decoration: none; }
-  ul { display: grid; gap: var(--arcl-space-1); margin: 0; padding: 0; list-style: none; }
-  li a { display: flex; align-items: center; gap: var(--arcl-space-2); padding: var(--arcl-space-1) var(--arcl-space-2); border-radius: var(--arcl-radius-sm); color: var(--arcl-text-muted); font-size: var(--arcl-type-sm); text-decoration: none; }
-  li a:hover { background: var(--arcl-surface-hover); color: var(--arcl-text); }
-  li a[aria-current="page"] { background: var(--arcl-surface-subtle); color: var(--arcl-heading); font-weight: 600; }
-  main { min-width: 0; padding: var(--arcl-space-5) var(--arcl-space-6); }
-  .tools { display: grid; gap: var(--arcl-space-1); }
-  .tool { display: flex; align-items: center; gap: var(--arcl-space-2); padding: var(--arcl-space-1) var(--arcl-space-2); border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-sm); color: var(--arcl-text-muted); background: var(--arcl-canvas); font: inherit; font-size: var(--arcl-type-sm); text-align: start; cursor: pointer; }
-  .tool:hover { background: var(--arcl-surface-hover); color: var(--arcl-text); }
-  .tool .label { flex: 1; }
-  .collapse-toggle { display: inline-grid; place-items: center; padding: var(--arcl-space-1); border: 0; border-radius: var(--arcl-radius-control); color: var(--arcl-text-muted); background: transparent; cursor: pointer; }
-  .collapse-toggle:hover { background: var(--arcl-surface-hover); color: var(--arcl-text); }
+  .shell {
+    display: grid;
+    grid-template-columns: 15rem 1fr;
+    min-height: 100vh;
+  }
+  .sidebar {
+    display: grid;
+    align-content: start;
+    gap: var(--arcl-space-4);
+    padding: var(--arcl-space-4) var(--arcl-space-3);
+    border-right: var(--arcl-border-width) solid var(--arcl-border);
+    background: var(--arcl-surface);
+    font-family: var(--arcl-font-ui);
+  }
+  .bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--arcl-space-2);
+  }
+  .menu {
+    display: grid;
+    gap: var(--arcl-space-4);
+  }
+  .menu-toggle {
+    display: none;
+    align-items: center;
+    gap: var(--arcl-space-1);
+    padding: var(--arcl-space-1) var(--arcl-space-2);
+    border: var(--arcl-border-width) solid var(--arcl-border);
+    border-radius: var(--arcl-radius-sm);
+    color: var(--arcl-text);
+    background: var(--arcl-canvas);
+    font: inherit;
+    font-size: var(--arcl-type-sm);
+    cursor: pointer;
+  }
+  .brand {
+    padding: 0 var(--arcl-space-2);
+    color: var(--arcl-heading);
+    font-weight: 650;
+    text-decoration: none;
+  }
+  ul {
+    display: grid;
+    gap: var(--arcl-space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  li a {
+    display: flex;
+    align-items: center;
+    gap: var(--arcl-space-2);
+    padding: var(--arcl-space-1) var(--arcl-space-2);
+    border-radius: var(--arcl-radius-sm);
+    color: var(--arcl-text-muted);
+    font-size: var(--arcl-type-sm);
+    text-decoration: none;
+  }
+  li a:hover {
+    background: var(--arcl-surface-hover);
+    color: var(--arcl-text);
+  }
+  li a[aria-current="page"] {
+    background: var(--arcl-surface-subtle);
+    color: var(--arcl-heading);
+    font-weight: 600;
+  }
+  main {
+    min-width: 0;
+    padding: var(--arcl-space-5) var(--arcl-space-6);
+  }
+  .tools {
+    display: grid;
+    gap: var(--arcl-space-1);
+  }
+  .tool {
+    display: flex;
+    align-items: center;
+    gap: var(--arcl-space-2);
+    padding: var(--arcl-space-1) var(--arcl-space-2);
+    border: var(--arcl-border-width) solid var(--arcl-border);
+    border-radius: var(--arcl-radius-sm);
+    color: var(--arcl-text-muted);
+    background: var(--arcl-canvas);
+    font: inherit;
+    font-size: var(--arcl-type-sm);
+    text-align: start;
+    cursor: pointer;
+  }
+  .tool:hover {
+    background: var(--arcl-surface-hover);
+    color: var(--arcl-text);
+  }
+  .tool .label {
+    flex: 1;
+  }
+  .collapse-toggle {
+    display: inline-grid;
+    place-items: center;
+    padding: var(--arcl-space-1);
+    border: 0;
+    border-radius: var(--arcl-radius-control);
+    color: var(--arcl-text-muted);
+    background: transparent;
+    cursor: pointer;
+  }
+  .collapse-toggle:hover {
+    background: var(--arcl-surface-hover);
+    color: var(--arcl-text);
+  }
   /* A collapsed sidebar is a rail of icons, whose labels stay as the buttons' and links' names. Narrow windows show the top bar instead. */
   @media (min-width: 48.0625rem) {
-    .shell[data-collapsed] { grid-template-columns: 3.5rem 1fr; }
-    [data-collapsed] .sidebar { padding-inline: var(--arcl-space-2); }
-    [data-collapsed] .bar { justify-content: center; }
-    [data-collapsed] .brand, [data-collapsed] .keys { display: none; }
-    [data-collapsed] .tool, [data-collapsed] li a { justify-content: center; min-height: 2rem; padding-inline: 0; }
-    [data-collapsed] .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .shell[data-collapsed] {
+      grid-template-columns: 3.5rem 1fr;
+    }
+    [data-collapsed] .sidebar {
+      padding-inline: var(--arcl-space-2);
+    }
+    [data-collapsed] .bar {
+      justify-content: center;
+    }
+    [data-collapsed] .brand,
+    [data-collapsed] .keys {
+      display: none;
+    }
+    [data-collapsed] .tool,
+    [data-collapsed] li a {
+      justify-content: center;
+      min-height: 2rem;
+      padding-inline: 0;
+    }
+    [data-collapsed] .label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
   }
-  .keys { display: inline-flex; gap: 2px; }
-  kbd { display: inline-flex; min-width: 1.125rem; height: 1.125rem; align-items: center; justify-content: center; padding: 0 0.25rem; border: var(--arcl-border-width) solid var(--arcl-border); border-radius: 4px; background: var(--arcl-surface); font: 500 var(--arcl-type-xs) / 1 var(--arcl-font-ui); }
-  .connecting { margin: 0; color: var(--arcl-text-muted); }
-  .filed { margin: 0 0 var(--arcl-space-4); padding: var(--arcl-space-2) var(--arcl-space-3); border-inline-start: 4px solid var(--arcl-success); border-radius: var(--arcl-radius-sm); background: var(--arcl-success-surface); font-size: var(--arcl-type-sm); }
+  .keys {
+    display: inline-flex;
+    gap: 2px;
+  }
+  kbd {
+    display: inline-flex;
+    min-width: 1.125rem;
+    height: 1.125rem;
+    align-items: center;
+    justify-content: center;
+    padding: 0 0.25rem;
+    border: var(--arcl-border-width) solid var(--arcl-border);
+    border-radius: 4px;
+    background: var(--arcl-surface);
+    font: 500 var(--arcl-type-xs) / 1 var(--arcl-font-ui);
+  }
+  .connecting {
+    margin: 0;
+    color: var(--arcl-text-muted);
+  }
+  .filed {
+    margin: 0 0 var(--arcl-space-4);
+    padding: var(--arcl-space-2) var(--arcl-space-3);
+    border-inline-start: 4px solid var(--arcl-success);
+    border-radius: var(--arcl-radius-sm);
+    background: var(--arcl-success-surface);
+    font-size: var(--arcl-type-sm);
+  }
   /* Narrow windows stack the sidebar above the page as a bar whose Menu button shows the views. */
   @media (max-width: 48rem) {
     /* The bar's height, border included. The page scrolls focused rows below it. */
-    :global(:root) { --shell-bar-height: 3rem; scroll-padding-top: var(--shell-bar-height); }
-    .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
-    .collapse-toggle { display: none; }
-    .sidebar { position: sticky; top: 0; z-index: 1; padding: 0 var(--arcl-space-3); border-right: 0; border-bottom: var(--arcl-border-width) solid var(--arcl-border); }
-    .bar { min-height: calc(var(--shell-bar-height) - var(--arcl-border-width)); }
-    .menu-toggle { display: inline-flex; }
-    .menu:not([data-open]) { display: none; }
-    .menu[data-open] { padding-bottom: var(--arcl-space-2); }
-    main { padding: var(--arcl-space-4) var(--arcl-space-3); }
+    :global(:root) {
+      --shell-bar-height: 3rem;
+      scroll-padding-top: var(--shell-bar-height);
+    }
+    .shell {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: auto 1fr;
+    }
+    .collapse-toggle {
+      display: none;
+    }
+    .sidebar {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      padding: 0 var(--arcl-space-3);
+      border-right: 0;
+      border-bottom: var(--arcl-border-width) solid var(--arcl-border);
+    }
+    .bar {
+      min-height: calc(var(--shell-bar-height) - var(--arcl-border-width));
+    }
+    .menu-toggle {
+      display: inline-flex;
+    }
+    .menu:not([data-open]) {
+      display: none;
+    }
+    .menu[data-open] {
+      padding-bottom: var(--arcl-space-2);
+    }
+    main {
+      padding: var(--arcl-space-4) var(--arcl-space-3);
+    }
   }
 </style>

@@ -15,11 +15,30 @@ const blocked: TaskRowItem = {
   reasons: ["blocked by Add the skill (pending)"],
 };
 
-const ready: TaskRowItem = { ...blocked, id: "t-1", title: "Add the skill", priority: "normal", glyph: "ready", ready: true, reasons: [] };
+const ready: TaskRowItem = {
+  ...blocked,
+  id: "t-1",
+  title: "Add the skill",
+  priority: "normal",
+  glyph: "ready",
+  ready: true,
+  reasons: [],
+};
 
 const groups: TaskGroup[] = [
-  { id: "m-5", title: "Milestone 5", detail: "2 tasks", sections: [{ id: "m-5/pending", title: "Pending", rows: [ready, blocked] }] },
-  { id: "none", title: "No milestone", sections: [{ id: "none/done", title: "Completed", rows: [{ ...ready, id: "t-3", status: "completed", glyph: "done" }] }] },
+  {
+    id: "m-5",
+    title: "Milestone 5",
+    detail: "2 tasks",
+    sections: [{ id: "m-5/pending", title: "Pending", rows: [ready, blocked] }],
+  },
+  {
+    id: "none",
+    title: "No milestone",
+    sections: [
+      { id: "none/done", title: "Completed", rows: [{ ...ready, id: "t-3", status: "completed", glyph: "done" }] },
+    ],
+  },
 ];
 
 describe("TaskRow", () => {

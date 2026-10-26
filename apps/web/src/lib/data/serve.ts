@@ -1,5 +1,15 @@
 import { tokenHeaders } from "$lib/token";
-import { type Listing, type Tree, type Work, captureOf, capturesOf, milestoneOf, taskIndexOf, taskOf, workOf } from "./envelopes";
+import {
+  type Listing,
+  type Tree,
+  type Work,
+  captureOf,
+  capturesOf,
+  milestoneOf,
+  taskIndexOf,
+  taskOf,
+  workOf,
+} from "./envelopes";
 import {
   type Changed,
   DataError,
@@ -112,7 +122,11 @@ export function serveSource(options: ServeOptions = {}): DataSource {
 
     async promoteCapture(id, input) {
       // The reply names the new record by its kind: `task`, `spec` or `note`.
-      const { value, warnings } = await captureChange<Partial<Record<PromotionTarget, { id: string; title: string }>>>(id, "promote", input);
+      const { value, warnings } = await captureChange<Partial<Record<PromotionTarget, { id: string; title: string }>>>(
+        id,
+        "promote",
+        input,
+      );
       const kind = (["task", "spec", "note"] as const).find((target) => value[target] !== undefined) ?? input.to;
       const record = value[kind];
       return { value: { kind, id: record?.id ?? "", title: record?.title ?? "" }, warnings };

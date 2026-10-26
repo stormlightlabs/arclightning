@@ -10,7 +10,12 @@ const tasks = [
 
 describe("parseCapture", () => {
   it("takes the first line as the title and the rest as the body", () => {
-    expect(parseCapture("  Fix the menu  \n\nIt opens twice.\n")).toEqual({ title: "Fix the menu", body: "It opens twice.", line: "Fix the menu", tokens: [] });
+    expect(parseCapture("  Fix the menu  \n\nIt opens twice.\n")).toEqual({
+      title: "Fix the menu",
+      body: "It opens twice.",
+      line: "Fix the menu",
+      tokens: [],
+    });
   });
 
   it("pulls priority, parent and blocker tokens out of the title", () => {
@@ -23,7 +28,12 @@ describe("parseCapture", () => {
       { kind: "blocker", text: "after:T18.4", ref: "T18.4" },
       { kind: "blocker", text: "after:arcl-t-4", ref: "arcl-t-4" },
     ]);
-    expect(parsed.tokens.map(describeToken)).toEqual(["high priority", "subtask of T18", "blocked by T18.4", "blocked by arcl-t-4"]);
+    expect(parsed.tokens.map(describeToken)).toEqual([
+      "high priority",
+      "subtask of T18",
+      "blocked by T18.4",
+      "blocked by arcl-t-4",
+    ]);
   });
 
   it("leaves words that only look like tokens, and the body, alone", () => {
@@ -59,9 +69,18 @@ describe("captureOf", () => {
 
 describe("taskOf", () => {
   it("sets the task's fields from the tokens, resolving title keys and IDs", () => {
-    const result = taskOf(parseCapture("Show unblocked !low !critical ^T18 after:t18.4 after:arcl-t-4 after:arcl-t-4\nBody"), [tasks[0], tasks[1], tasks[3]]);
+    const result = taskOf(
+      parseCapture("Show unblocked !low !critical ^T18 after:t18.4 after:arcl-t-4 after:arcl-t-4\nBody"),
+      [tasks[0], tasks[1], tasks[3]],
+    );
     expect(result).toEqual({
-      task: { title: "Show unblocked", body: "Body", priority: "critical", parent: "arcl-t-1", blocked_by: ["arcl-t-2", "arcl-t-4"] },
+      task: {
+        title: "Show unblocked",
+        body: "Body",
+        priority: "critical",
+        parent: "arcl-t-1",
+        blocked_by: ["arcl-t-2", "arcl-t-4"],
+      },
     });
   });
 
@@ -96,13 +115,17 @@ describe("resolveRef", () => {
     const id = "arcl-t-01M5QS2QP9TNCV3A88EHX375D9";
     const stored = [...tasks, { id, title: "T19: Ship", status: "pending" as const }];
     for (const ref of [id, id.toUpperCase(), id.toLowerCase()]) expect(resolveRef(ref, stored)).toBe(id);
-    expect(taskOf(parseCapture(`Idea after:${id.toUpperCase()}`), stored)).toMatchObject({ task: { blocked_by: [id] } });
+    expect(taskOf(parseCapture(`Idea after:${id.toUpperCase()}`), stored)).toMatchObject({
+      task: { blocked_by: [id] },
+    });
   });
 });
 
 describe("isTaskRef", () => {
   it("accepts task numbers and task IDs only", () => {
-    for (const ref of ["T1", "t18.4", "T18.4.2", "arcl-t-01M5QS2QP9TNCV3A88EHX375D9"]) expect(isTaskRef(ref)).toBe(true);
-    for (const ref of ["", "C", "lunch", "T", "T18.", "T18.4x", "arcl-c-1", "arcl-t-"]) expect(isTaskRef(ref)).toBe(false);
+    for (const ref of ["T1", "t18.4", "T18.4.2", "arcl-t-01M5QS2QP9TNCV3A88EHX375D9"])
+      expect(isTaskRef(ref)).toBe(true);
+    for (const ref of ["", "C", "lunch", "T", "T18.", "T18.4x", "arcl-c-1", "arcl-t-"])
+      expect(isTaskRef(ref)).toBe(false);
   });
 });

@@ -60,7 +60,11 @@
     return [
       EditorState.readOnly.of(readonly),
       EditorView.editable.of(!readonly),
-      EditorView.contentAttributes.of({ "aria-label": label, "aria-readonly": String(readonly), ...(readonly ? { tabindex: "0" } : {}) }),
+      EditorView.contentAttributes.of({
+        "aria-label": label,
+        "aria-readonly": String(readonly),
+        ...(readonly ? { tabindex: "0" } : {}),
+      }),
     ];
   }
 
@@ -91,7 +95,10 @@
 
   $effect(() => {
     if (view && view.state.doc.toString() !== value) {
-      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value }, annotations: fromProps.of(true) });
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: value },
+        annotations: fromProps.of(true),
+      });
     }
   });
 
@@ -103,11 +110,33 @@
 <div class="arcl-markdown-editor" tabindex="-1" bind:this={host}></div>
 
 <style>
-  .arcl-markdown-editor { overflow: hidden; border: var(--arcl-border-width) solid var(--arcl-border); border-radius: var(--arcl-radius-control); background: var(--arcl-canvas); }
-  .arcl-markdown-editor:focus-visible { outline: var(--arcl-focus-width) solid var(--arcl-focus); outline-offset: 2px; }
-  .arcl-markdown-editor :global(.cm-editor) { color: var(--arcl-text); font: var(--arcl-type-sm) / 1.6 var(--arcl-font-code); }
-  .arcl-markdown-editor :global(.cm-editor.cm-focused) { outline: var(--arcl-focus-width) solid var(--arcl-focus); outline-offset: -2px; }
-  .arcl-markdown-editor :global(.cm-scroller) { font-family: inherit; }
-  .arcl-markdown-editor :global(.cm-content) { padding: var(--arcl-space-3) var(--arcl-space-4); caret-color: var(--arcl-text); }
-  .arcl-markdown-editor :global(.cm-selectionBackground), .arcl-markdown-editor :global(.cm-focused .cm-selectionBackground) { background: var(--arcl-info-surface); }
+  .arcl-markdown-editor {
+    overflow: hidden;
+    border: var(--arcl-border-width) solid var(--arcl-border);
+    border-radius: var(--arcl-radius-control);
+    background: var(--arcl-canvas);
+  }
+  .arcl-markdown-editor:focus-visible {
+    outline: var(--arcl-focus-width) solid var(--arcl-focus);
+    outline-offset: 2px;
+  }
+  .arcl-markdown-editor :global(.cm-editor) {
+    color: var(--arcl-text);
+    font: var(--arcl-type-sm) / 1.6 var(--arcl-font-code);
+  }
+  .arcl-markdown-editor :global(.cm-editor.cm-focused) {
+    outline: var(--arcl-focus-width) solid var(--arcl-focus);
+    outline-offset: -2px;
+  }
+  .arcl-markdown-editor :global(.cm-scroller) {
+    font-family: inherit;
+  }
+  .arcl-markdown-editor :global(.cm-content) {
+    padding: var(--arcl-space-3) var(--arcl-space-4);
+    caret-color: var(--arcl-text);
+  }
+  .arcl-markdown-editor :global(.cm-selectionBackground),
+  .arcl-markdown-editor :global(.cm-focused .cm-selectionBackground) {
+    background: var(--arcl-info-surface);
+  }
 </style>

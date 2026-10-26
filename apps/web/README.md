@@ -16,15 +16,15 @@ disabled while any edit to the task waits for the sync.
 
 Run these from this directory, or with `pnpm --filter @arclightning/web`.
 
-| Command                   | Runs                                                                  |
-| ------------------------- | --------------------------------------------------------------------- |
-| `pnpm test`               | Unit tests in Node and component tests in happy-dom                   |
-| `pnpm test:browser`       | Route, layout and component tests in headless Chromium                |
-| `pnpm test:ui`            | Both of the above in watch mode                                       |
-| `pnpm test:e2e`           | Playwright workflows, fit and themes                                  |
-| `pnpm test:visual`        | Screenshots of the views and the Work board, compared with baselines  |
-| `pnpm test:visual:update` | Rewrites the baselines after an intended visual change                |
-| `pnpm screenshots`        | Rewrites the README images in `docs/images/`: dark, rounded, 2x       |
+| Command                   | Runs                                                                 |
+| ------------------------- | -------------------------------------------------------------------- |
+| `pnpm test`               | Unit tests in Node and component tests in happy-dom                  |
+| `pnpm test:browser`       | Route, layout and component tests in headless Chromium               |
+| `pnpm test:ui`            | Both of the above in watch mode                                      |
+| `pnpm test:e2e`           | Playwright workflows, fit and themes                                 |
+| `pnpm test:visual`        | Screenshots of the views and the Work board, compared with baselines |
+| `pnpm test:visual:update` | Rewrites the baselines after an intended visual change               |
+| `pnpm screenshots`        | Rewrites the README images in `docs/images/`: dark, rounded, 2x      |
 
 The browser tests need Chromium. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to
 use one already installed. CI runs `just check`, which runs `pnpm test` and

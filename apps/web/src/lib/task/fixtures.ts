@@ -20,12 +20,30 @@ export function blockedDetail(): TaskDetail {
       blocked: true,
       reasons: [
         { kind: "direct_blocker", message: "blocked by `t-10.3` (in_progress)", blocker: "t-10.3" },
-        { kind: "inherited_blocker", message: "ancestor `t-10` is blocked by `t-17` (pending)", ancestor: "t-10", blocker: "t-17" },
+        {
+          kind: "inherited_blocker",
+          message: "ancestor `t-10` is blocked by `t-17` (pending)",
+          ancestor: "t-10",
+          blocker: "t-17",
+        },
         { kind: "closed_container", message: "phase `ph-5` is `completed`", container: "ph-5" },
       ],
     },
-    blockers: [{ task: task("t-10.3", { title: "T10.3: Add the MCP server", status: "in_progress" }), completed: false, evidence: "" }],
-    inherited_blockers: [{ task: task("t-17", { title: "T17: Report readiness as data" }), completed: false, evidence: "", ancestor: "t-10" }],
+    blockers: [
+      {
+        task: task("t-10.3", { title: "T10.3: Add the MCP server", status: "in_progress" }),
+        completed: false,
+        evidence: "",
+      },
+    ],
+    inherited_blockers: [
+      {
+        task: task("t-17", { title: "T17: Report readiness as data" }),
+        completed: false,
+        evidence: "",
+        ancestor: "t-10",
+      },
+    ],
     dependents: [task("t-10.5", { title: "T10.5: Document the MCP tools" })],
     children: [],
     ancestors: [parent],
@@ -42,8 +60,17 @@ export function blockedDetail(): TaskDetail {
 export function doneBlockersDetail(): TaskDetail {
   const detail = blockedDetail();
   const done = (id: string, title: string) => task(id, { title, status: "completed" });
-  detail.blockers.push({ task: done("t-10.2", "T10.2: Define the tool schema"), completed: true, evidence: "Landed in **#38**." });
-  detail.inherited_blockers.push({ task: done("t-9", "T9: Ship the store"), completed: true, evidence: "", ancestor: "t-10" });
+  detail.blockers.push({
+    task: done("t-10.2", "T10.2: Define the tool schema"),
+    completed: true,
+    evidence: "Landed in **#38**.",
+  });
+  detail.inherited_blockers.push({
+    task: done("t-9", "T9: Ship the store"),
+    completed: true,
+    evidence: "",
+    ancestor: "t-10",
+  });
   return detail;
 }
 

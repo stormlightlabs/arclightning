@@ -1,4 +1,13 @@
-import { DataError, type ChangeWarning, type DataSource, type Task, type TaskDetail, type TaskEdit, type TaskPriority, type TaskStatus } from "$lib/data";
+import {
+  DataError,
+  type ChangeWarning,
+  type DataSource,
+  type Task,
+  type TaskDetail,
+  type TaskEdit,
+  type TaskPriority,
+  type TaskStatus,
+} from "$lib/data";
 
 /** A lifecycle change the Task view offers. */
 export type TaskAction = "start" | "complete" | "handoff" | "park" | "unpark";

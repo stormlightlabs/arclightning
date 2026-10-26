@@ -56,13 +56,11 @@ export interface Tree {
 export function workOf(work: Work): WorkList {
   const milestones = work.phases.map(milestoneOf);
   const byId = new Map(milestones.map((milestone) => [milestone.id, milestone]));
-  const items = work.tasks.map(
-    ({ task, readiness, phase_id }): WorkItem => ({
-      task,
-      readiness,
-      milestone: phase_id === null ? null : (byId.get(phase_id) ?? null),
-    }),
-  );
+  const items = work.tasks.map(({ task, readiness, phase_id }): WorkItem => ({
+    task,
+    readiness,
+    milestone: phase_id === null ? null : (byId.get(phase_id) ?? null),
+  }));
   return { milestones, items };
 }
 

@@ -45,13 +45,17 @@ function status(page: Page, text: string) {
 /** File a capture with quick capture, from whichever view is open. */
 async function capture(page: Page, title: string) {
   await page.keyboard.press("q");
-  await expect(page.getByRole("dialog", { name: "Quick capture" }).getByRole("textbox", { name: "Capture" })).toBeFocused();
+  await expect(
+    page.getByRole("dialog", { name: "Quick capture" }).getByRole("textbox", { name: "Capture" }),
+  ).toBeFocused();
   await page.keyboard.type(title);
   await page.keyboard.press("Enter");
   await expect(status(page, `Captured “${title}” in the Inbox.`)).toBeVisible();
 }
 
-test("keyboard alone takes captures to tasks through the Inbox and Planning, then starts and completes one", async ({ page }) => {
+test("keyboard alone takes captures to tasks through the Inbox and Planning, then starts and completes one", async ({
+  page,
+}) => {
   await page.goto(served!.url);
   await expect(page.getByRole("heading", { level: 1, name: "Work" })).toBeVisible();
 

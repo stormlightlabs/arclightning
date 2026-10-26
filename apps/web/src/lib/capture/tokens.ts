@@ -137,9 +137,12 @@ export function isTaskRef(ref: string): boolean {
 function tokenOf(word: string): CaptureToken | null {
   if (word.startsWith("!")) {
     const priority = word.slice(1).toLowerCase();
-    return (PRIORITIES as readonly string[]).includes(priority) ? { kind: "priority", text: word, priority: priority as TaskPriority } : null;
+    return (PRIORITIES as readonly string[]).includes(priority)
+      ? { kind: "priority", text: word, priority: priority as TaskPriority }
+      : null;
   }
   if (word.startsWith("^") && isTaskRef(word.slice(1))) return { kind: "parent", text: word, ref: word.slice(1) };
-  if (word.toLowerCase().startsWith("after:") && isTaskRef(word.slice(6))) return { kind: "blocker", text: word, ref: word.slice(6) };
+  if (word.toLowerCase().startsWith("after:") && isTaskRef(word.slice(6)))
+    return { kind: "blocker", text: word, ref: word.slice(6) };
   return null;
 }

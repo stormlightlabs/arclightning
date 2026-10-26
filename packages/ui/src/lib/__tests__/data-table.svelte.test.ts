@@ -4,7 +4,11 @@ import { render } from "vitest-browser-svelte";
 import "../styles/index.css";
 import DataTableHarness from "./DataTableHarness.svelte";
 
-const items = Array.from({ length: 12 }, (_, index) => ({ id: String.fromCharCode(97 + index), title: `Item ${index + 1}`, note: `Note ${index + 1}` }));
+const items = Array.from({ length: 12 }, (_, index) => ({
+  id: String.fromCharCode(97 + index),
+  title: `Item ${index + 1}`,
+  note: `Note ${index + 1}`,
+}));
 
 describe("DataTable", () => {
   it("shows a header and one row per item, with column headers", async () => {
@@ -47,7 +51,11 @@ describe("DataTable", () => {
 
   it("reaches only the selected row, or the first, with Tab", async () => {
     await render(DataTableHarness, { items });
-    const tabbable = () => page.getByRole("button", { name: /^Item/ }).elements().filter((button) => button.tabIndex === 0);
+    const tabbable = () =>
+      page
+        .getByRole("button", { name: /^Item/ })
+        .elements()
+        .filter((button) => button.tabIndex === 0);
     expect(tabbable().map((button) => button.textContent?.trim())).toEqual(["Item 1"]);
     await page.getByRole("button", { name: "Select second" }).click();
     expect(tabbable().map((button) => button.textContent?.trim())).toEqual(["Item 2"]);
