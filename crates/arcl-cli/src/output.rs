@@ -1310,24 +1310,20 @@ pub fn tree_section(kind: &str) -> Option<usize> {
     TREE_SECTIONS.iter().position(|(section, _)| *section == kind)
 }
 
-/// Renders top-level tree nodes for human output: nodes outside
-/// [`TREE_SECTIONS`] flush-left, then each section's heading with its nodes
-/// indented below it. A section with no nodes prints nothing.
+/// Renders top-level tree nodes for human output in the order given: nodes
+/// outside [`TREE_SECTIONS`] flush-left, and a section's heading before its
+/// first node, with its nodes indented below it. A section with no nodes
+/// prints nothing.
 fn human_tree(nodes: &[ConnectedTreeNode]) -> String {
-    let mut lines = nodes
-        .iter()
-        .filter(|node| tree_section(node.kind).is_none())
-        .map(|node| node.human(0))
-        .collect::<Vec<_>>();
-    for (index, (_, heading)) in TREE_SECTIONS.iter().enumerate() {
-        let mut members = nodes
-            .iter()
-            .filter(|node| tree_section(node.kind) == Some(index))
-            .peekable();
-        if members.peek().is_some() {
-            lines.push((*heading).to_owned());
-            lines.extend(members.map(|node| node.human(1)));
+    let mut lines = Vec::new();
+    let mut current = None;
+    for node in nodes {
+        let section = tree_section(node.kind);
+        if let Some(index) = section.filter(|_| section != current) {
+            lines.push(TREE_SECTIONS[index].1.to_owned());
         }
+        current = section;
+        lines.push(node.human(usize::from(section.is_some())));
     }
     lines.join("\n")
 }
