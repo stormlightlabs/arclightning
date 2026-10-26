@@ -4793,3 +4793,118 @@ fn web_apply_fails_a_malformed_entry_and_applies_the_rest() {
     );
     assert_eq!(capture_field(dir, &second, "status"), "discarded");
 }
+
+/// Import a copy of task `id`, titled `title`, whose ID differs from `id`
+/// only in the fifth character from the end, so the two share a 4-character
+/// suffix. Returns the copy's ID.
+fn import_suffix_twin(directory: &Path, id: &str, title: &str) -> String {
+    let ulid = id.strip_prefix("arcl-t-").expect("a task ID");
+    let changed = if &ulid[21..22] == "0" { "1" } else { "0" };
+    let twin = format!("arcl-t-{}{changed}{}", &ulid[..21], &ulid[22..]);
+    let tasks = directory.join(".arcl/workspace/tasks");
+    let original = fs::read_to_string(tasks.join(format!("{id}.md"))).expect("task file reads");
+    let copy = original
+        .replace(id, &twin)
+        .replace("title = \"First\"", &format!("title = \"{title}\""));
+    fs::write(tasks.join(format!("{twin}.md")), copy).expect("twin task file writes");
+    assert_success(
+        &arcl_in(directory)
+            .args(["workspace", "import"])
+            .output()
+            .expect("import runs"),
+    );
+    twin
+}
+
+/// The text a successful human-output command prints.
+fn human_stdout(directory: &Path, args: &[&str]) -> String {
+    let output = arcl_in(directory)
+        .args(["--color", "never"])
+        .args(args)
+        .output()
+        .expect("command runs");
+    assert_success(&output);
+    String::from_utf8(output.stdout).expect("output is UTF-8")
+}
+
+#[test]
+fn short_ids_select_records_and_grow_when_suffixes_collide() {
+    let directory = tempdir().expect("temporary directory can be created");
+    let dir = directory.path();
+    run_json(dir, ["--json", "init", "--workspace"].as_ref());
+    let first = create_task(dir, "First", None);
+    let other = create_task(dir, "Other", None);
+    let twin = import_suffix_twin(dir, &first, "Twin");
+    let suffix = |id: &str, length: usize| id[id.len() - length..].to_owned();
+
+    // The two tasks that share four characters show five; the other shows four.
+    let tree = human_stdout(dir, &["tree"]);
+    assert!(
+        tree.contains(&format!("task `{}` [First]", suffix(&first, 5))),
+        "{tree}"
+    );
+    assert!(tree.contains(&format!("task `{}` [Twin]", suffix(&twin, 5))), "{tree}");
+    assert!(
+        tree.contains(&format!("task `{}` [Other]", suffix(&other, 4))),
+        "{tree}"
+    );
+    let list = human_stdout(dir, &["list", "--kind", "task"]);
+    assert!(
+        list.contains(&format!("task\t{}\t[pending]\tFirst", suffix(&first, 5))),
+        "{list}"
+    );
+    let plain = human_stdout(dir, &["--plain", "tree"]);
+    assert!(
+        plain.contains(&format!("0\ttask\t{}\tpending\tOther", suffix(&other, 4))),
+        "{plain}"
+    );
+
+    // A unique suffix selects its record, in either case and with a kind.
+    let shown = human_stdout(dir, &["show", &suffix(&first, 5)]);
+    assert!(
+        shown.starts_with(&format!("Task `{}` [pending] First", suffix(&first, 5))),
+        "{shown}"
+    );
+    let lower = format!("t-{}", suffix(&other, 4).to_lowercase());
+    let shown = run_json(dir, ["--json", "show", &lower].as_ref());
+    assert_eq!(shown["data"]["task"]["id"], other.as_str(), "JSON keeps the full ID");
+    let rooted = human_stdout(dir, &["tree", &suffix(&twin, 6)]);
+    assert_eq!(rooted.trim(), format!("task `{}` [Twin]", suffix(&twin, 5)));
+    let started = run_json(dir, ["--json", "task", "start", &suffix(&first, 5)].as_ref());
+    assert_eq!(started["data"]["task"]["id"], first.as_str());
+    assert_eq!(started["data"]["task"]["status"], "in_progress");
+    let listed = run_json(dir, ["--json", "list", "--kind", "task"].as_ref());
+    assert!(
+        listed["data"]["records"]
+            .as_array()
+            .expect("records")
+            .iter()
+            .all(|record| record["id"].as_str().is_some_and(|id| id.starts_with("arcl-t-"))),
+        "{listed}"
+    );
+
+    // An ambiguous suffix lists every match; a kind that matches none is not found.
+    let ambiguous = arcl_in(dir)
+        .args(["task", "start", &suffix(&first, 4)])
+        .output()
+        .expect("start runs");
+    assert_eq!(ambiguous.status.code(), Some(3));
+    let stderr = String::from_utf8_lossy(&ambiguous.stderr);
+    assert!(stderr.contains(&format!("{first}  First")), "{stderr}");
+    assert!(stderr.contains(&format!("{twin}  Twin")), "{stderr}");
+    let missing = arcl_in(dir)
+        .args(["show", &format!("n-{}", suffix(&other, 4))])
+        .output()
+        .expect("show runs");
+    assert_eq!(missing.status.code(), Some(5));
+
+    // Too short or invalid input fails as an invalid record.
+    for input in ["ABC", "t-AB", "GBU5", "x-ABCD"] {
+        let refused = arcl_in(dir)
+            .args(["--json", "show", input])
+            .output()
+            .expect("show runs");
+        assert_eq!(refused.status.code(), Some(3), "{input}");
+        assert_eq!(json(&refused.stderr)["error"]["code"], "invalid_request", "{input}");
+    }
+}

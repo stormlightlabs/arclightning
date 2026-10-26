@@ -465,6 +465,7 @@ pub(super) fn run_task(command: TaskCommand, renderer: &Renderer) -> Result<Opti
                     &database
                         .planning_task_view(id)
                         .map_err(ApplicationError::from_command)?,
+                    &ShortIds::default(),
                 ),
             )
         }
@@ -579,6 +580,7 @@ pub(super) fn run_task(command: TaskCommand, renderer: &Renderer) -> Result<Opti
                     &database
                         .planning_task_view(id)
                         .map_err(ApplicationError::from_command)?,
+                    &ShortIds::default(),
                 ),
             )
         }
@@ -726,6 +728,9 @@ fn exec_membership(command: MembershipCommand, renderer: &Renderer) -> Result<Op
             let release_id = parse_release_id(&release_id).map_err(ApplicationError::from_command)?;
             let kind = parse_member_kind(&kind).map_err(ApplicationError::from_command)?;
             let mut database = open_database().map_err(ApplicationError::from_command)?;
+            let record_id = database
+                .resolve_record_id(&record_id)
+                .map_err(ApplicationError::from_command)?;
             let membership = database
                 .add_release_membership(release_id, kind, record_id)
                 .map_err(ApplicationError::from_command)?;
@@ -739,6 +744,9 @@ fn exec_membership(command: MembershipCommand, renderer: &Renderer) -> Result<Op
             let release_id = parse_release_id(&release_id).map_err(ApplicationError::from_command)?;
             let kind = parse_member_kind(&kind).map_err(ApplicationError::from_command)?;
             let mut database = open_database().map_err(ApplicationError::from_command)?;
+            let record_id = database
+                .resolve_record_id(&record_id)
+                .map_err(ApplicationError::from_command)?;
             let membership = database
                 .remove_release_membership(release_id, kind, &record_id)
                 .map_err(ApplicationError::from_command)?;
@@ -895,6 +903,9 @@ fn exec_note_link(command: NoteLinkCommand, renderer: &Renderer) -> anyhow::Resu
             let note_id = parse_note_id(&note_id).map_err(ApplicationError::from_command)?;
             let kind = parse_linked_kind(&kind).map_err(ApplicationError::from_command)?;
             let mut database = open_database().map_err(ApplicationError::from_command)?;
+            let record_id = database
+                .resolve_record_id(&record_id)
+                .map_err(ApplicationError::from_command)?;
             let link = database
                 .add_note_link(note_id, kind, record_id)
                 .map_err(ApplicationError::from_command)?;
@@ -908,6 +919,9 @@ fn exec_note_link(command: NoteLinkCommand, renderer: &Renderer) -> anyhow::Resu
             let note_id = parse_note_id(&note_id).map_err(ApplicationError::from_command)?;
             let kind = parse_linked_kind(&kind).map_err(ApplicationError::from_command)?;
             let mut database = open_database().map_err(ApplicationError::from_command)?;
+            let record_id = database
+                .resolve_record_id(&record_id)
+                .map_err(ApplicationError::from_command)?;
             let link = database
                 .remove_note_link(note_id, kind, &record_id)
                 .map_err(ApplicationError::from_command)?;

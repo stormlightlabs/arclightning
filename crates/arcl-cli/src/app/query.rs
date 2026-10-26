@@ -80,14 +80,18 @@ impl ListFilter {
     }
 }
 
+/// Show the record `id` names, a full or short ID. Human and plain output
+/// show short IDs.
 pub(super) fn show_record(database: &Database, id: &str, renderer: &Renderer) -> CResult<Option<String>> {
+    let id = &database.resolve_record_id(id)?;
+    let ids = display_ids(database, renderer)?;
     if id.starts_with(CaptureId::PREFIX) {
         let value = parse_capture_id(id)?;
         let record = database
             .capture(value)?
             .ok_or_else(|| StorageError::CaptureNotFound { id: id.to_owned() })?;
         return renderer
-            .render_capture("shown", &record)
+            .render_shown("capture", ids.short(id), &record.title, &record)
             .map_err(|error| CommandError::InvalidFilter { message: error.to_string() });
     }
     if id.starts_with(SpecId::PREFIX) {
@@ -96,7 +100,7 @@ pub(super) fn show_record(database: &Database, id: &str, renderer: &Renderer) ->
             .spec(value)?
             .ok_or_else(|| StorageError::SpecNotFound { id: id.to_owned() })?;
         return renderer
-            .render_spec("shown", &record)
+            .render_shown("spec", ids.short(id), &record.title, &record)
             .map_err(|error| CommandError::InvalidFilter { message: error.to_string() });
     }
     if id.starts_with(PlanId::PREFIX) {
@@ -105,7 +109,7 @@ pub(super) fn show_record(database: &Database, id: &str, renderer: &Renderer) ->
             .plan(value)?
             .ok_or_else(|| StorageError::PlanNotFound { id: id.to_owned() })?;
         return renderer
-            .render_plan("shown", &record)
+            .render_shown("plan", ids.short(id), &record.title, &record)
             .map_err(|error| CommandError::InvalidFilter { message: error.to_string() });
     }
     if id.starts_with(PhaseId::PREFIX) {
@@ -114,14 +118,14 @@ pub(super) fn show_record(database: &Database, id: &str, renderer: &Renderer) ->
             .phase(value)?
             .ok_or_else(|| StorageError::PhaseNotFound { id: id.to_owned() })?;
         return renderer
-            .render_phase("shown", &record)
+            .render_shown("phase", ids.short(id), &record.title, &record)
             .map_err(|error| CommandError::InvalidFilter { message: error.to_string() });
     }
     if id.starts_with(TaskId::PREFIX) {
         let value = parse_task_id(id)?;
         let record = database.planning_task_view(value)?;
         return renderer
-            .render_planning_task_view(&record)
+            .render_planning_task_view(&record, &ids)
             .map_err(|error| CommandError::InvalidFilter { message: error.to_string() });
     }
     if id.starts_with(NoteId::PREFIX) {
@@ -130,7 +134,7 @@ pub(super) fn show_record(database: &Database, id: &str, renderer: &Renderer) ->
             .note(value)?
             .ok_or_else(|| StorageError::NoteNotFound { id: id.to_owned() })?;
         return renderer
-            .render_note("shown", &record)
+            .render_shown("note", ids.short(id), &record.title, &record)
             .map_err(|error| CommandError::InvalidFilter { message: error.to_string() });
     }
     if id.starts_with(ReleaseId::PREFIX) {
@@ -139,7 +143,7 @@ pub(super) fn show_record(database: &Database, id: &str, renderer: &Renderer) ->
             .release(value)?
             .ok_or_else(|| StorageError::ReleaseNotFound { id: id.to_owned() })?;
         return renderer
-            .render_connected_release("shown", &record)
+            .render_shown("release", ids.short(id), &record.title, &record)
             .map_err(|error| CommandError::InvalidFilter { message: error.to_string() });
     }
     Err(CommandError::InvalidFilter { message: format!("unknown record ID `{id}`") })

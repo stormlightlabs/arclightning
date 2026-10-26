@@ -14,7 +14,11 @@ pub(super) fn read_show(id: &str, renderer: &Renderer) -> anyhow::Result<Option<
 /// `arcl list`.
 pub(super) fn read_list(filters: ListArgs, renderer: &Renderer) -> anyhow::Result<Option<String>> {
     let database = open_database().map_err(ApplicationError::from_command)?;
-    let summaries = list_connected(&database, filters).map_err(ApplicationError::from_command)?;
+    let mut summaries = list_connected(&database, filters).map_err(ApplicationError::from_command)?;
+    let ids = display_ids(&database, renderer).map_err(ApplicationError::from_command)?;
+    for summary in &mut summaries {
+        summary.id = ids.short(&summary.id).to_owned();
+    }
     Ok(renderer.render_connected_summaries(&summaries)?)
 }
 
@@ -25,7 +29,7 @@ pub(super) fn read_explain(task_id: &str, renderer: &Renderer) -> anyhow::Result
     let view = database
         .planning_task_view(id)
         .map_err(ApplicationError::from_command)?;
-    Ok(renderer.render_planning_task_view(&view)?)
+    Ok(renderer.render_planning_task_view(&view, &ShortIds::default())?)
 }
 
 /// `arcl context <task-id>`.
@@ -57,9 +61,23 @@ pub(super) fn read_work(renderer: &Renderer) -> anyhow::Result<Option<String>> {
 /// `arcl tree`, from the record `root` names or of every record.
 pub(super) fn read_tree(root: Option<&str>, renderer: &Renderer) -> anyhow::Result<Option<String>> {
     let database = open_database().map_err(ApplicationError::from_command)?;
+    let root = root
+        .map(|root| database.resolve_record_id(root))
+        .transpose()
+        .map_err(ApplicationError::from_command)?;
     let graph = database.connected_graph().map_err(ApplicationError::from_command)?;
-    let nodes = connected_tree(&graph, root).map_err(ApplicationError::from_command)?;
+    let mut nodes = connected_tree(&graph, root.as_deref()).map_err(ApplicationError::from_command)?;
+    let ids = display_ids(&database, renderer).map_err(ApplicationError::from_command)?;
+    shorten_tree(&mut nodes, &ids);
     Ok(renderer.render_connected_tree(&nodes)?)
+}
+
+/// Replace each node's ID with its short ID.
+fn shorten_tree(nodes: &mut [ConnectedTreeNode], ids: &ShortIds) {
+    for node in nodes {
+        node.id = ids.short(&node.id).to_owned();
+        shorten_tree(&mut node.children, ids);
+    }
 }
 
 /// The workspace file of the record `id`, for the web app's raw editor.

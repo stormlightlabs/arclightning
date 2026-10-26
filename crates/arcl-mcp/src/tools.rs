@@ -157,7 +157,8 @@ pub struct Envelope<T> {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RecordInput {
-    /// A record ID of any kind, such as `arcl-t-…` or `arcl-n-…`.
+    /// A record ID of any kind, such as `arcl-t-…` or `arcl-n-…`, or a short
+    /// ID: the end of one, such as `535B` or `t-535B`.
     pub id: String,
 }
 
@@ -165,7 +166,7 @@ pub struct RecordInput {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TaskInput {
-    /// The task ID, `arcl-t-…`.
+    /// The task ID, `arcl-t-…`, or a short ID such as `535B`.
     pub task_id: String,
 }
 

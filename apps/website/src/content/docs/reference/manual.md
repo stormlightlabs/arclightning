@@ -19,6 +19,25 @@ These options can appear before or after a subcommand & are global:
 | `--help`                      | Print help for the current command.                                              |
 | `--version`                   | Print the installed version.                                                     |
 
+## Record IDs
+
+A full record ID is `arcl-<kind>-<ULID>`, such as
+`arcl-t-01M5VDDD42HZQ1FEN49X80GBA5`. Every command that takes a record ID also
+takes a short ID: the end of the ULID, at least 4 characters, such as `GBA5`.
+Put the kind and a dash in front to match only that kind: `t-GBA5`. The kinds
+are `c`, `r`, `s`, `pl`, `ph`, `t` and `n`. Letters match in either case.
+
+A short ID must end exactly one record's ID. One that ends several fails with
+status 3 and lists each match's full ID and title; one that ends none fails with
+status 5.
+
+Human and `--plain` output from `show`, `list` and `tree` print each ID as its
+shortest unique suffix, at least 4 characters, compared across every record.
+`--json` output keeps full IDs.
+
+A short ID that is unique today can match a second record later. Write full IDs
+in files, evidence, links and scripts that outlive the command.
+
 ## Project Initialization
 
 ### `arcl init`
@@ -181,7 +200,7 @@ task ID, then a `subtask<TAB><id>` line for each completed subtask and an
 
 | Command                  | Purpose                                                            |
 | ------------------------ | ------------------------------------------------------------------ |
-| `arcl show <id>`         | Show one record selected by its typed ID prefix.                   |
+| `arcl show <id>`         | Show one record by its full or short ID.                           |
 | `arcl list`              | List records using kind, state, priority, and association filters. |
 | `arcl tree [<id>]`       | Show the complete hierarchy or one rooted subtree.                 |
 | `arcl explain <task-id>` | Report every condition affecting task readiness.                   |

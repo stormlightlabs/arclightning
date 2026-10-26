@@ -32,8 +32,26 @@ pub(super) fn parse_linked_kind(value: &str) -> CResult<LinkedRecordKind> {
     }
 }
 
+/// Parse a record ID argument. A full ID parses as it is; a short ID, such as
+/// `535B` or `t-535B`, resolves against the project's records first.
 pub(super) fn parse_id<T>(value: &str, parser: impl Fn(&str) -> Result<T, IdError>) -> CResult<T> {
+    let resolved;
+    let value = if is_full_id(value) {
+        value
+    } else {
+        resolved = open_database()?.resolve_record_id(value)?;
+        &resolved
+    };
     parser(value).map_err(|error| CommandError::Domain(DomainError::InvalidId(error)))
+}
+
+/// The short IDs human and plain output show, or none for JSON and quiet
+/// output, which keep full IDs.
+pub(super) fn display_ids(database: &Database, renderer: &Renderer) -> CResult<ShortIds> {
+    match renderer.mode() {
+        OutputMode::Human | OutputMode::Plain => Ok(database.short_ids()?),
+        OutputMode::Json | OutputMode::Quiet => Ok(ShortIds::default()),
+    }
 }
 
 pub(super) fn parse_optional_id<T>(

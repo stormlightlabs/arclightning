@@ -10,6 +10,7 @@ mod plan;
 mod planning_task;
 mod project;
 mod release;
+mod short_id;
 mod spec;
 
 pub use capture::{Capture, CaptureAction, CaptureStatus};
@@ -31,4 +32,5 @@ pub use plan::Plan;
 pub use planning_task::PlanningTask;
 pub use project::Project;
 pub use release::Release;
+pub use short_id::{MIN_SHORT_ID_LEN, RecordRef, ShortIdError, ShortIds, is_full_id, resolve_short_id};
 pub use spec::Spec;
