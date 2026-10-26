@@ -5,7 +5,7 @@ title = "Leave closed captures out of arcl tree by default"
 status = "completed"
 priority = "normal"
 position = 2
-evidence = "Delivered by #PR: arcl tree leaves out promoted and discarded captures in human, --plain and --json output; --all includes them and a closed capture as root still shows. CLI test tree_leaves_out_closed_captures_unless_all; on this repository tree --plain shows 24 captures, matching list --status captured; just check and arcl check pass."
+evidence = "Delivered by #59: arcl tree leaves out promoted and discarded captures in human, --plain and --json output; --all includes them and a closed capture as root still shows. CLI test tree_leaves_out_closed_captures_unless_all; on this repository tree --plain shows 24 captures, matching list --status captured; just check and arcl check pass."
 +++
 
 Leave closed captures out of `arcl tree` by default. Promoted and discarded
