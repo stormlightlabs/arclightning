@@ -1,4 +1,4 @@
-import type { TaskPriority, TaskStatus, WorkItem } from "$lib/data";
+import type { Readiness, ReadinessReason, Task, TaskPriority, TaskStatus, WorkItem } from "$lib/data";
 
 /** Task statuses in the order the Work list shows them. */
 export const STATUSES: readonly TaskStatus[] = ["in_progress", "pending", "parked", "completed", "cancelled"];
@@ -70,8 +70,23 @@ export function isFiltered(filters: WorkFilters): boolean {
   return Object.values(filters).some((values) => values.length > 0);
 }
 
-/** The readiness value `item` filters as. */
-export function readinessOf(item: WorkItem): ReadinessFilter {
+/** Whether `status` closes a task: completed or cancelled. */
+export function isClosed(status: TaskStatus): boolean {
+  return status === "completed" || status === "cancelled";
+}
+
+/**
+ * The reasons the web app shows for a task's readiness. Readiness asks
+ * whether a task can start, so a closed task shows none. An open task keeps
+ * every reason.
+ */
+export function shownReasons(task: Task, readiness: Readiness): ReadinessReason[] {
+  return isClosed(task.status) ? [] : readiness.reasons;
+}
+
+/** The readiness value `item` filters as, or `null` for a closed task, which no readiness filter matches. */
+export function readinessOf(item: WorkItem): ReadinessFilter | null {
+  if (isClosed(item.task.status)) return null;
   if (item.readiness.ready) return "ready";
   return item.readiness.blocked ? "blocked" : "waiting";
 }

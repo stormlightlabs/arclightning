@@ -248,6 +248,25 @@ describe("TaskDetail changes", () => {
   });
 });
 
+describe("TaskDetail readiness", () => {
+  it("shows the callout on an open task under a completed phase", () => {
+    stubSource(blockedDetail());
+    const root = view(blockedDetail());
+    const callout = root.querySelector('section[aria-label="Readiness"]');
+    expect(callout?.querySelector('[data-kind="closed_container"]')).not.toBeNull();
+  });
+
+  it("leaves the callout out of a completed task", () => {
+    const detail = blockedDetail();
+    detail.task.status = "completed";
+    detail.readiness.reasons.unshift({ kind: "status", message: "task status is `completed`", task: detail.task.id });
+    stubSource(detail);
+    const root = view(detail);
+    expect(root.querySelector('section[aria-label="Readiness"]')).toBeNull();
+    expect(root.textContent).not.toContain("Not ready");
+  });
+});
+
 describe("TaskDetail IDs", () => {
   afterEach(() => {
     delete (navigator as { clipboard?: unknown }).clipboard;
