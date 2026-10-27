@@ -42,7 +42,9 @@ In short (`arcl prime` prints this list):
    `arcl task unpark <id>` and `arcl task start <id> --claim`.
 2. Otherwise start the first ready task: `arcl next --start --claim`.
 3. Read `arcl context <id>`: acceptance criteria, blockers, last handoff.
-4. Do the work. Record work outside the task with `arcl capture create`.
+4. Do the work. Note each decision, finding or blocker with
+   `arcl task note <id> --kind <kind> "<text>"`. Record work outside the task
+   with `arcl capture create`.
 5. Finish with `arcl task complete <id> --evidence "<proof>"`, or park it with
    `arcl task handoff <id> --note "<where it stands, what is next>"`.
 
@@ -75,8 +77,16 @@ In full:
 3. Read the context. `arcl --json context <id>` [`context`] returns the task
    with its ancestors, spec, plan, phase, blockers, dependents, readiness, and
    earlier evidence. `data.task.handoff` holds the last resume note, and
-   `data.task.body` holds the acceptance criteria.
-4. Do the work the task describes.
+   `data.task.body` holds the acceptance criteria. `data.notes` holds the 10
+   most recent notes, newest first, and `data.omitted_notes` counts the rest,
+   which `arcl --json show <id>` lists.
+4. Do the work the task describes. Leave a note when you make a decision,
+   find something the next session needs, hit a blocker, or get a result:
+   `arcl --json task note <id> --kind decision "<what and why>"`
+   [`task_note`]. The kinds are `decision`, `observation`, `blocker` and
+   `result`; leave `--kind` out for none. Notes are plain text of at most
+   2000 characters, kept in order, and survive context compaction, parking
+   and completion.
 5. Finish or hand off:
    - Done: `arcl --json task complete <id> --evidence "<proof>"`
      [`task_complete`], where the evidence says what shows the work is done.

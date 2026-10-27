@@ -28,12 +28,13 @@ pub use sync::{Side, SyncOutcome, WorkspaceSyncError, resolve_workspace, sync_wo
 pub const CONFIG_FORMAT_VERSION: u32 = 1;
 /// The newest on-disk workspace format version this crate reads and writes.
 ///
-/// Version 2 adds the task `assignee` field; see [`ASSIGNEE_FORMAT_VERSION`]
-/// for when a projection writes it. Reading also accepts
+/// Version 2 adds the task `assignee` field and version 3 the task `notes`
+/// array; see [`ASSIGNEE_FORMAT_VERSION`] and [`TASK_NOTES_FORMAT_VERSION`]
+/// for when a projection writes each. Reading also accepts
 /// [`OLDEST_WORKSPACE_FORMAT_VERSION`] and later versions up to this one; an
-/// arcl that predates version 2 refuses a version 2 manifest before it reads
-/// any record.
-pub const WORKSPACE_FORMAT_VERSION: u32 = 2;
+/// arcl that predates a version refuses its manifest before it reads any
+/// record.
+pub const WORKSPACE_FORMAT_VERSION: u32 = 3;
 /// The oldest workspace format version this crate still reads.
 pub const OLDEST_WORKSPACE_FORMAT_VERSION: u32 = 1;
 /// The workspace format version a task `assignee` needs.
@@ -43,6 +44,12 @@ pub const OLDEST_WORKSPACE_FORMAT_VERSION: u32 = 1;
 /// is never moved back to an older version. Otherwise it keeps
 /// [`OLDEST_WORKSPACE_FORMAT_VERSION`], which an older arcl still reads.
 pub const ASSIGNEE_FORMAT_VERSION: u32 = 2;
+/// The workspace format version task `notes` need.
+///
+/// A projection writes this version once a task carries a note, under the
+/// same rule as [`ASSIGNEE_FORMAT_VERSION`]: it never lowers the version a
+/// workspace already has.
+pub const TASK_NOTES_FORMAT_VERSION: u32 = 3;
 
 /// Workspace and configuration validation failures.
 #[derive(Debug, Error)]
@@ -90,6 +97,24 @@ pub enum WorkspaceError {
     /// A task `assignee` on a task that is not in progress.
     #[error("workspace task assignee is set on a `{status}` task; only an in-progress task holds a claim")]
     AssigneeNotInProgress { status: String },
+    /// A task note whose text is empty, longer than 2000 characters, or
+    /// holds a control character other than a newline or tab, a format
+    /// character, or a line that is exactly `+++`.
+    #[error(
+        "workspace task note text `{}` must be non-empty, at most 2000 characters, and without control characters \
+         other than newline and tab, format characters, or a line that is exactly `+++`",
+        value.escape_debug()
+    )]
+    InvalidRecordNote { value: String },
+    /// A task note with an empty `created-at`.
+    #[error("workspace task note creation time cannot be empty")]
+    EmptyRecordNoteCreatedAt,
+    /// A task note whose `created-at` is not an RFC 3339 timestamp.
+    #[error(
+        "workspace task note creation time `{}` must be an RFC 3339 timestamp, such as `2026-10-27T10:00:00.000Z`",
+        value.escape_debug()
+    )]
+    InvalidRecordNoteCreatedAt { value: String },
     #[error("workspace capture creation time cannot be empty")]
     EmptyRecordCreatedAt,
     #[error("workspace record relationship is invalid: {0}")]

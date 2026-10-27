@@ -3,8 +3,9 @@
 //! Every successful tool returns the CLI's JSON envelope as structured
 //! content: `{"format_version", "data", "warnings"?}`. `data` has the shape
 //! the matching `arcl --json` command writes, and `format_version` is the
-//! version that command reports. A change to a tool's input or output shape
-//! comes with a new version, as for the CLI.
+//! version that command reports. Renaming, removing or retyping a field in a
+//! tool's input or output comes with a new version, as for the CLI; a new
+//! field does not.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -355,6 +356,18 @@ pub struct TaskHandoffInput {
     pub note: String,
 }
 
+/// A note to append to a task.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TaskNoteInput {
+    /// The task ID, `arcl-t-…`, or a short ID such as `535B`.
+    pub task_id: String,
+    /// What the note records. Leave it out for a note with no kind.
+    pub kind: Option<TaskNoteKind>,
+    /// Plain text, at most 2000 characters. It may span lines.
+    pub text: String,
+}
+
 /// A task to complete.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -443,6 +456,15 @@ pub struct TaskData {
     pub action: String,
     /// The task after the change.
     pub task: PlanningTask,
+}
+
+/// A note added to a task, as `arcl task note` returns it.
+#[derive(Debug, JsonSchema, Serialize)]
+pub struct TaskNoteData {
+    /// `noted`.
+    pub action: String,
+    /// The note as stored, with its timestamp.
+    pub note: TaskNote,
 }
 
 /// A completed task, as `arcl task complete` returns it.

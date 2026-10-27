@@ -151,6 +151,7 @@ Tasks retain:
 - Markdown completion evidence
 - an optional assignee, set by a claim when the task starts and cleared when
   it is parked, handed off, completed, or cancelled
+- timestamped notes, each with an optional kind
 
 Readiness is calculated for actionable leaf tasks. A task is ready when it is
 pending, its applicable ancestors and containers permit work, and every blocker
@@ -177,6 +178,20 @@ cancelled blocker does not complete the relationship; readiness reports it as
 a decision to remove or replace the dependency. Every readiness reason has a
 stable kind and record IDs in machine output, and completing a task reports
 the tasks it made ready.
+
+`arcl task note <id> [--kind <kind>] <text>` appends a note to a task so what
+an agent tried and decided survives context compaction. The kind is
+`decision`, `observation`, `blocker` or `result`, and a note without one has
+no kind. The note's time is the database's UTC time to the millisecond. The
+text is plain text, trimmed, of at most 2000 characters. It may span lines.
+It may hold no control character other than newline and tab, no format
+character such as a zero-width space, and no line that is exactly `+++`, the
+record delimiter. arcl commands only append notes. Editing or deleting a
+`[[notes]]` entry in the task file and running `arcl workspace sync` changes or
+removes the note, as with any workspace edit. A task in any status, completed
+included, keeps its notes and takes new ones.
+`show` and the Task view list every note, newest first. Notes are separate
+from handoff and evidence, and never affect readiness.
 
 ### Note
 
@@ -246,7 +261,9 @@ text.
 
 `arcl context` is the focused task handoff for command-line agents. It
 includes the task, relevant ancestors, spec and plan context, direct blockers,
-latest handoff, and relevant evidence without returning the whole project.
+latest handoff, and relevant evidence without returning the whole project. It
+includes the 10 most recent notes, newest first, and the count of older notes
+it leaves out.
 
 `arcl prime` is the session primer for hooks. It prints the skill's working
 loop, open work with handoffs, and the first ready tasks, within 40 lines and
@@ -273,12 +290,15 @@ file under a configurable workspace directory. The target layout is:
 ```
 
 `manifest.toml` holds `format-version`. Version 2 adds the task `assignee`
-field. arcl reads versions 1 and 2. It writes version 2 when a task file
+field, and version 3 the task `notes` array of tables, oldest first, each
+with `created-at`, an optional `kind`, and `text`. arcl reads versions 1 to 3.
+It writes version 3 when a task file carries a note, version 2 when one
 carries an `assignee`, and otherwise keeps the version the workspace already
-has, so a workspace without claims stays at version 1. A workspace never moves
-back from version 2 on its own. An arcl that only reads version 1 checks the
-manifest before any record and refuses a version 2 workspace with an
-unsupported format version error.
+has. A new workspace starts at version 1, so a workspace without claims or
+notes stays there. A workspace never moves back to an older version on its
+own. An arcl that reads only older versions checks the manifest before any
+record and refuses a newer workspace with an unsupported format version
+error.
 
 Synchronization uses a three-state comparison: compare
 the last common files, current database projection, and current workspace. Arc

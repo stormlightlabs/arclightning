@@ -13,10 +13,10 @@ pub use storage::*;
 /// items come from `arcl_core::prelude`.
 pub mod prelude {
     pub use crate::{
-        CURRENT_VERSION, CapturePromotionInput, CapturePromotionRecord, CapturePromotionResult, CaptureTaskPromotion,
-        CaptureUpdate, CheckReport, ConnectedGraph, DEFAULT_PROJECT_ID, DataVersion, Database, NoteUpdate,
-        OpenSubtasks, PhaseUpdate, PlanApplyResult, PlanChange, PlanDependencyDiff, PlanDiff, PlanDiffItem, PlanUpdate,
-        PlanningBlockerView, PlanningCompletion, PlanningContext, PlanningReadiness, PlanningReadyFilter,
+        CONTEXT_NOTE_LIMIT, CURRENT_VERSION, CapturePromotionInput, CapturePromotionRecord, CapturePromotionResult,
+        CaptureTaskPromotion, CaptureUpdate, CheckReport, ConnectedGraph, DEFAULT_PROJECT_ID, DataVersion, Database,
+        NoteUpdate, OpenSubtasks, PhaseUpdate, PlanApplyResult, PlanChange, PlanDependencyDiff, PlanDiff, PlanDiffItem,
+        PlanUpdate, PlanningBlockerView, PlanningCompletion, PlanningContext, PlanningReadiness, PlanningReadyFilter,
         PlanningTaskCreate, PlanningTaskUpdate, PlanningTaskView, ReadinessReason, ReadinessReasonKind, SpecUpdate,
         StorageError, WorkspaceBaseFile,
     };

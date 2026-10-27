@@ -179,12 +179,27 @@ The workspace contains `manifest.toml` and one Markdown file per record:
 - `notes/<note-id>.md`
 - `releases/<release-id>.md`
 
-The manifest contains `format-version`, 1 or 2. Version 2 adds the task
-`assignee` field. A sync writes version 2 once a task file carries an
-`assignee`, and otherwise keeps the version the manifest has, so a workspace
-without claims stays at version 1. Releasing every claim leaves it at 2. An
-arcl older than version 2 support refuses a version 2 workspace with an
-unsupported format version error. Front matter stores record metadata
+The manifest contains `format-version`, 1, 2 or 3. Version 2 adds the task
+`assignee` field, and version 3 the task `notes`. A sync writes version 3 once
+a task file carries a note, version 2 once one carries an `assignee`, and
+otherwise keeps the version the manifest has. A new workspace starts at
+version 1, so a workspace without claims or notes stays there. Releasing every
+claim leaves it at 2. An arcl that reads only older versions refuses a newer
+workspace with an unsupported format version error.
+
+A task file lists its notes oldest first, as an array of tables after the
+other fields:
+
+```toml
+[[notes]]
+created-at = "2026-10-27T10:00:00.000Z"
+kind = "decision"
+text = "Store notes in their own table"
+```
+
+`kind` is optional. Import validates each note's text as `arcl task note`
+does. `created-at` must be an RFC 3339 timestamp; import stores it in UTC to
+the millisecond, the form `arcl task note` writes. Front matter stores record metadata
 and explicit relationships. Descendants are not added to releases or links
 implicitly.
 

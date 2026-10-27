@@ -6388,3 +6388,324 @@ fn prime_shows_the_database_unsynced_when_the_sync_lock_stays_held() {
         "{stderr}"
     );
 }
+
+/// Run `task note` with `args` after the task ID and return the output.
+fn note_output(directory: &Path, task: &str, args: &[&str]) -> std::process::Output {
+    arcl_in(directory)
+        .args(["--json", "task", "note", task])
+        .args(args)
+        .output()
+        .expect("note runs")
+}
+
+/// The `text` of each note in a JSON `notes` array, in order.
+fn note_texts(notes: &Value) -> Vec<String> {
+    notes
+        .as_array()
+        .expect("notes")
+        .iter()
+        .map(|note| note["text"].as_str().expect("note text").to_owned())
+        .collect()
+}
+
+#[test]
+fn task_note_records_each_kind_or_none_and_show_lists_them_newest_first() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let task = create_task(dir, "Noted", None);
+
+    for kind in ["decision", "observation", "blocker", "result"] {
+        let added = note_output(dir, &task, &["--kind", kind, &format!("A {kind}")]);
+        assert_success(&added);
+        let added = json(&added.stdout);
+        assert_eq!(added["data"]["action"], "noted");
+        assert_eq!(added["data"]["note"]["task_id"], task.as_str());
+        assert_eq!(added["data"]["note"]["kind"], kind);
+        assert_eq!(added["data"]["note"]["text"], format!("A {kind}"));
+        assert!(
+            added["data"]["note"]["created_at"]
+                .as_str()
+                .expect("timestamp")
+                .ends_with('Z')
+        );
+    }
+    run_json(dir, ["--json", "task", "complete", &task].as_ref());
+    let plain = note_output(dir, &task, &["  line one\nline two  "]);
+    assert_success(&plain);
+    let plain = json(&plain.stdout);
+    assert!(plain["data"]["note"].get("kind").is_none());
+    assert_eq!(plain["data"]["note"]["text"], "line one\nline two");
+
+    let shown = run_json(dir, ["--json", "show", &task].as_ref());
+    assert_eq!(shown["data"]["task"]["status"], "completed");
+    assert_eq!(
+        note_texts(&shown["data"]["notes"]),
+        [
+            "line one\nline two",
+            "A result",
+            "A blocker",
+            "A observation",
+            "A decision"
+        ]
+    );
+
+    let created_at = plain["data"]["note"]["created_at"].as_str().expect("timestamp");
+    let human = arcl_in(dir)
+        .args(["--color", "never", "show", &task])
+        .output()
+        .expect("show runs");
+    assert_success(&human);
+    let human = String::from_utf8_lossy(&human.stdout);
+    let newest = human
+        .find(&format!("Note: {created_at} line one\n  line two"))
+        .expect("newest note");
+    let oldest = human.find("[decision] A decision").expect("oldest note");
+    assert!(newest < oldest, "{human}");
+
+    let plain_show = arcl_in(dir)
+        .args(["--plain", "task", "show", &task])
+        .output()
+        .expect("show runs");
+    assert_success(&plain_show);
+    let plain_show = String::from_utf8_lossy(&plain_show.stdout);
+    assert!(
+        plain_show.contains(&format!("note\t{created_at}\t\tline one\\nline two\n")),
+        "{plain_show}"
+    );
+
+    let human_note = arcl_in(dir)
+        .args(["--color", "never", "task", "note", &task, "--kind", "result", "Shipped"])
+        .output()
+        .expect("note runs");
+    assert_success(&human_note);
+    let short = run_json(dir, ["--json", "show", &task].as_ref());
+    assert_eq!(short["data"]["notes"][0]["text"], "Shipped");
+    assert!(
+        String::from_utf8_lossy(&human_note.stdout).starts_with("Added result note to task `"),
+        "{}",
+        String::from_utf8_lossy(&human_note.stdout)
+    );
+}
+
+#[test]
+fn task_note_refuses_invalid_text_and_kinds() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let task = create_task(dir, "Noted", None);
+    let long = "x".repeat(2001);
+    for args in [
+        vec!["   "],
+        vec![long.as_str()],
+        vec!["bell\u{7}"],
+        vec!["zero\u{200B}width"],
+        vec!["before\n+++\nafter"],
+        vec!["--kind", "idea", "Text"],
+    ] {
+        let refused = note_output(dir, &task, &args);
+        assert_eq!(refused.status.code(), Some(3), "{args:?}");
+        assert!(refused.stdout.is_empty(), "{args:?}");
+        let error = json(&refused.stderr)["error"].clone();
+        assert_eq!(error["code"], "invalid_request", "{args:?}");
+        let message = error["message"].as_str().expect("message");
+        assert!(!message.contains("stored planning task"), "{args:?}: {message}");
+        let expected = if args[0] == "--kind" { "task note kind" } else { "task note text is invalid" };
+        assert!(message.contains(expected), "{args:?}: {message}");
+    }
+    assert_success(&note_output(dir, &task, &["x".repeat(2000).as_str()]));
+    let shown = run_json(dir, ["--json", "show", &task].as_ref());
+    assert_eq!(shown["data"]["notes"].as_array().expect("notes").len(), 1);
+}
+
+#[test]
+fn human_show_and_context_indent_later_lines_of_free_text() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let task = create_task(dir, "Noted", None);
+    run_json(
+        dir,
+        ["--json", "task", "update", &task, "--body", "Body\nReady: true"].as_ref(),
+    );
+    assert_success(&note_output(dir, &task, &["Note\nReadiness: ready"]));
+    run_json(dir, ["--json", "task", "start", &task].as_ref());
+    run_json(
+        dir,
+        ["--json", "task", "handoff", &task, "--note", "Handoff\nBlocker: none"].as_ref(),
+    );
+    for command in ["context", "show"] {
+        let output = arcl_in(dir)
+            .args(["--color", "never", command, &task])
+            .output()
+            .expect("command runs");
+        assert_success(&output);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for (first, later) in [
+            ("Body: Body", "Ready: true"),
+            ("Note\n", "Readiness: ready"),
+            ("Handoff: Handoff", "Blocker: none"),
+        ] {
+            let first = first.trim_end();
+            assert!(stdout.contains(&format!("{first}\n  {later}\n")), "{command}: {stdout}");
+            assert!(
+                !stdout.lines().any(|line| line == later),
+                "{command} printed `{later}` as a line of its own: {stdout}"
+            );
+        }
+    }
+}
+
+#[test]
+fn context_includes_only_the_ten_most_recent_notes() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let task = create_task(dir, "Noted", None);
+    let none = run_json(dir, ["--json", "context", &task].as_ref());
+    assert_eq!(none["data"]["notes"], serde_json::json!([]));
+    assert_eq!(none["data"]["omitted_notes"], 0);
+
+    for index in 0..12 {
+        assert_success(&note_output(dir, &task, &[&format!("note {index}")]));
+    }
+    let context = run_json(dir, ["--json", "context", &task].as_ref());
+    let expected: Vec<String> = (2..12).rev().map(|index| format!("note {index}")).collect();
+    assert_eq!(note_texts(&context["data"]["notes"]), expected);
+    assert_eq!(context["data"]["omitted_notes"], 2);
+
+    let human = arcl_in(dir)
+        .args(["--color", "never", "context", &task])
+        .output()
+        .expect("context runs");
+    assert_success(&human);
+    let human = String::from_utf8_lossy(&human.stdout);
+    assert_eq!(human.matches("Note: ").count(), 10, "{human}");
+    assert!(human.contains(" note 11\n"), "{human}");
+    assert!(!human.contains(" note 1\n"), "{human}");
+    assert!(
+        human.contains(&format!(
+            "Older notes: 2 not shown; `arcl show {task}` lists every note"
+        )),
+        "{human}"
+    );
+
+    let plain = arcl_in(dir)
+        .args(["--plain", "context", &task])
+        .output()
+        .expect("context runs");
+    assert_success(&plain);
+    assert!(String::from_utf8_lossy(&plain.stdout).contains("omitted_notes\t2"));
+}
+
+#[test]
+fn task_notes_round_trip_through_the_workspace_at_format_version_three() {
+    let source = tempdir().expect("temporary directory can be created");
+    run_json(source.path(), ["--json", "init", "--workspace"].as_ref());
+    let task = create_task(source.path(), "Noted", None);
+    let manifest = ".arcl/workspace/manifest.toml";
+    assert_eq!(
+        fs::read_to_string(source.path().join(manifest)).expect("manifest reads"),
+        "format-version = 1\n",
+        "a workspace without notes"
+    );
+    assert_success(&note_output(
+        source.path(),
+        &task,
+        &["--kind", "decision", "Use SQLite"],
+    ));
+    assert_success(&note_output(source.path(), &task, &["Second"]));
+    assert_eq!(
+        fs::read_to_string(source.path().join(manifest)).expect("manifest reads"),
+        "format-version = 3\n",
+        "a workspace with a note"
+    );
+    let record_path = format!(".arcl/workspace/tasks/{task}.md");
+    let record = fs::read_to_string(source.path().join(&record_path)).expect("task record is exported");
+    assert!(record.contains("[[notes]]\ncreated-at = "), "record: {record}");
+    assert!(
+        record.contains("kind = \"decision\"\ntext = \"Use SQLite\""),
+        "record: {record}"
+    );
+
+    let target = tempdir().expect("temporary directory can be created");
+    run_json(target.path(), ["--json", "init", "--workspace"].as_ref());
+    for file in [manifest, record_path.as_str()] {
+        fs::copy(source.path().join(file), target.path().join(file)).expect("workspace file copies");
+    }
+    assert_success(
+        &arcl_in(target.path())
+            .args(["workspace", "import"])
+            .output()
+            .expect("import runs"),
+    );
+    let source_notes = run_json(source.path(), ["--json", "show", &task].as_ref())["data"]["notes"].clone();
+    let target_notes = run_json(target.path(), ["--json", "show", &task].as_ref())["data"]["notes"].clone();
+    assert_eq!(note_texts(&target_notes), ["Second", "Use SQLite"]);
+    assert_eq!(target_notes, source_notes);
+    assert_eq!(
+        fs::read_to_string(target.path().join(manifest)).expect("manifest reads"),
+        "format-version = 3\n"
+    );
+    assert_success(
+        &arcl_in(target.path())
+            .args(["workspace", "export"])
+            .output()
+            .expect("export runs"),
+    );
+    assert_eq!(
+        fs::read(target.path().join(&record_path)).expect("task record reads"),
+        record.as_bytes(),
+        "export after import rewrites the record byte for byte"
+    );
+}
+
+#[test]
+fn workspace_import_normalizes_note_times_to_utc_and_refuses_others() {
+    let directory = tempdir().expect("temporary directory can be created");
+    let dir = directory.path();
+    run_json(dir, ["--json", "init", "--workspace"].as_ref());
+    let task = create_task(dir, "Noted", None);
+    assert_success(&note_output(dir, &task, &["Timed"]));
+    let record_path = dir.join(format!(".arcl/workspace/tasks/{task}.md"));
+    let record = fs::read_to_string(&record_path).expect("task record reads");
+    let stored = run_json(dir, ["--json", "show", &task].as_ref())["data"]["notes"][0]["created_at"]
+        .as_str()
+        .expect("timestamp")
+        .to_owned();
+    let import = || {
+        arcl_in(dir)
+            .args(["--json", "workspace", "import"])
+            .output()
+            .expect("import runs")
+    };
+
+    let offset = record.replace(&stored, "2026-10-27T15:30:00.25+05:30");
+    fs::write(&record_path, &offset).expect("record writes");
+    assert_success(&import());
+    let shown = run_json(dir, ["--json", "show", &task].as_ref());
+    assert_eq!(shown["data"]["notes"][0]["created_at"], "2026-10-27T10:00:00.250Z");
+
+    for value in ["yesterday", "+05:00"] {
+        fs::write(&record_path, record.replace(&stored, value)).expect("record writes");
+        let refused = import();
+        assert_eq!(refused.status.code(), Some(3), "{value}");
+        let message = json(&refused.stderr)["error"]["message"]
+            .as_str()
+            .expect("message")
+            .to_owned();
+        assert!(
+            message.contains(&format!("tasks/{task}.md")) && message.contains("RFC 3339"),
+            "{message}"
+        );
+    }
+    let shown = arcl_in(dir)
+        .args(["--json", "show", &task])
+        .output()
+        .expect("show runs");
+    assert_eq!(
+        json(&shown.stderr)["warnings"][0]["code"],
+        "workspace_sync",
+        "the refused file leaves the database as it was"
+    );
+    assert_eq!(
+        json(&shown.stdout)["data"]["notes"][0]["created_at"],
+        "2026-10-27T10:00:00.250Z"
+    );
+}

@@ -3,8 +3,8 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use arcl_core::domain::{
-    CaptureId, CaptureStatus, ContainerStatus, NoteId, PhaseId, PlanId, ReleaseId, SpecId, TaskId, TaskPriority,
-    TaskStatus,
+    CaptureId, CaptureStatus, ContainerStatus, NoteId, PhaseId, PlanId, ReleaseId, SpecId, TaskId, TaskNoteKind,
+    TaskPriority, TaskStatus,
 };
 
 use super::{OLDEST_WORKSPACE_FORMAT_VERSION, Result, WORKSPACE_FORMAT_VERSION, WorkspaceError};
@@ -86,6 +86,19 @@ impl WorkspaceReference {
     pub fn new(kind: impl Into<String>, id: impl Into<String>) -> Self {
         Self { kind: kind.into(), id: id.into() }
     }
+}
+
+/// One note in a task file's `notes` array, which keeps notes oldest first.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct TaskNoteRecord {
+    /// When the note was added, as an RFC 3339 UTC timestamp.
+    pub created_at: String,
+    /// What the note records, when given.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<TaskNoteKind>,
+    /// The plain-text note, which may span lines.
+    pub text: String,
 }
 
 /// The workspace manifest's stable format metadata.
@@ -215,6 +228,8 @@ pub struct TaskRecord {
     /// Who claimed the task when starting it.
     pub assignee: Option<String>,
     pub links: Vec<WorkspaceReference>,
+    /// Notes on the task, oldest first.
+    pub notes: Vec<TaskNoteRecord>,
     pub body: String,
 }
 
@@ -228,6 +243,9 @@ pub struct NoteRecord {
 }
 
 /// A typed record in the versioned workspace projection.
+// A task is the largest record. Records are read one per file and kept in
+// maps, so boxing it would save little memory and change every match.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WorkspaceRecord {
     /// An inbox capture.
@@ -422,6 +440,8 @@ struct TaskFrontMatter {
     assignee: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     links: Vec<WorkspaceReference>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    notes: Vec<TaskNoteRecord>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -598,6 +618,7 @@ impl TaskRecord {
             evidence: normalize_optional_markdown(front_matter.evidence),
             assignee: normalize_assignee(front_matter.assignee, front_matter.status)?,
             links: normalize_references(front_matter.links),
+            notes: normalize_task_notes(front_matter.notes)?,
             body,
         })
     }
@@ -625,6 +646,7 @@ impl TaskRecord {
             evidence: normalize_optional_markdown(self.evidence.clone()),
             assignee: normalize_assignee(self.assignee.clone(), self.status)?,
             links,
+            notes: normalize_task_notes(self.notes.clone())?,
         })
     }
 }
@@ -775,6 +797,144 @@ fn normalize_assignee(value: Option<String>, status: TaskStatus) -> Result<Optio
         .map_err(|_| WorkspaceError::InvalidRecordAssignee { value })
 }
 
+/// Validate each task note's text as [`validate_task_note_text`] does,
+/// keeping the normalized text, and normalize `created-at` as
+/// [`normalize_note_created_at`] does. The order is kept: it is the order the
+/// notes were added.
+///
+/// [`validate_task_note_text`]: arcl_core::domain::validate_task_note_text
+fn normalize_task_notes(notes: Vec<TaskNoteRecord>) -> Result<Vec<TaskNoteRecord>> {
+    notes
+        .into_iter()
+        .map(|note| {
+            let created_at = normalize_note_created_at(&note.created_at)?;
+            let text = arcl_core::domain::validate_task_note_text(&note.text)
+                .map_err(|_| WorkspaceError::InvalidRecordNote { value: note.text.clone() })?;
+            Ok(TaskNoteRecord { created_at, kind: note.kind, text })
+        })
+        .collect()
+}
+
+/// Parse an RFC 3339 timestamp and write it in UTC with millisecond
+/// precision and a `Z` suffix, the form `task note` stores
+/// (`2026-10-27T10:00:00.000Z`). Digits past the millisecond are dropped, as
+/// SQLite's `%f` does. Leap seconds and years outside 0000 to 9999 after the
+/// shift to UTC are refused.
+fn normalize_note_created_at(value: &str) -> Result<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(WorkspaceError::EmptyRecordNoteCreatedAt);
+    }
+    parse_rfc3339_millis(trimmed)
+        .and_then(format_utc_millis)
+        .ok_or_else(|| WorkspaceError::InvalidRecordNoteCreatedAt { value: value.to_owned() })
+}
+
+/// Milliseconds since the Unix epoch for an RFC 3339
+/// `date-time`, or `None` when `value` is not one.
+fn parse_rfc3339_millis(value: &str) -> Option<i64> {
+    let bytes = value.as_bytes();
+    let digits = |range: std::ops::Range<usize>| -> Option<i64> {
+        let part = bytes.get(range)?;
+        if part.is_empty() || !part.iter().all(u8::is_ascii_digit) {
+            return None;
+        }
+        Some(part.iter().fold(0, |sum, digit| sum * 10 + i64::from(digit - b'0')))
+    };
+    let at = |index: usize, expected: &[u8]| bytes.get(index).is_some_and(|byte| expected.contains(byte));
+    if !(at(4, b"-") && at(7, b"-") && at(10, b"Tt") && at(13, b":") && at(16, b":")) {
+        return None;
+    }
+    let (year, month, day) = (digits(0..4)?, digits(5..7)?, digits(8..10)?);
+    let (hour, minute, second) = (digits(11..13)?, digits(14..16)?, digits(17..19)?);
+    if !(1..=12).contains(&month) || day < 1 || day > days_in_month(year, month) {
+        return None;
+    }
+    if hour > 23 || minute > 59 || second > 59 {
+        return None;
+    }
+    let mut index = 19;
+    let mut millis = 0;
+    if at(index, b".") {
+        let start = index + 1;
+        let end = start + bytes[start..].iter().take_while(|byte| byte.is_ascii_digit()).count();
+        if end == start {
+            return None;
+        }
+        let kept = &value[start..end.min(start + 3)];
+        millis = format!("{kept:0<3}").parse::<i64>().ok()?;
+        index = end;
+    }
+    let offset_minutes = match bytes.get(index)? {
+        b'Z' | b'z' if index + 1 == bytes.len() => 0,
+        sign @ (b'+' | b'-') if index + 6 == bytes.len() && at(index + 3, b":") => {
+            let (hours, minutes) = (digits(index + 1..index + 3)?, digits(index + 4..index + 6)?);
+            if hours > 23 || minutes > 59 {
+                return None;
+            }
+            let total = hours * 60 + minutes;
+            if *sign == b'-' { -total } else { total }
+        }
+        _ => return None,
+    };
+    let days = days_from_civil(year, month, day);
+    let seconds = days * 86_400 + hour * 3_600 + minute * 60 + second - offset_minutes * 60;
+    Some(seconds * 1_000 + millis)
+}
+
+/// Write milliseconds since the Unix epoch as `YYYY-MM-DDTHH:MM:SS.mmmZ`, or
+/// `None` when the year falls outside 0000 to 9999.
+fn format_utc_millis(millis: i64) -> Option<String> {
+    let seconds = millis.div_euclid(1_000);
+    let (days, second_of_day) = (seconds.div_euclid(86_400), seconds.rem_euclid(86_400));
+    let (year, month, day) = civil_from_days(days);
+    if !(0..=9999).contains(&year) {
+        return None;
+    }
+    Some(format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
+        second_of_day / 3_600,
+        second_of_day % 3_600 / 60,
+        second_of_day % 60,
+        millis.rem_euclid(1_000)
+    ))
+}
+
+fn days_in_month(year: i64, month: i64) -> i64 {
+    match month {
+        2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
+/// Days from 1970-01-01 to a proleptic Gregorian date (Howard Hinnant's
+/// `days_from_civil`).
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
+/// The proleptic Gregorian date `days` after 1970-01-01, the inverse of
+/// [`days_from_civil`].
+fn civil_from_days(days: i64) -> (i64, i64, i64) {
+    let days = days + 719_468;
+    let era = days.div_euclid(146_097);
+    let day_of_era = days - era * 146_097;
+    let year_of_era = (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_index = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+    let month = if month_index < 10 { month_index + 3 } else { month_index - 9 };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    (year, month, day)
+}
+
 fn normalize_line_endings(value: &str) -> String {
     value.replace("\r\n", "\n").replace('\r', "\n")
 }
@@ -819,17 +979,26 @@ mod tests {
     const NOTE_ID: &str = "arcl-n-01K0B2ZWTX7JX9PH7W5G1S6A9Q";
 
     #[test]
-    fn manifest_reads_and_renders_versions_one_and_two() {
-        let manifest = WorkspaceManifest::parse("format-version = 1").expect("manifest");
-        assert_eq!(manifest, WorkspaceManifest::default());
-        assert_eq!(manifest.render().expect("render"), "format-version = 1\n");
-        let manifest = WorkspaceManifest::parse("format-version = 2").expect("manifest");
-        assert_eq!(manifest.format_version, WORKSPACE_FORMAT_VERSION);
-        assert_eq!(manifest.render().expect("render"), "format-version = 2\n");
-        for version in [0, 3] {
+    fn manifest_reads_and_renders_versions_one_to_three() {
+        assert_eq!(
+            WorkspaceManifest::default().format_version,
+            OLDEST_WORKSPACE_FORMAT_VERSION
+        );
+        for version in 1..=3 {
+            let manifest = WorkspaceManifest::parse(&format!("format-version = {version}")).expect("manifest");
+            assert_eq!(
+                manifest.render().expect("render"),
+                format!(
+                    "format-version = {version}
+"
+                )
+            );
+        }
+        assert_eq!(WORKSPACE_FORMAT_VERSION, 3);
+        for version in [0, 4] {
             assert!(matches!(
                 WorkspaceManifest::parse(&format!("format-version = {version}")),
-                Err(WorkspaceError::UnsupportedVersion { found, expected: 2 }) if found == version
+                Err(WorkspaceError::UnsupportedVersion { found, expected: 3 }) if found == version
             ));
         }
     }
@@ -889,6 +1058,18 @@ mod tests {
                 evidence: Some("Evidence".to_owned()),
                 assignee: Some("codex".to_owned()),
                 links: vec![WorkspaceReference::new("spec", SPEC_ID)],
+                notes: vec![
+                    TaskNoteRecord {
+                        created_at: "2026-10-27T10:00:00.000Z".to_owned(),
+                        kind: Some(TaskNoteKind::Decision),
+                        text: "Use SQLite".to_owned(),
+                    },
+                    TaskNoteRecord {
+                        created_at: "2026-10-27T10:05:00.000Z".to_owned(),
+                        kind: None,
+                        text: "line one\n+++ two\nline \"three\"".to_owned(),
+                    },
+                ],
                 body: "Task body".to_owned(),
             }),
             WorkspaceRecord::Note(NoteRecord {
@@ -926,6 +1107,7 @@ mod tests {
             evidence: None,
             assignee: None,
             links: vec![],
+            notes: vec![],
             body: String::new(),
         });
         let rendered = record.render().expect("render");
@@ -952,6 +1134,7 @@ mod tests {
             evidence: None,
             assignee: Some("codex".to_owned()),
             links: vec![],
+            notes: vec![],
             body: String::new(),
         };
         let path = WorkspaceRecord::Task(task.clone()).path();
@@ -977,5 +1160,120 @@ mod tests {
                 Err(WorkspaceError::AssigneeNotInProgress { .. })
             ));
         }
+    }
+
+    #[test]
+    fn task_notes_render_as_an_array_of_tables_and_refuse_invalid_text() {
+        let record = WorkspaceRecord::Task(TaskRecord {
+            id: TaskId::parse(TASK_ID).unwrap(),
+            spec_id: None,
+            plan_id: None,
+            phase_id: None,
+            parent_id: None,
+            plan_key: None,
+            title: "Task".to_owned(),
+            status: TaskStatus::Completed,
+            priority: TaskPriority::Normal,
+            position: 0,
+            blocked_by: vec![],
+            handoff: None,
+            evidence: None,
+            assignee: None,
+            links: vec![],
+            notes: vec![TaskNoteRecord {
+                created_at: "2026-10-27T10:00:00.000Z".to_owned(),
+                kind: Some(TaskNoteKind::Result),
+                text: "Done".to_owned(),
+            }],
+            body: String::new(),
+        });
+        let path = record.path();
+        let rendered = record.render().expect("render");
+        assert!(
+            rendered
+                .contains("[[notes]]\ncreated-at = \"2026-10-27T10:00:00.000Z\"\nkind = \"result\"\ntext = \"Done\"\n"),
+            "{rendered}"
+        );
+
+        let padded = rendered.replace("text = \"Done\"", "text = \"  Done  \"");
+        assert_eq!(decode_record(&path, &padded).expect("decode"), record);
+        for (from, to) in [
+            ("text = \"Done\"", "text = \"  \""),
+            ("text = \"Done\"", "text = \"bell\\u0007\""),
+        ] {
+            assert!(matches!(
+                decode_record(&path, &rendered.replace(from, to)),
+                Err(WorkspaceError::InvalidRecordNote { .. })
+            ));
+        }
+        assert!(matches!(
+            decode_record(&path, &rendered.replace("2026-10-27T10:00:00.000Z", " ")),
+            Err(WorkspaceError::EmptyRecordNoteCreatedAt)
+        ));
+        assert!(matches!(
+            decode_record(&path, &rendered.replace("\"result\"", "\"idea\"")),
+            Err(WorkspaceError::FrontMatterParse(_))
+        ));
+    }
+
+    #[test]
+    fn task_note_creation_times_normalize_to_utc_milliseconds() {
+        for (input, stored) in [
+            ("2026-10-27T10:00:00.000Z", "2026-10-27T10:00:00.000Z"),
+            ("2026-10-27T15:30:00+05:30", "2026-10-27T10:00:00.000Z"),
+            ("2026-10-27t02:00:00.5-08:00", "2026-10-27T10:00:00.500Z"),
+            ("2026-10-27T10:00:00.123456789z", "2026-10-27T10:00:00.123Z"),
+            ("2024-03-01T00:30:00+01:00", "2024-02-29T23:30:00.000Z"),
+            ("1999-12-31T23:00:00-01:00", "2000-01-01T00:00:00.000Z"),
+        ] {
+            assert_eq!(normalize_note_created_at(input).expect(input), stored, "{input}");
+        }
+        for input in [
+            "yesterday",
+            "+05:00",
+            "2026-10-27",
+            "2026-10-27T10:00:00",
+            "2026-10-27 10:00:00Z",
+            "2026-13-01T00:00:00Z",
+            "2026-02-29T00:00:00Z",
+            "2026-10-27T24:00:00Z",
+            "2026-10-27T23:59:60Z",
+            "2026-10-27T10:00:00.Z",
+            "2026-10-27T10:00:00+0500",
+            "2026-10-27T10:00:00+24:00",
+            "2026-10-27T10:00:00Zjunk",
+            "0000-01-01T00:00:00+01:00",
+        ] {
+            assert!(
+                matches!(
+                    normalize_note_created_at(input),
+                    Err(WorkspaceError::InvalidRecordNoteCreatedAt { .. })
+                ),
+                "{input}"
+            );
+        }
+    }
+
+    #[test]
+    fn task_note_with_an_offset_decodes_to_utc_and_renders_stably() {
+        let input = format!(
+            "+++\nid = \"{TASK_ID}\"\ntitle = \"Task\"\nstatus = \"completed\"\npriority = \"normal\"\nposition = 0\n\n\
+             [[notes]]\ncreated-at = \"2026-10-27T15:30:00.25+05:30\"\ntext = \"Done\"\n+++\n"
+        );
+        let path = PathBuf::from(format!("tasks/{TASK_ID}.md"));
+        let WorkspaceRecord::Task(task) = decode_record(&path, &input).expect("decode") else {
+            panic!("a task record");
+        };
+        assert_eq!(task.notes[0].created_at, "2026-10-27T10:00:00.250Z");
+        let rendered = WorkspaceRecord::Task(task).render().expect("render");
+        let again = decode_record(&path, &rendered)
+            .expect("decode rendered")
+            .render()
+            .expect("render again");
+        assert_eq!(again, rendered);
+        assert!(matches!(
+            decode_record(&path, &input.replace("2026-10-27T15:30:00.25+05:30", "yesterday")),
+            Err(WorkspaceError::InvalidRecordNoteCreatedAt { .. })
+        ));
     }
 }

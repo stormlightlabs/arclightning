@@ -618,6 +618,18 @@ pub enum TaskCommand {
         #[arg(long, value_name = "PATH|-", conflicts_with = "note")]
         note_file: Option<PathBuf>,
     },
+    /// Append a timestamped note to a task, whatever its status.
+    Note {
+        /// The task ID to note.
+        id: String,
+        /// What the note records: decision, observation, blocker or result.
+        /// Without it the note has no kind.
+        #[arg(long, value_name = "KIND")]
+        kind: Option<String>,
+        /// The plain-text note, at most 2000 characters. It may span lines.
+        #[arg(allow_hyphen_values = true)]
+        text: String,
+    },
     /// Mark work completed.
     Complete {
         /// The task ID to complete.

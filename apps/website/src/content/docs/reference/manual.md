@@ -178,6 +178,7 @@ is `0`; negative positions are invalid. Terminal commands accept
 | `arcl task park <id>`                       | Move pending or in-progress work to `parked`.           |
 | `arcl task unpark <id>`                     | Return parked work to `pending`.                        |
 | `arcl task handoff <id>`                    | Store a resume note and park in-progress work.          |
+| `arcl task note <id> <text>`                | Append a timestamped note, with an optional `--kind`.   |
 | `arcl task complete <id>`                   | Mark pending or in-progress work completed.             |
 | `arcl task cancel <id>`                     | Cancel non-terminal work.                               |
 
@@ -206,6 +207,20 @@ checkout through Git and a sync.
 `arcl list --assignee <NAME>` lists the tasks one assignee holds.
 
 `handoff` requires either `--note <MARKDOWN>` or `--note-file <PATH|->`.
+
+`note` appends a note to a task in any status, completed included.
+`--kind` takes `decision`, `observation`, `blocker`, or `result`; without it the
+note has no kind. The text is trimmed, at most 2000 characters, and may span
+lines. It is refused with exit code `3` when it is empty or holds a control
+character other than newline and tab, a format character, or a line that is
+exactly `+++`. arcl commands only append notes; editing or deleting a note in
+the task file and running `workspace sync` changes or removes it. `show` lists every note,
+newest first, and `context` lists the 10 most recent and reports how many it
+left out: `omitted_notes` in JSON and plain output, an `Older notes` line in
+human output. In JSON a note has `task_id`, `created_at`, `kind` when set, and
+`text`; `task note --json` returns `{action: "noted", note}`. Plain output
+prints `note<TAB><created-at><TAB><kind><TAB><text>`, with an empty kind field
+when the note has none.
 
 Completion accepts either `--evidence <MARKDOWN>` or `--evidence-file <PATH|->`.
 Each pair is mutually exclusive, and `-` reads UTF-8 Markdown from standard input.
@@ -444,7 +459,7 @@ record's other fields stay editable.
 
 | Kind    | Fields only a command changes           | Commands                                                 |
 | ------- | --------------------------------------- | -------------------------------------------------------- |
-| task    | `status`, `handoff`, `evidence`, `assignee` | `arcl task start`, `park`, `unpark`, `handoff`, `complete`, `cancel` |
+| task    | `status`, `handoff`, `evidence`, `assignee`, `notes` | `arcl task start`, `park`, `unpark`, `handoff`, `complete`, `cancel`, `note` |
 | capture | `status`, `promoted-to`                 | `arcl capture promote`, `discard`                        |
 | spec    | `status`, `source-capture`              | `arcl spec complete`, `cancel`; `arcl capture promote`   |
 | plan    | `status`                                | `arcl plan complete`, `cancel`                           |

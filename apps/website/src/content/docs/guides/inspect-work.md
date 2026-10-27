@@ -114,7 +114,9 @@ arcl context arcl-t-01J... --json
 
 The output will contain the task, ancestor chain, milestone, epic, optional
 release, linked spec path, direct blockers and dependents, readiness reasons,
-current handoff, task evidence, and evidence from completed blockers.
+current handoff, task evidence, and evidence from completed blockers. It also
+lists the task's 10 most recent notes, newest first, and how many older notes
+it left out; `show` lists them all.
 
 Blockers held by an ancestor task block every task under it. `explain` and
 `context` list them apart from direct blockers, nearest ancestor first, each

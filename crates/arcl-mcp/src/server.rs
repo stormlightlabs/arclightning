@@ -45,8 +45,8 @@ macro_rules! read_description {
 }
 
 const INSTRUCTIONS: &str = "Arc Lightning tracks this project's tasks. Find work with `ready`, \
-claim it with `task_start`, read `context`, then finish with `task_complete` or park it with \
-`task_handoff`. `explain` says why a task is not ready. Record work outside the task with \
+claim it with `task_start`, read `context`, leave notes on decisions and findings with \
+`task_note`, then finish with `task_complete` or park it with `task_handoff`. `explain` says why a task is not ready. Record work outside the task with \
 `capture_create`. Every result is `{format_version, data}`; check the version before reading data.";
 
 /// The Arc Lightning MCP server for the project that holds its directory.
@@ -185,7 +185,8 @@ impl ArclServer {
     /// Return a task's context packet, like `arcl context`.
     #[tool(
         description = read_description!("Return a task with its ancestors, spec, plan, phase, blockers, dependents, \
-        readiness and earlier evidence, like `arcl context`. `data.task.handoff` holds the last resume note."),
+        readiness, earlier evidence and the most recent notes, like `arcl context`. `data.task.handoff` holds the \
+        last resume note; `data.omitted_notes` counts older notes, which `show` lists."),
         annotations(read_only_hint = true, open_world_hint = false),
         meta = version_meta(READINESS_FORMAT_VERSION)
     )]
@@ -409,6 +410,28 @@ impl ArclServer {
         self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
             let task = database.handoff_planning_task(record_id::<TaskId>(database, &input.task_id)?, input.note)?;
             Ok(TaskData { action: "handed_off".to_owned(), task })
+        })
+        .await
+    }
+
+    /// Append a timestamped note to a task, like `arcl task note`.
+    #[tool(
+        description = "Append a timestamped note to a task, like `arcl task note`, to record a decision, \
+        observation, blocker or result while working. Notes are kept in order, and arcl only appends \
+        them; editing or deleting one in the task file and syncing changes or removes it. A task in any \
+        status takes them. Empty text, text over 2000 characters, text with control or format characters \
+        other than newline and tab, or a line that is exactly `+++` fails with `invalid_request`.",
+        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false),
+        meta = version_meta(FORMAT_VERSION)
+    )]
+    pub async fn task_note(
+        &self, Parameters(input): Parameters<TaskNoteInput>, cancelled: CancellationToken,
+    ) -> Result<Json<Envelope<TaskNoteData>>, ToolError> {
+        let input = input?;
+        self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
+            let id = record_id::<TaskId>(database, &input.task_id)?;
+            let note = database.add_task_note(id, input.kind, &input.text)?;
+            Ok(TaskNoteData { action: "noted".to_owned(), note })
         })
         .await
     }

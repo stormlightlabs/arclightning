@@ -67,6 +67,26 @@ export function copyLabel(task: { id: string; title: string }, where: string): s
   return `Copy the ID of ${task.title} (${task.id}), ${where}`;
 }
 
+/**
+ * A note's timestamp as `YYYY-MM-DD HH:MM UTC`, the form the Task view shows.
+ * An RFC 3339 timestamp with any offset is shifted to UTC; a timestamp in
+ * another form is shown as it is.
+ */
+export function noteTime(createdAt: string): string {
+  const match = /^(\d{4}-\d{2}-\d{2})[Tt](\d{2}:\d{2}:\d{2})(?:\.(\d+))?([Zz]|[+-]\d{2}:\d{2})$/.exec(createdAt);
+  if (match === null) {
+    return createdAt;
+  }
+  const [, date, time, fraction = "", offset] = match;
+  const millis = fraction.slice(0, 3).padEnd(3, "0");
+  const parsed = new Date(`${date}T${time}.${millis}${offset.toUpperCase()}`);
+  const iso = Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString();
+  if (!/^\d{4}-/.test(iso)) {
+    return createdAt;
+  }
+  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+}
+
 /** The title of every record `detail` names, by ID. */
 export function titlesOf(detail: TaskDetail): Map<string, string> {
   const tasks: Task[] = [

@@ -3,11 +3,17 @@ use std::collections::{HashMap, HashSet};
 use rusqlite::{Connection, TransactionBehavior, params};
 use serde::Serialize;
 
-use super::{Result, StorageError, phases, planning_dependencies, planning_task, planning_tasks, specs};
+use super::{
+    Result, StorageError, notes_for_task, phases, planning_dependencies, planning_task, planning_tasks, specs,
+};
 use arcl_core::domain::{
     ContainerStatus, DomainError, EdgeViolation, Phase, PhaseId, Plan, PlanId, PlanningTask, ProjectId, Spec, SpecId,
-    TaskAction, TaskDependency, TaskId, TaskPriority, TaskStatus, validate_assignee, validate_blocker_edges,
+    TaskAction, TaskDependency, TaskId, TaskNote, TaskPriority, TaskStatus, validate_assignee, validate_blocker_edges,
 };
+
+/// The most task notes [`context`] includes, newest first. The packet counts
+/// the rest in `omitted_notes`.
+pub const CONTEXT_NOTE_LIMIT: usize = 10;
 
 /// What completing or cancelling a task does with its open descendants.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -174,6 +180,8 @@ pub struct PlanningTaskView {
     pub plan: Option<Plan>,
     /// The effective phase, if this task is under one.
     pub phase: Option<Phase>,
+    /// Every note on the task, newest first.
+    pub notes: Vec<TaskNote>,
 }
 
 /// The focused context packet for a connected-model task.
@@ -202,6 +210,10 @@ pub struct PlanningContext {
     /// Completed direct and inherited blockers that supplied evidence, one
     /// entry per blocker task. A direct entry wins over an inherited one.
     pub completion_evidence: Vec<PlanningBlockerView>,
+    /// The task's [`CONTEXT_NOTE_LIMIT`] most recent notes, newest first.
+    pub notes: Vec<TaskNote>,
+    /// How many older notes the packet leaves out; `arcl show` lists them.
+    pub omitted_notes: usize,
 }
 
 /// One task in the work list: the task, its readiness and its effective
@@ -321,6 +333,8 @@ pub fn planning_task_view(connection: &Connection, id: TaskId) -> Result<Plannin
     let dependents = dependent_tasks(&data, id);
     let children = child_tasks(&data, id);
     let readiness = readiness(&data, &task, &ancestry_ids)?;
+    let mut notes = notes_for_task(connection, id)?;
+    notes.reverse();
 
     Ok(PlanningTaskView {
         task,
@@ -333,6 +347,7 @@ pub fn planning_task_view(connection: &Connection, id: TaskId) -> Result<Plannin
         spec: ancestry_ids.spec_id.and_then(|value| data.specs.get(&value).cloned()),
         plan: ancestry_ids.plan_id.and_then(|value| data.plans.get(&value).cloned()),
         phase: ancestry_ids.phase_id.and_then(|value| data.phases.get(&value).cloned()),
+        notes,
     })
 }
 
@@ -367,6 +382,9 @@ pub fn context(connection: &Connection, id: TaskId) -> Result<PlanningContext> {
         .filter(|blocker| seen.insert(blocker.task.id))
         .cloned()
         .collect();
+    let mut notes = view.notes;
+    let omitted_notes = notes.len().saturating_sub(CONTEXT_NOTE_LIMIT);
+    notes.truncate(CONTEXT_NOTE_LIMIT);
     Ok(PlanningContext {
         task: view.task,
         ancestors: view.ancestors,
@@ -378,6 +396,8 @@ pub fn context(connection: &Connection, id: TaskId) -> Result<PlanningContext> {
         dependents: view.dependents,
         readiness: view.readiness,
         completion_evidence,
+        notes,
+        omitted_notes,
     })
 }
 
@@ -2788,5 +2808,68 @@ mod tests {
                 "round {round}: {loser:?}"
             );
         }
+    }
+
+    #[test]
+    fn notes_append_in_order_and_read_newest_first() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let work = task(&mut database, project.id, "Work");
+
+        let first = database
+            .add_task_note(
+                work.id,
+                Some(arcl_core::domain::TaskNoteKind::Decision),
+                "  Use SQLite  ",
+            )
+            .expect("note adds");
+        assert_eq!(first.text, "Use SQLite");
+        assert!(first.created_at.ends_with('Z'));
+        database
+            .add_task_note(work.id, None, "line one\nline two")
+            .expect("note adds");
+        database
+            .complete_planning_task(work.id, OpenSubtasks::Refuse, None)
+            .expect("task completes");
+        database
+            .add_task_note(work.id, Some(arcl_core::domain::TaskNoteKind::Result), "Shipped")
+            .expect("a completed task takes notes");
+
+        let stored = database.task_notes(work.id).expect("notes read");
+        assert_eq!(
+            stored.iter().map(|note| note.text.as_str()).collect::<Vec<_>>(),
+            ["Use SQLite", "line one\nline two", "Shipped"]
+        );
+        let view = database.planning_task_view(work.id).expect("view reads");
+        assert_eq!(
+            view.notes.iter().map(|note| note.text.as_str()).collect::<Vec<_>>(),
+            ["Shipped", "line one\nline two", "Use SQLite"]
+        );
+
+        for text in ["   ", "bell\u{7}"] {
+            assert!(matches!(
+                database.add_task_note(work.id, None, text),
+                Err(StorageError::InvalidTaskNoteText(DomainError::InvalidTaskNote))
+            ));
+        }
+        assert_eq!(database.task_notes(work.id).expect("notes read").len(), 3);
+    }
+
+    #[test]
+    fn context_keeps_the_most_recent_notes_and_counts_the_rest() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let work = task(&mut database, project.id, "Work");
+        for index in 0..CONTEXT_NOTE_LIMIT + 2 {
+            database
+                .add_task_note(work.id, None, &format!("note {index}"))
+                .expect("note adds");
+        }
+
+        let context = database.planning_context(work.id).expect("context reads");
+        assert_eq!(context.notes.len(), CONTEXT_NOTE_LIMIT);
+        assert_eq!(context.omitted_notes, 2);
+        assert_eq!(context.notes[0].text, format!("note {}", CONTEXT_NOTE_LIMIT + 1));
+        assert_eq!(context.notes[CONTEXT_NOTE_LIMIT - 1].text, "note 2");
     }
 }

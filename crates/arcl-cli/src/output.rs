@@ -9,7 +9,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::cli::{ColorChoice, TreeStyle};
 use arcl_core::domain::{
     Capture, CaptureStatus, ContainerStatus, Note, Phase, Plan, PlanningTask, Release, ShortIds, Spec, TaskDependency,
-    TaskPriority, TaskStatus,
+    TaskNote, TaskPriority, TaskStatus,
 };
 use arcl_repo::{
     vcs::{HeadState, PathState},
@@ -399,6 +399,26 @@ impl Renderer {
     /// Render one connected planning task mutation.
     pub fn render_planning_task(&self, action: &str, task: &PlanningTask) -> Result<Option<String>, OutputError> {
         self.render_named_mutation(action, "task", &task.id.to_string(), &task.title, task)
+    }
+
+    /// Render a note added to a task. Human output names the task as `ids`
+    /// shortens it, plain output prints the task ID and the note's timestamp,
+    /// and JSON returns `{action: "noted", note}`.
+    pub fn render_task_note(&self, note: &TaskNote, ids: &ShortIds) -> Result<Option<String>, OutputError> {
+        let task = note.task_id.to_string();
+        let message = match self.mode {
+            OutputMode::Human => match note.kind {
+                Some(kind) => format!("Added {} note to task `{}`", kind.as_str(), ids.short(&task)),
+                None => format!("Added note to task `{}`", ids.short(&task)),
+            },
+            OutputMode::Plain => format!("{task}\t{}", note.created_at),
+            OutputMode::Json => serde_json::to_string(&Envelope {
+                format_version: FORMAT_VERSION,
+                data: serde_json::json!({ "action": "noted", "note": note }),
+            })?,
+            OutputMode::Quiet => return Ok(None),
+        };
+        Ok(Some(self.style(message)))
     }
 
     /// Render a task completion with the subtasks it completed, in tree order,
@@ -1949,14 +1969,15 @@ impl PlanningTaskViewOutput for PlanningTaskView {
                 .map(|reason| format!("Reason: {}", ids.shorten_text(&reason.message))),
         );
         if !self.task.body.is_empty() {
-            lines.push(format!("Body: {}", self.task.body));
+            lines.push(format!("Body: {}", indent_continuation(&self.task.body)));
         }
         if !self.task.handoff.is_empty() {
-            lines.push(format!("Handoff: {}", self.task.handoff));
+            lines.push(format!("Handoff: {}", indent_continuation(&self.task.handoff)));
         }
         if !self.task.evidence.is_empty() {
-            lines.push(format!("Evidence: {}", self.task.evidence));
+            lines.push(format!("Evidence: {}", indent_continuation(&self.task.evidence)));
         }
+        lines.extend(self.notes.iter().map(human_task_note));
         lines.join("\n")
     }
 
@@ -1999,6 +2020,7 @@ impl PlanningTaskViewOutput for PlanningTaskView {
                 .ancestor
                 .map(|ancestor| format!("inherited\t{}\t{ancestor}", blocker.task.id))
         }));
+        lines.extend(self.notes.iter().map(plain_task_note));
         lines.extend(
             self.readiness
                 .reasons
@@ -2048,15 +2070,15 @@ impl PlanningContextOutput for PlanningContext {
         lines.extend(self.readiness.reasons.iter().map(|reason| format!("Reason: {reason}")));
         lines.push(format!(
             "Body: {}",
-            if self.task.body.is_empty() { "none" } else { &self.task.body }
+            if self.task.body.is_empty() { "none".into() } else { indent_continuation(&self.task.body) }
         ));
         lines.push(format!(
             "Handoff: {}",
-            if self.task.handoff.is_empty() { "none" } else { &self.task.handoff }
+            if self.task.handoff.is_empty() { "none".into() } else { indent_continuation(&self.task.handoff) }
         ));
         lines.push(format!(
             "Evidence: {}",
-            if self.task.evidence.is_empty() { "none" } else { &self.task.evidence }
+            if self.task.evidence.is_empty() { "none".into() } else { indent_continuation(&self.task.evidence) }
         ));
         lines.extend(self.blockers.iter().chain(&self.inherited_blockers).map(|blocker| {
             let via = blocker
@@ -2065,6 +2087,13 @@ impl PlanningContextOutput for PlanningContext {
                 .unwrap_or_default();
             format!("Blocker: {} [{}]{via}", blocker.task.id, blocker.task.status.as_str())
         }));
+        lines.extend(self.notes.iter().map(human_task_note));
+        if self.omitted_notes > 0 {
+            lines.push(format!(
+                "Older notes: {} not shown; `arcl show {}` lists every note",
+                self.omitted_notes, self.task.id
+            ));
+        }
         lines.join("\n")
     }
 
@@ -2107,6 +2136,10 @@ impl PlanningContextOutput for PlanningContext {
                 )
             })
         }));
+        lines.extend(self.notes.iter().map(plain_task_note));
+        if self.omitted_notes > 0 {
+            lines.push(format!("omitted_notes\t{}", self.omitted_notes));
+        }
         lines.extend(
             self.readiness
                 .reasons
@@ -2189,6 +2222,35 @@ fn human_escape(value: &str) -> Cow<'_, str> {
         push_human_escaped(&mut escaped, character);
     }
     Cow::Owned(escaped)
+}
+
+/// A task note as a human line, `Note: <created-at> [<kind>] <text>`, with
+/// the kind left out when the note has none. Later lines of the text are
+/// indented as [`indent_continuation`] does.
+fn human_task_note(note: &TaskNote) -> String {
+    let text = indent_continuation(&note.text);
+    match note.kind {
+        Some(kind) => format!("Note: {} [{}] {text}", note.created_at, kind.as_str()),
+        None => format!("Note: {} {text}", note.created_at),
+    }
+}
+
+/// Indent every line of `text` after the first by two spaces, so a
+/// multi-line field in human output cannot start a line that reads as a
+/// field of its own, such as `Ready: true`.
+fn indent_continuation(text: &str) -> Cow<'_, str> {
+    if text.contains('\n') { Cow::Owned(text.replace('\n', "\n  ")) } else { Cow::Borrowed(text) }
+}
+
+/// A task note as a plain line, `note\t<created-at>\t<kind>\t<text>`, with an
+/// empty kind field when the note has none.
+fn plain_task_note(note: &TaskNote) -> String {
+    format!(
+        "note\t{}\t{}\t{}",
+        note.created_at,
+        note.kind.map(|kind| kind.as_str()).unwrap_or_default(),
+        plain_escape(&note.text)
+    )
 }
 
 /// Push `character` to `out` as [`human_escape`] writes it.

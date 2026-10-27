@@ -555,6 +555,20 @@ pub(super) fn run_task(command: TaskCommand, renderer: &Renderer) -> Result<Opti
                 ),
             )
         }
+        TaskCommand::Note { id, kind, text } => {
+            let kind = kind
+                .as_deref()
+                .map(TaskNoteKind::parse)
+                .transpose()
+                .map_err(|error| ApplicationError::from_command(CommandError::Domain(error)))?;
+            let id = parse_task_id(&id).map_err(ApplicationError::from_command)?;
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            let note = database
+                .add_task_note(id, kind, &text)
+                .map_err(ApplicationError::from_command)?;
+            let ids = display_ids(&database, renderer).map_err(ApplicationError::from_command)?;
+            render_output(renderer.render_task_note(&note, &ids))
+        }
         TaskCommand::Complete { id, allow_open_children, with_subtasks, evidence, evidence_file } => {
             let evidence = resolve_optional_value(evidence, evidence_file).map_err(ApplicationError::from_command)?;
             let id = parse_task_id(&id).map_err(ApplicationError::from_command)?;

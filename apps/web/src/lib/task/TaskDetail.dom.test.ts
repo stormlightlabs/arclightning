@@ -284,6 +284,34 @@ describe("TaskDetail assignee", () => {
   });
 });
 
+describe("TaskDetail notes", () => {
+  it("lists notes newest first with their kind and time", () => {
+    const detail = blockedDetail();
+    detail.notes = [
+      { task_id: detail.task.id, created_at: "2026-10-27T10:05:00.000Z", text: "line one\nline two" },
+      { task_id: detail.task.id, created_at: "2026-10-27T10:00:00.000Z", kind: "decision", text: "Use SQLite" },
+    ];
+    stubSource(detail);
+    const root = view(detail);
+    const items = [...root.querySelectorAll<HTMLElement>("[aria-labelledby='task-notes'] li")];
+    expect(items.map((item) => item.querySelector(".note-text")?.textContent)).toEqual([
+      "line one\nline two",
+      "Use SQLite",
+    ]);
+    expect(items[0].querySelector(".note-kind")).toBeNull();
+    expect(items[1].querySelector(".note-kind")?.textContent).toBe("decision");
+    const time = items[1].querySelector("time");
+    expect(time?.getAttribute("datetime")).toBe("2026-10-27T10:00:00.000Z");
+    expect(time?.textContent).toBe("2026-10-27 10:00 UTC");
+  });
+
+  it("says so when a task has no notes", () => {
+    stubSource(blockedDetail());
+    const root = view(blockedDetail());
+    expect(root.querySelector("[aria-labelledby='task-notes']")?.textContent).toContain("No notes recorded.");
+  });
+});
+
 describe("TaskDetail IDs", () => {
   afterEach(() => {
     delete (navigator as { clipboard?: unknown }).clipboard;

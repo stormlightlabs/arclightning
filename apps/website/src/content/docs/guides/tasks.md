@@ -90,6 +90,23 @@ accepts pending or in-progress work. `unpark` always returns parked work to
 `pending`. `complete` accepts pending or in-progress work, and `cancel` accepts
 any non-terminal task.
 
+## Leave notes
+
+Notes record what you tried and decided while working, so the next session
+reads it from `show` or `context` instead of guessing:
+
+```sh
+arcl task note arcl-t-01J... --kind decision "Store notes in their own table"
+arcl task note arcl-t-01J... "The importer reads files in path order"
+```
+
+`--kind` is `decision`, `observation`, `blocker`, or `result`, and is optional.
+A note is plain text of at most 2000 characters and may span lines. Notes are
+kept in the order they were added, stay on the task when it is parked or
+completed. arcl commands only append notes; to change or remove one, edit the
+task file and run `arcl workspace sync`. `show` and the Task view list them newest
+first; `context` lists the 10 most recent.
+
 ## Close parent tasks
 
 By default, a task cannot become terminal while a descendant is still open.

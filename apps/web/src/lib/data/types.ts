@@ -30,6 +30,20 @@ export type Task = {
   assignee?: string;
 };
 
+/** What a task note records. */
+export type TaskNoteKind = "decision" | "observation" | "blocker" | "result";
+
+/** A timestamped note on a task, as `arcl task note --json` returns it. */
+export type TaskNote = {
+  task_id: string;
+  /** When the note was added, as an RFC 3339 UTC timestamp. */
+  created_at: string;
+  /** Absent when the note has no kind. */
+  kind?: TaskNoteKind;
+  /** Plain text, which may span lines. */
+  text: string;
+};
+
 /** A milestone: a phase of a plan. */
 export type Milestone = {
   id: string;
@@ -115,6 +129,8 @@ export type TaskDetail = {
   spec: Container | null;
   plan: Container | null;
   phase: Milestone | null;
+  /** The task's notes, newest first. Absent from data an arcl without notes wrote. */
+  notes?: TaskNote[];
 };
 
 /** The options of `arcl task create`. `priority` defaults to `normal`. */
