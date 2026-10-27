@@ -10,7 +10,7 @@
   export interface ButtonProps extends Omit<HTMLButtonAttributes, "children"> {
     busy?: boolean;
     children?: Snippet;
-    /** Icon drawn before the label and hidden from assistive tech. The spinner replaces it while busy. */
+    /** Icon drawn before the label and hidden from assistive tech. The spinner replaces it while busy. An icon-only button needs `aria-label`. */
     icon?: IconName;
     label?: string;
     variant?: ButtonVariant;
@@ -44,9 +44,9 @@
       name={icon}
       size="1rem"
     />{/if}
-  <span
-    >{#if children}{@render children()}{:else}{label}{/if}</span
-  >
+  {#if children || label}<span
+      >{#if children}{@render children()}{:else}{label}{/if}</span
+    >{/if}
 </button>
 
 <style>
