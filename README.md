@@ -15,6 +15,30 @@ Git worktree for repository-native project files.
 
 ## Quick start
 
+Install `arcl` on macOS or Linux:
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/stormlightlabs/arclightning/releases/latest/download/arcl-cli-installer.sh | sh
+```
+
+On Windows, in PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/stormlightlabs/arclightning/releases/latest/download/arcl-cli-installer.ps1 | iex"
+```
+
+Or with Homebrew or `cargo binstall`:
+
+```sh
+brew install stormlightlabs/tap/arcl
+cargo binstall --git https://github.com/stormlightlabs/arclightning arcl-cli
+```
+
+These install a prebuilt binary that includes the web app `arcl serve` opens.
+To compile it instead, run
+`cargo install --git https://github.com/stormlightlabs/arclightning arcl-cli`.
+That build leaves out the web app.
+
 Arc Lightning initializes ordinary directories directly and discovers the nearest
 project when commands run from any descendant directory. Inside a non-bare Git
 worktree, initialization uses the worktree root.

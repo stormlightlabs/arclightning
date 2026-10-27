@@ -2,6 +2,9 @@
 name = "arcl-mcp"
 version.workspace = true
 edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "MCP server for Arc Lightning projects"
 
 [[bin]]
 name = "arcl-mcp"
@@ -24,3 +27,7 @@ arcl-cli = { path = "../arcl-cli" }
 jsonschema = { version = "0.60", default-features = false }
 tempfile = "3.23"
 tokio = { workspace = true, features = ["time"] }
+
+# The Homebrew tap carries only the arcl formula.
+[package.metadata.dist]
+installers = ["shell", "powershell"]

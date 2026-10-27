@@ -109,9 +109,14 @@ and output, with no CLI text to parse. Install it, then have the MCP client
 start it in the project directory. For Claude Code:
 
 ```sh
-cargo install --git https://github.com/stormlightlabs/arclightning arcl-mcp
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/stormlightlabs/arclightning/releases/latest/download/arcl-mcp-installer.sh | sh
 claude mcp add arcl -- arcl-mcp
 ```
+
+On Windows, install it with `arcl-mcp-installer.ps1` from the same release, as
+the [Quick Start](/quick-start/) shows for `arcl`.
+`cargo install --git https://github.com/stormlightlabs/arclightning arcl-mcp`
+compiles it instead.
 
 Each tool calls the application operations directly and syncs the workspace
 around the call, as a command does. The read tools carry `readOnlyHint`

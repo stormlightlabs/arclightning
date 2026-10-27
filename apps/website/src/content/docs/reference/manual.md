@@ -570,11 +570,12 @@ transitions stop when the system asks for reduced motion. In a window narrower
 than 48rem the sidebar becomes a bar at the top, and **Menu** shows Search,
 Capture and the views; choosing a view closes it.
 
-`arcl` embeds the web app from `apps/web/build` when it compiles. That build is
-not committed, so `cargo install --git` produces an `arcl` whose `serve` shows
-a page saying the web app was not built. To get the web app, run
-`pnpm install` and `pnpm --filter @arclightning/web build` in a checkout, then
-`cargo install --path .`.
+`arcl` embeds the web app from `apps/web/build` when it compiles. Release
+binaries include it. That build is not committed, so `cargo install --git`
+produces an `arcl` whose `serve` shows a page saying the web app was not
+built. To compile one with the web app, run `pnpm install` and
+`pnpm --filter @arclightning/web build` in a checkout, then
+`cargo install --path crates/arcl-cli`.
 
 ## Publishing and syncing the artifact
 

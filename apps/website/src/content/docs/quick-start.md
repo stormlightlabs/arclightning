@@ -3,55 +3,74 @@ title: Quick Start
 description: Install Arc Lightning and create your first tracked work.
 ---
 
-## Requirements
+## Install
 
-You need:
+Install the `arcl` binary on macOS or Linux:
 
-- A Rust toolchain
-- Git
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/stormlightlabs/arclightning/releases/latest/download/arcl-cli-installer.sh | sh
+```
 
-Arc Lightning uses the enclosing worktree root as its boundary.
+On Windows, in PowerShell:
 
-You can run it from the root or from a nested directory.
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/stormlightlabs/arclightning/releases/latest/download/arcl-cli-installer.ps1 | iex"
+```
+
+With Homebrew:
+
+```sh
+brew install stormlightlabs/tap/arcl
+```
+
+With [cargo-binstall](https://github.com/cargo-bins/cargo-binstall), which
+downloads the release binary instead of compiling it:
+
+```sh
+cargo binstall --git https://github.com/stormlightlabs/arclightning arcl-cli
+```
+
+Release binaries cover Linux (x86_64 and arm64, static), macOS (arm64 and
+x86_64) and Windows (x86_64), and include the web app that `arcl serve` opens.
+The `latest` links skip pre-releases. To pin a version, as a cloud session or
+CI job would, replace `latest/download` with `download/<tag>`, such as
+`download/v0.3.0`.
+
+Releases before 1.0 can change JSON shapes, and each envelope's
+`format_version` names the shape it carries.
+
+Arc Lightning uses the enclosing Git worktree root as its boundary. You can run
+it from the root or from a nested directory.
 
 ## Build from Source
 
-Clone the repository and install the `arcl` binary into Cargo's local bin
-directory:
+Building needs a Rust toolchain, plus Node and pnpm for the web app. Clone the
+repository and install the `arcl` binary into Cargo's local bin directory:
 
 ```sh
 git clone https://github.com/stormlightlabs/arclightning.git
 cd arclightning
 pnpm install
 pnpm --filter @arclightning/web build
-cargo install --path .
+cargo install --path crates/arcl-cli
 ```
 
 The `pnpm` steps build the web app that `arcl serve` embeds. Without them,
 `arcl` still installs, and `arcl serve` serves a page that says the web app was
 not built.
 
-For development, keep the checkout and run the CLI with Cargo instead:
-
-```sh
-cargo run -- --help
-```
-
-## Install a tagged release
-
-To pin a known build without a checkout, as a cloud session or CI job would,
-install a tag from Git:
+`cargo install --git` compiles a tag or branch without a checkout, and leaves
+out the web app for the same reason:
 
 ```sh
 cargo install --git https://github.com/stormlightlabs/arclightning --tag v0.2.0 arcl-cli
 ```
 
-This installs the `arcl` binary. Releases before 1.0 can change JSON shapes,
-and each envelope's `format_version` names the shape it carries.
+For development, keep the checkout and run the CLI with Cargo instead:
 
-A Git install does not include the web app, since its build is not committed,
-so `arcl serve` serves a page that says the web app was not built. To get the
-web app, build from a checkout as above.
+```sh
+cargo run -- --help
+```
 
 ## Initialize a project
 
