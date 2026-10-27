@@ -5,7 +5,7 @@ title = "Make Edit and Edit file distinguishable"
 status = "completed"
 priority = "normal"
 position = 11
-evidence = "Delivered by #PR: `edit` (i-ri-pencil-line) and `editFile` (i-ri-file-edit-line) join `ICONS`. The Task view's Edit and Edit file buttons show them, aria-hidden, before their labels, and `task:edit` and `task:edit-file` use the same icons in the command menu. A DOM test in TaskDetail.dom.test.ts checks each button's icon, its unchanged name and its command's icon. The visual baselines are gitignored, so the Task view was checked by eye in a Playwright screenshot instead."
+evidence = "Delivered by #69: `edit` (i-ri-pencil-line) and `editFile` (i-ri-file-edit-line) join `ICONS`. The Task view's Edit and Edit file buttons show them, aria-hidden, before their labels, and `task:edit` and `task:edit-file` use the same icons in the command menu. A DOM test in TaskDetail.dom.test.ts checks each button's icon, its unchanged name and its command's icon. The visual baselines are gitignored, so the Task view was checked by eye in a Playwright screenshot instead."
 +++
 
 Tell Edit and Edit file apart in the Task view. The action row reads
