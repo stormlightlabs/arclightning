@@ -6,7 +6,7 @@ status = "completed"
 priority = "normal"
 position = 4
 blocked-by = ["arcl-t-01M5VDDD42HZQ1FEN49X80GBA5", "arcl-t-01M5VDDD61CZH33T5S34E02BKM", "arcl-t-01M5VDDD8HBGD5CTHESBV2SSQH", "arcl-t-01M5VDDDAS9P34RVKCAGHXRSFH"]
-evidence = "Delivered by #PR: arcl tree draws a box-drawing tree that folds finished phases, ends with an Inbox/Notes/Releases footer, and takes --ascii and --depth; --all unfolds it. --plain and --json are byte-identical to main on this repository."
+evidence = "Delivered by #61: arcl tree draws a box-drawing tree that folds finished phases, ends with an Inbox/Notes/Releases footer, and takes --ascii and --depth; --all unfolds it. --plain and --json are byte-identical to main on this repository."
 +++
 
 Make `arcl tree`'s default human output a box-drawing tree that folds

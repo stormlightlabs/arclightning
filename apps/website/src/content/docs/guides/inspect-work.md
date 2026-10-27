@@ -75,7 +75,7 @@ A task with subtasks is never ready itself; its subtasks are. `--ascii` draws
 the tree and the marks with ASCII characters, which avoids misalignment in
 terminals that draw the marks double-width.
 
-![arcl tree with a status mark on each line](/images/arcl-tree-status.png)
+![arcl tree folding finished milestones, with a status mark on each line](/images/arcl-tree-status.png)
 
 `--plain` and `--json` give the stored status instead.
 
