@@ -164,10 +164,15 @@ readiness and `arcl check`, and by import with the path that forms them.
 Moving a pending task to in progress requires it to be ready unless the caller
 passes `--force`. Starting a task that is already in progress stays a no-op.
 The MCP start tool does not expose force; an agent asks a person instead. A
-start can claim the task for an assignee in the same write, and is refused
-while another assignee holds it. `arcl next --start` selects the first ready
-task and starts it in one write transaction, so two concurrent calls never
-start the same task. A
+start can claim the task for an assignee in the same write. While a task has
+an assignee, a start is refused unless it claims the task for that assignee;
+`--force` does not override this. Parking, handing off, completing and
+cancelling release the claim, whoever runs them. A claim holds within one
+database, so separate Git worktrees, which each have their own database, can
+claim the same task; each sees the other's claim only after the workspace
+change reaches it through Git and a sync. `arcl next --start` selects the
+first ready task and starts it in one write transaction, so two concurrent
+calls on one database never start the same task. A
 cancelled blocker does not complete the relationship; readiness reports it as
 a decision to remove or replace the dependency. Every readiness reason has a
 stable kind and record IDs in machine output, and completing a task reports
@@ -264,10 +269,12 @@ file under a configurable workspace directory. The target layout is:
 ```
 
 `manifest.toml` holds `format-version`. Version 2 adds the task `assignee`
-field. arcl writes version 2 and reads versions 1 and 2, so a sync rewrites a
-version 1 manifest. An arcl that only reads version 1 checks the manifest
-before any record and refuses a version 2 workspace with an unsupported
-format version error.
+field. arcl reads versions 1 and 2. It writes version 2 when a task file
+carries an `assignee`, and otherwise keeps the version the workspace already
+has, so a workspace without claims stays at version 1. A workspace never moves
+back from version 2 on its own. An arcl that only reads version 1 checks the
+manifest before any record and refuses a version 2 workspace with an
+unsupported format version error.
 
 Synchronization uses a three-state comparison: compare
 the last common files, current database projection, and current workspace. Arc

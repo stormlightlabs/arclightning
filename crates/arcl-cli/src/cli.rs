@@ -585,7 +585,8 @@ pub enum TaskCommand {
     Start {
         /// The task ID to start.
         id: String,
-        /// Start the task even when it is not ready.
+        /// Start the task even when it is not ready. A claimed task still
+        /// needs `--claim` with its holder's name.
         #[arg(long)]
         force: bool,
         /// Claim the task for NAME, refusing a task someone else holds.

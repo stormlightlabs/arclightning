@@ -375,7 +375,8 @@ impl ArclServer {
     #[tool(
         description = "Move a ready task to in progress, like `arcl task start`. A task that is not \
         ready fails with `invalid_request`; read the reasons with `explain`. There is no force option. \
-        `claim` sets the task's assignee in the same write; a task another assignee holds fails with `conflict`.",
+        `claim` sets the task's assignee in the same write. A task an assignee holds fails with `conflict` \
+        unless `claim` names that assignee.",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false),
         meta = version_meta(FORMAT_VERSION)
     )]

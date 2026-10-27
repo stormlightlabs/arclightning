@@ -395,7 +395,9 @@ pub fn transition_planning_task(
 /// Start a connected-model task atomically.
 ///
 /// A pending task must be ready, apart from having child tasks, unless `force`
-/// is set. Starting an in-progress task is a no-op either way.
+/// is set. Starting an in-progress task is a no-op either way, except that a
+/// task an assignee holds is refused with [`StorageError::TaskClaimed`]; only
+/// [`claim_planning_task`] with the holder's name starts it again.
 pub fn start_planning_task(
     connection: &mut Connection, project_id: ProjectId, id: TaskId, force: bool,
 ) -> Result<PlanningTask> {
@@ -520,8 +522,9 @@ pub fn handoff_planning_task(
 
 /// Apply `action` to task `id` in one transaction.
 ///
-/// `claim` names the assignee a start sets. Parking, completing and
-/// cancelling clear the assignee. The transaction is immediate, so a
+/// `claim` names the assignee a start sets. A start without the holder's
+/// name is refused while the task has an assignee. Parking, completing and
+/// cancelling clear the assignee, whoever runs them. The transaction is immediate, so a
 /// concurrent writer waits up to the busy timeout rather than failing.
 #[allow(clippy::too_many_arguments)]
 fn transition(
@@ -547,8 +550,13 @@ fn transition_in(
     let current = planning_task(tx, id)?.ok_or_else(|| StorageError::PlanningTaskNotFound { id: id.to_string() })?;
     ensure_project_task(&current, project_id)?;
     validate_task_graph(tx, project_id, &current, false)?;
-    if let Some(claim) = &claim
-        && let Some(holder) = current.assignee.as_ref().filter(|holder| *holder != claim)
+    // A start by anyone but the holder is refused, with or without a claim
+    // and whatever `force` says: `force` overrides readiness, not claims.
+    if matches!(action, TaskAction::Start)
+        && let Some(holder) = current
+            .assignee
+            .as_ref()
+            .filter(|holder| claim.as_ref() != Some(*holder))
     {
         return Err(StorageError::TaskClaimed { id: id.to_string(), assignee: holder.clone() });
     }
@@ -2589,6 +2597,20 @@ mod tests {
             .expect_err("another holder is refused");
         assert!(matches!(error, StorageError::TaskClaimed { ref assignee, .. } if assignee == "codex"));
         assert_eq!(error.exit_code(), 4);
+        assert_eq!(
+            database.planning_task(work.id).expect("task reads"),
+            Some(claimed.clone())
+        );
+
+        for force in [false, true] {
+            let error = database
+                .start_planning_task(work.id, force)
+                .expect_err("an unclaimed start of a held task is refused");
+            assert!(
+                matches!(error, StorageError::TaskClaimed { ref assignee, .. } if assignee == "codex"),
+                "force {force}: {error:?}"
+            );
+        }
         assert_eq!(database.planning_task(work.id).expect("task reads"), Some(claimed));
     }
 

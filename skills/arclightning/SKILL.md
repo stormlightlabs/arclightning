@@ -49,8 +49,11 @@ ID fields.
    `data.task` means nothing can start. If it refuses with
    `invalid_request`, run `arcl --json explain <id>` [`explain`] and read
    `data.readiness.reasons`. A `conflict` means another assignee holds the
-   task; pick other work. Do not pass `--force` unless the person asks. The
-   tool has no force.
+   task; pick other work. Do not pass `--force` unless the person asks; it
+   does not override a claim. The tool has no force. Completing, parking or
+   handing off releases the claim, whoever runs it. A claim holds only within
+   one checkout's database: an agent in another Git worktree does not see it
+   until the change reaches that checkout through Git and a sync.
 3. Read the context. `arcl --json context <id>` [`context`] returns the task
    with its ancestors, spec, plan, phase, blockers, dependents, readiness, and
    earlier evidence. `data.task.handoff` holds the last resume note, and
