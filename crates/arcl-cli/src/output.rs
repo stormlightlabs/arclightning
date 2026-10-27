@@ -1256,7 +1256,8 @@ pub struct ConnectedTreeNode {
     #[serde(skip)]
     pub mark: StatusMark,
     /// The unfinished tasks that block this task directly, which human
-    /// output names at the end of the line.
+    /// output names at the end of the line. The root of `arcl tree <id>`
+    /// also lists those it inherits from its ancestors.
     #[serde(skip)]
     pub blocked_by: Vec<String>,
     /// Child records in the planning hierarchy.
@@ -1393,7 +1394,7 @@ fn human_tree(nodes: &[ConnectedTreeNode], view: TreeView) -> String {
     let mut lines = Vec::new();
     for node in records {
         lines.push(node.human_line(view));
-        push_children(&mut lines, &node.children.iter().collect::<Vec<_>>(), "", 2, view);
+        push_children(&mut lines, &node.children, "", 2, view);
     }
     if view.rooted {
         return lines.join("\n");
@@ -1407,7 +1408,7 @@ fn human_tree(nodes: &[ConnectedTreeNode], view: TreeView) -> String {
                 .collect::<Vec<_>>();
             if !members.is_empty() {
                 lines.push(heading.to_owned());
-                push_children(&mut lines, &members, "", 1, view);
+                push_children(&mut lines, members, "", 1, view);
             }
         }
     } else if let Some(footer) = tree_footer(&sectioned, view) {
@@ -1418,7 +1419,10 @@ fn human_tree(nodes: &[ConnectedTreeNode], view: TreeView) -> String {
 
 /// Appends `children`, at `level`, below a line drawn with `prefix`. Each
 /// run of finished phases folds into one line unless `view.all` is set.
-fn push_children(lines: &mut Vec<String>, children: &[&ConnectedTreeNode], prefix: &str, level: usize, view: TreeView) {
+fn push_children<'a>(
+    lines: &mut Vec<String>, children: impl IntoIterator<Item = &'a ConnectedTreeNode>, prefix: &str, level: usize,
+    view: TreeView,
+) {
     if !view.shows(level) {
         return;
     }
@@ -1432,13 +1436,7 @@ fn push_children(lines: &mut Vec<String>, children: &[&ConnectedTreeNode], prefi
             TreeItem::Record(node) => {
                 lines.push(format!("{prefix}{connector}{}", node.human_line(view)));
                 let below = format!("{prefix}{}", if last { chars.blank } else { chars.pipe });
-                push_children(
-                    lines,
-                    &node.children.iter().collect::<Vec<_>>(),
-                    &below,
-                    level + 1,
-                    view,
-                );
+                push_children(lines, &node.children, &below, level + 1, view);
             }
             TreeItem::Folded(run) => lines.push(format!("{prefix}{connector}{}", folded_line(&run, view))),
         }
@@ -1447,9 +1445,9 @@ fn push_children(lines: &mut Vec<String>, children: &[&ConnectedTreeNode], prefi
 
 /// Groups `nodes` into tree lines, with each run of consecutive completed
 /// phases in one [`TreeItem::Folded`] when `fold` is set.
-fn tree_items<'a>(nodes: &[&'a ConnectedTreeNode], fold: bool) -> Vec<TreeItem<'a>> {
+fn tree_items<'a>(nodes: impl IntoIterator<Item = &'a ConnectedTreeNode>, fold: bool) -> Vec<TreeItem<'a>> {
     let mut items = Vec::new();
-    for &node in nodes {
+    for node in nodes {
         if fold && node.kind == "phase" && node.mark == StatusMark::Done {
             if let Some(TreeItem::Folded(run)) = items.last_mut() {
                 run.push(node);
@@ -1465,20 +1463,14 @@ fn tree_items<'a>(nodes: &[&'a ConnectedTreeNode], fold: bool) -> Vec<TreeItem<'
 
 /// The line for a run of finished phases, such as
 /// `✓ Milestones 1–6  done · 29 tasks`. One phase keeps its title. A longer
-/// run names its range when the first and last titles start with the same
-/// word and a number, such as `Milestone 1:`, and counts phases otherwise.
+/// run names its range when every title is `Milestone` or `Phase` with
+/// consecutive numbers, such as `Milestone 1:`, and counts phases otherwise.
 fn folded_line(run: &[&ConnectedTreeNode], view: TreeView) -> String {
     let chars = view.chars();
     let tasks = run.iter().map(|phase| task_progress(&phase.children).1).sum::<usize>();
     let label = match run {
         [phase] => phase.title.clone(),
-        [first, .., last] => match (numbered_title(&first.title), numbered_title(&last.title)) {
-            (Some((word, from)), Some((last_word, to))) if word == last_word => {
-                format!("{word}s {from}{}{to}", chars.dash)
-            }
-            _ => format!("{} phases", run.len()),
-        },
-        [] => String::new(),
+        _ => folded_range(run, chars.dash).unwrap_or_else(|| format!("{} phases", run.len())),
     };
     let noun = if tasks == 1 { "task" } else { "tasks" };
     format!(
@@ -1488,13 +1480,32 @@ fn folded_line(run: &[&ConnectedTreeNode], view: TreeView) -> String {
     )
 }
 
+/// The range label for a run of phases, such as `Milestones 1–6`, or `None`
+/// unless every title is `Milestone` or `Phase` with the same word and
+/// consecutive numbers.
+fn folded_range(run: &[&ConnectedTreeNode], dash: &str) -> Option<String> {
+    let numbered = run
+        .iter()
+        .map(|phase| numbered_title(&phase.title))
+        .collect::<Option<Vec<_>>>()?;
+    let (word, from) = *numbered.first()?;
+    let (_, to) = *numbered.last()?;
+    let consecutive = numbered
+        .windows(2)
+        .all(|pair| pair[1].0 == word && pair[0].1.checked_add(1) == Some(pair[1].1));
+    (["Milestone", "Phase"].contains(&word) && consecutive).then(|| format!("{word}s {from}{dash}{to}"))
+}
+
 /// Splits a title such as `Milestone 7: Local web app` into its word and
-/// number, `("Milestone", "7")`, or `None` when the part before the first
+/// number, `("Milestone", 7)`, or `None` when the part before the first
 /// colon does not end in a number.
-fn numbered_title(title: &str) -> Option<(&str, &str)> {
+fn numbered_title(title: &str) -> Option<(&str, u64)> {
     let head = title.split(':').next()?.trim();
     let (word, number) = head.rsplit_once(' ')?;
-    (!number.is_empty() && number.chars().all(|character| character.is_ascii_digit())).then_some((word, number))
+    if number.is_empty() || !number.chars().all(|character| character.is_ascii_digit()) {
+        return None;
+    }
+    Some((word, number.parse().ok()?))
 }
 
 /// Counts the completed tasks and all tasks at any depth in `nodes`,
@@ -2357,5 +2368,27 @@ Inbox: 1 open · Notes: 1 · Releases: v0.1.0, v0.2.0"
             human(&nodes[..1], TreeView::default()),
             "◐ Plan\n└── ✓ 2 phases  done · 0 tasks"
         );
+    }
+
+    #[test]
+    fn folded_range_needs_a_known_word_and_consecutive_numbers() {
+        let phases = |titles: &[&str]| -> Vec<ConnectedTreeNode> {
+            titles
+                .iter()
+                .map(|title| node("phase", title, StatusMark::Done, Vec::new()))
+                .collect()
+        };
+        let range = |titles: &[&str]| {
+            let nodes = phases(titles);
+            folded_range(&nodes.iter().collect::<Vec<_>>(), "–")
+        };
+        assert_eq!(
+            range(&["Phase 2: A", "Phase 3: B", "Phase 4: C"]).as_deref(),
+            Some("Phases 2–4")
+        );
+        assert_eq!(range(&["Batch 1", "Batch 2"]), None);
+        assert_eq!(range(&["Milestone 1: A", "Milestone 5: B"]), None);
+        assert_eq!(range(&["Milestone 1: A", "Milestone 3: B", "Milestone 3: C"]), None);
+        assert_eq!(range(&["Milestone 1: A", "Phase 2: B"]), None);
     }
 }

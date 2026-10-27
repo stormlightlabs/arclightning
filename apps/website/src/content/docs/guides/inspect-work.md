@@ -43,17 +43,20 @@ arcl tree --ascii --depth 3
 position and ID order. Each line shows a status mark and a title. A phase
 shows its completed and total tasks, and a blocked task names its blockers by
 short ID. Finished phases fold into one line, and a footer counts the open
-captures and notes and names the releases. This output from Arc Lightning's
-own plan is trimmed:
+captures and notes and names the releases. This is Arc Lightning's own plan,
+with milestones 5 to 8 and the tasks of milestone 11 cut:
 
 ```text
 ◐ Arc Lightning first release and desktop app
 └── ◐ Roadmap
     ├── ✓ Milestones 1–4  done · 20 tasks
-    ├── ◐ Milestone 9: Integrated release  0/2
+    ├── ○ Milestone 9: Integrated release  0/2
     │   ├── ○ T15: Verify the integrated release  blocked by B7MS
     │   └── ● Publish release binaries with dist and support cargo-binstall
-    └── ○ Milestone 10: Desktop planning and execution  0/2
+    ├── ○ Milestone 10: Desktop planning and execution  0/2
+    │   ├── ○ T12: Build the desktop shell and project inbox  blocked by EGMS
+    │   └── ○ T13: Add desktop work, planning, and task views  blocked by AGNY
+    └── ◐ Milestone 11: CLI formatting  5/6
 Inbox: 24 open · Notes: 17 · Releases: v0.1.0, v0.2.0
 ```
 

@@ -967,6 +967,31 @@ fn tree_lines_start_with_the_status_mark() {
 }
 
 #[test]
+fn rooted_tree_names_the_blockers_a_task_inherits() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let blocker = create_task(dir, "Blocker", None);
+    let parent = create_task(dir, "Parent", None);
+    let child = create_task(dir, "Child", Some(&parent));
+    block_start_task(dir, &parent, &blocker);
+    let blocker_short = short_id(dir, &blocker);
+
+    let rooted = stdout_of(dir, &["--color", "never", "tree", &child]);
+    assert_eq!(
+        tree_line(&rooted, "Child").1,
+        format!("Child  blocked by {blocker_short}")
+    );
+
+    // The full tree names the blocker once, on the parent's line.
+    let full = stdout_of(dir, &["--color", "never", "tree"]);
+    assert_eq!(
+        tree_line(&full, "Parent").1,
+        format!("Parent  blocked by {blocker_short}")
+    );
+    assert_eq!(tree_line(&full, "Child").1, "Child");
+}
+
+#[test]
 fn tree_leaves_out_closed_captures_unless_all() {
     let directory = initialized_directory();
     let dir = directory.path();

@@ -241,9 +241,9 @@ unfinished direct blockers ends with `blocked by` and their short IDs.
 
 Each run of consecutive completed phases folds into one line. A run of one
 keeps its title, as in `✓ Milestone 6: Shared interface system  done · 1 task`.
-A longer run names its range when the first and last titles start with the
-same word and a number, as in `✓ Milestones 1–4  done · 20 tasks`, and reads
-`✓ 3 phases  done · 9 tasks` otherwise.
+A longer run names its range when every title starts with `Milestone` or
+`Phase` and consecutive numbers, as in `✓ Milestones 1–4  done · 20 tasks`, and
+reads `✓ 3 phases  done · 9 tasks` otherwise.
 
 A footer sums up the captures, notes and releases, such as
 `Inbox: 24 open · Notes: 17 · Releases: v0.1.0, v0.2.0`. It leaves out empty
