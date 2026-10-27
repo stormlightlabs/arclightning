@@ -816,7 +816,7 @@ mod tests {
     const NOTE_ID: &str = "arcl-n-01K0B2ZWTX7JX9PH7W5G1S6A9Q";
 
     #[test]
-    fn manifest_reads_versions_one_and_two_and_writes_two() {
+    fn manifest_reads_and_renders_versions_one_and_two() {
         let manifest = WorkspaceManifest::parse("format-version = 1").expect("manifest");
         assert_eq!(manifest.render().expect("render"), "format-version = 1\n");
         let manifest = WorkspaceManifest::parse("format-version = 2").expect("manifest");

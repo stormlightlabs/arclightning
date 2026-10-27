@@ -5714,6 +5714,15 @@ fn task_start_claim_sets_the_assignee_and_refuses_another_holder() {
             .contains("claimed by `codex`")
     );
 
+    for force in [None, Some("--force")] {
+        let mut command = arcl_in(directory.path());
+        command.args(["--json", "task", "start", &task]).args(force);
+        let unclaimed = command.output().expect("start runs");
+        assert_eq!(unclaimed.status.code(), Some(4), "{force:?}");
+        assert!(unclaimed.stdout.is_empty(), "{force:?}");
+        assert_eq!(json(&unclaimed.stderr)["error"]["code"], "conflict", "{force:?}");
+    }
+
     let shown = run_json(directory.path(), ["--json", "show", &task].as_ref());
     assert_eq!(shown["data"]["task"]["assignee"], "codex");
     let human = arcl_in(directory.path())

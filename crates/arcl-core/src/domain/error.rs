@@ -2,6 +2,9 @@ use thiserror::Error;
 
 use super::IdError;
 
+/// The longest task assignee name, in characters.
+pub const MAX_ASSIGNEE_CHARS: usize = 64;
+
 type Result<T> = std::result::Result<T, DomainError>;
 
 /// Errors caused by invalid domain values or state transitions.
@@ -78,9 +81,13 @@ pub enum DomainError {
     /// subtree has an unfinished blocker from outside it.
     #[error("cannot complete task `{id}` with its subtasks: {}", reasons.join("; "))]
     SubtasksNotCompletable { id: String, reasons: Vec<String> },
-    /// A task claim with an empty name, or one that holds a control
-    /// character such as a newline.
-    #[error("assignee `{value}` is invalid; use a non-empty name without control characters")]
+    /// A task claim with an empty name, a name longer than
+    /// [`MAX_ASSIGNEE_CHARS`], or one that holds a control character such as
+    /// a newline or a format character such as a zero-width space.
+    #[error(
+        "assignee `{}` is invalid; use a non-empty name of at most 64 characters without control or format characters",
+        value.escape_debug()
+    )]
     InvalidAssignee { value: String },
     #[error(transparent)]
     InvalidId(#[from] IdError),
@@ -90,15 +97,28 @@ pub fn validate_title(title: &str) -> Result<()> {
     if title.trim().is_empty() { Err(DomainError::EmptyTitle) } else { Ok(()) }
 }
 
-/// Return `name` trimmed, or refuse an empty name or one with a control
+/// Return `name` trimmed, or refuse an empty name, one longer than
+/// [`MAX_ASSIGNEE_CHARS`] characters, or one with a control or format
 /// character.
 pub fn validate_assignee(name: &str) -> Result<String> {
     let trimmed = name.trim();
-    if trimmed.is_empty() || trimmed.chars().any(char::is_control) {
+    if trimmed.is_empty()
+        || trimmed.chars().count() > MAX_ASSIGNEE_CHARS
+        || trimmed.chars().any(|c| c.is_control() || is_format_character(c))
+    {
         Err(DomainError::InvalidAssignee { value: name.to_owned() })
     } else {
         Ok(trimmed.to_owned())
     }
+}
+
+/// Return whether `c` is one of the common Unicode format characters
+/// (general category Cf) that hide in text or reorder it: zero-width
+/// characters, directional marks and embeddings, invisible operators,
+/// directional isolates and the byte order mark. The list is explicit because
+/// the standard library has no general category lookup.
+fn is_format_character(c: char) -> bool {
+    matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
 }
 
 pub fn validate_position(position: i64) -> Result<()> {
@@ -122,6 +142,33 @@ mod tests {
         ));
         assert!(matches!(
             validate_assignee("a\nb"),
+            Err(DomainError::InvalidAssignee { .. })
+        ));
+    }
+
+    #[test]
+    fn assignee_refuses_format_characters() {
+        for name in [
+            "co\u{200B}dex",
+            "\u{202E}xedoc",
+            "co\u{2066}dex",
+            "\u{FEFF}codex",
+            "co\u{2060}dex",
+        ] {
+            assert!(
+                matches!(validate_assignee(name), Err(DomainError::InvalidAssignee { .. })),
+                "{}",
+                name.escape_unicode()
+            );
+        }
+    }
+
+    #[test]
+    fn assignee_is_capped_at_64_characters() {
+        let longest = "é".repeat(MAX_ASSIGNEE_CHARS);
+        assert_eq!(validate_assignee(&longest), Ok(longest.clone()));
+        assert!(matches!(
+            validate_assignee(&format!("{longest}e")),
             Err(DomainError::InvalidAssignee { .. })
         ));
     }

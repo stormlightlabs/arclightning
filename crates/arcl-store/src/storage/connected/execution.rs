@@ -395,7 +395,9 @@ pub fn transition_planning_task(
 /// Start a connected-model task atomically.
 ///
 /// A pending task must be ready, apart from having child tasks, unless `force`
-/// is set. Starting an in-progress task is a no-op either way.
+/// is set. Starting an in-progress task is a no-op either way, except that a
+/// task an assignee holds is refused with [`StorageError::TaskClaimed`]; only
+/// [`claim_planning_task`] with the holder's name starts it again.
 pub fn start_planning_task(
     connection: &mut Connection, project_id: ProjectId, id: TaskId, force: bool,
 ) -> Result<PlanningTask> {
@@ -441,9 +443,8 @@ pub fn claim_planning_task(
 /// The transaction begins `IMMEDIATE`, so it holds SQLite's write lock from
 /// selection to commit: a second process waits for it and then selects from
 /// the committed state, so two calls never start the same task. With `claim`,
-/// the task gets that assignee, as in [`claim_planning_task`], and a ready task
-/// someone else holds is passed over. Returns `None`, writing nothing, when no
-/// task matches.
+/// the task gets that assignee, as in [`claim_planning_task`]. Returns `None`,
+/// writing nothing, when no task matches.
 pub fn start_next_planning_task(
     connection: &mut Connection, project_id: ProjectId, filter: &PlanningReadyFilter, claim: Option<&str>,
 ) -> Result<Option<PlanningTask>> {
@@ -452,11 +453,7 @@ pub fn start_next_planning_task(
         .transpose()
         .map_err(StorageError::InvalidPlanningTask)?;
     let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let next = planning_ready_tasks(&tx, project_id, filter)?.into_iter().find(|task| {
-        claim
-            .as_ref()
-            .is_none_or(|name| task.assignee.as_ref().is_none_or(|holder| holder == name))
-    });
+    let next = planning_ready_tasks(&tx, project_id, filter)?.into_iter().next();
     let Some(next) = next else {
         return Ok(None);
     };
@@ -525,8 +522,9 @@ pub fn handoff_planning_task(
 
 /// Apply `action` to task `id` in one transaction.
 ///
-/// `claim` names the assignee a start sets. Parking, completing and
-/// cancelling clear the assignee. The transaction is immediate, so a
+/// `claim` names the assignee a start sets. A start without the holder's
+/// name is refused while the task has an assignee. Parking, completing and
+/// cancelling clear the assignee, whoever runs them. The transaction is immediate, so a
 /// concurrent writer waits up to the busy timeout rather than failing.
 #[allow(clippy::too_many_arguments)]
 fn transition(
@@ -552,8 +550,13 @@ fn transition_in(
     let current = planning_task(tx, id)?.ok_or_else(|| StorageError::PlanningTaskNotFound { id: id.to_string() })?;
     ensure_project_task(&current, project_id)?;
     validate_task_graph(tx, project_id, &current, false)?;
-    if let Some(claim) = &claim
-        && let Some(holder) = current.assignee.as_ref().filter(|holder| *holder != claim)
+    // A start by anyone but the holder is refused, with or without a claim
+    // and whatever `force` says: `force` overrides readiness, not claims.
+    if matches!(action, TaskAction::Start)
+        && let Some(holder) = current
+            .assignee
+            .as_ref()
+            .filter(|holder| claim.as_ref() != Some(*holder))
     {
         return Err(StorageError::TaskClaimed { id: id.to_string(), assignee: holder.clone() });
     }
@@ -2594,6 +2597,20 @@ mod tests {
             .expect_err("another holder is refused");
         assert!(matches!(error, StorageError::TaskClaimed { ref assignee, .. } if assignee == "codex"));
         assert_eq!(error.exit_code(), 4);
+        assert_eq!(
+            database.planning_task(work.id).expect("task reads"),
+            Some(claimed.clone())
+        );
+
+        for force in [false, true] {
+            let error = database
+                .start_planning_task(work.id, force)
+                .expect_err("an unclaimed start of a held task is refused");
+            assert!(
+                matches!(error, StorageError::TaskClaimed { ref assignee, .. } if assignee == "codex"),
+                "force {force}: {error:?}"
+            );
+        }
         assert_eq!(database.planning_task(work.id).expect("task reads"), Some(claimed));
     }
 
@@ -2666,11 +2683,11 @@ mod tests {
     }
 
     #[test]
-    fn start_next_starts_the_first_ready_task_and_passes_over_other_holders() {
+    fn start_next_starts_ready_tasks_in_order_until_none_is_left() {
         let mut database = Database::open_in_memory().expect("database opens");
         let project = database.project().expect("project exists");
-        let first = task(&mut database, project.id, "First");
-        let second = task(&mut database, project.id, "Second");
+        task(&mut database, project.id, "First");
+        task(&mut database, project.id, "Second");
         let expected = database
             .ready_planning_tasks()
             .expect("ready tasks read")
@@ -2678,19 +2695,12 @@ mod tests {
             .map(|task| task.id)
             .collect::<Vec<_>>();
         assert_eq!(expected.len(), 2);
-        database
-            .connection
-            .execute(
-                "UPDATE planning_tasks SET assignee = 'claude' WHERE id = ?1",
-                [expected[0].to_string()],
-            )
-            .expect("assignee writes");
 
         let started = database
             .start_next_planning_task(&PlanningReadyFilter::default(), Some("codex"))
             .expect("start succeeds")
             .expect("a task starts");
-        assert_eq!(started.id, expected[1]);
+        assert_eq!(started.id, expected[0]);
         assert_eq!(started.status, TaskStatus::InProgress);
         assert_eq!(started.assignee.as_deref(), Some("codex"));
 
@@ -2698,8 +2708,8 @@ mod tests {
             .start_next_planning_task(&PlanningReadyFilter::default(), None)
             .expect("start succeeds")
             .expect("a task starts");
-        assert_eq!(unclaimed.id, expected[0]);
-        assert!([first.id, second.id].contains(&unclaimed.id));
+        assert_eq!(unclaimed.id, expected[1]);
+        assert_eq!(unclaimed.assignee, None);
 
         assert_eq!(
             database
@@ -2707,6 +2717,42 @@ mod tests {
                 .expect("start succeeds"),
             None
         );
+    }
+
+    #[test]
+    fn racing_start_next_never_starts_one_task_twice() {
+        let directory = tempfile::tempdir().expect("directory creates");
+        let path = directory.path().join("arcl.db");
+        let mut database = Database::open(&path).expect("database opens");
+        let project = database.project().expect("project exists");
+        for round in 0..20 {
+            let ready = if round % 2 == 0 { 2 } else { 1 };
+            let created = (0..ready)
+                .map(|index| task(&mut database, project.id, &format!("Work {round}.{index}")).id)
+                .collect::<Vec<_>>();
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let racers = ["codex", "claude"].map(|name| {
+                let (path, barrier) = (path.clone(), barrier.clone());
+                std::thread::spawn(move || {
+                    let mut database = Database::open(&path).expect("database opens");
+                    barrier.wait();
+                    database.start_next_planning_task(&PlanningReadyFilter::default(), Some(name))
+                })
+            });
+            let results = racers.map(|racer| racer.join().expect("racer finishes"));
+            let started = results
+                .iter()
+                .flat_map(|result| result.as_ref().expect("start succeeds"))
+                .map(|task| task.id)
+                .collect::<Vec<_>>();
+            if ready == 2 {
+                assert_eq!(started.len(), 2, "round {round}: {results:?}");
+                assert_ne!(started[0], started[1], "round {round}: {results:?}");
+            } else {
+                assert_eq!(started, created, "round {round}: {results:?}");
+            }
+            assert!(started.iter().all(|id| created.contains(id)), "round {round}");
+        }
     }
 
     #[test]
