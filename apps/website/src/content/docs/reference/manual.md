@@ -194,9 +194,15 @@ before storage changes.
 child tasks is the one reason it skips. `--force` starts the task anyway.
 
 `start --claim [<NAME>]` also sets the task's assignee in the same write. With
-no name it uses `ARCL_AGENT`, then the Git user name. A task another assignee
-holds is refused with exit code `4` and the `conflict` error code. Parking,
-handing off, completing, and cancelling clear the assignee.
+no name it uses `ARCL_AGENT`, then the Git user name. A name is at most 64
+characters, with no control or format characters such as zero-width spaces or
+direction marks. While a task has an assignee, a start without `--claim`, or
+with another name, is refused with exit code `4` and the `conflict` error code;
+`--force` does not override it. Parking, handing off, completing, and
+cancelling clear the assignee, whoever runs them. A claim holds within one
+database, which is one checkout's `.arcl/arcl.db`; agents in separate Git
+worktrees see each other's claims only after the workspace change reaches their
+checkout through Git and a sync.
 `arcl list --assignee <NAME>` lists the tasks one assignee holds.
 
 `handoff` requires either `--note <MARKDOWN>` or `--note-file <PATH|->`.

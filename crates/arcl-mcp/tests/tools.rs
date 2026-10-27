@@ -932,6 +932,15 @@ async fn task_start_claims_and_refuses_another_holder() {
     start("codex").await.expect("the holder can claim again");
     let refused = start("claude").await.err().expect("another holder is refused");
     assert_eq!((refused.code(), refused.exit_code()), ("conflict", 4));
+    let unclaimed = server
+        .task_start(
+            Parameters::from(TaskStartInput { task_id: task.clone(), claim: None }),
+            CancellationToken::new(),
+        )
+        .await
+        .err()
+        .expect("an unclaimed start of a held task is refused");
+    assert_eq!((unclaimed.code(), unclaimed.exit_code()), ("conflict", 4));
 }
 
 async fn create_task(server: &ArclServer, title: &str, blocked_by: &[&str]) -> String {

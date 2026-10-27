@@ -10,11 +10,11 @@ use thiserror::Error;
 use arcl_core::domain::*;
 use arcl_store::{ConnectedGraph, DataVersion, Database, StorageError, WorkspaceBaseFile};
 
+use super::export::{export_observed, format_floor, project_graph_at};
 use super::{
     CaptureRecord, NoteRecord, PhaseRecord, PlanRecord, ReleaseRecord, SpecRecord, TaskRecord, WorkspaceError,
     WorkspaceFile, WorkspaceRecord, WorkspaceReference, decode_manifest, decode_record, list_paths,
 };
-use super::{export::export_observed, export::project_graph};
 use crate::vcs::{PathState, Vcs, VcsError};
 
 const DEFAULT_PROJECT_ID: &str = "arcl-pj-00000000000000000000000000";
@@ -360,7 +360,14 @@ pub fn import_graph(
     let project = database.project()?;
     let base = database.workspace_base()?;
     let before = database.connected_graph()?;
-    let prepared = prepare_import(root, worktree_root, project, vcs, comparison_graph(&before, &base))?;
+    let prepared = prepare_import(
+        root,
+        worktree_root,
+        project,
+        vcs,
+        comparison_graph(&before, &base),
+        &base,
+    )?;
     apply_prepared(root, prepared, database, read)
 }
 
@@ -382,7 +389,7 @@ pub fn import_workspace(
         field: "project".to_owned(),
         message: error.to_string(),
     })?;
-    let prepared = prepare_import(root, worktree_root, project, vcs, None)?;
+    let prepared = prepare_import(root, worktree_root, project, vcs, None, &[])?;
     let mut database = Database::open(database_path)?;
     let read = database.data_version()?;
     apply_prepared(root, prepared, &mut database, read)
@@ -404,13 +411,18 @@ pub(super) fn comparison_graph<'a>(
     (!base.is_empty() && !empty).then_some(before)
 }
 
+/// Read and validate the workspace at `root`. The canonical files keep the
+/// manifest version `base` or the workspace has, moving it up only when a
+/// record needs it.
 fn prepare_import(
     root: &Path, worktree_root: &Path, project: Project, vcs: Option<&dyn Vcs>, before: Option<&ConnectedGraph>,
+    base: &[WorkspaceBaseFile],
 ) -> Result<PreparedImport> {
     reject_unmerged(root, vcs)?;
     let candidate = read_candidate(root)?;
+    let floor = format_floor(base, &candidate.files);
     let (graph, warnings) = validate_candidate(candidate.records, project, worktree_root, before)?;
-    let files = project_graph(&graph).map_err(|source| WorkspaceImportError::Field {
+    let files = project_graph_at(&graph, floor).map_err(|source| WorkspaceImportError::Field {
         path: PathBuf::from("manifest.toml"),
         field: "canonical rendering".to_owned(),
         message: source.to_string(),
@@ -425,11 +437,15 @@ fn apply_prepared(
 ) -> Result<ImportOutcome> {
     let base = database.workspace_base()?;
     reject_removed_base_records(&base, &prepared.files)?;
-    let current_files = project_graph(&database.connected_graph()?).map_err(|source| WorkspaceImportError::Field {
-        path: PathBuf::from("manifest.toml"),
-        field: "current database projection".to_owned(),
-        message: source.to_string(),
-    })?;
+    // Project the database at the version the import writes, so the manifest
+    // is never a conflict on its own.
+    let floor = format_floor(&[], &prepared.files);
+    let current_files =
+        project_graph_at(&database.connected_graph()?, floor).map_err(|source| WorkspaceImportError::Field {
+            path: PathBuf::from("manifest.toml"),
+            field: "current database projection".to_owned(),
+            message: source.to_string(),
+        })?;
     reject_removed_workspace_records(&current_files, &prepared.files)?;
     reject_divergent_changes(&base, &current_files, &prepared.files)?;
 
@@ -1164,7 +1180,7 @@ fn record_id_from_path(path: &Path) -> Option<String> {
 mod tests {
     use super::*;
     use crate::vcs::FakeVcs;
-    use crate::workspace::export::export_graph;
+    use crate::workspace::{export::export_graph, project_graph};
     use arcl_core::domain::TaskPriority;
     use arcl_store::PlanningTaskCreate;
 
