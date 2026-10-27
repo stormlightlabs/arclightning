@@ -7025,6 +7025,99 @@ fn pull_request_and_run_gates_ask_gh_and_report_each_gate() {
 }
 
 #[test]
+fn show_resolves_a_gate_by_full_or_short_id() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let task = create_task(dir, "Gated", None);
+    let gate = add_gate(dir, &task, "--until", "2000-01-01");
+    let short = &gate[gate.len() - 6..];
+
+    for id in [gate.as_str(), short] {
+        let shown = run_json(dir, ["--json", "show", id].as_ref());
+        assert_eq!(shown["data"]["action"], "shown");
+        assert_eq!(shown["data"]["gate"]["id"], gate);
+        assert_eq!(shown["data"]["gate"]["task_id"], task);
+        assert_eq!(shown["data"]["gate"]["kind"], "date");
+        assert_eq!(shown["data"]["gate"]["target"], "2000-01-01");
+        assert_eq!(shown["data"]["gate"]["status"], "open");
+        assert!(shown["data"]["gate"]["met_at"].is_null(), "{shown}");
+    }
+    let created = run_json(dir, ["--json", "show", &gate].as_ref())["data"]["gate"]["created_at"]
+        .as_str()
+        .expect("created time")
+        .to_owned();
+
+    let plain = arcl_in(dir)
+        .args(["--plain", "show", short])
+        .output()
+        .expect("show runs");
+    assert_success(&plain);
+    assert_eq!(
+        String::from_utf8(plain.stdout).expect("UTF-8"),
+        format!("gate\t{gate}\t{task}\tdate\t2000-01-01\topen\t\ncreated\t{created}\n")
+    );
+
+    gate_check(dir, no_gh_path().path().as_os_str(), &[]);
+    let human = arcl_in(dir).args(["show", &gate]).output().expect("show runs");
+    assert_success(&human);
+    let human = String::from_utf8(human.stdout).expect("UTF-8");
+    assert!(human.starts_with("Gate: `"), "{human}");
+    assert!(human.contains("] date 2000-01-01, met "), "{human}");
+    assert!(human.contains("\nTask: "), "{human}");
+    assert!(human.ends_with(&format!("\nCreated: {created}\n")), "{human}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_gh_call_past_its_timeout_is_killed_and_reported_as_an_error() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::{Duration, Instant};
+
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let bin = tempdir().expect("temporary directory can be created");
+    let gh = bin.path().join("gh");
+    fs::write(&gh, "#!/bin/sh\nexec sleep 30\n").expect("fake gh writes");
+    fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).expect("fake gh is executable");
+    let path = std::env::join_paths(
+        std::iter::once(bin.path().to_owned())
+            .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())),
+    )
+    .expect("PATH joins");
+    let task = create_task(dir, "Gated", None);
+    let pr = add_gate(dir, &task, "--pr", "https://github.com/o/r/pull/1");
+    let date = add_gate(dir, &task, "--until", "2000-01-01");
+
+    let started = Instant::now();
+    let output = arcl_in(dir)
+        .env("PATH", &path)
+        .env("ARCL_GH_TIMEOUT_MS", "300")
+        .args(["--json", "gate", "check"])
+        .output()
+        .expect("gate check runs");
+    assert!(started.elapsed() < Duration::from_secs(20), "gh was not killed");
+    assert_success(&output);
+    let report = json(&output.stdout);
+    assert_eq!(outcomes(&report), [(pr, "error".to_owned()), (date, "met".to_owned())]);
+    assert_eq!(report["data"]["checks"][0]["detail"], "timed out after 300ms");
+}
+
+#[test]
+fn gate_check_skips_the_gates_of_closed_tasks() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let task = create_task(dir, "Gated", None);
+    let gate = add_gate(dir, &task, "--pr", "https://github.com/o/r/pull/1");
+    run_json(dir, ["--json", "task", "cancel", &task].as_ref());
+
+    let report = gate_check(dir, no_gh_path().path().as_os_str(), &[]);
+    assert_eq!(outcomes(&report), [(gate, "skipped".to_owned())]);
+    assert_eq!(report["data"]["checks"][0]["detail"], "task is cancelled");
+    assert_eq!(report["data"]["checks"][0]["gate"]["status"], "open");
+    assert_eq!(report["data"]["gh_missing"], false);
+}
+
+#[test]
 fn without_gh_pull_request_and_run_gates_stay_open() {
     let directory = initialized_directory();
     let dir = directory.path();

@@ -138,6 +138,7 @@ pub enum ShowData {
     Phase(PhaseData),
     Note(NoteData),
     Release(ReleaseData),
+    Gate(GateData),
 }
 
 /// A successful tool result.
@@ -376,8 +377,8 @@ pub struct GateAddInput {
     pub task_id: String,
     /// What the gate waits for: `pr`, `run` or `date`.
     pub kind: GateKind,
-    /// For `pr`, `https://github.com/OWNER/REPO/pull/NUMBER`; for `run`,
-    /// `https://github.com/OWNER/REPO/actions/runs/RUN_ID`; for `date`,
+    /// For `pr`, `https://HOST/OWNER/REPO/pull/NUMBER`; for `run`,
+    /// `https://HOST/OWNER/REPO/actions/runs/RUN_ID`; for `date`,
     /// `YYYY-MM-DD`, met from the start of that day in UTC.
     pub target: String,
 }
@@ -490,12 +491,12 @@ pub struct TaskNoteData {
     pub note: TaskNote,
 }
 
-/// A gate added to a task, as `arcl gate add` returns it.
+/// A gate as `arcl gate add` or `arcl show` returns it.
 #[derive(Debug, JsonSchema, Serialize)]
 pub struct GateData {
-    /// `added`.
+    /// `added` or `shown`.
     pub action: String,
-    /// The gate as stored, open.
+    /// The gate as stored.
     pub gate: Gate,
 }
 

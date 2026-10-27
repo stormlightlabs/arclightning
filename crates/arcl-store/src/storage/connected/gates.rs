@@ -104,9 +104,46 @@ pub fn meet_gate(connection: &mut Connection, project_id: ProjectId, id: GateId)
     Ok(Gate { status: GateStatus::Met, met_at: Some(met_at), ..gate })
 }
 
+/// Mark each gate in `ids` met in one immediate transaction, for a check
+/// that probed them outside any transaction. Each gate is read again first:
+/// one still open is marked met at the current UTC time, one met since the
+/// probe comes back unchanged, and one removed since the probe, or in
+/// another project, comes back as `None`. The result has one entry per ID,
+/// in order.
+pub fn meet_gates(connection: &mut Connection, project_id: ProjectId, ids: &[GateId]) -> Result<Vec<Option<Gate>>> {
+    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let met_at: String = tx.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| row.get(0))?;
+    let mut gates = Vec::with_capacity(ids.len());
+    for &id in ids {
+        let gate = match project_gate(&tx, project_id, id) {
+            Ok(gate) => gate,
+            Err(StorageError::GateNotFound { .. }) => {
+                gates.push(None);
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        if gate.status == GateStatus::Met {
+            gates.push(Some(gate));
+            continue;
+        }
+        tx.execute(
+            "UPDATE task_gates SET status = 'met', met_at = ?1 WHERE id = ?2",
+            params![met_at, id.to_string()],
+        )?;
+        gates.push(Some(Gate {
+            status: GateStatus::Met,
+            met_at: Some(met_at.clone()),
+            ..gate
+        }));
+    }
+    tx.commit()?;
+    Ok(gates)
+}
+
 /// Read gate `id` in project `project_id`, or fail with
 /// [`StorageError::GateNotFound`].
-fn project_gate(connection: &Connection, project_id: ProjectId, id: GateId) -> Result<Gate> {
+pub fn project_gate(connection: &Connection, project_id: ProjectId, id: GateId) -> Result<Gate> {
     let owner: Option<String> = connection
         .query_row(
             "SELECT project_id FROM task_gates WHERE id = ?1",

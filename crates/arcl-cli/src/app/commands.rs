@@ -660,8 +660,39 @@ pub(super) fn exec_dependency(command: DependencyCommand, renderer: &Renderer) -
     write_output(message)
 }
 
-pub(super) fn exec_gate(command: GateCommand, renderer: &Renderer) -> anyhow::Result<()> {
+/// Run one `arcl gate` command. `gate check` adds the warnings of its syncs
+/// to `warnings`.
+pub(super) fn exec_gate(command: GateCommand, renderer: &Renderer, warnings: &mut Vec<Warning>) -> anyhow::Result<()> {
+    if let GateCommand::Check { task_id } = command {
+        return write_output(check_gates(task_id.as_deref(), renderer, warnings)?);
+    }
     write_output(run_gate(command, renderer).map_err(ApplicationError::from_command)?)
+}
+
+/// Run `arcl gate check` in three steps, so the sync lock is not held while
+/// `gh` runs: read the open gates under the lock, ask about them without
+/// it, then take the lock again to mark the met ones and render the report.
+fn check_gates(
+    task_id: Option<&str>, renderer: &Renderer, warnings: &mut Vec<Warning>,
+) -> Result<Option<String>, ApplicationError> {
+    let command = ApplicationError::from_command;
+    let (open, read_warnings) = synced(None, false, || {
+        let task_id = task_id.map(parse_task_id).transpose().map_err(command)?;
+        let database = open_database().map_err(command)?;
+        arcl_repo::gate::read_open_gates(&database, task_id).map_err(|error| command(error.into()))
+    })?;
+    warnings.extend(read_warnings);
+    let probed = arcl_repo::gate::probe_gates(open, &today_utc(), arcl_repo::gate::gh_timeout());
+    let (rendered, write_warnings) = synced(None, true, || {
+        let mut database = open_database().map_err(command)?;
+        let report = arcl_repo::gate::record_gate_checks(&mut database, probed);
+        let ids = display_ids(&database, renderer).map_err(command)?;
+        renderer
+            .render_gate_check(&report, &ids)
+            .map_err(|error| command(CommandError::InvalidFilter { message: error.to_string() }))
+    })?;
+    warnings.extend(write_warnings);
+    Ok(rendered)
 }
 
 /// Run one `arcl gate` command and render its result.
@@ -699,13 +730,7 @@ fn run_gate(command: GateCommand, renderer: &Renderer) -> CResult<Option<String>
             let gate = database.remove_gate(gate_id)?;
             rendered(renderer.render_gate("removed", &gate, &ids))
         }
-        GateCommand::Check { task_id } => {
-            let task_id = task_id.as_deref().map(parse_task_id).transpose()?;
-            let mut database = open_database()?;
-            let report = arcl_repo::gate::check_gates(&mut database, task_id, &today_utc())?;
-            let ids = display_ids(&database, renderer)?;
-            rendered(renderer.render_gate_check(&report, &ids))
-        }
+        GateCommand::Check { .. } => unreachable!("`exec_gate` runs `gate check` itself"),
     }
 }
 

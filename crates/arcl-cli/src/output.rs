@@ -448,6 +448,28 @@ impl Renderer {
         Ok(Some(self.style(message)))
     }
 
+    /// Render a gate for `show`. Human output prints the gate's line, its
+    /// task and when it was created, with short IDs; plain output prints the
+    /// gate's `gate` line, as a task's `show` does, then `created\t<time>`;
+    /// JSON returns `{action: "shown", gate}`.
+    pub fn render_shown_gate(&self, gate: &Gate, ids: &ShortIds) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human => format!(
+                "Gate: {}\nTask: {}\nCreated: {}",
+                human_gate(gate, ids),
+                ids.short(&gate.task_id.to_string()),
+                gate.created_at
+            ),
+            OutputMode::Plain => format!("{}\ncreated\t{}", plain_gate(gate), gate.created_at),
+            OutputMode::Json => serde_json::to_string(&Envelope {
+                format_version: FORMAT_VERSION,
+                data: serde_json::json!({ "action": "shown", "gate": gate }),
+            })?,
+            OutputMode::Quiet => return Ok(None),
+        };
+        Ok(Some(self.style(message)))
+    }
+
     /// Render a gate list. Human output prints one line per gate with its
     /// task, or `No gates.`; plain output prints a `gate` line per
     /// gate; JSON returns `{gates}`.

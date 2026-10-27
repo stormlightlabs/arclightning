@@ -99,6 +99,9 @@ pub(super) fn command_access(command: Option<&Command>) -> Access {
             TaskCommand::Show { .. } | TaskCommand::List | TaskCommand::Explain { .. } | TaskCommand::Context { .. }
         )),
         Some(Command::Dependency { command }) => read_when(matches!(command, DependencyCommand::List)),
+        // `gate check` takes the lock to read and again to write, and not
+        // while `gh` runs.
+        Some(Command::Gate { command: GateCommand::Check { .. } }) => Access::Untracked,
         Some(Command::Gate { command }) => read_when(matches!(command, GateCommand::List { .. })),
         // Each applied edit takes the lock for itself, as `serve` does.
         Some(Command::Web { command: WebCommand::Apply { .. } }) => Access::Untracked,
@@ -140,20 +143,41 @@ pub(super) fn auto_sync(roots: &WorkspaceRoots) -> CResult<Vec<String>> {
 pub(super) fn synced_write<T>(
     lock_wait: Duration, write: impl FnOnce() -> Result<T, ApplicationError>,
 ) -> Result<(T, Vec<Warning>), ApplicationError> {
+    synced(Some(lock_wait), true, write)
+}
+
+/// Run `operation` under the sync lock, after a sync that must succeed, and
+/// release the lock when it returns. With `export`, a second sync exports
+/// what `operation` changed. Returns what `operation` returned with the
+/// warnings the syncs gave.
+///
+/// `lock_wait` bounds the wait for the lock as [`synced_write`] does; `None`
+/// waits as long as it takes, as a command does. A write command that does
+/// slow work between a read and a write, such as `gate check` asking `gh`,
+/// runs each in its own call, so the lock is not held while it waits.
+pub(super) fn synced<T>(
+    lock_wait: Option<Duration>, export: bool, operation: impl FnOnce() -> Result<T, ApplicationError>,
+) -> Result<(T, Vec<Warning>), ApplicationError> {
     let roots = match workspace_roots() {
         Ok(Some(roots)) => roots,
-        // A missing database is the write's own error to report.
-        Ok(None) | Err(CommandError::NotInitialized { .. }) => return write().map(|value| (value, Vec::new())),
+        // A missing database is the operation's own error to report.
+        Ok(None) | Err(CommandError::NotInitialized { .. }) => return operation().map(|value| (value, Vec::new())),
         Err(error) => return Err(refuse_write(error)),
     };
-    let _lock = roots.lock_within(lock_wait).map_err(refuse_write)?;
+    let _lock = match lock_wait {
+        Some(wait) => roots.lock_within(wait),
+        None => roots.lock(),
+    }
+    .map_err(refuse_write)?;
     let mut warnings = match auto_sync(&roots) {
         Ok(found) => Warning::blocker_edges(found).collect(),
         Err(CommandError::NotInitialized { .. }) => Vec::new(),
         Err(error) => return Err(refuse_write(error)),
     };
-    let value = write()?;
-    export_after_write(&roots, &mut warnings);
+    let value = operation()?;
+    if export {
+        export_after_write(&roots, &mut warnings);
+    }
     Ok((value, warnings))
 }
 

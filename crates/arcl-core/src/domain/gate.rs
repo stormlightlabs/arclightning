@@ -5,10 +5,10 @@ use serde::{Deserialize, Serialize};
 use super::{DomainError, GateId, TaskId};
 
 /// The form a pull request gate's target takes.
-const PR_SHAPE: &str = "https://github.com/OWNER/REPO/pull/NUMBER";
+const PR_SHAPE: &str = "https://HOST/OWNER/REPO/pull/NUMBER";
 
 /// The form a run gate's target takes.
-const RUN_SHAPE: &str = "https://github.com/OWNER/REPO/actions/runs/RUN_ID";
+const RUN_SHAPE: &str = "https://HOST/OWNER/REPO/actions/runs/RUN_ID";
 
 /// What a gate waits for.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]

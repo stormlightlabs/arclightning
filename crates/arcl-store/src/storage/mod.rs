@@ -869,6 +869,20 @@ impl Database {
         connected::meet_gate(&mut self.connection, project.id, id)
     }
 
+    /// Mark gates met in one transaction, re-reading each first; see
+    /// [`connected::meet_gates`].
+    pub fn meet_gates(&mut self, ids: &[GateId]) -> Result<Vec<Option<Gate>>> {
+        let project = self.project()?;
+        connected::meet_gates(&mut self.connection, project.id, ids)
+    }
+
+    /// Read gate `id`, or fail with [`StorageError::GateNotFound`] when it is
+    /// missing or in another project.
+    pub fn gate(&self, id: GateId) -> Result<Gate> {
+        let project = self.project()?;
+        connected::project_gate(&self.connection, project.id, id)
+    }
+
     /// Read the gates on one task, oldest first, or on every task, grouped
     /// by task in task ID order. A task that does not exist is refused.
     pub fn gates(&self, task_id: Option<TaskId>) -> Result<Vec<Gate>> {

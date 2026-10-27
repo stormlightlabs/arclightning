@@ -484,7 +484,8 @@ impl ArclServer {
         description = "Check the open gates on one task, or on every task, and mark the met ones, like \
         `arcl gate check`. Date gates compare with today's UTC date. Pull request and run gates ask the GitHub \
         CLI, `gh`; without it they are `skipped` and `gh_missing` is true. One gate's error is reported as its \
-        `error` outcome and never fails the call.",
+        `error` outcome and never fails the call; a `gh` call that runs past 30 seconds is killed and is an \
+        `error`. Gates on completed or cancelled tasks are `skipped` without being checked.",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = true),
         meta = version_meta(FORMAT_VERSION)
     )]
@@ -492,16 +493,35 @@ impl ArclServer {
         &self, Parameters(input): Parameters<GateScopeInput>, cancelled: CancellationToken,
     ) -> Result<Json<Envelope<GateCheckData>>, ToolError> {
         let input = input?;
-        self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
-            let task = input
-                .task_id
-                .as_deref()
-                .map(|id| record_id::<TaskId>(database, id))
-                .transpose()?;
-            let report = arcl_repo::gate::check_gates(database, task, &today_utc())?;
-            Ok(GateCheckData { action: "checked".to_owned(), checks: report.checks, gh_missing: report.gh_missing })
+        // The sync lock is held to read the gates and again to mark the met
+        // ones, but not while `gh` runs.
+        let (open, mut warnings) = self
+            .run(Access::Read, cancelled.clone(), move |database| {
+                let task = input
+                    .task_id
+                    .as_deref()
+                    .map(|id| record_id::<TaskId>(database, id))
+                    .transpose()?;
+                Ok(arcl_repo::gate::read_open_gates(database, task)?)
+            })
+            .await?;
+        let probed = tokio::task::spawn_blocking(move || {
+            arcl_repo::gate::probe_gates(open, &today_utc(), arcl_repo::gate::gh_timeout())
         })
         .await
+        .map_err(|error| ToolError::new(1, format!("the tool call stopped: {error}")))?;
+        let (report, write_warnings) = self
+            .run(Access::Write, cancelled, move |database| {
+                Ok(arcl_repo::gate::record_gate_checks(database, probed))
+            })
+            .await?;
+        for warning in write_warnings {
+            if !warnings.contains(&warning) {
+                warnings.push(warning);
+            }
+        }
+        let data = GateCheckData { action: "checked".to_owned(), checks: report.checks, gh_missing: report.gh_missing };
+        Ok(Json(Envelope { format_version: FORMAT_VERSION, data, warnings }))
     }
 
     /// Return a parked task to pending, like `arcl task unpark`.
@@ -721,6 +741,9 @@ fn show_record(database: &mut Database, id: &str) -> Result<(u8, ShowData), Tool
             .release(ReleaseId::parse(id)?)?
             .ok_or_else(|| StorageError::ReleaseNotFound { id: id.to_owned() })?;
         ShowData::Release(ReleaseData { action: shown(), release })
+    } else if id.starts_with(GateId::PREFIX) {
+        let gate = database.gate(GateId::parse(id)?)?;
+        ShowData::Gate(GateData { action: shown(), gate })
     } else {
         return Err(ToolError::invalid_request(format!("unknown record ID `{id}`")));
     };

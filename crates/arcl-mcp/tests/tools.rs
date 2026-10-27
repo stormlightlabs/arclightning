@@ -1149,6 +1149,25 @@ async fn gates_hold_a_task_back_until_gate_check_meets_them() {
     assert_eq!(outcomes, ["met", "waiting"]);
     assert!(!checked.data.gh_missing);
 
+    let gate_id = past.data.gate.id.to_string();
+    for id in [gate_id.clone(), gate_id[gate_id.len() - 6..].to_owned()] {
+        let shown = server
+            .show(Parameters::from(RecordInput { id }), CancellationToken::new())
+            .await
+            .expect("show gate")
+            .0;
+        assert_eq!(shown.format_version, 1);
+        let shown = to_json(&shown.data);
+        assert_eq!(shown["action"], json!("shown"));
+        assert_eq!(shown["gate"]["id"], json!(gate_id));
+        assert_eq!(shown["gate"]["task_id"], json!(task));
+        assert_eq!(shown["gate"]["kind"], json!("date"));
+        assert_eq!(shown["gate"]["target"], json!("2000-01-01"));
+        assert_eq!(shown["gate"]["status"], json!("met"));
+        assert!(shown["gate"]["created_at"].is_string(), "{shown}");
+        assert!(shown["gate"]["met_at"].is_string(), "{shown}");
+    }
+
     let listed = server
         .gate_list(
             Parameters::from(GateScopeInput { task_id: Some(task.clone()) }),

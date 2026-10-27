@@ -274,10 +274,14 @@ children.
 
 Each gate's outcome is `met`, `waiting`, `failed` (a pull request closed
 without merging, or a run that finished without succeeding), `error` (`gh`
-failed or printed something unreadable) or `skipped`. Only `met` changes the
-gate. When `gh` is not on `PATH`, pull request and run gates are `skipped` and
-the check reports `gh not found; PR/run gates left open`. One gate's error
-never fails the check, which exits `0` unless the database fails.
+failed, ran past 30 seconds, or printed something unreadable) or `skipped`.
+Only `met` changes the gate. A gate on a completed or cancelled task is
+`skipped` with `task is completed` or `task is cancelled`, and is not checked.
+When `gh` is not on `PATH`, pull request and run gates are `skipped` and the
+check reports `gh not found; PR/run gates left open`. One gate's error never
+fails the check, which exits `0` unless the database fails. The check holds the
+project's sync lock while it reads the gates and while it marks the met ones,
+but not while `gh` runs.
 
 Human output prints one line per checked gate, such as
 ``Met: gate `QYF6` on task `H3TN`: merged``, or `No open gates.`. Plain output
@@ -289,6 +293,10 @@ met, `met_at`. `gate add` and `gate remove` return `{action, gate}` and
 `gate list` returns `{gates}`. Plain output prints a gate as
 `gate<TAB><id><TAB><task-id><TAB><kind><TAB><target><TAB><status><TAB><met-at>`,
 which `show` and `context` also print for each gate on the task.
+
+`arcl show <gate-id>` shows one gate. Human output prints the gate, its task
+and when it was created. Plain output prints the gate's `gate` line, then
+`created<TAB><created-at>`. JSON returns `{action: "shown", gate}`.
 
 ## Inspection
 

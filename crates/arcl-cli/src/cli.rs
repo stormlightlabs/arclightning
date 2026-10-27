@@ -853,11 +853,11 @@ pub enum WorkspaceCommand {
 #[group(required = true, multiple = false)]
 pub struct GateTargetArgs {
     /// Wait for this pull request to merge, given as
-    /// `https://github.com/OWNER/REPO/pull/NUMBER`.
+    /// `https://HOST/OWNER/REPO/pull/NUMBER`.
     #[arg(long, value_name = "URL")]
     pub pr: Option<String>,
     /// Wait for this GitHub Actions run to succeed, given as
-    /// `https://github.com/OWNER/REPO/actions/runs/RUN_ID`.
+    /// `https://HOST/OWNER/REPO/actions/runs/RUN_ID`.
     #[arg(long, value_name = "URL")]
     pub run: Option<String>,
     /// Wait until this date, YYYY-MM-DD, arrives in UTC.

@@ -1,14 +1,22 @@
 //! Resolve open gates: date gates against today's UTC date, pull request and
 //! run gates through the GitHub CLI, `gh`.
+//!
+//! A check runs in three steps so that no lock is held while `gh` asks the
+//! network: [`read_open_gates`] reads the gates, [`probe_gates`] asks about
+//! each one without the database, and [`record_gate_checks`] marks the met
+//! ones in one short transaction. [`check_gates`] runs the three in a row.
 
 use std::{
-    io,
-    process::{Command, Stdio},
+    io::{self, Read},
+    process::{Child, Command, ExitStatus, Stdio},
+    sync::mpsc::{self, Receiver},
+    thread,
+    time::{Duration, Instant},
 };
 
 use serde::{Deserialize, Serialize};
 
-use arcl_core::domain::{Gate, GateKind, GateStatus, GithubUrl, TaskId};
+use arcl_core::domain::{Gate, GateKind, GateStatus, GithubUrl, TaskId, TaskStatus};
 use arcl_store::{Database, StorageError};
 
 /// The program a pull request or run gate check runs, found on `PATH`.
@@ -16,6 +24,18 @@ pub const GH_PROGRAM: &str = "gh";
 
 /// The detail a skipped check reports when `gh` is not on `PATH`.
 pub const GH_MISSING: &str = "gh not found; PR/run gates left open";
+
+/// How long one `gh` call may run before it is killed and its gate reported
+/// as [`GateOutcome::Error`].
+pub const GH_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The environment variable that overrides [`GH_TIMEOUT`] for
+/// [`gh_timeout`], in whole milliseconds greater than zero. Tests set it to
+/// a short value.
+pub const GH_TIMEOUT_ENV: &str = "ARCL_GH_TIMEOUT_MS";
+
+/// How often a running `gh` call is polled for its exit.
+const GH_POLL: Duration = Duration::from_millis(10);
 
 /// What one gate check found.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -31,11 +51,11 @@ pub enum GateOutcome {
     /// merging or the run finished without succeeding. The gate stays open
     /// until someone removes it.
     Failed,
-    /// The check could not run or its answer could not be read. The gate
-    /// stays open.
+    /// The check could not run, timed out, or its answer could not be read.
+    /// The gate stays open.
     Error,
-    /// `gh` is not on `PATH`, so the pull request or run gate was not
-    /// checked. The gate stays open.
+    /// The gate was not checked: its task is completed or cancelled, or `gh`
+    /// is not on `PATH` for a pull request or run gate. The gate stays open.
     Skipped,
 }
 
@@ -56,7 +76,7 @@ impl GateOutcome {
 enum ProbeError {
     /// `gh` is not on `PATH`.
     Missing,
-    /// `gh` ran and failed, or its output could not be read.
+    /// `gh` ran and failed, timed out, or its output could not be read.
     Failed(String),
 }
 
@@ -84,6 +104,21 @@ pub struct GateCheckReport {
     pub gh_missing: bool,
 }
 
+/// The open gates in scope, each with its task's status, as
+/// [`read_open_gates`] read them for [`probe_gates`].
+#[derive(Clone, Debug, Default)]
+pub struct OpenGates {
+    gates: Vec<(Gate, TaskStatus)>,
+}
+
+/// What [`probe_gates`] found about each open gate, for
+/// [`record_gate_checks`] to mark the met ones.
+#[derive(Debug, Default)]
+pub struct ProbedGates {
+    probes: Vec<(Gate, Probe)>,
+    gh_missing: bool,
+}
+
 /// The answer `gh` gave about a pull request or run.
 #[derive(Debug)]
 struct Probe {
@@ -107,57 +142,131 @@ struct RunView {
 }
 
 /// Check every open gate on task `task`, or on every task, and mark the ones
-/// whose condition holds as met.
-///
-/// A date gate is met once `today`, a `YYYY-MM-DD` date in UTC, reaches its
-/// date; it needs no network. A pull request gate runs `gh pr view <url>
-/// --json state,mergedAt` and is met once the pull request merged. A run
-/// gate runs `gh run view <id> --repo <host/owner/repo> --json
-/// status,conclusion` and is met once the run completed with `success`.
-///
-/// One gate's failure never stops the others: it is reported as that gate's
-/// [`GateOutcome::Error`]. When `gh` is not on `PATH`, pull request and run
-/// gates are [`GateOutcome::Skipped`] and the report sets `gh_missing`.
-/// Only reading the gates can fail the whole check.
+/// whose condition holds as met: [`read_open_gates`], [`probe_gates`] with
+/// `gh_timeout`, then [`record_gate_checks`]. A caller that holds a lock
+/// around writes runs the three itself, holding it only for the first and
+/// the last.
 pub fn check_gates(
-    database: &mut Database, task: Option<TaskId>, today: &str,
+    database: &mut Database, task: Option<TaskId>, today: &str, gh_timeout: Duration,
 ) -> Result<GateCheckReport, StorageError> {
-    let open = database
-        .gates(task)?
-        .into_iter()
-        .filter(|gate| gate.status == GateStatus::Open)
-        .collect::<Vec<_>>();
-    let mut report = GateCheckReport::default();
-    for gate in open {
-        let probe = match gate.kind {
-            GateKind::Date => Ok(date_probe(&gate.target, today)),
-            GateKind::Pr | GateKind::Run if report.gh_missing => Err(ProbeError::Missing),
-            GateKind::Pr => pull_request_probe(&gate.target),
-            GateKind::Run => run_probe(&gate.target),
+    let open = read_open_gates(database, task)?;
+    let probed = probe_gates(open, today, gh_timeout);
+    Ok(record_gate_checks(database, probed))
+}
+
+/// Read the open gates on task `task`, or on every task, with each gate's
+/// task status. Reading is the only step of a check that fails as a whole.
+pub fn read_open_gates(database: &Database, task: Option<TaskId>) -> Result<OpenGates, StorageError> {
+    let mut statuses = std::collections::HashMap::new();
+    let mut gates = Vec::new();
+    for gate in database.gates(task)? {
+        if gate.status != GateStatus::Open {
+            continue;
+        }
+        let status = match statuses.get(&gate.task_id) {
+            Some(status) => *status,
+            None => {
+                let status = database
+                    .planning_task(gate.task_id)?
+                    .ok_or_else(|| StorageError::PlanningTaskNotFound { id: gate.task_id.to_string() })?
+                    .status;
+                statuses.insert(gate.task_id, status);
+                status
+            }
+        };
+        gates.push((gate, status));
+    }
+    Ok(OpenGates { gates })
+}
+
+/// Ask about each open gate, without the database.
+///
+/// A gate on a completed or cancelled task is [`GateOutcome::Skipped`]
+/// without being asked about, since its task no longer waits on it. A date
+/// gate is met once `today`, a `YYYY-MM-DD` date in UTC, reaches its date;
+/// it needs no network. A pull request gate runs `gh pr view <url> --json
+/// state,mergedAt` and is met once the pull request merged. A run gate runs
+/// `gh run view <id> --repo <host/owner/repo> --json status,conclusion` and
+/// is met once the run completed with `success`.
+///
+/// Each `gh` call may run for `gh_timeout`; past it the call is killed and
+/// its gate is [`GateOutcome::Error`] with a `timed out after …` detail.
+/// One gate's failure never stops the others. When `gh` is not on `PATH`,
+/// pull request and run gates are [`GateOutcome::Skipped`] and the report
+/// sets `gh_missing`.
+pub fn probe_gates(open: OpenGates, today: &str, gh_timeout: Duration) -> ProbedGates {
+    let mut probed = ProbedGates::default();
+    for (gate, task_status) in open.gates {
+        let probe = match (task_status, gate.kind) {
+            (TaskStatus::Completed | TaskStatus::Cancelled, _) => {
+                Ok(Probe { outcome: GateOutcome::Skipped, detail: format!("task is {}", task_status.as_str()) })
+            }
+            (_, GateKind::Date) => Ok(date_probe(&gate.target, today)),
+            (_, GateKind::Pr | GateKind::Run) if probed.gh_missing => Err(ProbeError::Missing),
+            (_, GateKind::Pr) => pull_request_probe(&gate.target, gh_timeout),
+            (_, GateKind::Run) => run_probe(&gate.target, gh_timeout),
         };
         let probe = match probe {
             Ok(probe) => probe,
             Err(ProbeError::Missing) => {
-                report.gh_missing = true;
+                probed.gh_missing = true;
                 Probe { outcome: GateOutcome::Skipped, detail: GH_MISSING.to_owned() }
             }
             Err(ProbeError::Failed(detail)) => Probe { outcome: GateOutcome::Error, detail },
         };
-        let check = if probe.outcome == GateOutcome::Met {
-            match database.meet_gate(gate.id) {
-                Ok(met) => GateCheck { gate: met, outcome: GateOutcome::Met, detail: probe.detail },
+        probed.probes.push((gate, probe));
+    }
+    probed
+}
+
+/// Mark the gates [`probe_gates`] found met, in one immediate transaction
+/// that reads each gate again first, and report every gate.
+///
+/// A gate met by another check since the probe is reported met as it is
+/// stored. A gate removed since the probe, or a transaction that fails, is
+/// reported as [`GateOutcome::Error`] with that reason; nothing here fails
+/// the check as a whole.
+pub fn record_gate_checks(database: &mut Database, probed: ProbedGates) -> GateCheckReport {
+    let met_ids = probed
+        .probes
+        .iter()
+        .filter(|(_, probe)| probe.outcome == GateOutcome::Met)
+        .map(|(gate, _)| gate.id)
+        .collect::<Vec<_>>();
+    let mut marked =
+        if met_ids.is_empty() { Ok(Vec::new()) } else { database.meet_gates(&met_ids) }.map(Vec::into_iter);
+    let mut report = GateCheckReport { checks: Vec::new(), gh_missing: probed.gh_missing };
+    for (gate, probe) in probed.probes {
+        let check = if probe.outcome != GateOutcome::Met {
+            GateCheck { gate, outcome: probe.outcome, detail: probe.detail }
+        } else {
+            match marked.as_mut().map(Iterator::next) {
+                Ok(Some(Some(met))) => GateCheck { gate: met, outcome: GateOutcome::Met, detail: probe.detail },
+                Ok(Some(None) | None) => GateCheck {
+                    gate,
+                    outcome: GateOutcome::Error,
+                    detail: "the gate was removed during the check".to_owned(),
+                },
                 Err(error) => GateCheck {
                     gate,
                     outcome: GateOutcome::Error,
                     detail: format!("could not mark the gate met: {error}"),
                 },
             }
-        } else {
-            GateCheck { gate, outcome: probe.outcome, detail: probe.detail }
         };
         report.checks.push(check);
     }
-    Ok(report)
+    report
+}
+
+/// The `gh` timeout: [`GH_TIMEOUT_ENV`] in milliseconds when it is set to a
+/// whole number greater than zero, and [`GH_TIMEOUT`] otherwise.
+pub fn gh_timeout() -> Duration {
+    std::env::var(GH_TIMEOUT_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|millis| *millis > 0)
+        .map_or(GH_TIMEOUT, Duration::from_millis)
 }
 
 /// Compare a date gate's `target` with `today`; both are `YYYY-MM-DD`, so
@@ -170,16 +279,19 @@ fn date_probe(target: &str, today: &str) -> Probe {
     }
 }
 
-fn pull_request_probe(url: &str) -> Result<Probe, ProbeError> {
-    let output = run_gh(&["pr", "view", url, "--json", "state,mergedAt"])?;
+fn pull_request_probe(url: &str, timeout: Duration) -> Result<Probe, ProbeError> {
+    let output = run_gh(&["pr", "view", url, "--json", "state,mergedAt"], timeout)?;
     pull_request_outcome(&output).map_err(ProbeError::Failed)
 }
 
-fn run_probe(url: &str) -> Result<Probe, ProbeError> {
+fn run_probe(url: &str, timeout: Duration) -> Result<Probe, ProbeError> {
     let run = GithubUrl::run(url).ok_or_else(|| ProbeError::Failed(format!("`{url}` is not a run URL")))?;
     let id = run.number.to_string();
     let repository = run.repository();
-    let output = run_gh(&["run", "view", &id, "--repo", &repository, "--json", "status,conclusion"])?;
+    let output = run_gh(
+        &["run", "view", &id, "--repo", &repository, "--json", "status,conclusion"],
+        timeout,
+    )?;
     run_outcome(&output).map_err(ProbeError::Failed)
 }
 
@@ -212,27 +324,80 @@ fn run_outcome(output: &str) -> Result<Probe, String> {
 }
 
 /// Run `gh` with `args` and return its standard output. Standard input is
-/// closed and prompts are off, so `gh` never waits on the terminal.
-fn run_gh(args: &[&str]) -> Result<String, ProbeError> {
-    let output = Command::new(GH_PROGRAM)
+/// closed and prompts are off, so `gh` never waits on the terminal. A call
+/// still running after `timeout`, or whose output stays open past it, is
+/// killed and fails with `timed out after <timeout>`.
+fn run_gh(args: &[&str], timeout: Duration) -> Result<String, ProbeError> {
+    let deadline = Instant::now() + timeout;
+    let mut child = Command::new(GH_PROGRAM)
         .args(args)
         .env("GH_PROMPT_DISABLED", "1")
         .stdin(Stdio::null())
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|error| match error.kind() {
             io::ErrorKind::NotFound => ProbeError::Missing,
             _ => ProbeError::Failed(format!("could not run gh: {error}")),
         })?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    let timed_out = || ProbeError::Failed(format!("timed out after {timeout:?}"));
+    // Each pipe drains on its own thread, so a full pipe never stalls `gh`.
+    // A process `gh` started may keep a pipe open after `gh` is killed; the
+    // thread then ends when that process does, and nothing waits on it.
+    let stdout = drain(child.stdout.take());
+    let stderr = drain(child.stderr.take());
+    let status = wait_until(&mut child, deadline).ok_or_else(timed_out)?;
+    let remaining = || deadline.saturating_duration_since(Instant::now());
+    let stdout = stdout.recv_timeout(remaining()).map_err(|_| timed_out())?;
+    let stderr = stderr.recv_timeout(remaining()).map_err(|_| timed_out())?;
+    if !status.success() {
+        let stderr = String::from_utf8_lossy(&stderr);
         let reason = stderr
             .lines()
             .map(str::trim)
             .find(|line| !line.is_empty())
             .unwrap_or("no error output");
-        return Err(ProbeError::Failed(format!("gh failed ({}): {reason}", output.status)));
+        return Err(ProbeError::Failed(format!("gh failed ({status}): {reason}")));
     }
-    String::from_utf8(output.stdout).map_err(|_| ProbeError::Failed("gh output is not UTF-8".to_owned()))
+    String::from_utf8(stdout).map_err(|_| ProbeError::Failed("gh output is not UTF-8".to_owned()))
+}
+
+/// Wait for `child` to exit until `deadline`, and kill it once the deadline
+/// passes. Returns its exit status, or `None` when it was killed or could
+/// not be waited on.
+fn wait_until(child: &mut Child, deadline: Instant) -> Option<ExitStatus> {
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Some(status),
+            Ok(None) if Instant::now() < deadline => thread::sleep(GH_POLL),
+            Ok(None) | Err(_) => {
+                // The child may have exited since `try_wait`; either way it
+                // is reaped here.
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+}
+
+/// Read `pipe` to its end on a new thread, and send what it held. A missing
+/// pipe sends nothing at once.
+fn drain(pipe: Option<impl Read + Send + 'static>) -> Receiver<Vec<u8>> {
+    let (sender, receiver) = mpsc::channel();
+    match pipe {
+        Some(mut pipe) => {
+            thread::spawn(move || {
+                let mut output = Vec::new();
+                let _ = pipe.read_to_end(&mut output);
+                let _ = sender.send(output);
+            });
+        }
+        None => {
+            let _ = sender.send(Vec::new());
+        }
+    }
+    receiver
 }
 
 #[cfg(test)]
@@ -279,31 +444,42 @@ mod tests {
         assert!(outcome(r#"{"conclusion":"success"}"#).is_err());
     }
 
-    #[test]
-    fn a_check_meets_due_date_gates_and_leaves_the_rest() {
+    /// A new in-memory database with one pending task titled `title`.
+    fn database_with_task(title: &str) -> (Database, TaskId) {
         let mut database = Database::open_in_memory().expect("database opens");
+        let task = create_task(&mut database, title);
+        (database, task)
+    }
+
+    fn create_task(database: &mut Database, title: &str) -> TaskId {
         let project_id = database.project().expect("project exists").id;
-        let task = database
+        database
             .create_planning_task(arcl_store::PlanningTaskCreate {
                 project_id,
                 spec_id: None,
                 plan_id: None,
                 phase_id: None,
                 parent_id: None,
-                title: "Work".to_owned(),
+                title: title.to_owned(),
                 body: String::new(),
                 priority: arcl_core::domain::TaskPriority::Normal,
                 position: 0,
             })
-            .expect("task creates");
+            .expect("task creates")
+            .id
+    }
+
+    #[test]
+    fn a_check_meets_due_date_gates_and_leaves_the_rest() {
+        let (mut database, task) = database_with_task("Work");
         let past = database
-            .add_gate(task.id, GateKind::Date, "2026-10-01")
+            .add_gate(task, GateKind::Date, "2026-10-01")
             .expect("gate adds");
         let future = database
-            .add_gate(task.id, GateKind::Date, "2026-12-01")
+            .add_gate(task, GateKind::Date, "2026-12-01")
             .expect("gate adds");
 
-        let report = check_gates(&mut database, Some(task.id), "2026-10-27").expect("check runs");
+        let report = check_gates(&mut database, Some(task), "2026-10-27", GH_TIMEOUT).expect("check runs");
         assert!(!report.gh_missing);
         let outcomes = report
             .checks
@@ -316,7 +492,78 @@ mod tests {
         );
         assert_eq!(report.checks[0].gate.status, GateStatus::Met);
 
-        let again = check_gates(&mut database, None, "2026-10-27").expect("check runs");
+        let again = check_gates(&mut database, None, "2026-10-27", GH_TIMEOUT).expect("check runs");
         assert_eq!(again.checks.len(), 1, "a met gate is not checked again");
+    }
+
+    #[test]
+    fn gates_on_closed_tasks_are_skipped_without_asking_gh() {
+        let (mut database, done) = database_with_task("Done");
+        let dropped = create_task(&mut database, "Dropped");
+        database
+            .transition_planning_task(done, arcl_core::domain::TaskAction::Start, false)
+            .expect("task starts");
+        let done_gate = database
+            .add_gate(done, GateKind::Pr, "https://github.com/o/r/pull/1")
+            .expect("gate adds");
+        database
+            .complete_planning_task(done, arcl_store::OpenSubtasks::Refuse, None)
+            .expect("task completes");
+        let dropped_gate = database
+            .add_gate(dropped, GateKind::Date, "2000-01-01")
+            .expect("gate adds");
+        database
+            .transition_planning_task(dropped, arcl_core::domain::TaskAction::Cancel, false)
+            .expect("task cancels");
+
+        let report = check_gates(&mut database, None, "2026-10-27", GH_TIMEOUT).expect("check runs");
+        let mut found = report
+            .checks
+            .iter()
+            .map(|check| (check.gate.id, check.outcome, check.detail.as_str(), check.gate.status))
+            .collect::<Vec<_>>();
+        found.sort_by_key(|(id, ..)| id.to_string());
+        let mut expected = vec![
+            (
+                done_gate.id,
+                GateOutcome::Skipped,
+                "task is completed",
+                GateStatus::Open,
+            ),
+            (
+                dropped_gate.id,
+                GateOutcome::Skipped,
+                "task is cancelled",
+                GateStatus::Open,
+            ),
+        ];
+        expected.sort_by_key(|(id, ..)| id.to_string());
+        assert_eq!(found, expected);
+        assert!(!report.gh_missing, "a skipped closed task never looks for gh");
+    }
+
+    #[test]
+    fn recording_reports_a_gate_removed_after_its_probe() {
+        let (mut database, task) = database_with_task("Work");
+        let kept = database
+            .add_gate(task, GateKind::Date, "2000-01-01")
+            .expect("gate adds");
+        let removed = database
+            .add_gate(task, GateKind::Date, "2000-01-02")
+            .expect("gate adds");
+        let probed = probe_gates(
+            read_open_gates(&database, None).expect("gates read"),
+            "2026-10-27",
+            GH_TIMEOUT,
+        );
+        database.remove_gate(removed.id).expect("gate removes");
+
+        let report = record_gate_checks(&mut database, probed);
+        assert_eq!(report.checks[0].gate.id, kept.id);
+        assert_eq!(report.checks[0].outcome, GateOutcome::Met);
+        assert_eq!(report.checks[0].gate.status, GateStatus::Met);
+        assert_eq!(report.checks[1].gate.id, removed.id);
+        assert_eq!(report.checks[1].outcome, GateOutcome::Error);
+        assert_eq!(report.checks[1].detail, "the gate was removed during the check");
     }
 }

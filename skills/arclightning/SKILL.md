@@ -121,8 +121,8 @@ When a task cannot start until a pull request merges, a CI run passes or a
 date arrives, gate it instead of parking it or waiting:
 
 ```sh
-arcl --json gate add <id> --pr https://github.com/OWNER/REPO/pull/NUMBER
-arcl --json gate add <id> --run https://github.com/OWNER/REPO/actions/runs/RUN_ID
+arcl --json gate add <id> --pr https://HOST/OWNER/REPO/pull/NUMBER
+arcl --json gate add <id> --run https://HOST/OWNER/REPO/actions/runs/RUN_ID
 arcl --json gate add <id> --until YYYY-MM-DD
 ```
 

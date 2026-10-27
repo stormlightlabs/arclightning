@@ -208,9 +208,14 @@ network. A date gate is met from the start of its date in UTC. A pull request
 gate is met once `gh pr view` reports it merged, and a run gate once `gh run
 view` reports it completed with `success`. A closed pull request or a failed
 run leaves the gate open and is reported as failed. Without `gh` on `PATH`,
-pull request and run gates stay open and the check says so. One gate's error
-is reported with that gate and never fails the check. A met gate stays met;
-`arcl gate remove` deletes a gate in either state.
+pull request and run gates stay open and the check says so. A `gh` call is
+killed after 30 seconds and reported as an error. A gate on a completed or
+cancelled task is skipped without being checked. One gate's error is reported
+with that gate and never fails the check. The check reads the open gates, asks
+about them without holding the sync lock or a database transaction, then
+marks the met ones in one transaction that reads each gate again. A met gate
+stays met; `arcl gate remove` deletes a gate in either state. `arcl show`
+shows a gate by its ID.
 
 ### Note
 
@@ -316,10 +321,10 @@ with `created-at`, an optional `kind`, and `text`, and version 4 the task
 It writes version 4 when a task file carries a gate, version 3 when one
 carries a note, version 2 when one carries an `assignee`, and otherwise keeps
 the version the workspace already has. A new workspace starts at version 1,
-so a workspace without claims, notes or gates stays there. A workspace never moves back to an older version on its
-own. An arcl that reads only older versions checks the manifest before any
-record and refuses a newer workspace with an unsupported format version
-error.
+so a workspace without claims, notes or gates stays there. A workspace never
+moves back to an older version on its own. An arcl that reads only older
+versions checks the manifest before any record and refuses a newer workspace
+with an unsupported format version error.
 
 Synchronization uses a three-state comparison: compare
 the last common files, current database projection, and current workspace. Arc
