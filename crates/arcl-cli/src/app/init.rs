@@ -27,7 +27,7 @@ pub(super) fn initialize(start: &Path, workspace: bool) -> IResult<Initializatio
 }
 
 fn initialization_root(start: &Path) -> IResult<PathBuf> {
-    if let Some(root) = nearest_project_root(start) {
+    if let Some(root) = nearest_project_root(start).map_err(|(path, source)| InitError::ReadConfig { path, source })? {
         return Ok(root);
     }
     match GixVcs::discover(start) {

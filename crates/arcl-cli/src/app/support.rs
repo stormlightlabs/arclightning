@@ -209,15 +209,19 @@ pub(super) fn parse_plan_document(input: &str) -> CResult<arcl_core::plan::PlanD
 pub(super) fn open_database() -> CResult<Database> {
     let (root, _) = project_root_config()?;
     let database_path = root.join(ARCL_DIRECTORY).join(DATABASE_FILE);
-    if !database_path.is_file() {
-        return Err(CommandError::NotInitialized { root });
+    match file_present(fs::metadata(&database_path)) {
+        Ok(true) => {}
+        Ok(false) => return Err(CommandError::NotInitialized { root }),
+        Err(source) => return Err(CommandError::ProbeDatabase { path: database_path, source }),
     }
     Database::open(&database_path).map_err(|source| CommandError::OpenDatabase { path: database_path, source })
 }
 
 pub(super) fn project_root_config() -> CResult<(PathBuf, ProjectConfig)> {
     let start = std::env::current_dir().map_err(|source| CommandError::CurrentDirectory { source })?;
-    let Some(root) = nearest_project_root(&start) else {
+    let Some(root) =
+        nearest_project_root(&start).map_err(|(path, source)| CommandError::ReadConfig { path, source })?
+    else {
         return Err(CommandError::NotInitialized { root: start });
     };
     let config_path = root.join(ARCL_DIRECTORY).join(CONFIG_FILE);
@@ -238,9 +242,49 @@ pub(super) fn workspace_paths() -> CResult<(PathBuf, PathBuf)> {
     Ok((root, workspace_root))
 }
 
-pub(super) fn nearest_project_root(start: &Path) -> Option<PathBuf> {
-    start
-        .ancestors()
-        .find(|candidate| candidate.join(ARCL_DIRECTORY).join(CONFIG_FILE).is_file())
-        .map(Path::to_owned)
+/// The nearest of `start` and its ancestors with a `.arcl/config.toml` file,
+/// or `None` when there is none. A config path that cannot be checked for a
+/// reason other than its absence, such as a `.arcl` directory without read
+/// permission, fails with that path and error.
+pub(super) fn nearest_project_root(start: &Path) -> Result<Option<PathBuf>, (PathBuf, io::Error)> {
+    for candidate in start.ancestors() {
+        let config_path = candidate.join(ARCL_DIRECTORY).join(CONFIG_FILE);
+        match file_present(fs::metadata(&config_path)) {
+            Ok(true) => return Ok(Some(candidate.to_owned())),
+            Ok(false) => {}
+            Err(source) => return Err((config_path, source)),
+        }
+    }
+    Ok(None)
+}
+
+/// Whether the path `metadata` was read from is a file. Only a missing path,
+/// or one under a non-directory, counts as absent; any other error, such as
+/// a permission error, is returned.
+fn file_present(metadata: io::Result<fs::Metadata>) -> io::Result<bool> {
+    match metadata {
+        Ok(metadata) => Ok(metadata.is_file()),
+        Err(error) if matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_present_treats_only_a_missing_path_as_absent() {
+        let missing = |kind: io::ErrorKind| file_present(Err(io::Error::from(kind)));
+        assert!(!missing(io::ErrorKind::NotFound).expect("a missing path is absent"));
+        assert!(!missing(io::ErrorKind::NotADirectory).expect("a path under a file is absent"));
+        let denied = missing(io::ErrorKind::PermissionDenied).expect_err("a permission error fails");
+        assert_eq!(denied.kind(), io::ErrorKind::PermissionDenied);
+
+        let directory = tempfile::tempdir().expect("temporary directory can be created");
+        let file = directory.path().join("config.toml");
+        fs::write(&file, "").expect("file is written");
+        assert!(file_present(fs::metadata(&file)).expect("a file is present"));
+        assert!(!file_present(fs::metadata(directory.path())).expect("a directory is not a file"));
+    }
 }

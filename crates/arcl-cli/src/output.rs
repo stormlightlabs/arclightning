@@ -1349,7 +1349,7 @@ impl PrimeTask {
     fn claim(&self) -> String {
         self.assignee
             .as_deref()
-            .map(|assignee| format!(" ({})", clip(&human_escape(assignee), PRIME_ASSIGNEE_BYTES, false)))
+            .map(|assignee| format!(" ({})", clip_escaped(assignee, PRIME_ASSIGNEE_BYTES, false)))
             .unwrap_or_default()
     }
 
@@ -1358,7 +1358,7 @@ impl PrimeTask {
     fn clipped_title(&self) -> String {
         let mut lines = self.title.lines();
         let first = lines.next().unwrap_or_default();
-        clip(&human_escape(first), PRIME_TEXT_BYTES, lines.next().is_some())
+        clip_escaped(first, PRIME_TEXT_BYTES, lines.next().is_some())
     }
 
     /// The handoff's first non-blank line with control characters escaped,
@@ -1366,7 +1366,7 @@ impl PrimeTask {
     fn handoff_line(&self) -> Option<String> {
         let mut lines = self.handoff.lines().map(str::trim).filter(|line| !line.is_empty());
         let first = lines.next()?;
-        Some(clip(&human_escape(first), PRIME_TEXT_BYTES, lines.next().is_some()))
+        Some(clip_escaped(first, PRIME_TEXT_BYTES, lines.next().is_some()))
     }
 }
 
@@ -2186,18 +2186,23 @@ fn human_escape(value: &str) -> Cow<'_, str> {
     }
     let mut escaped = String::with_capacity(value.len() + 4);
     for character in value.chars() {
-        match character {
-            '\n' => escaped.push_str("\\n"),
-            '\t' => escaped.push_str("\\t"),
-            '\r' => escaped.push_str("\\r"),
-            control if u32::from(control) < 0x80 && control.is_control() => {
-                escaped.push_str(&format!("\\x{:02x}", u32::from(control)));
-            }
-            control if control.is_control() => escaped.push_str(&format!("\\u{{{:x}}}", u32::from(control))),
-            other => escaped.push(other),
-        }
+        push_human_escaped(&mut escaped, character);
     }
     Cow::Owned(escaped)
+}
+
+/// Push `character` to `out` as [`human_escape`] writes it.
+fn push_human_escaped(out: &mut String, character: char) {
+    match character {
+        '\n' => out.push_str("\\n"),
+        '\t' => out.push_str("\\t"),
+        '\r' => out.push_str("\\r"),
+        control if u32::from(control) < 0x80 && control.is_control() => {
+            out.push_str(&format!("\\x{:02x}", u32::from(control)));
+        }
+        control if control.is_control() => out.push_str(&format!("\\u{{{:x}}}", u32::from(control))),
+        other => out.push(other),
+    }
 }
 
 fn plain_escape(value: &str) -> String {
@@ -2310,17 +2315,27 @@ fn head_text(head: &HeadState) -> String {
     }
 }
 
-/// `text` within `limit` bytes. Text that is longer, or that `cut` says
-/// continues, ends with `…` inside the limit.
-fn clip(text: &str, limit: usize, cut: bool) -> String {
-    if !cut && text.len() <= limit {
-        return text.to_owned();
+/// `text` escaped as [`human_escape`] does, within `limit` bytes. Text that
+/// is longer, or that `cut` says continues, ends with `…` inside the limit.
+/// The cut falls between escaped characters, never inside an escape.
+fn clip_escaped(text: &str, limit: usize, cut: bool) -> String {
+    let escaped = human_escape(text);
+    if !cut && escaped.len() <= limit {
+        return escaped.into_owned();
     }
-    let mut end = text.len().min(limit - '…'.len_utf8());
-    while !text.is_char_boundary(end) {
-        end -= 1;
+    let budget = limit - '…'.len_utf8();
+    let mut clipped = String::with_capacity(limit);
+    let mut piece = String::new();
+    for character in text.chars() {
+        piece.clear();
+        push_human_escaped(&mut piece, character);
+        if clipped.len() + piece.len() > budget {
+            break;
+        }
+        clipped.push_str(&piece);
     }
-    format!("{}…", &text[..end])
+    clipped.push('…');
+    clipped
 }
 
 fn short(commit: &str) -> &str {
@@ -2375,6 +2390,24 @@ const fn path_state_slug(state: PathState) -> &'static str {
 mod tests {
     use super::*;
     use crate::cli::ColorChoice;
+
+    #[test]
+    fn clip_escaped_cuts_between_escapes() {
+        let run = "a".repeat(76);
+        for control in ['\u{1b}', '\u{85}'] {
+            let title = format!("{run}{control}b");
+            let clipped = clip_escaped(&title, PRIME_TEXT_BYTES, false);
+            assert_eq!(clipped, format!("{run}…"), "{control:?}");
+            assert!(clipped.len() <= PRIME_TEXT_BYTES);
+        }
+        // An escape that fits is kept whole.
+        let title = format!("{}\u{1b}b", "a".repeat(70));
+        assert_eq!(
+            clip_escaped(&title, PRIME_TEXT_BYTES, true),
+            format!("{}\\x1bb…", "a".repeat(70))
+        );
+        assert_eq!(clip_escaped("short\u{85}", PRIME_TEXT_BYTES, false), "short\\u{85}");
+    }
 
     #[test]
     fn plain_output_is_stable_and_unstyled() {

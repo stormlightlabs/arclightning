@@ -249,8 +249,9 @@ prints `Nothing to start`, prints nothing with `--plain`, returns a null
 `data.task` with `--json`, and exits `0`.
 
 `prime` prints the working loop from the Arc Lightning skill, then the
-in-progress and parked tasks with their assignee and the first line of their
-latest handoff, then the first ready tasks, then a pointer to
+in-progress tasks with their assignee and the parked tasks, which have none
+since parking releases the claim, each with the first line of its latest
+handoff, then the first ready tasks, then a pointer to
 `arcl context <id>`. Each list shows at most 5 tasks and ends with
 `and K more` and the command that lists the rest. Titles and handoff lines are
 cut to 80 bytes and assignees to 40, so the output stays within 40 lines and

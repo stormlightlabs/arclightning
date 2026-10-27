@@ -9,6 +9,9 @@ use super::skill::SKILL_MARKDOWN;
 use super::support::{display_ids, open_database};
 use super::*;
 
+/// How long `arcl prime` waits for the sync lock before it shows the database
+/// without a sync, so a stuck command cannot stall a session start.
+pub(super) const PRIME_LOCK_WAIT: Duration = Duration::from_secs(2);
 /// The line that opens the loop block in `SKILL.md`.
 const LOOP_BEGIN: &str = "<!-- arcl-prime:begin -->";
 /// The line that closes the loop block in `SKILL.md`.

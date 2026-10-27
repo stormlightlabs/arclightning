@@ -113,6 +113,8 @@ pub(super) enum CommandError {
     InvalidConfig { path: PathBuf, source: WorkspaceError },
     #[error("could not open Arc Lightning database `{path}`: {source}")]
     OpenDatabase { path: PathBuf, source: StorageError },
+    #[error("could not open Arc Lightning database `{path}`: {source}")]
+    ProbeDatabase { path: PathBuf, source: io::Error },
     #[error("workspace support is disabled; run `arcl init --workspace` first")]
     WorkspaceDisabled,
     #[error(transparent)]
@@ -232,6 +234,7 @@ impl CommandError {
             | Self::ReadMarkdown { .. }
             | Self::ReadStdin { .. }
             | Self::OpenDatabase { source: StorageError::Sqlite(_), .. }
+            | Self::ProbeDatabase { .. }
             | Self::CurrentDirectory { .. }
             | Self::SyncLock { .. }
             | Self::SyncLockBusy { .. }

@@ -6356,3 +6356,35 @@ fn prime_fails_on_a_database_it_cannot_open() {
     assert!(!output.status.success(), "prime fails on a corrupt database");
     assert!(output.stdout.is_empty());
 }
+
+#[test]
+fn prime_shows_the_database_unsynced_when_the_sync_lock_stays_held() {
+    use std::time::{Duration, Instant};
+
+    let directory = tempdir().expect("temporary directory can be created");
+    let dir = directory.path();
+    run_json(dir, ["--json", "init", "--workspace"].as_ref());
+    create_task(dir, "Waits for the lock", None);
+    let lock = fs::OpenOptions::new()
+        .write(true)
+        .open(dir.join(".arcl/arcl.db-sync.lock"))
+        .expect("the lock file opens");
+    lock.lock().expect("the test holds the sync lock");
+
+    let started = Instant::now();
+    let output = arcl_in(dir)
+        .args(["--color", "never", "prime"])
+        .output()
+        .expect("prime runs");
+    let waited = started.elapsed();
+    assert_success(&output);
+    assert!(waited < Duration::from_secs(10), "prime waited {waited:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains(": Waits for the lock\n"), "{stdout}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(stderr.lines().count(), 1, "{stderr}");
+    assert!(
+        stderr.starts_with("warning: the workspace did not sync") && stderr.contains("held the sync lock"),
+        "{stderr}"
+    );
+}

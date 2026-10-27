@@ -37,8 +37,9 @@ In short (`arcl prime` prints this list):
 
 <!-- arcl-prime:begin -->
 
-1. Resume your parked work first: `arcl task unpark <id>`, then
-   `arcl task start <id> --claim`.
+1. Pick up parked work first. Parking releases the claim, so any session may
+   take it: read the handoff in `arcl context <id>`, then
+   `arcl task unpark <id>` and `arcl task start <id> --claim`.
 2. Otherwise start the first ready task: `arcl next --start --claim`.
 3. Read `arcl context <id>`: acceptance criteria, blockers, last handoff.
 4. Do the work. Record work outside the task with `arcl capture create`.
@@ -49,11 +50,12 @@ In short (`arcl prime` prints this list):
 
 In full:
 
-1. Find work. First resume your own parked work:
+1. Find work. First pick up parked work:
    `arcl --json list --kind task --status parked` [`list`] lists tasks a
-   session handed off. Otherwise `arcl --json ready` [`ready`] returns
-   `data.tasks` in order, and `arcl --json next` returns the first as
-   `data.task`. An empty list means nothing can start. The tools return at
+   session handed off. Parking releases the claim, so these have no assignee;
+   read the handoff before you unpark one. Otherwise `arcl --json ready`
+   [`ready`] returns `data.tasks` in order, and `arcl --json next` returns
+   the first as `data.task`. An empty list means nothing can start. The tools return at
    most `limit` records and a `data.next_cursor` to pass as `cursor` while
    more remain.
 2. Start it. `arcl --json task start <id> --claim` [`task_start` with

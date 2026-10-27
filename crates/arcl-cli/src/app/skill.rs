@@ -45,7 +45,9 @@ pub(super) fn exec_skill(command: SkillCommand, renderer: &Renderer) -> anyhow::
         SkillCommand::Install { check } => {
             let start = std::env::current_dir()
                 .map_err(|source| ApplicationError::from_command(CommandError::CurrentDirectory { source }))?;
-            let Some(root) = nearest_project_root(&start) else {
+            let Some(root) = nearest_project_root(&start)
+                .map_err(|(path, source)| ApplicationError::from_command(CommandError::ReadConfig { path, source }))?
+            else {
                 return Err(ApplicationError::from_command(CommandError::NotInitialized { root: start }).into());
             };
             let report = install_skill(&root, check).map_err(ApplicationError::from_command)?;

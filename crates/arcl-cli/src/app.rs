@@ -43,7 +43,7 @@ use commands::{
 pub use error::ApplicationError;
 use error::{CResult, CommandError};
 use init::initialize;
-use prime::read_prime;
+use prime::{PRIME_LOCK_WAIT, read_prime};
 use query::resolve_ready_filter;
 use reads::{read_context, read_explain, read_list, read_ready, read_show, read_tree};
 use serve::exec_serve;
@@ -92,11 +92,14 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
     // `web export` stamps its documents with the time, so it must not export
     // a database the sync did not bring up to date.
     let needs_sync = matches!(cli.command, Some(Command::Web { command: WebCommand::Export { .. } }));
+    // `prime` runs at session start, so it waits a bounded time for the lock
+    // and, failing that, shows the database without a sync.
+    let prime = matches!(cli.command, Some(Command::Prime));
     // The lock is held from the first sync until `run` returns.
     let (roots, synced, _lock) = match access {
         Access::Untracked => (None, Ok(Vec::new()), None),
         _ => match workspace_roots() {
-            Ok(Some(roots)) => match roots.lock() {
+            Ok(Some(roots)) => match if prime { roots.lock_within(PRIME_LOCK_WAIT) } else { roots.lock() } {
                 Ok(lock) => {
                     let synced = auto_sync(&roots);
                     (Some(roots), synced, Some(lock))
