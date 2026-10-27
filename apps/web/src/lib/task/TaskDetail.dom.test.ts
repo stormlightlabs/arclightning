@@ -266,4 +266,15 @@ describe("TaskDetail IDs", () => {
     expect(panel.querySelector(".arcl-copy-id code")?.textContent).toBe("t-10.4");
     expect(root.querySelectorAll(".relations .arcl-copy-id").length).toBeGreaterThan(0);
   });
+
+  it("gives each copy button a distinct name", () => {
+    stubSource(blockedDetail());
+    const root = view(blockedDetail());
+    const names = [...root.querySelectorAll(".arcl-copy-id button")].map((button) => button.getAttribute("aria-label"));
+    expect(names.length).toBeGreaterThan(2);
+    expect(new Set(names).size).toBe(names.length);
+    expect(names).toContain("Copy ID");
+    expect(names).toContain("Copy this task's ID");
+    expect(names.filter((name) => name?.startsWith("Copy the ID of ")).length).toBe(names.length - 2);
+  });
 });

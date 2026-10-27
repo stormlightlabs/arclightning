@@ -5,7 +5,7 @@ title = "Make record IDs copyable in the web app"
 status = "completed"
 priority = "normal"
 position = 10
-evidence = "Delivered by #65: `CopyId` in packages/ui copies a record ID from its button or the ID itself, says Copied in a live region, and selects the ID when the clipboard is missing or refused. It sits on the IDs in the Task view, its properties panel, Work board cards and the Inbox detail."
+evidence = "Delivered by #65: `CopyId` in packages/ui copies a record ID from its button or the ID itself, says Copied in a live region, and selects the ID when the clipboard is missing or refused. It sits on the IDs in the Task view, its properties panel, Work board cards and the Inbox detail. copy.e2e covers the serve build; artifact.e2e covers the artifact build with the clipboard write granted and refused against a stand-in host. The hand check in the published claude.ai artifact is still open, so the last criterion stays unticked."
 +++
 
 Let a reader copy a record ID from the web app, so pasting it into

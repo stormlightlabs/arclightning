@@ -14,6 +14,8 @@
     priority?: Priority;
     /** Show the value as a record ID with a copy button. */
     copy?: boolean;
+    /** The copy button's accessible name; defaults to "Copy <label>". */
+    copyLabel?: string;
   }
 
   /** Props for a record's collapsible properties panel. */
@@ -58,7 +60,7 @@
           {:else if property.status}
             <StatusBadge status={property.status} />
           {:else if property.copy}
-            <CopyId id={property.value} label={`Copy ${property.label}`} />
+            <CopyId id={property.value} label={property.copyLabel ?? `Copy ${property.label}`} />
           {:else if property.priority}
             <PriorityBadge priority={property.priority} />
           {:else if property.href}

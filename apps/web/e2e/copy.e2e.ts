@@ -39,7 +39,8 @@ test("the Task view's copy button puts the full ID on the clipboard", async ({ p
   expect(await clipboard(page)).toBe(id);
 });
 
-test("clicking a board card's ID copies it and leaves the board open", async ({ page }) => {
+// Nothing on a card reacts to a click, so the copy-id component test covers stopping its propagation.
+test("clicking a board card's ID copies it", async ({ page }) => {
   const id: string = served!.cli("task", "create", "Board copy").task.id;
   await page.goto(served!.url);
   await page.getByRole("button", { name: "Board" }).click();
@@ -47,5 +48,4 @@ test("clicking a board card's ID copies it and leaves the board open", async ({ 
   await card.getByText(id, { exact: true }).click();
   await expect(card.getByRole("status")).toHaveText("Copied");
   expect(await clipboard(page)).toBe(id);
-  await expect(page.getByRole("region", { name: "Board" })).toBeVisible();
 });

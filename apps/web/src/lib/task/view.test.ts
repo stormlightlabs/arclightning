@@ -85,7 +85,7 @@ describe("propertiesOf", () => {
   it("lists the ID, status, readiness, priority, parent, spec, plan and phase", () => {
     const detail = blockedDetail();
     expect(propertiesOf(detail)).toEqual([
-      { label: "ID", value: detail.task.id, copy: true },
+      { label: "ID", value: detail.task.id, copy: true, copyLabel: "Copy this task's ID" },
       { label: "Status", value: "Pending", status: "pending" },
       { label: "Readiness", value: "Blocked" },
       { label: "Priority", value: "normal", priority: "normal" },
