@@ -1,6 +1,6 @@
 {
   "name": "@arclightning/web",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Arc Lightning web app, served by `arcl serve` or published as a claude.ai artifact",
   "type": "module",
