@@ -5,7 +5,7 @@ title = "Make record IDs copyable in the web app"
 status = "completed"
 priority = "normal"
 position = 10
-evidence = "Delivered by #PR: `CopyId` in packages/ui copies a record ID from its button or the ID itself, says Copied in a live region, and selects the ID when the clipboard is missing or refused. It sits on the IDs in the Task view, its properties panel, Work board cards and the Inbox detail."
+evidence = "Delivered by #65: `CopyId` in packages/ui copies a record ID from its button or the ID itself, says Copied in a live region, and selects the ID when the clipboard is missing or refused. It sits on the IDs in the Task view, its properties panel, Work board cards and the Inbox detail."
 +++
 
 Let a reader copy a record ID from the web app, so pasting it into
@@ -36,7 +36,7 @@ Acceptance criteria:
       in a live region
 - [x] With no clipboard API, or a refused write, the ID is selected and the
       message says to copy it by hand
-- [x] Copying works in the `arcl serve` build and the artifact build
+- [ ] Copying works in the `arcl serve` build and the artifact build
 
 Verification:
 
