@@ -5821,6 +5821,51 @@ fn list_filters_tasks_by_assignee() {
 }
 
 #[test]
+fn a_new_workspace_starts_at_version_one_until_a_claim() {
+    let directory = tempdir().expect("temporary directory can be created");
+    run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
+    let manifest = directory.path().join(".arcl/workspace/manifest.toml");
+    assert_eq!(
+        fs::read_to_string(&manifest).expect("manifest reads"),
+        "format-version = 1\n"
+    );
+
+    let task = create_task(directory.path(), "Claimed", None);
+    assert_success(&claim_output(directory.path(), &task, Some("codex"), None));
+    assert_success(
+        &arcl_in(directory.path())
+            .args(["workspace", "sync"])
+            .output()
+            .expect("sync runs"),
+    );
+    assert_eq!(
+        fs::read_to_string(&manifest).expect("manifest reads"),
+        "format-version = 2\n"
+    );
+}
+
+#[test]
+fn task_start_claim_refuses_an_invalid_name_as_a_request_error() {
+    let directory = initialized_directory();
+    let task = create_task(directory.path(), "Unclaimed", None);
+    let long = "a".repeat(65);
+    for name in ["", "   ", "a\u{7}b", "a\u{200b}b", long.as_str()] {
+        let refused = claim_output(directory.path(), &task, Some(name), None);
+        assert_eq!(refused.status.code(), Some(3), "{name:?}");
+        assert!(refused.stdout.is_empty(), "{name:?}");
+        let error = json(&refused.stderr);
+        assert_eq!(error["error"]["code"], "invalid_request", "{name:?}");
+        let message = error["error"]["message"].as_str().expect("error message");
+        assert!(message.contains("claim name `"), "{message}");
+        assert!(message.contains("at most 64 characters"), "{message}");
+        assert!(!message.contains("stored"), "{message}");
+    }
+    let shown = run_json(directory.path(), ["--json", "show", &task].as_ref());
+    assert_eq!(shown["data"]["task"]["status"], "pending");
+    assert!(shown["data"]["task"].get("assignee").is_none());
+}
+
+#[test]
 fn the_assignee_round_trips_through_the_workspace() {
     let source = tempdir().expect("temporary directory can be created");
     run_json(source.path(), ["--json", "init", "--workspace"].as_ref());

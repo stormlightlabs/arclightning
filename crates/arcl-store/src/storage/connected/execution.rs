@@ -419,11 +419,13 @@ pub fn start_planning_task(
 /// Readiness and `force` work as in [`start_planning_task`]. A task another
 /// assignee holds is refused with [`StorageError::TaskClaimed`]. A claim by
 /// the current assignee changes nothing, and claiming an unassigned task that
-/// is already in progress only sets the assignee.
+/// is already in progress only sets the assignee. An invalid `assignee` is
+/// refused with [`StorageError::InvalidClaimName`] before the task is read.
 pub fn claim_planning_task(
     connection: &mut Connection, project_id: ProjectId, id: TaskId, force: bool, assignee: &str,
 ) -> Result<PlanningTask> {
-    let assignee = validate_assignee(assignee).map_err(StorageError::InvalidPlanningTask)?;
+    let assignee =
+        validate_assignee(assignee).map_err(|_| StorageError::InvalidClaimName { value: assignee.to_owned() })?;
     transition(
         connection,
         project_id,
