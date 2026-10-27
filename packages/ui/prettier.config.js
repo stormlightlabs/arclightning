@@ -1,7 +1,7 @@
 /**
  * Prettier settings for this package. They keep the code's two-space indent,
- * double quotes and trailing commas, and take `printWidth`, `bracketSameLine` and
- * the Svelte plugin from `apps/website`.
+ * double quotes and trailing commas, and take `printWidth`,
+ * `bracketSameLine` and the Svelte plugin from `apps/website`.
  *
  * @type {import("prettier").Config}
  */
