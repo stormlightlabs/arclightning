@@ -31,6 +31,18 @@ pub enum KeepSide {
     Workspace,
 }
 
+/// The layout of human `arcl tree` output.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+pub enum TreeStyle {
+    /// A box-drawing tree that folds each run of finished phases into one line.
+    #[default]
+    Folded,
+    /// The box-drawing tree with every phase unfolded and short IDs on the right.
+    Full,
+    /// STATUS, ID and TITLE columns, with titles indented by depth and no box characters.
+    Outline,
+}
+
 /// Arc Lightning commands.
 #[derive(Clone, Debug, Subcommand)]
 pub enum Command {
@@ -789,6 +801,9 @@ pub struct TreeArgs {
     /// Stop human output after this many levels of records.
     #[arg(long, value_name = "N", value_parser = clap::value_parser!(u16).range(1..))]
     pub depth: Option<u16>,
+    /// Choose the human output layout.
+    #[arg(long, value_enum, default_value_t = TreeStyle::Folded)]
+    pub style: TreeStyle,
 }
 
 /// Filters accepted by broad connected-record queries.
