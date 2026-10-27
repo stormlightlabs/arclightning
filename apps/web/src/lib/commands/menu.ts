@@ -1,5 +1,5 @@
 import { formatStatus, type CommandGroup, type CommandItem, type IconName } from "@arclightning/ui";
-import type { TaskSummary } from "$lib/data";
+import type { TaskSummary } from "$lib/data/types";
 import { formatKeys } from "./keys";
 
 /** How many matching tasks the menu lists. */

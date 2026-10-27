@@ -1,6 +1,6 @@
 import { formatStatus, type TaskGlyphKind } from "@arclightning/ui";
-import type { TaskStatus, WorkItem, WorkList } from "$lib/data";
-import type { TaskAction } from "$lib/task";
+import type { TaskStatus, WorkItem, WorkList } from "$lib/data/types";
+import type { TaskAction } from "$lib/task/actions";
 import { matches, shownReasons, type WorkFilters } from "./filters";
 import { describeReason, glyphOf, orderMilestones, orderTasks } from "./grouping";
 

@@ -12,33 +12,36 @@
     type SelectOption,
   } from "@arclightning/ui";
   import { onMount, tick, untrack } from "svelte";
-  import { formatKeys, useCommands, type Command } from "$lib/commands";
+  import { formatKeys } from "$lib/commands/keys";
+  import { useCommands } from "$lib/commands/registry.svelte";
+  import type { Command } from "$lib/commands/menu";
   import {
     QUEUED,
-    dataSource,
-    latestRead,
     type Capture,
     type CaptureSummary,
     type ChangeWarning,
     type Promoted,
     type WorkList,
-  } from "$lib/data";
+  } from "$lib/data/types";
+  import { dataSource } from "$lib/data/source";
+  import { latestRead } from "$lib/data/latest";
   import {
     TRIAGE_KEYS,
     TRIAGE_LABELS,
     afterRemoval,
-    createdAt,
     formFor,
     promotionOf,
-    shortAge,
     type PromotionForm,
     type TriageAction,
-  } from "$lib/inbox";
+  } from "$lib/inbox/triage";
+  import { createdAt, shortAge } from "$lib/inbox/created";
   import PromoteForm from "$lib/inbox/PromoteForm.svelte";
   import { failureNotice } from "$lib/notice";
   import { appHref } from "$lib/route";
-  import { failureOf, type ActionFailure } from "$lib/task";
-  import { moveSelection, orderMilestones, orderTasks, taskHref, visibleSelection, workKeyAction } from "$lib/work";
+  import { failureOf, type ActionFailure } from "$lib/task/actions";
+  import { moveSelection, visibleSelection, workKeyAction } from "$lib/work/keys";
+  import { orderMilestones, orderTasks } from "$lib/work/grouping";
+  import { taskHref } from "$lib/work/links";
 
   const ACTIONS: TriageAction[] = ["task", "spec", "note", "discard"];
   const ICONS: Record<TriageAction, IconName> = { task: "task", spec: "spec", note: "note", discard: "close" };
@@ -366,8 +369,7 @@
       <Button
         label="Dismiss"
         variant="ghost"
-        onclick={() => (warnings = warnings.filter((_, other) => other !== index))}
-      />
+        onclick={() => (warnings = warnings.filter((_, other) => other !== index))} />
     {/snippet}
   </Feedback>
 {/each}
@@ -383,8 +385,7 @@
 {:else if captures.length === 0}
   <EmptyState
     title="The Inbox is empty"
-    message="Press Q to capture an idea. Captures wait here until you promote or discard them."
-  />
+    message="Press Q to capture an idea. Captures wait here until you promote or discard them." />
 {:else}
   <div class="inbox">
     <div class="columns">
@@ -394,8 +395,7 @@
         rowId={(capture) => capture.id}
         selectedId={selected}
         onselect={select}
-        label="Captures"
-      >
+        label="Captures">
         {#snippet cell(capture, column)}
           {@const date = column.id === "created" ? createdAt(capture.id) : null}
           {#if column.id === "title"}
@@ -430,8 +430,7 @@
                 variant={action === "task" ? "primary" : action === "discard" ? "ghost" : "secondary"}
                 aria-keyshortcuts={TRIAGE_KEYS[action]}
                 disabled={busy}
-                onclick={() => triage(action)}
-              >
+                onclick={() => triage(action)}>
                 <kbd aria-hidden="true">{formatKeys([TRIAGE_KEYS[action]], false)[0]}</kbd>
                 {TRIAGE_LABELS[action]}
               </Button>
@@ -452,8 +451,7 @@
 <Dialog
   bind:open={confirming}
   title="Discard this capture?"
-  description="A discarded capture leaves the Inbox for good."
->
+  description="A discarded capture leaves the Inbox for good.">
   <div class="confirm">
     <p>{selectedCapture?.title}</p>
     <div class="buttons">

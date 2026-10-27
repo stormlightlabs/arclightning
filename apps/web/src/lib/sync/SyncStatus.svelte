@@ -1,5 +1,5 @@
 <script module lang="ts">
-  import type { SyncStatus } from "$lib/data";
+  import type { SyncStatus } from "$lib/data/types";
 
   /** Props for the artifact's sync status. */
   export interface SyncStatusProps {
@@ -43,8 +43,7 @@
     <Feedback
       tone="warning"
       title="This page stopped following syncs"
-      message={`Reload the page to see new syncs and queued edits. (${status.stopped.code})`}
-    />
+      message={`Reload the page to see new syncs and queued edits. (${status.stopped.code})`} />
   {/if}
   {#if stale}
     <Feedback tone="info" title="The project synced" message="This view shows the records from before the sync.">
@@ -55,8 +54,7 @@
     <Feedback
       tone="danger"
       title={`Not applied: ${describeEdit(edit)}`}
-      message={edit.error ? `${edit.error.message} (${edit.error.code})` : "arcl refused it."}
-    >
+      message={edit.error ? `${edit.error.message} (${edit.error.code})` : "arcl refused it."}>
       {#snippet actions()}<Button label="Dismiss" variant="ghost" onclick={() => ondismiss?.(edit.id)} />{/snippet}
     </Feedback>
   {/each}

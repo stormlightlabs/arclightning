@@ -27,11 +27,9 @@
       { id: "promote", label: "Promote to task" },
       { id: "disabled", label: "Archive", disabled: true },
     ]}
-    onselect={(item) => (result = item.label)}
-  />
+    onselect={(item) => (result = item.label)} />
   <output>{result}</output>
   <Tabs label="Test views" items={tabs} />
   <Dialog bind:open={dialogOpen} title="Confirm promotion"
-    ><Button label="Done" onclick={() => (dialogOpen = false)} /></Dialog
-  >
+    ><Button label="Done" onclick={() => (dialogOpen = false)} /></Dialog>
 </div>

@@ -2,7 +2,7 @@
 id = "arcl-ph-01M5VDD6PCB2B64MKW9TX01XXG"
 plan = "arcl-pl-01M5NE5P0CWMJNP2A7B0ZQW6XC"
 title = "Milestone 11: CLI formatting"
-status = "open"
+status = "completed"
 position = 11
 +++
 

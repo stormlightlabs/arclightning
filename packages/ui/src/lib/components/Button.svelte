@@ -38,12 +38,10 @@
   class={["arcl-button", className]}
   data-variant={variant}
   disabled={disabled || busy}
-  {type}
->
+  {type}>
   {#if busy}<span class="arcl-button__spinner" aria-hidden="true"></span>{:else if icon}<Icon
       name={icon}
-      size="1rem"
-    />{/if}
+      size="1rem" />{/if}
   {#if children || label}<span
       >{#if children}{@render children()}{:else}{label}{/if}</span
     >{/if}

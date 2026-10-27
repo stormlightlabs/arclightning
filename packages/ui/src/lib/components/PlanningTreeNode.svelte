@@ -16,8 +16,7 @@
         type="button"
         aria-label={`${expanded ? "Collapse" : "Expand"} ${node.title}`}
         aria-expanded={expanded}
-        onclick={() => (expanded = !expanded)}
-      >
+        onclick={() => (expanded = !expanded)}>
         <span aria-hidden="true">{expanded ? "−" : "+"}</span>
       </button>
     {:else}<span class="arcl-tree-node__spacer"></span>{/if}

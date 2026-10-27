@@ -23,8 +23,7 @@
       rowId={(item) => item.id}
       {selectedId}
       onselect={(id) => (selectedId = id)}
-      label="Items"
-    >
+      label="Items">
       {#snippet cell(item, column)}{column.id === "title" ? item.title : item.note}{/snippet}
     </DataTable>
   </div>

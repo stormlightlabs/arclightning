@@ -1,5 +1,5 @@
 import type { PlanningTreeNode, RecordStatus } from "@arclightning/ui";
-import type { Planning, Readiness, TreeNode } from "$lib/data";
+import type { Planning, Readiness, TreeNode } from "$lib/data/types";
 
 /** The keys the Planning view answers, apart from `j`, `k` and `Enter`. */
 export const PLANNING_KEYS = {

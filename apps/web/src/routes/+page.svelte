@@ -14,16 +14,11 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
-  import { useCommands, type Command } from "$lib/commands";
-  import {
-    dataSource,
-    latestRead,
-    type ChangeWarning,
-    type NewTask,
-    type TaskPriority,
-    type TaskStatus,
-    type WorkList,
-  } from "$lib/data";
+  import { useCommands } from "$lib/commands/registry.svelte";
+  import type { Command } from "$lib/commands/menu";
+  import { dataSource } from "$lib/data/source";
+  import { latestRead } from "$lib/data/latest";
+  import type { ChangeWarning, NewTask, TaskPriority, TaskStatus, WorkList } from "$lib/data/types";
   import { failureNotice } from "$lib/notice";
   import { appUrl, appUrlHref } from "$lib/route";
   import {
@@ -35,33 +30,31 @@
     runAction,
     type ActionFailure,
     type TaskAction,
-  } from "$lib/task";
+  } from "$lib/task/actions";
   import WorkBoard from "$lib/work/WorkBoard.svelte";
   import {
     NO_MILESTONE,
     PRIORITIES,
     STATUSES,
+    isFiltered,
+    parseFilters,
+    withKnownMilestone,
+    writeFilters,
+    type WorkFilters,
+  } from "$lib/work/filters";
+  import {
     boardColumns,
     boardOrder,
-    groupWork,
-    isFiltered,
-    moveSelection,
-    orderMilestones,
-    parseFilters,
     refusal,
     rememberView,
-    selectedOf,
-    taskHref,
     viewOf,
-    visibleSelection,
-    withKnownMilestone,
-    workKeyAction,
-    writeFilters,
     writeView,
     type BoardCard,
-    type WorkFilters,
     type WorkView,
-  } from "$lib/work";
+  } from "$lib/work/board";
+  import { groupWork, orderMilestones } from "$lib/work/grouping";
+  import { moveSelection, visibleSelection, workKeyAction } from "$lib/work/keys";
+  import { selectedOf, taskHref } from "$lib/work/links";
 
   type FilterName = keyof WorkFilters;
 
@@ -368,8 +361,7 @@
         {label}
         options={options[name]}
         value={filters[name][0] ?? ""}
-        onchange={(value) => setFilter(name, value)}
-      />
+        onchange={(value) => setFilter(name, value)} />
     {/each}
   </form>
 </header>
@@ -382,15 +374,13 @@
       label="Priority"
       options={options.priority.slice(1)}
       value={creating.priority}
-      onchange={(value) => creating && (creating.priority = value as TaskPriority)}
-    />
+      onchange={(value) => creating && (creating.priority = value as TaskPriority)} />
     <span class="label">Description</span>
     <MarkdownEditor
       value={creating.body}
       label="Description Markdown"
       readonly={false}
-      onchange={(value) => creating && (creating.body = value)}
-    />
+      onchange={(value) => creating && (creating.body = value)} />
     <div class="buttons">
       <Button type="submit" variant="primary" label="Create" busy={createBusy} disabled={createBusy} />
       <Button label="Cancel" variant="ghost" disabled={createBusy} onclick={() => (creating = null)} />
@@ -413,8 +403,7 @@
     {...failureNotice(
       actionFailure.failure,
       `Could not ${ACTION_LABELS[actionFailure.action].toLowerCase()} ${actionFailure.title}`,
-    )}
-  />
+    )} />
 {/if}
 {#each actionWarnings as warning, index (index)}
   <Feedback tone="warning" title="The change is saved, with a warning" message={`${warning.message} (${warning.code})`}>
@@ -422,8 +411,7 @@
       <Button
         label="Dismiss"
         variant="ghost"
-        onclick={() => (actionWarnings = actionWarnings.filter((_, other) => other !== index))}
-      />
+        onclick={() => (actionWarnings = actionWarnings.filter((_, other) => other !== index))} />
     {/snippet}
   </Feedback>
 {/each}
@@ -439,15 +427,13 @@
 {:else if list.items.length === 0}
   <EmptyState
     title="No tasks yet"
-    message="Tasks appear here once you create one with New task or arcl task create, or apply a plan."
-  />
+    message="Tasks appear here once you create one with New task or arcl task create, or apply a plan." />
 {:else if order.length === 0}
   <EmptyState title="No tasks match these filters" message="Change or clear the filters to see more tasks.">
     {#snippet actions()}
       <Button
         label="Clear filters"
-        onclick={() => showFilters({ status: [], readiness: [], priority: [], milestone: [] })}
-      />
+        onclick={() => showFilters({ status: [], readiness: [], priority: [], milestone: [] })} />
     {/snippet}
   </EmptyState>
 {:else if view === "board"}
@@ -459,8 +445,7 @@
     locked={actionBusy}
     onselect={(id) => (selectedId = id)}
     onmove={move}
-    onrefuse={refuse}
-  />
+    onrefuse={refuse} />
 {:else}
   <TaskList {groups} href={taskHref} selectedId={selected} onselect={(id) => (selectedId = id)} label="Work" />
 {/if}

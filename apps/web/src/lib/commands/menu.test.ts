@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { TRIAGE_KEYS } from "$lib/inbox";
-import { PLANNING_KEYS } from "$lib/planning";
-import { ACTION_KEYS, EDIT_KEY } from "$lib/task";
+import { TRIAGE_KEYS } from "$lib/inbox/triage";
+import { PLANNING_KEYS } from "$lib/planning/view";
+import { ACTION_KEYS, EDIT_KEY } from "$lib/task/actions";
 import { TASK_RESULT_PREFIX, boundCommands, clashes, menuGroups, type Command, type MenuInput } from "./menu";
 
 const run = () => {};

@@ -18,7 +18,7 @@
 
 <script lang="ts">
   import { Button, Field, SelectMenu } from "@arclightning/ui";
-  import { PRIORITIES } from "$lib/work";
+  import { PRIORITIES } from "$lib/work/filters";
   import { TRIAGE_LABELS } from "./triage";
 
   let { form = $bindable(), phases = [], parents = [], busy = false, onsubmit, oncancel }: PromoteFormProps = $props();
@@ -40,20 +40,17 @@
         label="Priority"
         options={priorities}
         value={form.priority}
-        onchange={(value) => form.to === "task" && (form.priority = value as typeof form.priority)}
-      />
+        onchange={(value) => form.to === "task" && (form.priority = value as typeof form.priority)} />
       <SelectMenu
         label="Milestone"
         options={[none, ...phases]}
         value={form.phase}
-        onchange={(value) => form.to === "task" && (form.phase = value)}
-      />
+        onchange={(value) => form.to === "task" && (form.phase = value)} />
       <SelectMenu
         label="Parent"
         options={[none, ...parents]}
         value={form.parent}
-        onchange={(value) => form.to === "task" && (form.parent = value)}
-      />
+        onchange={(value) => form.to === "task" && (form.parent = value)} />
     </div>
     {#each form.notes as note (note)}<p class="note">{note}</p>{/each}
     <p class="hint">The task gets the capture's body.</p>
@@ -62,8 +59,7 @@
       label="Acceptance criteria"
       description="Markdown; you can add them later."
       multiline
-      bind:value={form.acceptance}
-    />
+      bind:value={form.acceptance} />
     <p class="hint">The spec gets the capture's body. Plan it from Planning.</p>
   {:else}
     <p class="hint">The note gets the capture's body.</p>

@@ -1,5 +1,5 @@
-import type { CapturePromotion, PromotionTarget, TaskPriority, TaskSummary } from "$lib/data";
-import { parseCapture, resolveRef } from "$lib/capture";
+import type { CapturePromotion, PromotionTarget, TaskPriority, TaskSummary } from "$lib/data/types";
+import { parseCapture, resolveRef } from "$lib/capture/tokens";
 
 /** What triage does with the selected capture. */
 export type TriageAction = PromotionTarget | "discard";

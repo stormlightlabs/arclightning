@@ -146,8 +146,7 @@
         autofocus
         {placeholder}
         bind:value={query}
-        {onkeydown}
-      />
+        {onkeydown} />
     </div>
     <div
       class="arcl-command-menu__list"
@@ -165,8 +164,7 @@
       onclick={(event) => {
         const index = optionAt(event.target);
         if (index !== null) run(index);
-      }}
-    >
+      }}>
       {#each groups as group, groupIndex (group.id)}
         <div role="group" aria-labelledby={`${id}-group-${groupIndex}`}>
           <div class="arcl-command-menu__group" id={`${id}-group-${groupIndex}`} role="presentation">{group.label}</div>
@@ -179,18 +177,15 @@
               id={optionId(index)}
               tabindex="-1"
               aria-selected={index === active}
-              data-index={index}
-            >
+              data-index={index}>
               <Icon name={item.icon ?? "arrowRight"} size="1rem" />
               <span class="arcl-command-menu__label"
                 >{before}<b>{match}</b>{after}{#if item.detail}<span class="arcl-command-menu__detail">
                     · {item.detail}</span
-                  >{/if}</span
-              >
+                  >{/if}</span>
               {#if item.keys?.length}
                 <span class="arcl-command-menu__keys"
-                  >{#each item.keys as key, keyIndex (keyIndex)}<kbd>{key}</kbd>{/each}</span
-                >
+                  >{#each item.keys as key, keyIndex (keyIndex)}<kbd>{key}</kbd>{/each}</span>
               {/if}
             </div>
           {/each}

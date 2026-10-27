@@ -1,4 +1,4 @@
-import type { DataSource } from "$lib/data";
+import type { DataSource } from "$lib/data/types";
 
 /**
  * A data source for route tests: `answers` stands in for the methods a test

@@ -1,7 +1,8 @@
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { registeredCommands } from "$lib/commands";
-import { DataError, setDataSource, type Changed, type DataSource, type TaskDetail as Detail } from "$lib/data";
+import { registeredCommands } from "$lib/commands/registry.svelte";
+import { DataError, type Changed, type DataSource, type TaskDetail as Detail } from "$lib/data/types";
+import { setDataSource } from "$lib/data/source";
 import { task } from "$lib/work/fixtures";
 import { blockedDetail, doneBlockersDetail } from "./fixtures";
 import TaskDetail from "./TaskDetail.svelte";

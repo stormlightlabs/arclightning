@@ -3,8 +3,11 @@
   import { onMount, tick } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { goto } from "$app/navigation";
-  import { useCommands, type Command } from "$lib/commands";
-  import { dataSource, latestRead, type ChangeWarning, type Planning } from "$lib/data";
+  import { useCommands } from "$lib/commands/registry.svelte";
+  import type { Command } from "$lib/commands/menu";
+  import { dataSource } from "$lib/data/source";
+  import { latestRead } from "$lib/data/latest";
+  import type { ChangeWarning, Planning } from "$lib/data/types";
   import {
     PLANNING_KEYS,
     closedRecords,
@@ -14,10 +17,11 @@
     visibleRows,
     type MilestoneRow,
     type PlanningRow,
-  } from "$lib/planning";
+  } from "$lib/planning/view";
   import { failureNotice } from "$lib/notice";
-  import { failureOf, type ActionFailure } from "$lib/task";
-  import { moveSelection, taskHref, visibleSelection, workKeyAction } from "$lib/work";
+  import { failureOf, type ActionFailure } from "$lib/task/actions";
+  import { moveSelection, visibleSelection, workKeyAction } from "$lib/work/keys";
+  import { taskHref } from "$lib/work/links";
 
   /** A form the view shows, with the record it acts on. */
   type PlanningForm =
@@ -306,8 +310,7 @@
         description="TOML, as arcl plan apply --file reads it. Applying again with the same keys updates the phases and tasks."
         multiline
         spellcheck={false}
-        bind:value={current.document}
-      />
+        bind:value={current.document} />
     {/if}
     <div class="buttons">
       <Button
@@ -315,8 +318,7 @@
         variant="primary"
         label={current.kind === "apply" ? "Apply" : "Create"}
         {busy}
-        disabled={busy}
-      />
+        disabled={busy} />
       <Button label="Cancel" variant="ghost" disabled={busy} onclick={closeForm} />
     </div>
     {#if formFailure !== null}
@@ -330,8 +332,7 @@
   <Button
     label="New spec"
     variant="primary"
-    onclick={() => openForm({ kind: "spec", title: "", body: "", acceptance: "" })}
-  />
+    onclick={() => openForm({ kind: "spec", title: "", body: "", acceptance: "" })} />
 </header>
 
 {#if notice !== null}<p class="notice" role="status">{notice}</p>{/if}
@@ -341,8 +342,7 @@
       <Button
         label="Dismiss"
         variant="ghost"
-        onclick={() => (warnings = warnings.filter((_, other) => other !== index))}
-      />
+        onclick={() => (warnings = warnings.filter((_, other) => other !== index))} />
     {/snippet}
   </Feedback>
 {/each}
@@ -359,8 +359,7 @@
 {:else if specs.length === 0}
   <EmptyState
     title="No specs yet"
-    message="Create a spec with New spec, or promote a capture to one from the Inbox. Its plans and milestones appear here."
-  />
+    message="Create a spec with New spec, or promote a capture to one from the Inbox. Its plans and milestones appear here." />
 {:else}
   <div class="planning" bind:this={root}>
     {#each specs as spec (spec.id)}
@@ -372,8 +371,7 @@
             data-row-id={spec.id}
             aria-expanded={!collapsed.has(spec.id)}
             onfocus={() => (selectedId = spec.id)}
-            onclick={() => toggle(spec)}
-          >
+            onclick={() => toggle(spec)}>
             <span class="chevron" aria-hidden="true">{collapsed.has(spec.id) ? "▸" : "▾"}</span>
             <span class="title">{spec.title}</span>
             <span class="detail">Spec · {count(spec.plans.length, "plan")}</span>
@@ -383,8 +381,7 @@
             label="New plan"
             variant="ghost"
             aria-keyshortcuts="A"
-            onclick={() => openForm({ kind: "plan", spec: spec.id, title: "", body: "" })}
-          />
+            onclick={() => openForm({ kind: "plan", spec: spec.id, title: "", body: "" })} />
         </div>
         {#if form?.kind === "plan" && form.spec === spec.id}{@render formFor(form)}{/if}
         {#if !collapsed.has(spec.id)}
@@ -399,8 +396,7 @@
                 data-row-id={plan.id}
                 aria-expanded={!collapsed.has(plan.id)}
                 onfocus={() => (selectedId = plan.id)}
-                onclick={() => toggle(plan)}
-              >
+                onclick={() => toggle(plan)}>
                 <span class="chevron" aria-hidden="true">{collapsed.has(plan.id) ? "▸" : "▾"}</span>
                 <span class="title">{plan.title}</span>
                 <span class="detail">Plan · {describeProgress(plan)}</span>
@@ -410,8 +406,7 @@
                 label="Apply plan"
                 variant="ghost"
                 aria-keyshortcuts="A"
-                onclick={() => openForm({ kind: "apply", plan: plan.id, document: planTemplate() })}
-              />
+                onclick={() => openForm({ kind: "apply", plan: plan.id, document: planTemplate() })} />
             </div>
             {#if form?.kind === "apply" && form.plan === plan.id}{@render formFor(form)}{/if}
             {#if !collapsed.has(plan.id)}
@@ -429,8 +424,7 @@
                         data-done={row.status !== "open" || undefined}
                         aria-expanded={expanded.has(row.id)}
                         onfocus={() => (selectedId = row.id)}
-                        onclick={() => toggle(row)}
-                      >
+                        onclick={() => toggle(row)}>
                         <svg
                           class="ring"
                           width="18"
@@ -441,16 +435,14 @@
                             ? "Done"
                             : row.status === "cancelled"
                               ? "Cancelled"
-                              : "Open"}
-                        >
+                              : "Open"}>
                           {#if row.status === "completed"}
                             <circle cx="10" cy="10" r="9" fill="currentColor" />
                             <path
                               d="m6.2 10.2 2.6 2.6 5-5.3"
                               fill="none"
                               stroke="var(--arcl-surface)"
-                              stroke-width="1.8"
-                            />
+                              stroke-width="1.8" />
                           {:else}
                             <circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2" />
                           {/if}
@@ -458,8 +450,7 @@
                         <span class="title">{row.title}</span>
                         <span class="progress">
                           <span class="bar" aria-hidden="true"
-                            ><span style:width={`${row.total ? (100 * row.done) / row.total : 0}%`}></span></span
-                          >
+                            ><span style:width={`${row.total ? (100 * row.done) / row.total : 0}%`}></span></span>
                           <span class="detail">{describeProgress(row)}</span>
                         </span>
                         <span class="now">
@@ -477,8 +468,7 @@
                             <PlanningTree
                               label={`Tasks in ${row.title}`}
                               nodes={row.tree}
-                              onselect={(node) => goto(taskHref(node.id))}
-                            />
+                              onselect={(node) => goto(taskHref(node.id))} />
                           {:else}
                             <p class="muted">No tasks in this milestone.</p>
                           {/if}
@@ -494,8 +484,7 @@
                   <PlanningTree
                     label={`Tasks in ${plan.title} outside a milestone`}
                     nodes={plan.tasks}
-                    onselect={(node) => goto(taskHref(node.id))}
-                  />
+                    onselect={(node) => goto(taskHref(node.id))} />
                 </div>
               {/if}
             {/if}

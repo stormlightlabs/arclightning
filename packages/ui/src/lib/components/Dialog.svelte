@@ -113,8 +113,7 @@
   }}
   onclick={(event) => {
     if (event.target === dialog) requestClose();
-  }}
->
+  }}>
   {#if bare}
     <h2 class="arcl-dialog__hidden" id={titleId}>{title}</h2>
     {#if description}<p class="arcl-dialog__hidden" id={descriptionId}>{description}</p>{/if}

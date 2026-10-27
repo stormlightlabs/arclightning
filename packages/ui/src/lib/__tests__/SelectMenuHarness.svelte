@@ -22,8 +22,7 @@
     options={[
       { value: "low", label: "Low" },
       { value: "high", label: "High" },
-    ]}
-  />
+    ]} />
   <output data-testid="value">{value}</output>
   <output data-testid="changes">{changes.join(",")}</output>
 </div>

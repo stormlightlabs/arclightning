@@ -7,36 +7,17 @@
   import { page } from "$app/state";
   import { MediaQuery } from "svelte/reactivity";
   import QuickCapture from "$lib/capture/QuickCapture.svelte";
-  import {
-    SEQUENCE_TIMEOUT,
-    TASK_RESULT_PREFIX,
-    boundCommands,
-    formatKeys,
-    isMac,
-    menuGroups,
-    opensMenu,
-    registeredCommands,
-    registeredContext,
-    shortcutStep,
-    takesShortcut,
-    useCommands,
-    type Command,
-  } from "$lib/commands";
-  import {
-    ARTIFACT_BUILD,
-    OPEN_IN_CLAUDE,
-    connectArtifact,
-    dataSource,
-    type ChangeWarning,
-    type SyncStatus as Sync,
-    type TaskSummary,
-  } from "$lib/data";
+  import { SEQUENCE_TIMEOUT, formatKeys, isMac, opensMenu, shortcutStep, takesShortcut } from "$lib/commands/keys";
+  import { TASK_RESULT_PREFIX, boundCommands, menuGroups, type Command } from "$lib/commands/menu";
+  import { registeredCommands, registeredContext, useCommands } from "$lib/commands/registry.svelte";
+  import { ARTIFACT_BUILD, OPEN_IN_CLAUDE, connectArtifact, dataSource } from "$lib/data/source";
+  import type { ChangeWarning, SyncStatus as Sync, TaskSummary } from "$lib/data/types";
   import { appHref, appUrl } from "$lib/route";
   import { SIDEBAR_KEY, rememberSidebar, sidebarCollapsed } from "$lib/sidebar";
-  import { setSyncStatus, syncStatus } from "$lib/sync";
+  import { setSyncStatus, syncStatus } from "$lib/sync/status.svelte";
   import SyncStatus from "$lib/sync/SyncStatus.svelte";
   import { adoptToken } from "$lib/token";
-  import { taskHref } from "$lib/work";
+  import { taskHref } from "$lib/work/links";
 
   let { children } = $props();
 
@@ -248,8 +229,7 @@
         aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         aria-keyshortcuts={SIDEBAR_KEY}
         title={`${collapsed ? "Expand" : "Collapse"} sidebar (${SIDEBAR_KEY})`}
-        onclick={toggleSidebar}
-      >
+        onclick={toggleSidebar}>
         <Icon name={collapsed ? "sidebarExpand" : "sidebarCollapse"} size="1.125rem" />
       </button>
       <button
@@ -258,8 +238,7 @@
         bind:this={navToggle}
         aria-expanded={navOpen}
         aria-controls="views-menu"
-        onclick={() => (navOpen = !navOpen)}
-      >
+        onclick={() => (navOpen = !navOpen)}>
         <Icon name={navOpen ? "close" : "menu"} size="1.125rem" />
         <span>Menu</span>
       </button>
@@ -271,21 +250,18 @@
           class="tool"
           aria-keyshortcuts={mac ? "Meta+K" : "Control+K"}
           title={collapsed ? `Search (${menuKeys.join("")})` : undefined}
-          onclick={openMenu}
-        >
+          onclick={openMenu}>
           <Icon name="search" size="1rem" />
           <span class="label">Search</span>
           <span class="keys" aria-hidden="true"
-            >{#each menuKeys as key (key)}<kbd>{key}</kbd>{/each}</span
-          >
+            >{#each menuKeys as key (key)}<kbd>{key}</kbd>{/each}</span>
         </button>
         <button
           type="button"
           class="tool"
           aria-keyshortcuts="Q"
           title={collapsed ? "Capture (Q)" : undefined}
-          onclick={() => (captureOpen = true)}
-        >
+          onclick={() => (captureOpen = true)}>
           <Icon name="capture" size="1rem" />
           <span class="label">Capture</span>
           <span class="keys" aria-hidden="true"><kbd>Q</kbd></span>
@@ -297,8 +273,7 @@
             <a
               href={appHref(view.path)}
               aria-current={appUrl(page.url).pathname === view.path ? "page" : undefined}
-              title={collapsed ? view.label : undefined}
-            >
+              title={collapsed ? view.label : undefined}>
               <Icon name={view.icon} size="1.125rem" />
               <span class="label">{view.label}</span>
             </a>
@@ -313,14 +288,12 @@
       <Feedback
         tone="warning"
         title="The capture is saved, with a warning"
-        message={`${warning.message} (${warning.code})`}
-      >
+        message={`${warning.message} (${warning.code})`}>
         {#snippet actions()}
           <Button
             label="Dismiss"
             variant="ghost"
-            onclick={() => (captureWarnings = captureWarnings.filter((_, other) => other !== index))}
-          />
+            onclick={() => (captureWarnings = captureWarnings.filter((_, other) => other !== index))} />
         {/snippet}
       </Feedback>
     {/each}
@@ -343,8 +316,7 @@
   {groups}
   context={context?.label}
   onclearcontext={() => (contextCleared = true)}
-  onrun={runCommand}
-/>
+  onrun={runCommand} />
 <QuickCapture
   bind:open={captureOpen}
   {mac}
@@ -356,8 +328,7 @@
     (filed = `Created “${task.title}”.`),
     (captureWarnings = []),
     goto(taskHref(task.id), { state: { warnings } })
-  )}
-/>
+  )} />
 
 <style>
   .shell {

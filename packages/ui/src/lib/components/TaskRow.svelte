@@ -39,8 +39,7 @@
     aria-describedby={explained ? reasonId : undefined}
     aria-current={selected ? "true" : undefined}
     tabindex={tabbable ? 0 : -1}
-    onfocus={() => onselect?.(row.id)}>{row.title}</a
-  >
+    onfocus={() => onselect?.(row.id)}>{row.title}</a>
   <span class="arcl-task-row__meta">
     {#if row.priority !== "normal"}<PriorityBadge priority={row.priority} />{/if}
     <StatusBadge status={row.status} />

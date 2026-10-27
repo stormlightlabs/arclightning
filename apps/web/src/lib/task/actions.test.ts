@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DataError, type DataSource } from "$lib/data";
+import { DataError, type DataSource } from "$lib/data/types";
 import { task } from "$lib/work/fixtures";
 import { actionsFor, draftOf, editOf, failureOf, formAction, runAction, unblockedTasks } from "./actions";
 import { blockedDetail } from "./fixtures";

@@ -2,13 +2,14 @@ import { page as screen, userEvent } from "vitest/browser";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-svelte";
 import "@arclightning/ui/styles.css";
-import { registeredCommands } from "$lib/commands";
-import { DataError, QUEUED, setDataSource, type DataSource, type WorkList } from "$lib/data";
-import { VIEW_STORAGE_KEY } from "$lib/work";
+import { registeredCommands } from "$lib/commands/registry.svelte";
+import { DataError, QUEUED, type DataSource, type WorkList } from "$lib/data/types";
+import { setDataSource } from "$lib/data/source";
+import { VIEW_STORAGE_KEY } from "$lib/work/board";
 import { sampleList, task } from "$lib/work/fixtures";
 import WorkRoute from "../../routes/+page.svelte";
 import { goto, reset, show } from "./app.svelte";
-import { fakeSource } from "./source";
+import { fakeSource } from "./fake-source";
 
 vi.mock("$app/state", async () => ({ page: (await import("./app.svelte")).page }));
 vi.mock("$app/navigation", async () => {
