@@ -2,7 +2,7 @@
   import type { Snippet } from "svelte";
 
   /** One column of a data table. */
-  export interface DataTableColumn {
+  export type DataTableColumn = {
     /** Names the column to `cell`, and keys it, so each column needs its own. */
     id: string;
     /** The header text. */
@@ -11,7 +11,7 @@
     width?: string;
     /** Hide the column while the table is narrower than 32rem. */
     hideNarrow?: boolean;
-  }
+  };
 
   /**
    * Props for a table whose rows the keyboard selects one at a time. Each
@@ -23,7 +23,7 @@
    * table scrolls inside its own box, under a sticky header, so give it a
    * height or a `max-height`.
    */
-  export interface DataTableProps<Row> {
+  export type DataTableProps<Row> = {
     rows: Row[];
     columns: DataTableColumn[];
     /** The row's ID, which `selectedId` and `onselect` use. */
@@ -36,7 +36,7 @@
     onselect?: (id: string) => void;
     /** The accessible name of the table's region. */
     label: string;
-  }
+  };
 </script>
 
 <script lang="ts" generics="Row">

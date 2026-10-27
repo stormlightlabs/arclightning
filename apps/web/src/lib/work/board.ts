@@ -29,7 +29,7 @@ const MOVES: Partial<Record<TaskStatus, Partial<Record<TaskStatus, TaskAction>>>
 };
 
 /** One card on the board. */
-export interface BoardCard {
+export type BoardCard = {
   id: string;
   title: string;
   status: TaskStatus;
@@ -38,14 +38,14 @@ export interface BoardCard {
   glyph: TaskGlyphKind;
   /** Why the task is not ready, with record IDs replaced by titles. */
   reasons: string[];
-}
+};
 
 /** One status column and its cards, in `arcl tree` order. */
-export interface BoardColumn {
+export type BoardColumn = {
   status: TaskStatus;
   title: string;
   cards: BoardCard[];
-}
+};
 
 /**
  * The board for `list`: a column for each of {@link BOARD_STATUSES}, holding

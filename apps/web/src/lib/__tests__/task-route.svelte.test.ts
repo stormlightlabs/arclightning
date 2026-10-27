@@ -18,11 +18,11 @@ vi.mock("$app/navigation", async () => {
 });
 
 /** A read the test answers when it chooses. */
-interface Pending {
+type Pending = {
   signal: AbortSignal | undefined;
   answer(): void;
   fail(message: string): void;
-}
+};
 
 /** A change these tests never make. */
 const unused = () => Promise.reject(new Error("not used in these tests"));

@@ -27,11 +27,11 @@ import {
 } from "./types";
 
 /** Options for {@link serveSource}; tests pass their own. */
-export interface ServeOptions {
+export type ServeOptions = {
   fetch?: typeof fetch;
   /** The headers that authenticate each request. */
   headers?: () => Record<string, string>;
-}
+};
 
 /**
  * A data source over the `arcl serve` that served the page.

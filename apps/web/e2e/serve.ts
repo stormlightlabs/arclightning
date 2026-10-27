@@ -11,14 +11,14 @@ export const ARCL =
   join(process.env.CARGO_TARGET_DIR ?? fileURLToPath(new URL("../../../target", import.meta.url)), "debug", "arcl");
 
 /** `arcl serve` on a scratch project, with the CLI pointed at the same project. */
-export interface Served {
+export type Served = {
   /** The URL `arcl serve` printed, with the token for the first page load. */
   url: string;
   /** Run `arcl <args> --json` in the project and return the envelope's `data`. */
   cli: (...args: string[]) => any;
   /** Stop the server and delete the project. */
   stop: () => Promise<void>;
-}
+};
 
 /** How long one `arcl` command, or `arcl serve` printing its URL, may take, in ms. */
 export const SETUP_TIMEOUT = 10_000;

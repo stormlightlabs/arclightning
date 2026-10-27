@@ -20,13 +20,13 @@ export const NO_MILESTONE = "none";
 export type ReadinessFilter = "ready" | "blocked" | "waiting";
 
 /** The Work list's filters. An empty list puts no limit on its field. */
-export interface WorkFilters {
+export type WorkFilters = {
   status: TaskStatus[];
   readiness: ReadinessFilter[];
   priority: TaskPriority[];
   /** Milestone IDs, or {@link NO_MILESTONE}. */
   milestone: string[];
-}
+};
 
 /**
  * Read filters from a page URL's query. Each filter takes the first value of

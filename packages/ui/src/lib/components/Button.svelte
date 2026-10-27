@@ -7,14 +7,14 @@
   export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 
   /** Props for an Arc Lightning button. */
-  export interface ButtonProps extends Omit<HTMLButtonAttributes, "children"> {
+  export type ButtonProps = Omit<HTMLButtonAttributes, "children"> & {
     busy?: boolean;
     children?: Snippet;
     /** Icon drawn before the label and hidden from assistive tech. The spinner replaces it while busy. An icon-only button needs `aria-label`. */
     icon?: IconName;
     label?: string;
     variant?: ButtonVariant;
-  }
+  };
 </script>
 
 <script lang="ts">

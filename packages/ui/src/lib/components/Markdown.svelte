@@ -3,10 +3,10 @@
    * Props for safe Markdown presentation. Raw HTML is escaped, and GFM task
    * list items render as read-only checkboxes.
    */
-  export interface MarkdownProps {
+  export type MarkdownProps = {
     source: string;
     label?: string;
-  }
+  };
 </script>
 
 <script lang="ts">

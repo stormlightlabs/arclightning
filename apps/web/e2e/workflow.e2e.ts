@@ -2,12 +2,12 @@ import { expect, test, type Page } from "@playwright/test";
 import { serveScratch, stopAll, type Served } from "./serve";
 
 /** A record as the CLI's JSON lists it. */
-interface Listed {
+type Listed = {
   id: string;
   title: string;
   status: string;
   [field: string]: unknown;
-}
+};
 
 let served: Served | undefined;
 

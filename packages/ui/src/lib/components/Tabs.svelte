@@ -2,19 +2,19 @@
   import type { Snippet } from "svelte";
 
   /** A labelled panel in the shared tab set. */
-  export interface TabItem {
+  export type TabItem = {
     id: string;
     label: string;
     panel: Snippet;
     disabled?: boolean;
-  }
+  };
   /** Props for accessible tabs with arrow-key navigation. */
-  export interface TabsProps {
+  export type TabsProps = {
     label: string;
     items: TabItem[];
     selected?: string;
     onselect?: (id: string) => void;
-  }
+  };
 </script>
 
 <script lang="ts">

@@ -2,17 +2,17 @@
   import type { HTMLSelectAttributes } from "svelte/elements";
 
   /** A value and label displayed by the shared selector. */
-  export interface SelectOption {
+  export type SelectOption = {
     value: string;
     label: string;
     disabled?: boolean;
-  }
+  };
   /** Props for a labelled native selector. */
-  export interface SelectProps extends Omit<HTMLSelectAttributes, "value"> {
+  export type SelectProps = Omit<HTMLSelectAttributes, "value"> & {
     label: string;
     options: SelectOption[];
     value?: string;
-  }
+  };
 </script>
 
 <script lang="ts">

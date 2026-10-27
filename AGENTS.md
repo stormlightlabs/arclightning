@@ -4,6 +4,10 @@
   - Use only 1 level of super (i.e. no `super::super::`)
   - Import shared crate items through `arcl_core::prelude::*` and
     `arcl_store::prelude::*` rather than long item lists
+- In TypeScript, declare data shapes such as props, records and API envelopes
+  with `type`. Keep `interface` for contracts a class implements, and for the
+  global augmentations in `apps/web/src/app.d.ts` (`App.PageState`,
+  `ImportMetaEnv`, `Window`), which rely on declaration merging
 - Use the writing-docs skill and keep communication direct & succinct while retaining
   the user's voice. Describe the current product directly instead of framing it
   against earlier versions.

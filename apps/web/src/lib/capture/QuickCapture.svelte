@@ -2,7 +2,7 @@
   import type { Capture, ChangeWarning, Task } from "$lib/data/types";
 
   /** Props for the quick capture dialog. */
-  export interface QuickCaptureProps {
+  export type QuickCaptureProps = {
     open?: boolean;
     /** Whether `Mod` is `⌘`, for the key hints. */
     mac?: boolean;
@@ -10,7 +10,7 @@
     oncaptured?: (capture: Capture, warnings: ChangeWarning[]) => void;
     /** Called after `Mod+Enter` files a task, with the warnings its syncs gave. */
     oncreated?: (task: Task, warnings: ChangeWarning[]) => void;
-  }
+  };
 </script>
 
 <script lang="ts">

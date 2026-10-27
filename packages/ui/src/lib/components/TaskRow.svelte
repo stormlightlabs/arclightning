@@ -1,14 +1,14 @@
 <script module lang="ts">
   import type { TaskRowItem } from "../types";
   /** Props for one dense, linkable task row. */
-  export interface TaskRowProps {
+  export type TaskRowProps = {
     row: TaskRowItem;
     href: string;
     selected?: boolean;
     /** Whether Tab reaches this row; a list makes one row tabbable. */
     tabbable?: boolean;
     onselect?: (id: string) => void;
-  }
+  };
 </script>
 
 <script lang="ts">

@@ -13,26 +13,26 @@ import {
 export type TaskAction = "start" | "complete" | "handoff" | "park" | "unpark";
 
 /** The fields the Task view's edit form changes. */
-export interface TaskDraft {
+export type TaskDraft = {
   title: string;
   body: string;
   priority: TaskPriority;
-}
+};
 
 /** What a finished action reports to the view. */
-export interface ActionResult {
+export type ActionResult = {
   /** The tasks a completion made ready, by ID; empty for other actions. */
   unblocked: string[];
   /** The warnings the change's syncs gave; the change is saved. */
   warnings: ChangeWarning[];
-}
+};
 
 /** A failed change, as the view shows it next to the action. */
-export interface ActionFailure {
+export type ActionFailure = {
   /** The CLI's error code, such as `invalid_request`. */
   code: string;
   message: string;
-}
+};
 
 /** The button label of each action. */
 export const ACTION_LABELS: Record<TaskAction, string> = {

@@ -1,11 +1,11 @@
 import { QUEUED } from "$lib/data/types";
 
 /** The props of the `Feedback` that shows a failed change. */
-export interface FailureNotice {
+export type FailureNotice = {
   tone: "info" | "danger";
   title: string;
   message: string;
-}
+};
 
 /**
  * How a view shows a change that did not save: as `title` with the CLI's

@@ -2,7 +2,7 @@
   import type { IconName } from "../icons";
 
   /** One command the menu lists. */
-  export interface CommandItem {
+  export type CommandItem = {
     /** Unique across the menu; {@link CommandMenuProps.onrun} receives it. */
     id: string;
     label: string;
@@ -11,17 +11,17 @@
     /** The keys that run the command outside the menu, shown as key caps. */
     keys?: string[];
     icon?: IconName;
-  }
+  };
 
   /** A titled run of commands, such as the actions on the selected task. */
-  export interface CommandGroup {
+  export type CommandGroup = {
     id: string;
     label: string;
     items: CommandItem[];
-  }
+  };
 
   /** Props for the command menu: a search field over grouped commands in a dialog. */
-  export interface CommandMenuProps {
+  export type CommandMenuProps = {
     /** Whether the menu is open. */
     open?: boolean;
     /** The search text. The caller filters `groups` with it. */
@@ -40,7 +40,7 @@
     placeholder?: string;
     /** What the menu says when no command matches. */
     empty?: string;
-  }
+  };
 </script>
 
 <script lang="ts">

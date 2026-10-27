@@ -1,11 +1,11 @@
 <script lang="ts">
   import DataTable, { type DataTableColumn } from "../components/DataTable.svelte";
 
-  interface Item {
+  type Item = {
     id: string;
     title: string;
     note: string;
-  }
+  };
   let { items, width = "40rem" }: { items: Item[]; width?: string } = $props();
   let selectedId = $state<string | null>(null);
   const columns: DataTableColumn[] = [

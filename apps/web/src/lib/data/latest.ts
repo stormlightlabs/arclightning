@@ -1,16 +1,16 @@
 /** Where {@link latestRead} reports the read that finished. */
-export interface ReadReport<T> {
+export type ReadReport<T> = {
   loaded(value: T): void;
   failed(error: unknown): void;
-}
+};
 
 /** A read that a view starts, restarts and stops. */
-export interface LatestRead {
+export type LatestRead = {
   /** Abort the read in flight, if any, and start a new one. */
   start(): void;
   /** Abort the read in flight, if any. */
   stop(): void;
-}
+};
 
 /**
  * Run `read` one at a time for a view. Each start aborts the read before it,

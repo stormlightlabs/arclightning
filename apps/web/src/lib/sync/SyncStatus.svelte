@@ -2,7 +2,7 @@
   import type { SyncStatus } from "$lib/data/types";
 
   /** Props for the artifact's sync status. */
-  export interface SyncStatusProps {
+  export type SyncStatusProps = {
     status: SyncStatus;
     /** Whether a sync changed records since the view loaded. */
     stale?: boolean;
@@ -10,7 +10,7 @@
     onreload?: () => void;
     /** Remove a failed edit from the queue. */
     ondismiss?: (id: string) => void;
-  }
+  };
 </script>
 
 <script lang="ts">

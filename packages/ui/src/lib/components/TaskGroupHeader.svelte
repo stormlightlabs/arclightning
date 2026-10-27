@@ -1,13 +1,13 @@
 <script module lang="ts">
   /** Props for the heading over a group of task rows. */
-  export interface TaskGroupHeaderProps {
+  export type TaskGroupHeaderProps = {
     title: string;
     /** Text after the title, such as a count. */
     detail?: string;
     /** 2 for a top-level group, 3 for a section inside one. */
     level?: 2 | 3;
     id?: string;
-  }
+  };
 </script>
 
 <script lang="ts">

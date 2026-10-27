@@ -1,9 +1,9 @@
 <script module lang="ts">
   /** Props for a concise readiness explanation. */
-  export interface ReadinessProps {
+  export type ReadinessProps = {
     ready: boolean;
     reasons?: string[];
-  }
+  };
 </script>
 
 <script lang="ts">

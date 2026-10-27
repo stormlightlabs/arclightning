@@ -21,7 +21,7 @@ export const TRIAGE_LABELS: Record<TriageAction, string> = {
 };
 
 /** The Promote to task form. `phase` and `parent` are IDs, or `""` for none. */
-export interface TaskForm {
+export type TaskForm = {
   to: "task";
   title: string;
   priority: TaskPriority;
@@ -29,21 +29,21 @@ export interface TaskForm {
   parent: string;
   /** What the capture's tokens ask for that the form does not set, one line each. */
   notes: string[];
-}
+};
 
 /** The Promote to spec form. */
-export interface SpecForm {
+export type SpecForm = {
   to: "spec";
   title: string;
   /** Markdown acceptance criteria; blank leaves them out. */
   acceptance: string;
-}
+};
 
 /** The Make a note form. */
-export interface NoteForm {
+export type NoteForm = {
   to: "note";
   title: string;
-}
+};
 
 /** The form a promotion fills in before it runs. */
 export type PromotionForm = TaskForm | SpecForm | NoteForm;

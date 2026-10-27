@@ -3,7 +3,7 @@
   import type { TaskAction } from "./actions";
 
   /** Props for the body of the Task view, once its task has loaded. */
-  export interface TaskDetailProps {
+  export type TaskDetailProps = {
     detail: TaskDetail;
     /** Where the breadcrumb's Work link goes. */
     workHref: string;
@@ -27,7 +27,7 @@
      * warnings in, such as those of the create that opened the view.
      */
     warnings?: ChangeWarning[];
-  }
+  };
 </script>
 
 <script lang="ts">

@@ -30,42 +30,42 @@ import {
 } from "./types";
 
 /** A failed `db` call, as the artifact rejects it. */
-export interface ArtifactDbError {
+export type ArtifactDbError = {
   code: string;
   message: string;
-}
+};
 
 /** One document as a read or snapshot delivers it. */
-export interface ArtifactSnapshot {
+export type ArtifactSnapshot = {
   id: string;
   exists: boolean;
   data(): Record<string, unknown> | undefined;
-}
+};
 
 /** A reference to one document. */
-export interface ArtifactDocument {
+export type ArtifactDocument = {
   id: string;
   get(): Promise<ArtifactSnapshot>;
   set(data: Record<string, unknown>): Promise<void>;
   delete(): Promise<void>;
   onSnapshot(next: (snapshot: ArtifactSnapshot) => void, error?: (error: ArtifactDbError) => void): () => void;
-}
+};
 
 /** A query over one collection. */
-export interface ArtifactQuery {
+export type ArtifactQuery = {
   limit(count: number): ArtifactQuery;
   onSnapshot(
     next: (snapshot: { docs: ArtifactSnapshot[] }) => void,
     error?: (error: ArtifactDbError) => void,
   ): () => void;
-}
+};
 
 /** A collection: a query over everything in it, plus its documents. */
-export interface ArtifactCollection extends ArtifactQuery {
+export type ArtifactCollection = ArtifactQuery & {
   /** A document; without `id`, one under a fresh ID. */
   doc(id?: string): ArtifactDocument;
   orderBy(field: string, direction?: "asc" | "desc"): ArtifactQuery;
-}
+};
 
 /** The artifact's `db` capability. */
 export interface ArtifactDb {
@@ -74,19 +74,19 @@ export interface ArtifactDb {
 }
 
 /** The artifact's `user` capability. */
-export interface ArtifactUser {
+export type ArtifactUser = {
   /** The viewer's ID, or `null` when the page has no identity for them. */
   id(): Promise<string | null>;
-}
+};
 
 /** `window.claude` on an artifact page. */
-export interface ArtifactHost {
+export type ArtifactHost = {
   use(name: "db"): Promise<ArtifactDb | null>;
   use(name: "user"): Promise<ArtifactUser | null>;
-}
+};
 
 /** Options for {@link artifactSource}; tests pass their own. */
-export interface ArtifactOptions {
+export type ArtifactOptions = {
   /** The ID of the person viewing the page, stored on each queued edit. */
   userId?: () => Promise<string | null>;
   now?: () => Date;
@@ -94,7 +94,7 @@ export interface ArtifactOptions {
   setTimeout?: (run: () => void, ms: number) => unknown;
   /** Cancel a scheduled resubscription. */
   clearTimeout?: (handle: unknown) => void;
-}
+};
 
 /** What a queued change's {@link DataError} says. */
 export const QUEUED_MESSAGE =
