@@ -6,7 +6,7 @@ status = "completed"
 priority = "normal"
 position = 4
 blocked-by = ["arcl-t-01M5S4N8CBY1JSE73MV0NN5BW4"]
-evidence = "Delivered by #PR: apps/web and packages/ui set `bracketSameLine: true`, and one commit reformats both packages with no other changes. Verified with pnpm lint, check and test, the web build, build:artifact, and cargo fmt, clippy and test."
+evidence = "Delivered by #71: apps/web and packages/ui set `bracketSameLine: true`, and one commit reformats both packages with no other changes. Verified with pnpm lint, check and test, the web build, build:artifact, and cargo fmt, clippy and test."
 +++
 
 Set `bracketSameLine: true` in the Prettier config for `apps/web` and
