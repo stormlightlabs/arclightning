@@ -126,8 +126,7 @@
     bind:unsaved
     bind:warnings
     onchanged={refresh}
-    initialAction={asked?.id === id ? asked.action : null}
-  />
+    initialAction={asked?.id === id ? asked.action : null} />
 {/if}
 
 <style>

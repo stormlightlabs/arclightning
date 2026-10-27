@@ -24,8 +24,7 @@
   class={["arcl-icon", ICONS[name], className]}
   role={label ? "img" : undefined}
   style:--arcl-icon-size={resolvedSize}
-  style:color
-></span>
+  style:color></span>
 
 <style>
   .arcl-icon {

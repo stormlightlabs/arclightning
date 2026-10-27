@@ -74,8 +74,7 @@
       <tr>
         {#each columns as column (column.id)}
           <th scope="col" style:width={column.width} data-hide-narrow={column.hideNarrow || undefined}
-            >{column.label}</th
-          >
+            >{column.label}</th>
         {/each}
       </tr>
     </thead>
@@ -91,8 +90,7 @@
                   data-row-id={id}
                   aria-current={id === selectedId ? "true" : undefined}
                   tabindex={id === tabbableId ? 0 : -1}
-                  onkeydown={(event) => onkeydown(event, id)}
-                >
+                  onkeydown={(event) => onkeydown(event, id)}>
                   {@render cell(row, column)}
                 </button>
               {:else}

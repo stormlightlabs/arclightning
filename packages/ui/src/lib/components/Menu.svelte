@@ -59,8 +59,7 @@
 <svelte:window
   onclick={(event) => {
     if (open && !root.contains(event.target as Node)) open = false;
-  }}
-/>
+  }} />
 
 <div class="arcl-menu" bind:this={root}>
   <button
@@ -71,8 +70,7 @@
     onclick={() => {
       open = !open;
       if (open) requestAnimationFrame(() => focusItem(0));
-    }}>{label}<span aria-hidden="true">⌄</span></button
-  >
+    }}>{label}<span aria-hidden="true">⌄</span></button>
   {#if open}
     <div
       class="arcl-menu__items"
@@ -82,16 +80,14 @@
       onkeydown={handleKeydown}
       onfocusout={(event) => {
         if (!root.contains(event.relatedTarget as Node)) open = false;
-      }}
-    >
+      }}>
       {#each items as item (item.id)}
         <button
           type="button"
           role="menuitem"
           disabled={item.disabled}
           data-destructive={item.destructive || undefined}
-          onclick={() => choose(item)}>{item.label}</button
-        >
+          onclick={() => choose(item)}>{item.label}</button>
       {/each}
     </div>
   {/if}

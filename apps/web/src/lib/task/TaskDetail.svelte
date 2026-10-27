@@ -332,8 +332,7 @@
         label={copyLabel(
           blocker.task,
           ancestor ? `Completed blockers inherited from ${ancestor.title} (${ancestor.id})` : "Completed blockers",
-        )}
-      />
+        )} />
       <StatusBadge status={blocker.task.status} />
     </div>
     {#if ancestor}<p class="muted via">Inherited from <a href={taskHref(ancestor.id)}>{ancestor.title}</a></p>{/if}
@@ -368,8 +367,7 @@
             busy={busy === action}
             disabled={busy !== null}
             aria-expanded={ACTION_TEXT[action] === undefined ? undefined : asking === action}
-            onclick={() => choose(action)}
-          />
+            onclick={() => choose(action)} />
         {/each}
         {#if draft === null}
           <Button label="Edit" icon="edit" variant="ghost" disabled={busy !== null} onclick={openEdit} />
@@ -381,8 +379,7 @@
             variant="ghost"
             busy={busy === "file"}
             disabled={busy !== null || fileQueued}
-            onclick={openFile}
-          />
+            onclick={openFile} />
         {/if}
       </div>
       {#if canEditFile && fileQueued}
@@ -396,22 +393,19 @@
             value={text}
             label={`${label} Markdown`}
             readonly={false}
-            onchange={(value) => (text = value)}
-          />
+            onchange={(value) => (text = value)} />
           <div class="buttons">
             <Button
               type="submit"
               variant="primary"
               label={ACTION_LABELS[asking]}
               busy={busy === asking}
-              disabled={busy !== null}
-            />
+              disabled={busy !== null} />
             <Button
               label="Cancel"
               variant="ghost"
               disabled={busy !== null}
-              onclick={() => ((asking = null), (failure = null))}
-            />
+              onclick={() => ((asking = null), (failure = null))} />
           </div>
         </form>
       {/if}
@@ -419,14 +413,12 @@
         <Feedback
           tone="warning"
           title="The change is saved, with a warning"
-          message={`${warning.message} (${warning.code})`}
-        >
+          message={`${warning.message} (${warning.code})`}>
           {#snippet actions()}
             <Button
               label="Dismiss"
               variant="ghost"
-              onclick={() => (warnings = warnings.filter((_, other) => other !== index))}
-            />
+              onclick={() => (warnings = warnings.filter((_, other) => other !== index))} />
           {/snippet}
         </Feedback>
       {/each}
@@ -434,8 +426,7 @@
         <Feedback
           tone="warning"
           title="The change is saved, but this view did not reload"
-          message={`${stale.message} (${stale.code})`}
-        />
+          message={`${stale.message} (${stale.code})`} />
       {/if}
       {#each actions as action (action)}{@render failed(
           action,
@@ -500,22 +491,19 @@
           label="Record file"
           frontMatter
           readonly={false}
-          onchange={(value) => file && (file.text = value)}
-        />
+          onchange={(value) => file && (file.text = value)} />
         <div class="buttons">
           <Button
             type="submit"
             variant="primary"
             label="Save file"
             busy={busy === "file"}
-            disabled={busy !== null || fileQueued || file.text === file.source}
-          />
+            disabled={busy !== null || fileQueued || file.text === file.source} />
           <Button
             label="Cancel"
             variant="ghost"
             disabled={busy !== null}
-            onclick={() => ((file = null), (failure = null))}
-          />
+            onclick={() => ((file = null), (failure = null))} />
         </div>
         {#if failure?.action === "file"}
           <Feedback {...failureNotice(failure.failure, "Could not save the file")}>
@@ -533,29 +521,25 @@
           label="Priority"
           options={priorities}
           value={draft.priority}
-          onchange={(value) => draft && (draft.priority = value as TaskDraft["priority"])}
-        />
+          onchange={(value) => draft && (draft.priority = value as TaskDraft["priority"])} />
         <span class="label">Description</span>
         <MarkdownEditor
           value={draft.body}
           label="Description Markdown"
           readonly={false}
-          onchange={(value) => draft && (draft.body = value)}
-        />
+          onchange={(value) => draft && (draft.body = value)} />
         <div class="buttons">
           <Button
             type="submit"
             variant="primary"
             label="Save"
             busy={busy === "edit"}
-            disabled={busy !== null || Object.keys(edit).length === 0}
-          />
+            disabled={busy !== null || Object.keys(edit).length === 0} />
           <Button
             label="Cancel"
             variant="ghost"
             disabled={busy !== null}
-            onclick={() => ((draft = null), (failure = null))}
-          />
+            onclick={() => ((draft = null), (failure = null))} />
         </div>
         {@render failed("edit", "save the task")}
       </form>
@@ -568,8 +552,7 @@
               type="button"
               class="link-button"
               aria-pressed={showSource}
-              onclick={() => (showSource = !showSource)}
-            >
+              onclick={() => (showSource = !showSource)}>
               {showSource ? "Show rendered" : "View Markdown"}
             </button>
           {/if}

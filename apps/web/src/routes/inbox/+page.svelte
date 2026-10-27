@@ -366,8 +366,7 @@
       <Button
         label="Dismiss"
         variant="ghost"
-        onclick={() => (warnings = warnings.filter((_, other) => other !== index))}
-      />
+        onclick={() => (warnings = warnings.filter((_, other) => other !== index))} />
     {/snippet}
   </Feedback>
 {/each}
@@ -383,8 +382,7 @@
 {:else if captures.length === 0}
   <EmptyState
     title="The Inbox is empty"
-    message="Press Q to capture an idea. Captures wait here until you promote or discard them."
-  />
+    message="Press Q to capture an idea. Captures wait here until you promote or discard them." />
 {:else}
   <div class="inbox">
     <div class="columns">
@@ -394,8 +392,7 @@
         rowId={(capture) => capture.id}
         selectedId={selected}
         onselect={select}
-        label="Captures"
-      >
+        label="Captures">
         {#snippet cell(capture, column)}
           {@const date = column.id === "created" ? createdAt(capture.id) : null}
           {#if column.id === "title"}
@@ -430,8 +427,7 @@
                 variant={action === "task" ? "primary" : action === "discard" ? "ghost" : "secondary"}
                 aria-keyshortcuts={TRIAGE_KEYS[action]}
                 disabled={busy}
-                onclick={() => triage(action)}
-              >
+                onclick={() => triage(action)}>
                 <kbd aria-hidden="true">{formatKeys([TRIAGE_KEYS[action]], false)[0]}</kbd>
                 {TRIAGE_LABELS[action]}
               </Button>
@@ -452,8 +448,7 @@
 <Dialog
   bind:open={confirming}
   title="Discard this capture?"
-  description="A discarded capture leaves the Inbox for good."
->
+  description="A discarded capture leaves the Inbox for good.">
   <div class="confirm">
     <p>{selectedCapture?.title}</p>
     <div class="buttons">

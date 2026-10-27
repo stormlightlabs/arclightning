@@ -34,6 +34,5 @@
   {groups}
   {context}
   onclearcontext={() => (context = undefined)}
-  onrun={(id) => (ran = [...ran, id])}
-/>
+  onrun={(id) => (ran = [...ran, id])} />
 <output data-testid="ran">{ran.join(",")}</output>

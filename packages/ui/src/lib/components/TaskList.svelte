@@ -51,8 +51,7 @@
               href={href(row.id)}
               selected={row.id === selectedId}
               tabbable={row.id === tabbableId}
-              {onselect}
-            />
+              {onselect} />
           {/each}
         </ul>
       {/each}

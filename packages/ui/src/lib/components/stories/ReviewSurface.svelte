@@ -71,14 +71,12 @@
     <div class="row">
       <Button variant="primary" label="Create capture" /><Button label="Save changes" /><Button
         variant="ghost"
-        label="Cancel"
-      /><Button variant="danger" label="Discard" />
+        label="Cancel" /><Button variant="danger" label="Discard" />
     </div>
     <div class="row">
       <Button label="Unavailable" disabled /><Button label="Saving changes" busy /><IconButton
         name="capture"
-        label="Add capture"
-      /><IconButton name="task" label="Show tasks" selected /><Menu items={menuItems} />
+        label="Add capture" /><IconButton name="task" label="Show tasks" selected /><Menu items={menuItems} />
     </div>
     <div class="fields">
       <Field label="Title" bind:value={title} description="Use a short, actionable name." /><Select
@@ -87,22 +85,19 @@
         options={[
           { value: "low", label: "Low" },
           { value: "high", label: "High" },
-        ]}
-      />
+        ]} />
     </div>
     <Field
       label="Project path"
       value="/missing/project"
-      error="Choose a directory that contains an Arc Lightning project."
-    />
+      error="Choose a directory that contains an Arc Lightning project." />
   </section>
 
   <section aria-labelledby="records">
     <h2 id="records">Planning records</h2>
     <div class="row">
       <StatusBadge status="draft" /><StatusBadge status="ready" /><StatusBadge status="in_progress" /><StatusBadge
-        status="completed"
-      /><PriorityBadge priority="low" /><PriorityBadge priority="critical" />
+        status="completed" /><PriorityBadge priority="low" /><PriorityBadge priority="critical" />
     </div>
     <RecordSummary record={task} selected={selected === task.id} onselect={(record) => (selected = record.id)} />
     <PlanningTree nodes={tree} selectedId={selected} onselect={(node) => (selected = node.id)} />
@@ -115,12 +110,10 @@
     <Feedback
       title="Workspace and database diverged"
       message="Choose which side to keep before Arc Lightning writes another record."
-      tone="danger"
-    />
+      tone="danger" />
     <EmptyState title="Inbox clear" message="New captures will appear here for triage." />
     <Markdown
-      source={`### ${title}\n\nKeep planning context close to executable work.\n\n- Compare the common base\n- Stop on **true divergence**`}
-    />
+      source={`### ${title}\n\nKeep planning context close to executable work.\n\n- Compare the common base\n- Stop on **true divergence**`} />
   </section>
 </div>
 

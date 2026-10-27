@@ -19,8 +19,7 @@
   viewBox="0 0 14 14"
   role={label ? "img" : undefined}
   aria-label={label}
-  aria-hidden={label ? undefined : "true"}
->
+  aria-hidden={label ? undefined : "true"}>
   {#if kind === "done"}
     <circle cx="7" cy="7" r="6" fill="currentColor" />
     <path d="m4.3 7.2 1.8 1.8 3.6-3.8" fill="none" stroke="var(--arcl-surface)" stroke-width="1.5" />
@@ -32,8 +31,7 @@
       fill="none"
       stroke="currentColor"
       stroke-width="1.5"
-      stroke-dasharray={kind === "waiting" ? "2 2" : undefined}
-    />
+      stroke-dasharray={kind === "waiting" ? "2 2" : undefined} />
     {#if kind === "ready"}<circle cx="7" cy="7" r="2.5" fill="currentColor" />{/if}
     {#if kind === "blocked"}<path d="M4.5 7h5" stroke="currentColor" stroke-width="1.5" />{/if}
     {#if kind === "in_progress"}<path d="M7 1.5a5.5 5.5 0 0 1 0 11z" fill="currentColor" />{/if}

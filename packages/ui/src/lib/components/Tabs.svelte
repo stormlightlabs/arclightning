@@ -54,8 +54,7 @@
         tabindex={active === item.id ? 0 : -1}
         disabled={item.disabled}
         onkeydown={move}
-        onclick={() => select(item.id)}>{item.label}</button
-      >
+        onclick={() => select(item.id)}>{item.label}</button>
     {/each}
   </div>
   {#each items as item (item.id)}

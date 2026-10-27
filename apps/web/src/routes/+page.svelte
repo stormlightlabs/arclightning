@@ -368,8 +368,7 @@
         {label}
         options={options[name]}
         value={filters[name][0] ?? ""}
-        onchange={(value) => setFilter(name, value)}
-      />
+        onchange={(value) => setFilter(name, value)} />
     {/each}
   </form>
 </header>
@@ -382,15 +381,13 @@
       label="Priority"
       options={options.priority.slice(1)}
       value={creating.priority}
-      onchange={(value) => creating && (creating.priority = value as TaskPriority)}
-    />
+      onchange={(value) => creating && (creating.priority = value as TaskPriority)} />
     <span class="label">Description</span>
     <MarkdownEditor
       value={creating.body}
       label="Description Markdown"
       readonly={false}
-      onchange={(value) => creating && (creating.body = value)}
-    />
+      onchange={(value) => creating && (creating.body = value)} />
     <div class="buttons">
       <Button type="submit" variant="primary" label="Create" busy={createBusy} disabled={createBusy} />
       <Button label="Cancel" variant="ghost" disabled={createBusy} onclick={() => (creating = null)} />
@@ -413,8 +410,7 @@
     {...failureNotice(
       actionFailure.failure,
       `Could not ${ACTION_LABELS[actionFailure.action].toLowerCase()} ${actionFailure.title}`,
-    )}
-  />
+    )} />
 {/if}
 {#each actionWarnings as warning, index (index)}
   <Feedback tone="warning" title="The change is saved, with a warning" message={`${warning.message} (${warning.code})`}>
@@ -422,8 +418,7 @@
       <Button
         label="Dismiss"
         variant="ghost"
-        onclick={() => (actionWarnings = actionWarnings.filter((_, other) => other !== index))}
-      />
+        onclick={() => (actionWarnings = actionWarnings.filter((_, other) => other !== index))} />
     {/snippet}
   </Feedback>
 {/each}
@@ -439,15 +434,13 @@
 {:else if list.items.length === 0}
   <EmptyState
     title="No tasks yet"
-    message="Tasks appear here once you create one with New task or arcl task create, or apply a plan."
-  />
+    message="Tasks appear here once you create one with New task or arcl task create, or apply a plan." />
 {:else if order.length === 0}
   <EmptyState title="No tasks match these filters" message="Change or clear the filters to see more tasks.">
     {#snippet actions()}
       <Button
         label="Clear filters"
-        onclick={() => showFilters({ status: [], readiness: [], priority: [], milestone: [] })}
-      />
+        onclick={() => showFilters({ status: [], readiness: [], priority: [], milestone: [] })} />
     {/snippet}
   </EmptyState>
 {:else if view === "board"}
@@ -459,8 +452,7 @@
     locked={actionBusy}
     onselect={(id) => (selectedId = id)}
     onmove={move}
-    onrefuse={refuse}
-  />
+    onrefuse={refuse} />
 {:else}
   <TaskList {groups} href={taskHref} selectedId={selected} onselect={(id) => (selectedId = id)} label="Work" />
 {/if}

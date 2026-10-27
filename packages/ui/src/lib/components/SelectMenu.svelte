@@ -118,8 +118,7 @@
 <svelte:window
   onpointerdown={(event) => {
     if (open && !root.contains(event.target as Node)) hide();
-  }}
-/>
+  }} />
 
 <div class="arcl-select-menu" bind:this={root}>
   <div
@@ -139,8 +138,7 @@
     {onkeydown}
     onfocusout={(event) => {
       if (open && !root.contains(event.relatedTarget as Node)) hide();
-    }}
-  >
+    }}>
     <span class="arcl-select-menu__label" id={labelId}>{label}</span>
     <span class="arcl-select-menu__value">{options[selectedIndex]?.label ?? placeholder}</span>
     <Icon name="chevronDown" size="1rem" />
@@ -167,8 +165,7 @@
         if (index === null || options[index].disabled) return;
         choose(index);
         hide();
-      }}
-    >
+      }}>
       {#each options as option, index (option.value)}
         <div
           class="arcl-select-menu__option"
@@ -178,8 +175,7 @@
           aria-selected={index === selectedIndex}
           aria-disabled={option.disabled || undefined}
           data-active={index === active || undefined}
-          data-index={index}
-        >
+          data-index={index}>
           <span>{option.label}</span>
           {#if index === selectedIndex}<Icon name="check" size="1rem" />{/if}
         </div>

@@ -155,8 +155,7 @@
       aria-labelledby={`${baseId}-${column.status}`}
       ondragover={(event) => ondragover(event, column.status)}
       ondragleave={() => over === column.status && (over = null)}
-      ondrop={(event) => ondrop(event, column.status)}
-    >
+      ondrop={(event) => ondrop(event, column.status)}>
       <h2 id={`${baseId}-${column.status}`}>{column.title} <span class="count">{column.cards.length}</span></h2>
       <ul aria-labelledby={`${baseId}-${column.status}`}>
         {#each column.cards as card (card.id)}
@@ -167,8 +166,7 @@
             aria-busy={card.id === busyId}
             draggable={!locked}
             ondragstart={(event) => ondragstart(event, card)}
-            ondragend={() => ((dragging = null), (over = null))}
-          >
+            ondragend={() => ((dragging = null), (over = null))}>
             <div class="top">
               <span class="id"><CopyId id={card.id} label={`Copy the ID of ${card.title} (${card.id})`} /></span>
               <PriorityBadge priority={card.priority} />
@@ -176,8 +174,7 @@
             <a
               href={taskHref(card.id)}
               aria-current={card.id === selectedId ? "true" : undefined}
-              onfocus={() => onselect?.(card.id)}>{card.title}</a
-            >
+              onfocus={() => onselect?.(card.id)}>{card.title}</a>
             <div class="bottom">
               <span class="readiness" title={card.reasons.join("\n") || undefined}>
                 <TaskGlyph kind={card.glyph} />
@@ -191,8 +188,7 @@
                 aria-haspopup="dialog"
                 busy={card.id === busyId}
                 disabled={locked}
-                onclick={() => openMove(card, false)}
-              />
+                onclick={() => openMove(card, false)} />
             </div>
           </li>
         {/each}
@@ -208,8 +204,7 @@
     : moving.completing
       ? `Complete ${moving.card.title}`
       : `Move ${moving.card.title}`}
-  description={moving === null ? undefined : `In ${formatStatus(moving.card.status)}`}
->
+  description={moving === null ? undefined : `In ${formatStatus(moving.card.status)}`}>
   {#if moving !== null && moving.completing}
     <form class="complete" aria-label="Complete" onsubmit={complete}>
       <MarkdownEditor
@@ -217,8 +212,7 @@
         value={evidence}
         label="Evidence Markdown"
         readonly={false}
-        onchange={(value) => (evidence = value)}
-      />
+        onchange={(value) => (evidence = value)} />
       <div class="buttons">
         <Button type="submit" variant="primary" label="Complete" />
         <Button label="Cancel" variant="ghost" onclick={() => (dialogOpen = false)} />
@@ -236,8 +230,7 @@
             <Button
               label={formatStatus(target)}
               variant={target === targets[0] ? "primary" : "secondary"}
-              onclick={() => moveTo(card, target)}
-            />
+              onclick={() => moveTo(card, target)} />
           </li>
         {/each}
       </ul>
