@@ -153,6 +153,8 @@ pub(super) fn show_record(database: &Database, id: &str, renderer: &Renderer) ->
 
 /// Builds the `arcl tree` nodes, from the record `root` names or of every
 /// record. `ready` holds the ready tasks, for the pending tasks' marks.
+/// Specs come first, then tasks outside any spec, then captures, notes and
+/// releases in [`TREE_SECTIONS`] order; each kind is in ID order.
 /// Promoted and discarded captures appear only with `options.all` or as
 /// `root`.
 pub(super) fn connected_tree(
@@ -234,7 +236,7 @@ pub(super) fn connected_tree(
             children: Vec::new(),
         });
     }
-    nodes.sort_by(|left, right| left.kind.cmp(right.kind).then_with(|| left.id.cmp(&right.id)));
+    nodes.sort_by(|left, right| (tree_rank(left.kind), &left.id).cmp(&(tree_rank(right.kind), &right.id)));
     let Some(root) = root else { return Ok(nodes) };
     if let Some(node) = find_tree_node(&nodes, root) {
         return Ok(vec![node.clone()]);
@@ -504,6 +506,16 @@ fn find_tree_node<'a>(nodes: &'a [ConnectedTreeNode], id: &str) -> Option<&'a Co
             if node.id == id { Some(node) } else { find_tree_node(&node.children, id) }
         },
     )
+}
+
+/// The sort rank of a top-level tree node `kind`: specs, then tasks, then
+/// the kinds in [`TREE_SECTIONS`] order.
+fn tree_rank(kind: &str) -> usize {
+    match kind {
+        "spec" => 0,
+        "task" => 1,
+        _ => 2 + tree_section(kind).unwrap_or(TREE_SECTIONS.len()),
+    }
 }
 
 fn tree_root_error(id: &str) -> CommandError {

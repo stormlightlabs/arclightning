@@ -77,7 +77,7 @@ pub(super) fn read_tree(root: Option<&str>, options: TreeArgs, renderer: &Render
     let mut nodes = connected_tree(&graph, &ready, root.as_deref(), options).map_err(ApplicationError::from_command)?;
     let ids = display_ids(&database, renderer).map_err(ApplicationError::from_command)?;
     shorten_tree(&mut nodes, &ids);
-    Ok(renderer.render_connected_tree(&nodes)?)
+    Ok(renderer.render_connected_tree(&nodes, root.is_some())?)
 }
 
 /// Replace each node's ID with its short ID.

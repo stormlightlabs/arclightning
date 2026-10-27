@@ -2,9 +2,10 @@
 id = "arcl-t-01M5VDDDAS9P34RVKCAGHXRSFH"
 phase = "arcl-ph-01M5VDD6PCB2B64MKW9TX01XXG"
 title = "Put the plan first in arcl tree"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 3
+evidence = "Delivered by #60: specs print first in arcl tree, with captures, notes and releases under Inbox, Notes and Releases headings."
 +++
 
 Put the plan first in `arcl tree`. Unplaced captures, notes and releases
@@ -25,10 +26,10 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] The first line of `arcl tree` is a spec
-- [ ] Captures, notes and releases follow under Inbox, Notes and Releases
+- [x] The first line of `arcl tree` is a spec
+- [x] Captures, notes and releases follow under Inbox, Notes and Releases
       headings
-- [ ] `--json` output keeps its shape
+- [x] `--json` output keeps its shape
 
 Verification:
 

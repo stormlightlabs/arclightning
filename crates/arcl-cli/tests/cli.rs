@@ -1028,7 +1028,7 @@ fn tree_leaves_out_closed_captures_unless_all() {
             .into_iter()
             .find(|line| line.ends_with(&format!("[{title}]")))
             .unwrap_or_else(|| panic!("a tree line for {title} in:\n{human_all}"));
-        line.chars().next().expect("a non-empty line")
+        line.trim_start().chars().next().expect("a non-empty line")
     };
     assert_eq!(mark("Promoted idea"), '✓');
     assert_eq!(mark("Discarded idea"), '✗');
@@ -1038,6 +1038,91 @@ fn tree_leaves_out_closed_captures_unless_all() {
         let nodes = rooted["data"]["nodes"].as_array().expect("tree nodes");
         assert_eq!(nodes.len(), 1, "{rooted}");
         assert_eq!(nodes[0]["id"], closed.as_str());
+    }
+}
+
+#[test]
+fn tree_puts_specs_first_and_unplaced_records_under_sections() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    // Created before the spec, so these records' IDs sort ahead of its ID.
+    run_json(dir, ["--json", "release", "create", "v1"].as_ref());
+    run_json(dir, ["--json", "note", "create", "Decision"].as_ref());
+    create_capture(dir, "Idea", "Later");
+    create_task(dir, "Loose", None);
+    run_json(dir, ["--json", "spec", "create", "Feature"].as_ref());
+
+    let human = stdout_of(dir, &["--color", "never", "tree"]);
+    let lines = human.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 8, "{human}");
+    let record = |index: usize, prefix: &str, title: &str| {
+        let line = lines[index];
+        assert!(
+            line.starts_with(prefix) && line.ends_with(&format!("[{title}]")),
+            "{human}"
+        );
+    };
+    record(0, "○ spec `", "Feature");
+    record(1, "● task `", "Loose");
+    assert_eq!(lines[2], "Inbox", "{human}");
+    record(3, "  ○ capture `", "Idea");
+    assert_eq!(lines[4], "Notes", "{human}");
+    record(5, "  ○ note `", "Decision");
+    assert_eq!(lines[6], "Releases", "{human}");
+    record(7, "  ○ release `", "v1");
+
+    let expected = ["spec", "task", "capture", "note", "release"];
+    let plain = stdout_of(dir, &["--plain", "tree"]);
+    let plain_kinds = plain
+        .lines()
+        .map(|line| {
+            let fields = line.split('\t').collect::<Vec<_>>();
+            assert_eq!(fields.len(), 5, "{plain}");
+            assert_eq!(fields[0], "0", "{plain}");
+            fields[1]
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(plain_kinds, expected);
+
+    let tree = run_json(dir, ["--json", "tree"].as_ref());
+    assert_eq!(tree["format_version"], 1);
+    let nodes = tree["data"]["nodes"].as_array().expect("tree nodes");
+    let json_kinds = nodes
+        .iter()
+        .map(|node| node["kind"].as_str().expect("a node kind"))
+        .collect::<Vec<_>>();
+    assert_eq!(json_kinds, expected);
+    for node in nodes {
+        let mut keys = node
+            .as_object()
+            .expect("node object")
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        keys.sort();
+        assert_eq!(keys, ["children", "id", "kind", "status", "title"], "{node}");
+    }
+}
+
+#[test]
+fn rooted_tree_prints_the_record_without_a_section_heading() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let release = run_json(dir, ["--json", "release", "create", "v1"].as_ref());
+    let release_id = release["data"]["release"]["id"]
+        .as_str()
+        .expect("release ID")
+        .to_owned();
+    let capture_id = create_capture(dir, "Idea", "Later");
+
+    for (id, prefix, title) in [(&release_id, "○ release `", "v1"), (&capture_id, "○ capture `", "Idea")] {
+        let human = stdout_of(dir, &["--color", "never", "tree", id]);
+        let lines = human.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 1, "{human}");
+        assert!(
+            lines[0].starts_with(prefix) && lines[0].ends_with(&format!("[{title}]")),
+            "{human}"
+        );
     }
 }
 

@@ -228,6 +228,14 @@ association filters.
 `--json` output; `--all` includes them. A closed capture named as the root
 still shows. The JSON nodes keep their shape either way.
 
+`tree` prints specs first, then tasks outside any spec, then captures, notes
+and releases, each kind in ID order. Human output puts the captures, notes and
+releases under `Inbox`, `Notes` and `Releases` headings, with their records
+indented below. `arcl tree <id>` prints that record at depth `0` with no
+heading. `--plain` keeps one record per row, with top-level records at depth
+`0` and no heading rows, and `--json` lists the top-level nodes in the same
+order.
+
 See [Inspecting Work](/guides/inspect-work/) for the query workflow and context contents.
 
 ## Web app

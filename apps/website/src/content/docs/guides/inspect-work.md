@@ -38,8 +38,10 @@ arcl tree arcl-t-01J...
 arcl tree --all
 ```
 
+Specs and their plans print first, then tasks outside any spec. Captures,
+notes and releases follow under `Inbox`, `Notes` and `Releases` headings.
 Records use deterministic position and ID ordering. Promoted and discarded
-captures are left out; `--all` includes them. Each line starts with a
+captures are left out; `--all` includes them. Each record line starts with a
 status mark:
 
 | Mark | Status                                                                                    |

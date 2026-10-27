@@ -17,6 +17,11 @@ use arcl_store::{
     CheckReport, PlanApplyResult, PlanDiff, PlanningCompletion, PlanningContext, PlanningTaskView, PlanningWork,
 };
 
+/// The record kinds human `arcl tree` output groups under a heading at the
+/// top level, with each heading, in the order the sections print. They follow
+/// the specs and the tasks outside any spec.
+pub const TREE_SECTIONS: [(&str, &str); 3] = [("capture", "Inbox"), ("note", "Notes"), ("release", "Releases")];
+
 /// The heading for files with lines that look like conflict markers.
 const MARKER_LABEL: &str = "Lines that look like conflict markers (sync accepts them as content):";
 
@@ -585,10 +590,14 @@ impl Renderer {
         self.render_collection("records", records, records)
     }
 
-    /// Render the connected planning hierarchy.
-    pub fn render_connected_tree(&self, nodes: &[ConnectedTreeNode]) -> Result<Option<String>, OutputError> {
+    /// Render the connected planning hierarchy. A `rooted` tree prints its
+    /// nodes at depth `0` with no section headings.
+    pub fn render_connected_tree(
+        &self, nodes: &[ConnectedTreeNode], rooted: bool,
+    ) -> Result<Option<String>, OutputError> {
         let message = match self.mode {
-            OutputMode::Human => nodes.iter().map(|node| node.human(0)).collect::<Vec<_>>().join("\n"),
+            OutputMode::Human if rooted => nodes.iter().map(|node| node.human(0)).collect::<Vec<_>>().join("\n"),
+            OutputMode::Human => human_tree(nodes),
             OutputMode::Plain => nodes
                 .iter()
                 .flat_map(|node| node.plain_lines(0))
@@ -1295,6 +1304,30 @@ struct NextPlanningData<'a> {
     task: Option<&'a PlanningTask>,
 }
 
+/// The place of a top-level record `kind` in [`TREE_SECTIONS`], or `None`
+/// for the specs and tasks that print before every section.
+pub fn tree_section(kind: &str) -> Option<usize> {
+    TREE_SECTIONS.iter().position(|(section, _)| *section == kind)
+}
+
+/// Renders top-level tree nodes for human output in the order given: nodes
+/// outside [`TREE_SECTIONS`] flush-left, and a section's heading before its
+/// first node, with its nodes indented below it. A section with no nodes
+/// prints nothing.
+fn human_tree(nodes: &[ConnectedTreeNode]) -> String {
+    let mut lines = Vec::new();
+    let mut current = None;
+    for node in nodes {
+        let section = tree_section(node.kind);
+        if let Some(index) = section.filter(|_| section != current) {
+            lines.push(TREE_SECTIONS[index].1.to_owned());
+        }
+        current = section;
+        lines.push(node.human(usize::from(section.is_some())));
+    }
+    lines.join("\n")
+}
+
 fn human_action(action: &str) -> &str {
     match action {
         "created" => "Created",
@@ -1875,7 +1908,7 @@ mod tests {
         let nodes = [node];
         let render = |mode| {
             Renderer::new(mode, ColorChoice::Never)
-                .render_connected_tree(&nodes)
+                .render_connected_tree(&nodes, false)
                 .expect("rendering succeeds")
                 .expect("output is not quiet")
         };
