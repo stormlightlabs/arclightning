@@ -1,7 +1,7 @@
 +++
 id = "arcl-r-01M5YKX4WNX7F9EEJAABZYBNKG"
 title = "v0.3.0"
-status = "open"
+status = "completed"
 
 [[members]]
 kind = "task"
@@ -36,4 +36,4 @@ kind = "task"
 id = "arcl-t-01M5YKWJVRBAYQKGCYC4S25D3T"
 +++
 
-Ships the CLI formatting milestone: short record IDs, a status mark on each `arcl tree` line, closed captures left out of the tree, the plan first, finished milestones folded, and the full and outline styles. It is the first release dist builds and publishes, with archives for Linux, macOS and Windows, shell and PowerShell installers, a Homebrew formula in `stormlightlabs/homebrew-tap`, and cargo-binstall support. "Prepare and tag v0.3.0" covers the release work itself.
+Ships the CLI formatting milestone: short record IDs, a status mark on each `arcl tree` line, closed captures left out of the tree, the plan first, finished milestones folded, and the full and outline styles. It is the first release dist builds and publishes, with archives for Linux, macOS and Windows, shell and PowerShell installers, a Homebrew formula in `stormlightlabs/homebrew-tap`, and cargo-binstall support. "Prepare and tag v0.3.0" covers the release work itself. Tagged `v0.3.0` on d4b9f16 (#64). Install with `curl --proto '=https' --tlsv1.2 -LsSf https://github.com/stormlightlabs/arclightning/releases/download/v0.3.0/arcl-cli-installer.sh | sh` or `brew install stormlightlabs/tap/arcl`.
