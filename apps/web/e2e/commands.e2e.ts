@@ -263,7 +263,10 @@ test("q opens quick capture from any view, and its tokens set the task's fields"
   await expect(capture).toBeFocused();
   await page.keyboard.type("An idea !high");
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("status")).toHaveText("Captured “An idea !high” in the Inbox.");
+  // The Task view's ID copy controls are status regions too.
+  await expect(page.getByRole("status").filter({ hasText: "Captured" })).toHaveText(
+    "Captured “An idea !high” in the Inbox.",
+  );
 
   await page.keyboard.press("q");
   await expect(capture).toBeFocused();

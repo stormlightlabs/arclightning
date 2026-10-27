@@ -6,6 +6,7 @@ export const ICONS = {
   check: "i-ri-check-line",
   chevronDown: "i-ri-arrow-down-s-line",
   close: "i-ri-close-line",
+  copy: "i-ri-file-copy-line",
   github: "i-ri-github-fill",
   inbox: "i-ph-tray",
   markdown: "i-ri-markdown-line",

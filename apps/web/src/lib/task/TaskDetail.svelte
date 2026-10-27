@@ -34,6 +34,7 @@
   import { tick, untrack } from "svelte";
   import {
     Button,
+    CopyId,
     Feedback,
     Field,
     Markdown,
@@ -309,7 +310,7 @@
 {#snippet relation(related: Task)}
   <li>
     <a href={taskHref(related.id)}>{related.title}</a>
-    <code>{related.id}</code>
+    <CopyId id={related.id} />
     <StatusBadge status={related.status} />
   </li>
 {/snippet}
@@ -318,7 +319,7 @@
   <li>
     <div class="row">
       <a href={taskHref(blocker.task.id)}>{blocker.task.title}</a>
-      <code>{blocker.task.id}</code>
+      <CopyId id={blocker.task.id} />
       <StatusBadge status={blocker.task.status} />
     </div>
     {#if ancestor}<p class="muted via">Inherited from <a href={taskHref(ancestor.id)}>{ancestor.title}</a></p>{/if}
@@ -343,7 +344,7 @@
 <div class="layout" data-panel={panelOpen ? "open" : "closed"}>
   <article aria-labelledby="task-title">
     <header>
-      <code class="id">{task.id}</code>
+      <div class="id"><CopyId id={task.id} /></div>
       <h1 id="task-title">{task.title}</h1>
       <div class="actions" role="group" aria-label="Task actions">
         {#each actions as action, index (action)}
@@ -434,7 +435,7 @@
             Unblocked:
             <ul>
               {#each unblockedTasks(unblocked, detail) as ready (ready.id)}
-                <li><a href={taskHref(ready.id)}>{ready.title}</a> <code>{ready.id}</code></li>
+                <li><a href={taskHref(ready.id)}>{ready.title}</a> <CopyId id={ready.id} /></li>
               {/each}
             </ul>
           {:else}
@@ -683,8 +684,8 @@
     gap: var(--arcl-space-1);
   }
   .id {
-    color: var(--arcl-text-muted);
-    font: var(--arcl-type-sm) var(--arcl-font-code);
+    display: flex;
+    font-size: var(--arcl-type-sm);
   }
   h1 {
     margin: 0;
@@ -799,9 +800,8 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .relations code {
-    color: var(--arcl-text-muted);
-    font: var(--arcl-type-xs) var(--arcl-font-code);
+  .relations :global(.arcl-copy-id) {
+    font-size: var(--arcl-type-xs);
   }
   .done li {
     display: grid;
@@ -860,9 +860,8 @@
   .notice a {
     color: var(--arcl-link);
   }
-  .notice code {
-    color: var(--arcl-text-muted);
-    font: var(--arcl-type-xs) var(--arcl-font-code);
+  .notice :global(.arcl-copy-id) {
+    font-size: var(--arcl-type-xs);
   }
   @media (max-width: 60rem) {
     .layout,

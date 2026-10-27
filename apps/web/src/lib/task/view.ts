@@ -129,6 +129,7 @@ export function propertiesOf(detail: TaskDetail): PropertyItem[] {
   const { task } = detail;
   const parent = detail.ancestors.at(-1) ?? null;
   return [
+    { label: "ID", value: task.id, copy: true },
     { label: "Status", value: formatStatus(task.status), status: task.status },
     { label: "Readiness", value: readinessLabel(detail) },
     { label: "Priority", value: task.priority, priority: task.priority },

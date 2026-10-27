@@ -246,3 +246,24 @@ describe("TaskDetail changes", () => {
     expect(unsaved).toBe(false);
   });
 });
+
+describe("TaskDetail IDs", () => {
+  afterEach(() => {
+    delete (navigator as { clipboard?: unknown }).clipboard;
+  });
+
+  it("puts a copy button on the task's ID, its properties and its related tasks", async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    stubSource(blockedDetail());
+    const root = view(blockedDetail());
+    const header = root.querySelector("header")!;
+    header.querySelector<HTMLButtonElement>('button[aria-label="Copy ID"]')!.click();
+    await settle();
+    expect(writeText).toHaveBeenCalledWith("t-10.4");
+    expect(header.querySelector('[role="status"]')?.textContent).toBe("Copied");
+    const panel = root.querySelector('aside[aria-label="Properties"]')!;
+    expect(panel.querySelector(".arcl-copy-id code")?.textContent).toBe("t-10.4");
+    expect(root.querySelectorAll(".relations .arcl-copy-id").length).toBeGreaterThan(0);
+  });
+});
