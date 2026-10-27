@@ -2,10 +2,11 @@
 id = "arcl-t-01M5VDDDFDTPS7XC8PCK9PNWV9"
 phase = "arcl-ph-01M5VDD6PCB2B64MKW9TX01XXG"
 title = "Add full and outline styles to arcl tree"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 5
 blocked-by = ["arcl-t-01M5VDDDD562QZYTSA0VJNWNTS"]
+evidence = "Delivered by #62: arcl tree --style full unfolds every phase with short IDs aligned right, and --style outline prints STATUS, ID and TITLE columns with dot indentation and no box characters. Both follow --all, --ascii, --depth and the colour rules; folded, --plain and --json output are byte-identical to main on this repository."
 +++
 
 Add `--style full` and `--style outline` to `arcl tree`, beside the default
@@ -34,13 +35,13 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] `--style full` shows every record unfolded, with short IDs on the
+- [x] `--style full` shows every record unfolded, with short IDs on the
       right
-- [ ] `--style outline` prints STATUS, ID and TITLE columns with dot
+- [x] `--style outline` prints STATUS, ID and TITLE columns with dot
       indentation and no box characters
-- [ ] Both styles follow the colour and `--ascii` rules
-- [ ] The manual documents `--style`
-- [ ] `--json` output is unchanged
+- [x] Both styles follow the colour and `--ascii` rules
+- [x] The manual documents `--style`
+- [x] `--json` output is unchanged
 
 Verification:
 

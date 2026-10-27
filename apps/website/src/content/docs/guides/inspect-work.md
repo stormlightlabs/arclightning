@@ -37,6 +37,7 @@ arcl tree arcl-e-01J...
 arcl tree arcl-t-01J...
 arcl tree --all
 arcl tree --ascii --depth 3
+arcl tree --style outline | grep in_progress
 ```
 
 `tree` draws specs and their plans first, then tasks outside any spec, in
@@ -62,8 +63,11 @@ Inbox: 24 open · Notes: 17 · Releases: v0.1.0, v0.2.0
 
 `--all` unfolds every phase, lists the captures, notes and releases under
 `Inbox`, `Notes` and `Releases` headings, and includes promoted and discarded
-captures. `--depth N` stops after `N` levels. Each line starts with a status
-mark:
+captures. `--depth N` stops after `N` levels. `--style full` unfolds every
+phase and puts each record's short ID on the right. `--style outline` prints
+`STATUS`, `ID` and `TITLE` columns without box characters, for narrow
+terminals and `grep`. In the folded and full styles each line starts with a
+status mark:
 
 | Mark | ASCII | Status                                                                                    |
 | ---- | ----- | ----------------------------------------------------------------------------------------- |

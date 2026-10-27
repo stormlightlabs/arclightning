@@ -210,16 +210,16 @@ task ID, then a `subtask<TAB><id>` line for each completed subtask and an
 
 ## Inspection
 
-| Command                                            | Purpose                                                            |
-| -------------------------------------------------- | ------------------------------------------------------------------ |
-| `arcl show <id>`                                   | Show one record by its full or short ID.                           |
-| `arcl list`                                        | List records using kind, state, priority, and association filters. |
-| `arcl tree [<id>] [--all] [--ascii] [--depth <N>]` | Show the complete hierarchy or one rooted subtree.                 |
-| `arcl explain <task-id>`                           | Report every condition affecting task readiness.                   |
-| `arcl context <task-id>`                           | Return the bounded context needed to work on a task.               |
-| `arcl check`                                       | Validate database and graph invariants.                            |
-| `arcl ready`                                       | List actionable leaf tasks in deterministic order.                 |
-| `arcl next`                                        | Return the first actionable task, if one exists.                   |
+| Command                                                              | Purpose                                                            |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `arcl show <id>`                                                     | Show one record by its full or short ID.                           |
+| `arcl list`                                                          | List records using kind, state, priority, and association filters. |
+| `arcl tree [<id>] [--all] [--ascii] [--depth <N>] [--style <STYLE>]` | Show the complete hierarchy or one rooted subtree.                 |
+| `arcl explain <task-id>`                                             | Report every condition affecting task readiness.                   |
+| `arcl context <task-id>`                                             | Return the bounded context needed to work on a task.               |
+| `arcl check`                                                         | Validate database and graph invariants.                            |
+| `arcl ready`                                                         | List actionable leaf tasks in deterministic order.                 |
+| `arcl next`                                                          | Return the first actionable task, if one exists.                   |
 
 `list` accepts `--kind`, `--status`, `--priority`, `--release`, `--epic`,
 `--milestone`, and `--parent`. `ready` and `next` accept the same priority and
@@ -232,7 +232,8 @@ still shows. The JSON nodes keep their shape either way.
 `tree` prints specs first, then tasks outside any spec, then captures, notes
 and releases, each kind in ID order. `--plain` keeps one record per row, with
 top-level records at depth `0`, and `--json` lists the top-level nodes in the
-same order. Both print every record and ignore `--ascii` and `--depth`.
+same order. Both print every record and ignore `--ascii`, `--depth` and
+`--style`.
 
 Human output draws a box-drawing tree. Each line holds a status mark and the
 record's title, with no ID. A phase adds its completed and total task counts,
@@ -252,11 +253,42 @@ A footer sums up the captures, notes and releases, such as
 `Inbox: 24 open · Notes: 17 · Releases: v0.1.0, v0.2.0`. It leaves out empty
 parts, and an empty project prints none.
 
-| Flag        | Human output                                                                                                                      |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `--all`     | Unfolds every phase and lists captures, notes and releases under `Inbox`, `Notes` and `Releases` headings in place of the footer. |
-| `--ascii`   | Draws with `\|--`, `` `-- `` and `\|`, as GNU `tree -A` does, and uses each mark's ASCII form.                                    |
-| `--depth N` | Stops after `N` levels of records, counting top-level records as `1`.                                                             |
+| Flag              | Human output                                                                                                                      |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `--all`           | Unfolds every phase and lists captures, notes and releases under `Inbox`, `Notes` and `Releases` headings in place of the footer. |
+| `--ascii`         | Draws with `\|--`, `` `-- `` and `\|`, as GNU `tree -A` does, and uses each mark's ASCII form.                                    |
+| `--depth N`       | Stops after `N` levels of records, counting top-level records as `1`.                                                             |
+| `--style <STYLE>` | Lays the tree out as `folded`, the default, `full` or `outline`.                                                                  |
+
+`--style full` draws the same tree with every phase unfolded. Each record line
+ends with the record's short ID, aligned right two spaces past the widest
+record line, counted in terminal columns, so a wide character such as `日`
+counts as two. Every record line pads to that widest line whatever the
+terminal's width, so one long title widens the whole view. Headings and the
+footer carry no ID and no padding.
+
+Terminals that draw East Asian Ambiguous characters double-width, common in
+CJK locales, misalign the marks and box lines. Use `--ascii` there.
+
+`--style outline` prints a `STATUS`, `ID` and `TITLE` header, then one row per
+record, with no box characters and no marks:
+
+```text
+STATUS       ID    TITLE
+open         W6XC  Roadmap
+open         FMEE  . Milestone 7: Local web app
+in_progress  5BW4  . . T24: Format apps/web and packages/ui with Prettier
+```
+
+`STATUS` is the stored status `--plain` prints. Each level below the top, or
+below a section heading, adds `. ` before the title. Rows carry no task counts
+or blockers. Phases never fold, and a section heading sits in the `TITLE`
+column.
+
+Every style keeps the footer, or the section headings with `--all`, and
+follows `--all`, `--ascii`, `--depth` and the colour rules below.
+Every style prints control characters in titles escaped, as `\n`, `\t` or
+`\x1b`, so a title cannot add a line or send the terminal an escape sequence.
 
 `arcl tree <id>` draws that record and its subtree, never folding the root,
 with no headings and no footer.
