@@ -239,8 +239,10 @@ task ID, then a `subtask<TAB><id>` line for each completed subtask and an
 association filters.
 
 `next --start` selects and starts the task in one write transaction, so two
-concurrent calls never start the same task; the second waits and takes the
-next one. `next --start` selects the task `next` returns, and `--claim` names
+concurrent calls never start the same task. The second waits up to 5 seconds
+for the first to finish, then takes the next ready task; if the database stays
+locked longer, it fails with `database is locked` (exit `1`) and can be run
+again. `next --start` selects the task `next` returns, and `--claim` names
 the assignee as `task start --claim` does. When nothing is ready it
 prints `Nothing to start`, prints nothing with `--plain`, returns a null
 `data.task` with `--json`, and exits `0`.

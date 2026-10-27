@@ -451,9 +451,8 @@ pub fn start_next_planning_task(
     connection: &mut Connection, project_id: ProjectId, filter: &PlanningReadyFilter, claim: Option<&str>,
 ) -> Result<Option<PlanningTask>> {
     let claim = claim
-        .map(validate_assignee)
-        .transpose()
-        .map_err(StorageError::InvalidPlanningTask)?;
+        .map(|name| validate_assignee(name).map_err(|_| StorageError::InvalidClaimName { value: name.to_owned() }))
+        .transpose()?;
     let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let next = planning_ready_tasks(&tx, project_id, filter)?.into_iter().next();
     let Some(next) = next else {

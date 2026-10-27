@@ -5960,6 +5960,26 @@ fn next_start_claim_claims_the_task_as_task_start_does() {
 }
 
 #[test]
+fn next_start_claim_refuses_an_invalid_name_as_a_request_error() {
+    let directory = initialized_directory();
+    let task = create_task(directory.path(), "Ready", None);
+    for name in ["", "a\u{7}b", "a\u{200b}b"] {
+        let refused = arcl_in(directory.path())
+            .args(["--json", "next", "--start", "--claim", name])
+            .output()
+            .expect("next runs");
+        assert_eq!(refused.status.code(), Some(3), "{name:?}");
+        let error = json(&refused.stderr);
+        assert_eq!(error["error"]["code"], "invalid_request", "{name:?}");
+        let message = error["error"]["message"].as_str().expect("error message");
+        assert!(message.contains("claim name `"), "{message}");
+        assert!(!message.contains("stored"), "{message}");
+    }
+    let shown = run_json(directory.path(), ["--json", "show", &task].as_ref());
+    assert_eq!(shown["data"]["task"]["status"], "pending");
+}
+
+#[test]
 fn next_start_reports_nothing_to_start_and_exits_zero() {
     let directory = initialized_directory();
     let dir = directory.path();
