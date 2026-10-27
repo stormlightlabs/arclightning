@@ -2,6 +2,7 @@
 name = "arcl-core"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [features]
 # Derive JSON Schemas for the serialized records, for adapters that publish them.
