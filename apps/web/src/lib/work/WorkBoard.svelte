@@ -4,7 +4,7 @@
   import type { BoardCard, BoardColumn } from "./board";
 
   /** Props for the Work page's board of status columns. */
-  export interface WorkBoardProps {
+  export type WorkBoardProps = {
     columns: BoardColumn[];
     selectedId?: string | null;
     /** The card whose move is running, shown busy. */
@@ -23,7 +23,7 @@
     onmove: (card: BoardCard, action: TaskAction, text: string) => Promise<void>;
     /** A card dropped on a column no task command moves it to. The card stays where it is. */
     onrefuse: (card: BoardCard, to: TaskStatus) => void;
-  }
+  };
 </script>
 
 <script lang="ts">

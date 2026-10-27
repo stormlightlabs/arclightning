@@ -13,7 +13,7 @@ export type TaskPriority = "critical" | "high" | "normal" | "low";
 export type ContainerStatus = "open" | "completed" | "cancelled";
 
 /** A task record, as `arcl show <task-id> --json` returns it. */
-export interface Task {
+export type Task = {
   id: string;
   spec_id: string | null;
   plan_id: string | null;
@@ -28,10 +28,10 @@ export interface Task {
   evidence: string;
   /** Who claimed the task when starting it. Absent while nobody holds it. */
   assignee?: string;
-}
+};
 
 /** A milestone: a phase of a plan. */
-export interface Milestone {
+export type Milestone = {
   id: string;
   /** The plan the phase belongs to. */
   plan_id: string;
@@ -39,17 +39,17 @@ export interface Milestone {
   status: ContainerStatus;
   /** The phase's place in its plan, which orders milestones as `arcl tree` does. */
   position: number;
-}
+};
 
 /** A spec or plan a task falls under, directly or through an ancestor. */
-export interface Container {
+export type Container = {
   id: string;
   title: string;
   status: string;
-}
+};
 
 /** One reason a task is not ready, with the records it names. */
-export interface ReadinessReason {
+export type ReadinessReason = {
   /** A stable name for the reason, such as `direct_blocker`. */
   kind: string;
   message: string;
@@ -59,49 +59,49 @@ export interface ReadinessReason {
   container?: string;
   /** The task IDs that form a dependency cycle. */
   path?: string[];
-}
+};
 
 /** Whether a task can start, as `arcl explain --json` reports it. */
-export interface Readiness {
+export type Readiness = {
   ready: boolean;
   /** Whether a blocker on the task or an ancestor is incomplete. */
   blocked: boolean;
   reasons: ReadinessReason[];
-}
+};
 
 /** A task with its readiness and the milestone it falls under. */
-export interface WorkItem {
+export type WorkItem = {
   task: Task;
   readiness: Readiness;
   /** The task's phase, or its nearest ancestor's; `null` outside any phase. */
   milestone: Milestone | null;
-}
+};
 
 /**
  * What the Work view shows. Lists may come in any order: the Work view sorts
  * them as `arcl tree` does.
  */
-export interface WorkList {
+export type WorkList = {
   milestones: Milestone[];
   items: WorkItem[];
-}
+};
 
 /** A task that must complete before another can start. */
-export interface Blocker {
+export type Blocker = {
   task: Task;
   completed: boolean;
   /** The evidence recorded when the blocker completed. */
   evidence: string;
-}
+};
 
 /** A blocker held by an ancestor, which every descendant waits on too. */
-export interface InheritedBlocker extends Blocker {
+export type InheritedBlocker = Blocker & {
   /** The ancestor task that holds the blocker. */
   ancestor: string;
-}
+};
 
 /** What the Task view shows, as `arcl show <task-id> --json` returns it. */
-export interface TaskDetail {
+export type TaskDetail = {
   task: Task;
   readiness: Readiness;
   blockers: Blocker[];
@@ -115,10 +115,10 @@ export interface TaskDetail {
   spec: Container | null;
   plan: Container | null;
   phase: Milestone | null;
-}
+};
 
 /** The options of `arcl task create`. `priority` defaults to `normal`. */
-export interface NewTask {
+export type NewTask = {
   title: string;
   body?: string;
   priority?: TaskPriority;
@@ -129,65 +129,65 @@ export interface NewTask {
   phase?: string;
   /** The IDs of the tasks that must complete first. */
   blocked_by?: string[];
-}
+};
 
 /** The options of `arcl task update`. A field left out keeps its value. */
-export interface TaskEdit {
+export type TaskEdit = {
   title?: string;
   body?: string;
   priority?: TaskPriority;
-}
+};
 
 /** The options of `arcl task complete`. */
-export interface CompleteOptions {
+export type CompleteOptions = {
   /** Markdown completion evidence. */
   evidence?: string;
   /** Complete only this task even when subtasks are open. */
   allow_open_children?: boolean;
   /** Also complete every pending and in-progress subtask. */
   with_subtasks?: boolean;
-}
+};
 
 /** What `arcl task complete --json` returns. */
-export interface TaskCompletion {
+export type TaskCompletion = {
   task: Task;
   /** The subtasks completed with the task, by ID. */
   completed_subtasks: string[];
   /** The tasks the completion made ready, by ID. */
   unblocked: string[];
-}
+};
 
 /** A task as `arcl list --json` names it, for search and references. */
-export interface TaskSummary {
+export type TaskSummary = {
   id: string;
   title: string;
   status: TaskStatus;
-}
+};
 
 /** A capture's state in the inbox. */
 export type CaptureStatus = "captured" | "promoted" | "discarded";
 
 /** A capture record, as `arcl capture create --json` returns it. */
-export interface Capture {
+export type Capture = {
   id: string;
   title: string;
   body: string;
   status: CaptureStatus;
   created_at: string;
-}
+};
 
 /** The options of `arcl capture create`. */
-export interface NewCapture {
+export type NewCapture = {
   title: string;
   body?: string;
-}
+};
 
 /** A capture as `arcl list --kind capture` lists it, without its body. */
-export interface CaptureSummary {
+export type CaptureSummary = {
   id: string;
   title: string;
   status: CaptureStatus;
-}
+};
 
 /** What `arcl capture promote` turns a capture into. */
 export type PromotionTarget = "task" | "spec" | "note";
@@ -197,7 +197,7 @@ export type PromotionTarget = "task" | "spec" | "note";
  * capture's. `acceptance_criteria` applies to a spec; `spec`, `plan`,
  * `phase`, `parent` and `priority` apply to a task.
  */
-export interface CapturePromotion {
+export type CapturePromotion = {
   to: PromotionTarget;
   title?: string;
   body?: string;
@@ -208,80 +208,80 @@ export interface CapturePromotion {
   /** The parent task's ID. */
   parent?: string;
   priority?: TaskPriority;
-}
+};
 
 /** The record a promotion created. */
-export interface Promoted {
+export type Promoted = {
   kind: PromotionTarget;
   id: string;
   title: string;
-}
+};
 
 /** A spec record, as `arcl spec create --json` returns it. */
-export interface Spec {
+export type Spec = {
   id: string;
   title: string;
   body: string;
   acceptance_criteria: string;
   status: string;
-}
+};
 
 /** A plan record, as `arcl plan create --json` returns it. */
-export interface Plan {
+export type Plan = {
   id: string;
   /** The spec that owns the plan. */
   spec_id: string;
   title: string;
   body: string;
   status: ContainerStatus;
-}
+};
 
 /** The options of `arcl spec create`. */
-export interface NewSpec {
+export type NewSpec = {
   title: string;
   body?: string;
   acceptance_criteria?: string;
-}
+};
 
 /** The options of `arcl plan create`. */
-export interface NewPlan {
+export type NewPlan = {
   title: string;
   /** The ID of the spec that owns the plan. */
   spec: string;
   body?: string;
-}
+};
 
 /** What `arcl plan apply --json` returns: the plan with every phase and task it owns. */
-export interface PlanApplied {
+export type PlanApplied = {
   plan: Plan;
   phases: Milestone[];
   tasks: Task[];
-}
+};
 
 /** One record in the planning hierarchy, as `arcl tree --json` returns it. */
-export interface TreeNode {
+export type TreeNode = {
   /** The record kind, such as `spec`, `plan`, `phase` or `task`. */
   kind: string;
   id: string;
   title: string;
   status: string;
   children: TreeNode[];
-}
+};
 
 /**
  * What the Planning view shows: the planning hierarchy in `arcl tree` order,
  * and every task's readiness and milestone.
  */
-export interface Planning {
+export type Planning = {
   tree: TreeNode[];
   work: WorkList;
-}
+};
 
 /**
  * A record's workspace file, as `GET /api/records/{id}/source` returns it:
  * the bytes a workspace export writes for the record.
  */
-export interface RecordSource {
+export type RecordSource = {
   id: string;
   /** The record kind, such as `task`. */
   kind: string;
@@ -291,29 +291,29 @@ export interface RecordSource {
   source: string;
   /** Names the file's content; a save from an older revision is refused. */
   revision: string;
-}
+};
 
 /** A raw record edit: the whole file, and the revision it was edited from. */
-export interface RecordSourceEdit {
+export type RecordSourceEdit = {
   source: string;
   revision: string;
-}
+};
 
 /**
  * A warning from the workspace sync around a saved change, as the CLI
  * prints it under `--json`: `blocker_edge`, or `workspace_sync` when the
  * export after the change failed.
  */
-export interface ChangeWarning {
+export type ChangeWarning = {
   code: string;
   message: string;
-}
+};
 
 /** What a saved change returns, with the warnings its syncs gave. */
-export interface Changed<T> {
+export type Changed<T> = {
   value: T;
   warnings: ChangeWarning[];
-}
+};
 
 /**
  * Where views read and change records. `arcl serve` backs it locally; a
@@ -324,7 +324,7 @@ export interface Changed<T> {
  * code and message. A saved change can still carry warnings. A backend that
  * cannot run the command queues it and fails with the code {@link QUEUED}.
  */
-export interface DataSource {
+export type DataSource = {
   /** Every task, with its readiness and milestone. Aborting `signal` stops the read. */
   work(signal?: AbortSignal): Promise<WorkList>;
   /** One task with its readiness, relations, handoff and evidence. Aborting `signal` stops the read. */
@@ -383,7 +383,7 @@ export interface DataSource {
   watch?(listener: (status: SyncStatus) => void): () => void;
   /** Remove a queued edit, such as one that failed, from the queue. */
   dismiss?(id: string): Promise<void>;
-}
+};
 
 /**
  * The code of the {@link DataError} a change fails with when the backend
@@ -393,7 +393,7 @@ export interface DataSource {
 export const QUEUED = "queued";
 
 /** An edit queued for an agent to apply with `arcl web apply`. */
-export interface QueuedEdit {
+export type QueuedEdit = {
   id: string;
   /** The `arcl serve` mutation it runs, such as `discard_capture`. */
   op: string;
@@ -408,10 +408,10 @@ export interface QueuedEdit {
    */
   status: "queued" | "applying" | "failed";
   error: { code: string; message: string } | null;
-}
+};
 
 /** When the backend's records last synced, and what waits for the next sync. */
-export interface SyncStatus {
+export type SyncStatus = {
   /** When the last sync ran, as RFC 3339, or `null` before the first. */
   syncedAt: string | null;
   /** The Git commit the last sync read. */
@@ -425,7 +425,7 @@ export interface SyncStatus {
    * follows them. Once set, only reloading the page follows them again.
    */
   stopped: { code: string; message: string } | null;
-}
+};
 
 /** A failed read or change, with the CLI's error code and message. */
 export class DataError extends Error {

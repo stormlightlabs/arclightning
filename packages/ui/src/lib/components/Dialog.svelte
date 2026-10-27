@@ -2,7 +2,7 @@
   import type { Snippet } from "svelte";
 
   /** Props for the shared modal dialog. */
-  export interface DialogProps {
+  export type DialogProps = {
     /**
      * Drop the visible header and its close button, and sit near the top of
      * the window, as a command menu does. The title still names the dialog
@@ -14,7 +14,7 @@
     open?: boolean;
     onclose?: () => void;
     title: string;
-  }
+  };
 </script>
 
 <script lang="ts">

@@ -1,11 +1,11 @@
 <script module lang="ts">
   import type { PlanningRecordSummary } from "../types";
   /** Props for a compact, selectable planning record. */
-  export interface RecordSummaryProps {
+  export type RecordSummaryProps = {
     record: PlanningRecordSummary;
     selected?: boolean;
     onselect?: (record: PlanningRecordSummary) => void;
-  }
+  };
 </script>
 
 <script lang="ts">

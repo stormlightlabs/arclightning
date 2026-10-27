@@ -1,11 +1,11 @@
 <script module lang="ts">
   import type { Snippet } from "svelte";
   /** Props for a useful empty collection state. */
-  export interface EmptyStateProps {
+  export type EmptyStateProps = {
     title: string;
     message: string;
     actions?: Snippet;
-  }
+  };
 </script>
 
 <script lang="ts">

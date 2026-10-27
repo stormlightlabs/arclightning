@@ -1,12 +1,12 @@
 <script module lang="ts">
   import type { PlanningTreeNode as PlanningNode } from "../types";
   /** Props for a collapsible application-supplied planning hierarchy. */
-  export interface PlanningTreeProps {
+  export type PlanningTreeProps = {
     label?: string;
     nodes: PlanningNode[];
     selectedId?: string;
     onselect?: (node: PlanningNode) => void;
-  }
+  };
 </script>
 
 <script lang="ts">

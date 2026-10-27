@@ -1,17 +1,17 @@
 <script module lang="ts">
   /** One action in the shared menu. */
-  export interface MenuItem {
+  export type MenuItem = {
     id: string;
     label: string;
     disabled?: boolean;
     destructive?: boolean;
-  }
+  };
   /** Props for a button-triggered action menu. */
-  export interface MenuProps {
+  export type MenuProps = {
     items: MenuItem[];
     label?: string;
     onselect?: (item: MenuItem) => void;
-  }
+  };
 </script>
 
 <script lang="ts">

@@ -8,30 +8,30 @@
 export const TYPEAHEAD_TIMEOUT = 500;
 
 /** The parts of a keyboard event {@link listboxKey} reads. */
-export interface ListboxKey {
+export type ListboxKey = {
   key: string;
   altKey: boolean;
   ctrlKey: boolean;
   metaKey: boolean;
-}
+};
 
 /** The combobox state a key acts on. */
-export interface ListboxState {
+export type ListboxState = {
   open: boolean;
   /** The option index the listbox highlights. */
   active: number;
   /** Whether a type-ahead query is in progress, which makes Space part of it. */
   searching: boolean;
-}
+};
 
 /** One option's label and whether it can be chosen. */
-export interface ListboxOption {
+export type ListboxOption = {
   label: string;
   disabled?: boolean;
-}
+};
 
 /** What a key does: the next state, and whether to choose the active option. */
-export interface ListboxStep {
+export type ListboxStep = {
   open: boolean;
   active: number;
   /** Choose the option at `active`, then close. */
@@ -40,7 +40,7 @@ export interface ListboxStep {
   type?: string;
   /** Whether the key's default action should be stopped. Tab keeps its own. */
   prevent: boolean;
-}
+};
 
 /**
  * The step for a key press, or `null` when the key is not the combobox's.

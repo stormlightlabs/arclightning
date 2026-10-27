@@ -2,11 +2,11 @@ import { untrack } from "svelte";
 import type { Command, CommandContext } from "./menu";
 
 /** What one view or component offers the command menu and the shortcuts. */
-export interface Registration {
+export type Registration = {
   commands: Command[];
   /** The record the registration's selection commands act on. */
   context?: CommandContext | null;
-}
+};
 
 /** The registrations in the order they were made, by owner. */
 let registrations = $state<{ owner: symbol; registration: Registration }[]>([]);

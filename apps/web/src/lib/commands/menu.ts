@@ -13,7 +13,7 @@ export const TASK_RESULTS = 8;
 export type CommandScope = "selection" | "view" | "global";
 
 /** An action the command menu lists and a shortcut can run. */
-export interface Command {
+export type Command = {
   /** Unique among the commands registered at once. */
   id: string;
   label: string;
@@ -31,16 +31,16 @@ export interface Command {
   viewKeys?: boolean;
   icon?: IconName;
   run: () => void;
-}
+};
 
 /** The record the selection commands act on, shown as the menu's chip. */
-export interface CommandContext {
+export type CommandContext = {
   id: string;
   label: string;
-}
+};
 
 /** What {@link menuGroups} builds the menu from. */
-export interface MenuInput {
+export type MenuInput = {
   commands: Command[];
   query: string;
   /** The selected record; `null` drops the selection commands. */
@@ -48,7 +48,7 @@ export interface MenuInput {
   /** Tasks to search; matches show only once the query has text. */
   tasks: TaskSummary[];
   mac: boolean;
-}
+};
 
 /** The ID prefix of a task search result in the menu, before the task's ID. No command ID starts with it. */
 export const TASK_RESULT_PREFIX = "search:";

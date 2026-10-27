@@ -2,7 +2,7 @@
   import type { SelectOption } from "./Select.svelte";
 
   /** Props for a compact select that opens a listbox. */
-  export interface SelectMenuProps {
+  export type SelectMenuProps = {
     label: string;
     options: SelectOption[];
     /** The chosen option's value. */
@@ -13,7 +13,7 @@
     disabled?: boolean;
     /** What the trigger shows when `value` names no option. */
     placeholder?: string;
-  }
+  };
 </script>
 
 <script lang="ts">

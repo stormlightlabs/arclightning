@@ -3,11 +3,11 @@
   import type { IconName } from "../icons";
 
   /** Props for a compact icon-only action with a required accessible name. */
-  export interface IconButtonProps extends HTMLButtonAttributes {
+  export type IconButtonProps = HTMLButtonAttributes & {
     label: string;
     name: IconName;
     selected?: boolean;
-  }
+  };
 </script>
 
 <script lang="ts">

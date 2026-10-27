@@ -2,13 +2,13 @@
 export type WorkKeyAction = "next" | "previous" | "open";
 
 /** The parts of a keyboard event {@link workKeyAction} reads. */
-export interface WorkKey {
+export type WorkKey = {
   key: string;
   altKey: boolean;
   ctrlKey: boolean;
   metaKey: boolean;
   target: EventTarget | null;
-}
+};
 
 /**
  * The Work list action for a key press, or `null` when the key is not the

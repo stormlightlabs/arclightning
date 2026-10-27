@@ -3,12 +3,12 @@
   import type { IconName } from "../icons";
 
   /** Props for an Iconify-backed icon named by product meaning. */
-  export interface IconProps extends Omit<HTMLAttributes<HTMLSpanElement>, "children"> {
+  export type IconProps = Omit<HTMLAttributes<HTMLSpanElement>, "children"> & {
     color?: string;
     label?: string;
     name: IconName;
     size?: number | string;
-  }
+  };
 </script>
 
 <script lang="ts">

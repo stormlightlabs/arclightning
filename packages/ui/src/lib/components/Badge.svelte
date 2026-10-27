@@ -2,10 +2,10 @@
   /** Semantic treatments supported by the compact badge. */
   export type BadgeTone = "neutral" | "info" | "success" | "warning" | "danger";
   /** Props for compact metadata and state labels. */
-  export interface BadgeProps {
+  export type BadgeProps = {
     label: string;
     tone?: BadgeTone;
-  }
+  };
 </script>
 
 <script lang="ts">

@@ -20,37 +20,37 @@ import {
 } from "./types";
 
 /** A record as `arcl list --json` lists it. */
-export interface ListedRecord {
+export type ListedRecord = {
   id: string;
   kind: string;
   status: string;
   title: string;
-}
+};
 
 /** The `data` of `arcl list --json`, and of `/api/records`. */
-export interface Listing {
+export type Listing = {
   records: ListedRecord[];
-}
+};
 
 /** A phase as `arcl serve` returns it. */
-export interface Phase {
+export type Phase = {
   id: string;
   plan_id: string;
   title: string;
   status: Milestone["status"];
   position: number;
-}
+};
 
 /** The `data` of `/api/work`: every task with its readiness and phase, and every phase. */
-export interface Work {
+export type Work = {
   tasks: { task: Task; readiness: Readiness; phase_id: string | null }[];
   phases: Phase[];
-}
+};
 
 /** The `data` of `arcl tree --json`, and of `/api/tree`. */
-export interface Tree {
+export type Tree = {
   nodes: TreeNode[];
-}
+};
 
 /** The Work list from `/api/work`'s data. */
 export function workOf(work: Work): WorkList {

@@ -1,6 +1,6 @@
 <script module lang="ts">
   /** Props for a CodeMirror 6 Markdown editor, read-only unless told otherwise. */
-  export interface MarkdownEditorProps {
+  export type MarkdownEditorProps = {
     value: string;
     /** The editor's accessible name. */
     label: string;
@@ -12,7 +12,7 @@
     frontMatter?: boolean;
     /** Called with the whole text after each edit a person makes, not when `value` changes. */
     onchange?: (value: string) => void;
-  }
+  };
 </script>
 
 <script lang="ts">

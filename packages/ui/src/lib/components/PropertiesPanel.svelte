@@ -3,7 +3,7 @@
   import type { RecordStatus } from "./StatusBadge.svelte";
 
   /** One labelled value in a properties panel. `null` reads as "None". */
-  export interface PropertyItem {
+  export type PropertyItem = {
     label: string;
     value: string | null;
     /** The record the value names; the value links to it. */
@@ -16,17 +16,17 @@
     copy?: boolean;
     /** The copy button's accessible name; defaults to "Copy <label>". */
     copyLabel?: string;
-  }
+  };
 
   /** Props for a record's collapsible properties panel. */
-  export interface PropertiesPanelProps {
+  export type PropertiesPanelProps = {
     properties: PropertyItem[];
     /** Whether the values show; bind to it to toggle from a shortcut. */
     open?: boolean;
     label?: string;
     /** The key that toggles the panel, shown on its button. */
     shortcut?: string;
-  }
+  };
 </script>
 
 <script lang="ts">

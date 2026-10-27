@@ -3,12 +3,12 @@
   /** Feedback states for inline and page-level notices. */
   export type FeedbackTone = "info" | "success" | "warning" | "danger";
   /** Props for actionable user feedback. */
-  export interface FeedbackProps {
+  export type FeedbackProps = {
     title: string;
     message?: string;
     tone?: FeedbackTone;
     actions?: Snippet;
-  }
+  };
 </script>
 
 <script lang="ts">

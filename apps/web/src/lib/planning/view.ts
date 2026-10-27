@@ -10,15 +10,15 @@ export const PLANNING_KEYS = {
 } as const;
 
 /** How many tasks under a record are done, and how many count. */
-export interface Progress {
+export type Progress = {
   /** Completed tasks. */
   done: number;
   /** Every task but the cancelled ones. */
   total: number;
-}
+};
 
 /** A milestone row: a phase with its progress and what can start. */
-export interface MilestoneRow extends Progress {
+export type MilestoneRow = Progress & {
   kind: "milestone";
   id: string;
   title: string;
@@ -29,10 +29,10 @@ export interface MilestoneRow extends Progress {
   blocked: number;
   /** The phase's tasks, each with its subtasks, in `arcl tree` order. */
   tree: PlanningTreeNode[];
-}
+};
 
 /** A plan with its milestones. */
-export interface PlanRow extends Progress {
+export type PlanRow = Progress & {
   kind: "plan";
   id: string;
   title: string;
@@ -40,16 +40,16 @@ export interface PlanRow extends Progress {
   milestones: MilestoneRow[];
   /** Tasks in the plan outside any phase, with their subtasks. */
   tasks: PlanningTreeNode[];
-}
+};
 
 /** A spec with its plans. */
-export interface SpecRow {
+export type SpecRow = {
   kind: "spec";
   id: string;
   title: string;
   status: string;
   plans: PlanRow[];
-}
+};
 
 /** A row the Planning view can select. */
 export type PlanningRow = SpecRow | PlanRow | MilestoneRow;

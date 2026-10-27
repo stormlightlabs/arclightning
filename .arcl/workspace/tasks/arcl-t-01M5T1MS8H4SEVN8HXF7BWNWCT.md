@@ -2,9 +2,10 @@
 id = "arcl-t-01M5T1MS8H4SEVN8HXF7BWNWCT"
 phase = "arcl-ph-01M5NE5P5RE8Y5Y5Y84T36FMEE"
 title = "Declare TypeScript data shapes with type"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 9
+evidence = "Delivered by #73: 129 `interface` declarations in `apps/web` and `packages/ui` become `type`; `ArtifactDb`, which `FakeDb` implements, and the `app.d.ts` global augmentations stay interfaces, and `AGENTS.md` states the rule."
 +++
 
 Declare TypeScript data shapes with `type` instead of `interface` in
@@ -26,14 +27,15 @@ contract. The packages have no ESLint setup today, so it needs one first.
 
 Acceptance criteria:
 
-- [ ] Every remaining `interface` in `apps/web` and `packages/ui` is one a
-      class implements
-- [ ] `AGENTS.md` states the rule
-- [ ] No behaviour changes; type checks and tests pass unchanged
+- [x] Every remaining `interface` in `apps/web` and `packages/ui` is one a
+      class implements, or a global augmentation in `app.d.ts` that needs
+      declaration merging
+- [x] `AGENTS.md` states the rule
+- [x] No behaviour changes; type checks and tests pass unchanged
 
 Verification:
 
 - `grep -rn 'interface ' apps/web/src packages/ui/src` lists only class
-  contracts
+  contracts and the `app.d.ts` augmentations
 - `pnpm check`, `pnpm test`
 - `just check`

@@ -1,14 +1,14 @@
 <script module lang="ts">
   import type { TaskGroup } from "../types";
   /** Props for a dense task list in groups and sections. */
-  export interface TaskListProps {
+  export type TaskListProps = {
     groups: TaskGroup[];
     /** The link each row opens. */
     href: (id: string) => string;
     selectedId?: string | null;
     onselect?: (id: string) => void;
     label?: string;
-  }
+  };
 
   /** The row IDs of `groups` in the order the list shows them. */
   export function rowOrder(groups: TaskGroup[]): string[] {

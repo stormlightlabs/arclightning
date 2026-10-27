@@ -8,7 +8,7 @@ export type CaptureToken =
   | { kind: "blocker"; text: string; ref: string };
 
 /** Quick capture text split into its fields. */
-export interface ParsedCapture {
+export type ParsedCapture = {
   /** The first line without its tokens. */
   title: string;
   /** The lines after the first, as Markdown. */
@@ -16,14 +16,14 @@ export interface ParsedCapture {
   /** The first line as typed, tokens included. */
   line: string;
   tokens: CaptureToken[];
-}
+};
 
 /** A task reference the task list does not resolve to one task. */
-export interface RefProblem {
+export type RefProblem = {
   ref: string;
   /** `missing` names no task; `ambiguous` names more than one. */
   problem: "missing" | "ambiguous";
-}
+};
 
 /**
  * Split quick capture text into fields.

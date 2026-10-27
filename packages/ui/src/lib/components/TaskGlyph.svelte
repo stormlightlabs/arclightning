@@ -1,10 +1,10 @@
 <script module lang="ts">
   import type { TaskGlyphKind } from "../types";
   /** Props for the small glyph that leads a task row. */
-  export interface TaskGlyphProps {
+  export type TaskGlyphProps = {
     kind: TaskGlyphKind;
     label?: string;
-  }
+  };
 </script>
 
 <script lang="ts">

@@ -2,13 +2,13 @@
   import type { HTMLInputAttributes, HTMLTextareaAttributes } from "svelte/elements";
 
   /** Props for a labelled single- or multi-line text field. */
-  export interface FieldProps extends Omit<HTMLInputAttributes & HTMLTextareaAttributes, "value"> {
+  export type FieldProps = Omit<HTMLInputAttributes & HTMLTextareaAttributes, "value"> & {
     description?: string;
     error?: string;
     label: string;
     multiline?: boolean;
     value?: string;
-  }
+  };
 </script>
 
 <script lang="ts">

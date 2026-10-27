@@ -4,7 +4,7 @@ import { inField } from "$lib/work/keys";
 export const SEQUENCE_TIMEOUT = 1000;
 
 /** The parts of a keyboard event the shortcut rules read. */
-export interface ShortcutKey {
+export type ShortcutKey = {
   key: string;
   altKey: boolean;
   ctrlKey: boolean;
@@ -15,20 +15,20 @@ export interface ShortcutKey {
   target: EventTarget | null;
   /** Absent where the event has no modifier state, as in tests. */
   getModifierState?: (key: string) => boolean;
-}
+};
 
 /** A command a shortcut can run: the keys pressed one after another. */
-export interface Bound {
+export type Bound = {
   keys: string[];
-}
+};
 
 /** What a key press does to a shortcut sequence in progress. */
-export interface ShortcutStep<T> {
+export type ShortcutStep<T> = {
   /** The command the sequence completed, if any. */
   match: T | null;
   /** The keys pressed so far toward a longer shortcut; empty when none is pending. */
   pending: string[];
-}
+};
 
 /** Whether the browser runs on macOS, where `⌘` stands in for `Ctrl`. */
 export function isMac(platform: string): boolean {

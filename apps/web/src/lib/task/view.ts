@@ -11,33 +11,33 @@ export type TaskKeyAction = "back" | "properties";
 export type ReasonSegment = { text: string } | { id: string; label: string; href: string };
 
 /** The unfinished inherited blockers one ancestor holds. */
-export interface InheritedGroup {
+export type InheritedGroup = {
   ancestor: { id: string; title: string };
   blockers: InheritedBlocker[];
-}
+};
 
 /** A completed blocker, with the ancestor that holds it when it is inherited. */
-export interface DoneBlocker {
+export type DoneBlocker = {
   blocker: Blocker;
   ancestor: { id: string; title: string } | null;
-}
+};
 
 /** A task's blockers: those it still waits on, and those already completed. */
-export interface Blockers {
+export type Blockers = {
   /** Unfinished direct blockers. */
   direct: Blocker[];
   /** Unfinished inherited blockers, by the ancestor that holds them. */
   inherited: InheritedGroup[];
   /** Completed blockers, direct ones first. */
   done: DoneBlocker[];
-}
+};
 
 /** The parts of a keyboard event {@link taskKeyAction} reads. */
-export interface TaskKey extends WorkKey {
+export type TaskKey = WorkKey & {
   defaultPrevented: boolean;
   /** Absent where the event has no modifier state, as in tests. */
   getModifierState?: (key: string) => boolean;
-}
+};
 
 /**
  * The Task view action for a key press, or `null`: `Escape` returns to the

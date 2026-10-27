@@ -3,7 +3,7 @@
   import type { PromotionForm } from "./triage";
 
   /** Props for the form that promotes the selected capture. */
-  export interface PromoteFormProps {
+  export type PromoteFormProps = {
     form: PromotionForm;
     /** The phases a task can go in, after a `None` option. */
     phases?: SelectOption[];
@@ -13,7 +13,7 @@
     onsubmit: () => void;
     /** Called by Cancel. The view closes the form on Escape too, while it holds no edits. */
     oncancel: () => void;
-  }
+  };
 </script>
 
 <script lang="ts">

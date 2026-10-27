@@ -3,9 +3,9 @@
   export type RecordStatus =
     "draft" | "pending" | "ready" | "in_progress" | "parked" | "completed" | "cancelled" | "discarded";
   /** Props for a human-readable record status. */
-  export interface StatusBadgeProps {
+  export type StatusBadgeProps = {
     status: RecordStatus;
-  }
+  };
 </script>
 
 <script lang="ts">

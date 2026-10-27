@@ -2,9 +2,9 @@
   /** Task priorities shown by shared planning components. */
   export type Priority = "low" | "normal" | "high" | "critical";
   /** Props for a priority label. */
-  export interface PriorityBadgeProps {
+  export type PriorityBadgeProps = {
     priority: Priority;
-  }
+  };
 </script>
 
 <script lang="ts">
