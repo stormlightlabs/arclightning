@@ -16,6 +16,8 @@ installers = ["shell", "powershell", "homebrew"]
 tap = "stormlightlabs/homebrew-tap"
 # A custom job in publish-homebrew.yml pushes Formula/arcl.rb with the
 # stormlight-thunderbot app token, so no tap secret is needed.
+# dist generates `secrets: inherit` for custom jobs and has no setting to pass
+# only named secrets.
 publish-jobs = ["./publish-homebrew"]
 targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl", "x86_64-pc-windows-msvc"]
 install-path = "CARGO_HOME"

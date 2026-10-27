@@ -171,3 +171,10 @@ dist builds a release only when the tag matches the version in Cargo.toml.
    Run `dist plan --tag=v<version>` to check it.
 2. Once it merges, dispatch the Bump workflow with tag `v<version>` and that
    commit. The tag starts `.github/workflows/release.yml`.
+
+Pre-release tags skip the Homebrew tap, so the publish-homebrew job first runs
+on the first stable release, after the GitHub Release is public. It needs the
+stormlight-thunderbot app installed on `stormlightlabs/homebrew-tap` with
+contents write. If the job fails, fix the cause and use "Re-run failed jobs" on
+that Release run. The run's artifacts are still there, and the job only pushes
+a changed `Formula/arcl.rb`.

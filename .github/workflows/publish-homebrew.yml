@@ -3,6 +3,11 @@
 # pre-release tags, as dist's own Homebrew job does. It pushes as
 # stormlight-thunderbot, whose app is installed on the organization, so the
 # tap needs no secret of its own. dist does not regenerate this file.
+#
+# The first stable release is this job's first run. It needs the app installed
+# on stormlightlabs/homebrew-tap with contents write. If it fails, fix the
+# cause and use "Re-run failed jobs" on that Release run: the artifacts are
+# still there, and a re-run pushes only a changed Formula/arcl.rb.
 name: Publish Homebrew formula
 
 on:
