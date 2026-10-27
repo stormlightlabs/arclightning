@@ -6000,3 +6000,188 @@ fn concurrent_next_starts_never_start_the_same_task() {
     assert_eq!(results.iter().flatten().collect::<Vec<_>>(), vec![&only]);
     assert_eq!(results.iter().filter(|id| id.is_none()).count(), 1);
 }
+
+/// Run `arcl prime` with `args` and return its standard output.
+fn prime_output(directory: &Path, args: &[&str]) -> String {
+    let output = arcl_in(directory)
+        .args(["--color", "never"])
+        .args(args)
+        .arg("prime")
+        .output()
+        .expect("prime runs");
+    assert_success(&output);
+    String::from_utf8(output.stdout).expect("prime prints UTF-8")
+}
+
+/// The loop block of `skills/arclightning/SKILL.md`, which `arcl prime`
+/// prints.
+fn skill_loop() -> String {
+    let skill = fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../skills/arclightning/SKILL.md"
+    ))
+    .expect("SKILL.md reads");
+    let (_, rest) = skill
+        .split_once("<!-- arcl-prime:begin -->")
+        .expect("SKILL.md opens the loop block");
+    let (block, _) = rest
+        .split_once("<!-- arcl-prime:end -->")
+        .expect("SKILL.md closes the loop block");
+    block.trim().to_owned()
+}
+
+/// Replace each short ID human output prints for `ids` with its name. A short
+/// ID is the shortest unique suffix of the full ID, so the longest suffix
+/// found after `- ` is the one printed.
+fn name_short_ids(output: &str, ids: &[(&str, &str)]) -> String {
+    let mut output = output.to_owned();
+    for (full, name) in ids {
+        let found = (1..=full.len())
+            .rev()
+            .map(|length| format!("- {} ", &full[full.len() - length..]))
+            .find(|prefix| output.contains(prefix.as_str()))
+            .unwrap_or_else(|| panic!("no short ID of {full} in {output}"));
+        output = output.replace(&found, &format!("- <{name}> "));
+    }
+    output
+}
+
+/// A project with a claimed in-progress task that has a handoff, a parked
+/// task, a ready task and a blocked one. Returns the directory and the IDs.
+fn prime_fixture() -> (TempDir, [String; 4]) {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let claimed = create_task(dir, "Resume the parser", None);
+    let parked = create_task(dir, "Write the docs", None);
+    let ready = create_task(dir, "Ship the release", None);
+    let blocked = create_task(dir, "Announce the release", None);
+    block_start_task(dir, &blocked, &ready);
+
+    assert_success(&claim_output(dir, &claimed, Some("codex"), None));
+    run_json(
+        dir,
+        [
+            "--json",
+            "task",
+            "handoff",
+            &claimed,
+            "--note",
+            "Parser handles literals.\nNext: error recovery.",
+        ]
+        .as_ref(),
+    );
+    run_json(dir, ["--json", "task", "unpark", &claimed].as_ref());
+    assert_success(&claim_output(dir, &claimed, Some("codex"), None));
+
+    run_json(dir, ["--json", "task", "start", &parked].as_ref());
+    run_json(
+        dir,
+        ["--json", "task", "handoff", &parked, "--note", "Drafted the guide."].as_ref(),
+    );
+    (directory, [claimed, parked, ready, blocked])
+}
+
+#[test]
+fn prime_prints_the_loop_open_work_and_ready_tasks() {
+    let (directory, [claimed, parked, ready, _]) = prime_fixture();
+    let output = prime_output(directory.path(), &[]);
+    let output = name_short_ids(
+        &output,
+        &[(&claimed, "claimed"), (&parked, "parked"), (&ready, "ready")],
+    );
+    let expected = format!(
+        "Arc Lightning tracks this project's tasks. Work the loop:\n\
+         \n\
+         {}\n\
+         \n\
+         Open work:\n\
+         - <claimed> in_progress (codex): Resume the parser\n\
+         \x20 Handoff: Parser handles literals.…\n\
+         - <parked> parked: Write the docs\n\
+         \x20 Handoff: Drafted the guide.\n\
+         \n\
+         Ready:\n\
+         - <ready> [normal]: Ship the release\n\
+         \n\
+         `arcl context <id>` shows a task's criteria, blockers and full handoff.\n",
+        skill_loop()
+    );
+    assert_eq!(output, expected);
+}
+
+#[test]
+fn prime_json_returns_the_loop_and_capped_lists_with_full_ids() {
+    let (directory, [claimed, parked, ready, _]) = prime_fixture();
+    let primer = run_json(directory.path(), ["--json", "prime"].as_ref());
+    assert_eq!(primer["format_version"], 1);
+    let data = &primer["data"];
+    assert_eq!(data["loop"], skill_loop());
+
+    let open = data["open"]["tasks"].as_array().expect("open tasks");
+    assert_eq!(data["open"]["more"], 0);
+    assert_eq!(open.len(), 2);
+    assert_eq!(open[0]["id"], claimed);
+    assert_eq!(open[0]["title"], "Resume the parser");
+    assert_eq!(open[0]["status"], "in_progress");
+    assert_eq!(open[0]["priority"], "normal");
+    assert_eq!(open[0]["assignee"], "codex");
+    assert_eq!(open[0]["handoff"], "Parser handles literals.\nNext: error recovery.");
+    assert_eq!(open[1]["id"], parked);
+    assert_eq!(open[1]["status"], "parked");
+    assert!(open[1].get("assignee").is_none());
+
+    let listed = data["ready"]["tasks"].as_array().expect("ready tasks");
+    assert_eq!(data["ready"]["more"], 0);
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0]["id"], ready);
+    assert_eq!(listed[0]["handoff"], "");
+}
+
+#[test]
+fn prime_stays_within_its_size_budget() {
+    use arcl_cli::output::{PRIME_MAX_BYTES, PRIME_MAX_LINES};
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let title = "é".repeat(150);
+    let assignee = "agent-".repeat(20);
+    let note = format!("{}\n{}", "ü".repeat(200), "more ".repeat(100));
+    for _ in 0..8 {
+        let task = create_task(dir, &title, None);
+        assert_success(&claim_output(dir, &task, Some(&assignee), None));
+        run_json(dir, ["--json", "task", "handoff", &task, "--note", &note].as_ref());
+        run_json(dir, ["--json", "task", "unpark", &task].as_ref());
+        assert_success(&claim_output(dir, &task, Some(&assignee), None));
+    }
+    for _ in 0..8 {
+        let task = create_task(dir, &title, None);
+        run_json(dir, ["--json", "task", "start", &task].as_ref());
+        run_json(dir, ["--json", "task", "handoff", &task, "--note", &note].as_ref());
+        run_json(dir, ["--json", "task", "unpark", &task].as_ref());
+    }
+
+    let output = prime_output(dir, &[]);
+    let lines = output.lines().count();
+    assert!(lines <= PRIME_MAX_LINES, "{lines} lines:\n{output}");
+    assert!(output.len() <= PRIME_MAX_BYTES, "{} bytes:\n{output}", output.len());
+    assert!(output.contains("  and 3 more: arcl list --kind task --status in_progress parked\n"));
+    assert!(output.contains("  and 3 more: arcl ready\n"));
+    assert!(output.lines().all(|line| line.len() <= 200), "{output}");
+
+    let primer = run_json(dir, ["--json", "prime"].as_ref());
+    assert_eq!(primer["data"]["open"]["tasks"].as_array().map(Vec::len), Some(5));
+    assert_eq!(primer["data"]["open"]["more"], 3);
+    assert_eq!(primer["data"]["ready"]["more"], 3);
+}
+
+#[test]
+fn prime_on_an_empty_project_prints_the_loop_and_no_work() {
+    let directory = initialized_directory();
+    let output = prime_output(directory.path(), &[]);
+    assert!(output.contains(&skill_loop()));
+    assert!(output.contains("\nOpen work: none.\n\nReady: none.\n"));
+    assert_eq!(output, prime_output(directory.path(), &["--plain"]));
+
+    let primer = run_json(directory.path(), ["--json", "prime"].as_ref());
+    assert_eq!(primer["data"]["open"], serde_json::json!({ "tasks": [], "more": 0 }));
+    assert_eq!(primer["data"]["ready"], serde_json::json!({ "tasks": [], "more": 0 }));
+}

@@ -102,6 +102,46 @@ npx skills add stormlightlabs/arclightning --skill arclightning
 `--skill arclightning` picks it out of the other skills this repository keeps
 for its own development.
 
+## Prime each session
+
+`arcl prime` prints the skill's loop, the in-progress and parked tasks with
+their handoffs, and the first ready tasks, in at most 40 lines and 4 KiB. Run
+it from a session-start hook so the agent starts with the loop and the open
+work in its context. The [manual](/reference/manual/#inspection) describes the
+output.
+
+For Claude Code, add the hook to `.claude/settings.json`. A `SessionStart`
+hook with no matcher also runs after `/clear` and after compaction, so the
+primer comes back once the context is compacted:
+
+```json
+{
+	"hooks": {
+		"SessionStart": [
+			{
+				"hooks": [{ "type": "command", "command": "arcl prime" }]
+			}
+		]
+	}
+}
+```
+
+For Codex, add the same shape to `.codex/hooks.json`. Codex runs project hooks
+only in a trusted project, after you trust the hook in `/hooks`:
+
+```json
+{
+	"hooks": {
+		"SessionStart": [
+			{
+				"matcher": "startup|resume",
+				"hooks": [{ "type": "command", "command": "arcl prime" }]
+			}
+		]
+	}
+}
+```
+
 ## Connect the MCP server
 
 `arcl-mcp` serves the same operations as typed MCP tools over standard input

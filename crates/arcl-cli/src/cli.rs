@@ -119,6 +119,9 @@ pub enum Command {
         /// The task identifier.
         task_id: String,
     },
+    /// Print the agent loop, open work with handoffs, and the first ready
+    /// tasks, for a session-start hook.
+    Prime,
     /// Validate database and graph invariants.
     Check,
     /// Inspect or synchronize the version-controlled workspace.

@@ -33,6 +33,22 @@ ID fields.
 
 ## Work the loop
 
+In short (`arcl prime` prints this list):
+
+<!-- arcl-prime:begin -->
+
+1. Resume your parked work first: `arcl task unpark <id>`, then
+   `arcl task start <id> --claim`.
+2. Otherwise start the first ready task: `arcl next --start --claim`.
+3. Read `arcl context <id>`: acceptance criteria, blockers, last handoff.
+4. Do the work. Record work outside the task with `arcl capture create`.
+5. Finish with `arcl task complete <id> --evidence "<proof>"`, or park it with
+   `arcl task handoff <id> --note "<where it stands, what is next>"`.
+
+<!-- arcl-prime:end -->
+
+In full:
+
 1. Find work. First resume your own parked work:
    `arcl --json list --kind task --status parked` [`list`] lists tasks a
    session handed off. Otherwise `arcl --json ready` [`ready`] returns

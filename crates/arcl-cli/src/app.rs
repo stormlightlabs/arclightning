@@ -27,6 +27,7 @@ mod auto_sync;
 mod commands;
 mod error;
 mod init;
+mod prime;
 mod query;
 mod reads;
 mod serve;
@@ -42,6 +43,7 @@ use commands::{
 pub use error::ApplicationError;
 use error::{CResult, CommandError};
 use init::initialize;
+use prime::read_prime;
 use query::resolve_ready_filter;
 use reads::{read_context, read_explain, read_list, read_ready, read_show, read_tree};
 use serve::exec_serve;
@@ -185,6 +187,7 @@ fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Wa
         Some(Command::Tree { id, options }) => write_output(read_tree(id.as_deref(), options, renderer)?),
         Some(Command::Explain { task_id }) => write_output(read_explain(&task_id, renderer)?),
         Some(Command::Context { task_id }) => write_output(read_context(&task_id, renderer)?),
+        Some(Command::Prime) => write_output(read_prime(renderer)?),
         Some(Command::Check) => {
             let database = open_database().map_err(ApplicationError::from_command)?;
             let report = database.check().map_err(ApplicationError::from_command)?;

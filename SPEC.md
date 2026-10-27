@@ -243,6 +243,10 @@ text.
 includes the task, relevant ancestors, spec and plan context, direct blockers,
 latest handoff, and relevant evidence without returning the whole project.
 
+`arcl prime` is the session primer for hooks. It prints the skill's working
+loop, open work with handoffs, and the first ready tasks, within 40 lines and
+4 KiB, and points to `arcl context` for the rest.
+
 ### Repository-native workspace
 
 Repository-native mode projects the database into one record per Markdown/TOML

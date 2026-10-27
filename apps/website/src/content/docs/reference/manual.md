@@ -227,6 +227,7 @@ task ID, then a `subtask<TAB><id>` line for each completed subtask and an
 | `arcl ready`                                                         | List actionable leaf tasks in deterministic order.                 |
 | `arcl next`                                                          | Return the first actionable task, if one exists.                   |
 | `arcl next --start [--claim [<NAME>]]`                               | Start the first actionable task, claiming it with `--claim`.       |
+| `arcl prime`                                                         | Print the agent loop, open work, and the first ready tasks.        |
 
 `list` accepts `--kind`, `--status`, `--priority`, `--release`, `--epic`,
 `--milestone`, and `--parent`. `ready` and `next` accept the same priority and
@@ -238,6 +239,17 @@ next one. `--claim` names the assignee as `task start --claim` does, and
 passes over a ready task another assignee holds. When nothing is ready it
 prints `Nothing to start`, prints nothing with `--plain`, returns a null
 `data.task` with `--json`, and exits `0`.
+
+`prime` prints the working loop from the Arc Lightning skill, then the
+in-progress and parked tasks with their assignee and the first line of their
+latest handoff, then the first ready tasks, then a pointer to
+`arcl context <id>`. Each list shows at most 5 tasks and ends with
+`and K more` and the command that lists the rest. Titles and handoff lines are
+cut to 80 bytes and assignees to 40, so the output stays within 40 lines and
+4 KiB. `--plain` prints the same text. `--json` returns `loop`, the loop as
+Markdown, and `open` and `ready`, each with `tasks` and `more`. Each task has
+`id`, `title`, `status`, `priority`, `assignee` when set, and the full
+`handoff`.
 
 `tree` leaves out promoted and discarded captures in human, `--plain` and
 `--json` output; `--all` includes them. A closed capture named as the root

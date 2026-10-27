@@ -9,7 +9,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::cli::{ColorChoice, TreeStyle};
 use arcl_core::domain::{
     Capture, CaptureStatus, ContainerStatus, Note, Phase, Plan, PlanningTask, Release, ShortIds, Spec, TaskDependency,
-    TaskStatus,
+    TaskPriority, TaskStatus,
 };
 use arcl_repo::{
     vcs::{HeadState, PathState},
@@ -23,6 +23,17 @@ use arcl_store::{
 /// top level, with each heading, in the order the sections print. They follow
 /// the specs and the tasks outside any spec.
 pub const TREE_SECTIONS: [(&str, &str); 3] = [("capture", "Inbox"), ("note", "Notes"), ("release", "Releases")];
+
+/// The most tasks each `arcl prime` list shows. The rest are counted in
+/// [`PrimeList::more`].
+pub const PRIME_LIST_LIMIT: usize = 5;
+
+/// The most lines human `arcl prime` output prints. The size budget the
+/// manual documents.
+pub const PRIME_MAX_LINES: usize = 40;
+
+/// The most bytes human `arcl prime` output prints.
+pub const PRIME_MAX_BYTES: usize = 4096;
 
 /// The characters human `arcl tree` output draws with by default.
 const UNICODE_TREE: TreeChars =
@@ -42,6 +53,12 @@ const FORMAT_VERSION: u8 = 1;
 /// and `task complete` envelopes. Version 2 made readiness reasons typed
 /// objects and added `unblocked` to completion.
 const READINESS_FORMAT_VERSION: u8 = 2;
+
+/// The most bytes of a title or handoff line human `arcl prime` output keeps.
+const PRIME_TEXT_BYTES: usize = 80;
+
+/// The most bytes of an assignee human `arcl prime` output keeps.
+const PRIME_ASSIGNEE_BYTES: usize = 40;
 
 /// The output format for a command result.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -592,6 +609,19 @@ impl Renderer {
             (OutputMode::Plain, None) | (OutputMode::Quiet, _) => return Ok(None),
         };
         Ok(Some(self.style(message)))
+    }
+
+    /// Render the `arcl prime` primer. Human and plain output print the same
+    /// unstyled text, within [`PRIME_MAX_LINES`] and [`PRIME_MAX_BYTES`].
+    pub fn render_primer(&self, primer: &Primer) -> Result<Option<String>, OutputError> {
+        Ok(match self.mode {
+            OutputMode::Human | OutputMode::Plain => Some(primer.human()),
+            OutputMode::Json => Some(serde_json::to_string(&Envelope {
+                format_version: FORMAT_VERSION,
+                data: primer,
+            })?),
+            OutputMode::Quiet => None,
+        })
     }
 
     /// Render structured plan changes.
@@ -1152,6 +1182,158 @@ pub struct SkillReport {
     pub root: String,
     /// One entry per agent directory and skill file, in install order.
     pub files: Vec<SkillFile>,
+}
+
+/// What `arcl prime` prints: the skill's working loop, open work and ready
+/// work.
+#[derive(Debug, Serialize)]
+pub struct Primer {
+    /// The loop block of the Arc Lightning skill, as Markdown.
+    #[serde(rename = "loop")]
+    pub work_loop: &'static str,
+    /// In-progress tasks, then parked tasks.
+    pub open: PrimeList,
+    /// Ready tasks, in `arcl ready` order.
+    pub ready: PrimeList,
+}
+
+impl Primer {
+    /// The human text: a heading, the loop, both lists and a pointer to
+    /// `arcl context`.
+    fn human(&self) -> String {
+        let mut lines = vec![
+            "Arc Lightning tracks this project's tasks. Work the loop:".to_owned(),
+            String::new(),
+        ];
+        lines.extend(self.work_loop.lines().map(str::to_owned));
+        lines.push(String::new());
+        lines.extend(self.open.human_lines(
+            "Open work",
+            "arcl list --kind task --status in_progress parked",
+            PrimeTask::open_line,
+        ));
+        lines.push(String::new());
+        lines.extend(self.ready.human_lines("Ready", "arcl ready", PrimeTask::ready_line));
+        lines.push(String::new());
+        lines.push("`arcl context <id>` shows a task's criteria, blockers and full handoff.".to_owned());
+        lines.join("\n")
+    }
+}
+
+/// One `arcl prime` list: at most [`PRIME_LIST_LIMIT`] tasks, and how many
+/// more there are.
+#[derive(Debug, Serialize)]
+pub struct PrimeList {
+    /// The first tasks, in order.
+    pub tasks: Vec<PrimeTask>,
+    /// How many tasks the list leaves out.
+    pub more: usize,
+}
+
+impl PrimeList {
+    /// Keep the first [`PRIME_LIST_LIMIT`] of `tasks`, with IDs from `ids`,
+    /// and count the rest.
+    pub fn new<'a>(tasks: impl IntoIterator<Item = &'a PlanningTask>, ids: &ShortIds) -> Self {
+        let mut list = Self { tasks: Vec::new(), more: 0 };
+        for task in tasks {
+            if list.tasks.len() < PRIME_LIST_LIMIT {
+                list.tasks.push(PrimeTask::new(task, ids));
+            } else {
+                list.more += 1;
+            }
+        }
+        list
+    }
+
+    /// The heading, then each task's lines, then where to find the rest.
+    fn human_lines(&self, heading: &str, rest: &str, line: fn(&PrimeTask) -> String) -> Vec<String> {
+        if self.tasks.is_empty() {
+            return vec![format!("{heading}: none.")];
+        }
+        let mut lines = vec![format!("{heading}:")];
+        for task in &self.tasks {
+            lines.push(line(task));
+            if let Some(handoff) = task.handoff_line() {
+                lines.push(format!("  Handoff: {handoff}"));
+            }
+        }
+        if self.more > 0 {
+            lines.push(format!("  and {} more: {rest}", self.more));
+        }
+        lines
+    }
+}
+
+/// One task in an `arcl prime` list.
+#[derive(Debug, Serialize)]
+pub struct PrimeTask {
+    /// The full ID, or the short ID in human output.
+    pub id: String,
+    pub title: String,
+    pub status: TaskStatus,
+    pub priority: TaskPriority,
+    /// Who claimed the task, if anyone did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assignee: Option<String>,
+    /// The latest handoff note in full, or empty.
+    pub handoff: String,
+}
+
+impl PrimeTask {
+    fn new(task: &PlanningTask, ids: &ShortIds) -> Self {
+        let id = task.id.to_string();
+        Self {
+            id: ids.short(&id).to_owned(),
+            title: task.title.clone(),
+            status: task.status,
+            priority: task.priority,
+            assignee: task.assignee.clone(),
+            handoff: task.handoff.clone(),
+        }
+    }
+
+    /// `- <id> <status> (<assignee>): <title>`.
+    fn open_line(&self) -> String {
+        format!(
+            "- {} {}{}: {}",
+            self.id,
+            self.status.as_str(),
+            self.claim(),
+            self.clipped_title()
+        )
+    }
+
+    /// `- <id> [<priority>] (<assignee>): <title>`.
+    fn ready_line(&self) -> String {
+        format!(
+            "- {} [{}]{}: {}",
+            self.id,
+            self.priority.as_str(),
+            self.claim(),
+            self.clipped_title()
+        )
+    }
+
+    fn claim(&self) -> String {
+        self.assignee
+            .as_deref()
+            .map(|assignee| format!(" ({})", clip(assignee, PRIME_ASSIGNEE_BYTES, false)))
+            .unwrap_or_default()
+    }
+
+    fn clipped_title(&self) -> String {
+        let mut lines = self.title.lines();
+        let first = lines.next().unwrap_or_default();
+        clip(first, PRIME_TEXT_BYTES, lines.next().is_some())
+    }
+
+    /// The handoff's first non-blank line, clipped, with `…` when more
+    /// follows.
+    fn handoff_line(&self) -> Option<String> {
+        let mut lines = self.handoff.lines().map(str::trim).filter(|line| !line.is_empty());
+        let first = lines.next()?;
+        Some(clip(first, PRIME_TEXT_BYTES, lines.next().is_some()))
+    }
 }
 
 /// The manifest `web export` writes beside the documents, and reads back on
@@ -2092,6 +2274,19 @@ fn head_text(head: &HeadState) -> String {
         HeadState::Unborn { branch } => format!("on branch {branch} with no commits yet"),
         HeadState::Unknown => "HEAD names no branch or commit".to_owned(),
     }
+}
+
+/// `text` within `limit` bytes. Text that is longer, or that `cut` says
+/// continues, ends with `…` inside the limit.
+fn clip(text: &str, limit: usize, cut: bool) -> String {
+    if !cut && text.len() <= limit {
+        return text.to_owned();
+    }
+    let mut end = text.len().min(limit - '…'.len_utf8());
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &text[..end])
 }
 
 fn short(commit: &str) -> &str {
