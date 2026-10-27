@@ -9,7 +9,7 @@ import { planTemplate } from "$lib/planning/view";
 import { planning } from "$lib/planning/fixtures";
 import PlanningRoute from "../../routes/planning/+page.svelte";
 import { goto, reset } from "./app.svelte";
-import { fakeSource } from "./source";
+import { fakeSource } from "./fake-source";
 
 vi.mock("$app/state", async () => ({ page: (await import("./app.svelte")).page }));
 vi.mock("$app/navigation", async () => {

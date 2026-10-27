@@ -9,7 +9,7 @@ import { VIEW_STORAGE_KEY } from "$lib/work/board";
 import { sampleList, task } from "$lib/work/fixtures";
 import WorkRoute from "../../routes/+page.svelte";
 import { goto, reset, show } from "./app.svelte";
-import { fakeSource } from "./source";
+import { fakeSource } from "./fake-source";
 
 vi.mock("$app/state", async () => ({ page: (await import("./app.svelte")).page }));
 vi.mock("$app/navigation", async () => {

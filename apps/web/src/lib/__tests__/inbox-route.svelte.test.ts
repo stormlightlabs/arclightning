@@ -8,7 +8,7 @@ import { setDataSource } from "$lib/data/source";
 import { blockedDetail } from "$lib/task/fixtures";
 import InboxRoute from "../../routes/inbox/+page.svelte";
 import { reset } from "./app.svelte";
-import { fakeSource } from "./source";
+import { fakeSource } from "./fake-source";
 
 vi.mock("$app/state", async () => ({ page: (await import("./app.svelte")).page }));
 vi.mock("$app/navigation", async () => {

@@ -8,7 +8,7 @@ import { setSyncStatus } from "$lib/sync/status.svelte";
 import { blockedDetail } from "$lib/task/fixtures";
 import TaskRoute from "../../routes/tasks/[id]/+page.svelte";
 import { reset, show } from "./app.svelte";
-import { fakeSource } from "./source";
+import { fakeSource } from "./fake-source";
 
 vi.mock("$app/state", async () => ({ page: (await import("./app.svelte")).page }));
 vi.mock("$app/navigation", async () => {
