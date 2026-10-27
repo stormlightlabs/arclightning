@@ -5,20 +5,20 @@ import type { DocHeading } from './table-of-contents';
 export type DocSection = 'Get started' | 'Guides' | 'Reference';
 
 /** Front matter generated for a documentation page. */
-export interface DocMetadata {
+export type DocMetadata = {
 	title: string;
 	description: string;
 	toc?: DocHeading[];
-}
+};
 
 /** One Markdown documentation page and its stable URL slug. */
-export interface Doc extends DocMetadata {
+export type Doc = DocMetadata & {
 	slug: string;
 	section: DocSection;
 	component: Component;
 	markdown: string;
 	toc: DocHeading[];
-}
+};
 
 type MarkdownModule = { default: Component; metadata: DocMetadata };
 const modules = import.meta.glob<MarkdownModule>('/src/content/docs/**/*.md', { eager: true });

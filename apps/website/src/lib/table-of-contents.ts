@@ -38,8 +38,8 @@ export function extractTableOfContents() {
 	};
 }
 
-export interface DocHeading {
+export type DocHeading = {
 	title: string;
 	slug: string;
 	level: 2 | 3;
-}
+};
