@@ -5,7 +5,7 @@ title = "Print an agent primer with arcl prime"
 status = "completed"
 priority = "normal"
 position = 2
-evidence = "Delivered by #PR: `arcl prime` prints the skill's loop block, open work with handoffs and the first ready tasks within 40 lines and 4 KiB; the automation guide shows Claude Code and Codex SessionStart hooks."
+evidence = "Delivered by #76: `arcl prime` prints the skill's loop block, open work with handoffs and the first ready tasks within 40 lines and 4 KiB; the automation guide shows Claude Code and Codex SessionStart hooks."
 +++
 
 Print the agent loop and the current state of work in one command, for

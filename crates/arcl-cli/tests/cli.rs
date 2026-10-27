@@ -6152,7 +6152,7 @@ fn prime_stays_within_its_size_budget() {
     let directory = initialized_directory();
     let dir = directory.path();
     let title = "é".repeat(150);
-    let assignee = "agent-".repeat(20);
+    let assignee = "ä".repeat(64);
     let note = format!("{}\n{}", "ü".repeat(200), "more ".repeat(100));
     for _ in 0..8 {
         let task = create_task(dir, &title, None);
