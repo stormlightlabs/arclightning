@@ -27,6 +27,7 @@ mod auto_sync;
 mod commands;
 mod error;
 mod init;
+mod prime;
 mod query;
 mod reads;
 mod serve;
@@ -36,12 +37,13 @@ mod web;
 mod workspace;
 
 use commands::{
-    apply_plan_document, exec_dependency, exec_note, exec_plan, exec_release, exec_spec, exec_task, run_capture,
-    run_plan, run_spec, run_task,
+    apply_plan_document, claim_name, exec_dependency, exec_note, exec_plan, exec_release, exec_spec, exec_task,
+    run_capture, run_plan, run_spec, run_task,
 };
 pub use error::ApplicationError;
 use error::{CResult, CommandError};
 use init::initialize;
+use prime::{PRIME_LOCK_WAIT, read_prime};
 use query::resolve_ready_filter;
 use reads::{read_context, read_explain, read_list, read_ready, read_show, read_tree};
 use serve::exec_serve;
@@ -90,11 +92,14 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
     // `web export` stamps its documents with the time, so it must not export
     // a database the sync did not bring up to date.
     let needs_sync = matches!(cli.command, Some(Command::Web { command: WebCommand::Export { .. } }));
+    // `prime` runs at session start, so it waits a bounded time for the lock
+    // and, failing that, shows the database without a sync.
+    let prime = matches!(cli.command, Some(Command::Prime));
     // The lock is held from the first sync until `run` returns.
     let (roots, synced, _lock) = match access {
         Access::Untracked => (None, Ok(Vec::new()), None),
         _ => match workspace_roots() {
-            Ok(Some(roots)) => match roots.lock() {
+            Ok(Some(roots)) => match if prime { roots.lock_within(PRIME_LOCK_WAIT) } else { roots.lock() } {
                 Ok(lock) => {
                     let synced = auto_sync(&roots);
                     (Some(roots), synced, Some(lock))
@@ -185,6 +190,7 @@ fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Wa
         Some(Command::Tree { id, options }) => write_output(read_tree(id.as_deref(), options, renderer)?),
         Some(Command::Explain { task_id }) => write_output(read_explain(&task_id, renderer)?),
         Some(Command::Context { task_id }) => write_output(read_context(&task_id, renderer)?),
+        Some(Command::Prime) => write_output(read_prime(renderer)?),
         Some(Command::Check) => {
             let database = open_database().map_err(ApplicationError::from_command)?;
             let report = database.check().map_err(ApplicationError::from_command)?;
@@ -206,7 +212,19 @@ fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Wa
             }
         }
         Some(Command::Ready { filters }) => write_output(read_ready(filters, renderer)?),
-        Some(Command::Next { filters }) => {
+        Some(Command::Next { filters, start: true, claim }) => {
+            let claim = claim
+                .map(claim_name)
+                .transpose()
+                .map_err(ApplicationError::from_command)?;
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            let filter = resolve_ready_filter(filters).map_err(ApplicationError::from_command)?;
+            let task = database
+                .start_next_planning_task(&filter, claim.as_deref())
+                .map_err(ApplicationError::from_command)?;
+            write_output(renderer.render_started_next_planning_task(task.as_ref())?)
+        }
+        Some(Command::Next { filters, .. }) => {
             let database = open_database().map_err(ApplicationError::from_command)?;
             let filter = resolve_ready_filter(filters).map_err(ApplicationError::from_command)?;
             let task = database

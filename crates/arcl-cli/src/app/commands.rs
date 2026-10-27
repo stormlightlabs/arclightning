@@ -520,17 +520,19 @@ pub(super) fn run_task(command: TaskCommand, renderer: &Renderer) -> Result<Opti
                 ),
             )
         }
-        TaskCommand::Start { id, force } => {
+        TaskCommand::Start { id, force, claim } => {
             let id = parse_task_id(&id).map_err(ApplicationError::from_command)?;
+            let claim = claim
+                .map(claim_name)
+                .transpose()
+                .map_err(ApplicationError::from_command)?;
             let mut database = open_database().map_err(ApplicationError::from_command)?;
-            render_output(
-                renderer.render_planning_task(
-                    "started",
-                    &database
-                        .start_planning_task(id, force)
-                        .map_err(ApplicationError::from_command)?,
-                ),
-            )
+            let task = match claim {
+                Some(name) => database.claim_planning_task(id, force, &name),
+                None => database.start_planning_task(id, force),
+            }
+            .map_err(ApplicationError::from_command)?;
+            render_output(renderer.render_planning_task("started", &task))
         }
         TaskCommand::Park { id } => transition_task(id, TaskAction::Park, false, renderer),
         TaskCommand::Unpark { id } => transition_task(id, TaskAction::Unpark, false, renderer),
@@ -873,6 +875,29 @@ fn transition_phase(
         ContainerAction::Cancel => "cancelled",
     };
     render_output(renderer.render_phase(action, &phase))
+}
+
+/// The name `task start --claim` claims for: `name` when given, then a
+/// non-empty `ARCL_AGENT`, then the Git user name.
+pub(super) fn claim_name(name: Option<String>) -> CResult<String> {
+    if let Some(name) = name {
+        return Ok(name);
+    }
+    if let Some(agent) = std::env::var("ARCL_AGENT")
+        .ok()
+        .filter(|agent| !agent.trim().is_empty())
+    {
+        return Ok(agent);
+    }
+    std::process::Command::new("git")
+        .args(["config", "user.name"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty())
+        .ok_or(CommandError::NoClaimName)
 }
 
 fn transition_task(

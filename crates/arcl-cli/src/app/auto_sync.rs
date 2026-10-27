@@ -8,8 +8,9 @@
 //!
 //! Every sync runs under the project's sync lock, so arcl commands in one
 //! project with the workspace on run one at a time. A command waits for the
-//! lock as long as it takes; `arcl serve` waits a bounded time instead, so a
-//! long command cannot hold up the server.
+//! lock as long as it takes. `arcl serve` waits a bounded time instead, so a
+//! long command cannot hold up the server, and so does `arcl prime`, which
+//! then shows the database without a sync.
 
 use std::fs::TryLockError;
 use std::thread;
@@ -53,7 +54,7 @@ impl WorkspaceRoots {
 
     /// Take the project's sync lock, waiting at most `wait`. See
     /// [`lock_project_within`].
-    fn lock_within(&self, wait: Duration) -> CResult<File> {
+    pub(super) fn lock_within(&self, wait: Duration) -> CResult<File> {
         lock_project_within(&self.worktree_root, wait)
     }
 }
@@ -73,10 +74,12 @@ pub(super) fn command_access(command: Option<&Command>) -> Access {
             | Command::Tree { .. }
             | Command::Explain { .. }
             | Command::Context { .. }
+            | Command::Prime
             | Command::Check
             | Command::Ready { .. }
-            | Command::Next { .. },
+            | Command::Next { start: false, .. },
         ) => Access::Read,
+        Some(Command::Next { start: true, .. }) => Access::Write,
         Some(Command::Capture { command }) => {
             read_when(matches!(command, CaptureCommand::Show { .. } | CaptureCommand::List))
         }

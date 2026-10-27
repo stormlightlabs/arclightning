@@ -5673,3 +5673,718 @@ fn input_that_starts_an_id_is_refused_and_a_capitalized_full_id_keeps_its_error(
     let stderr = String::from_utf8_lossy(&refused.stderr);
     assert!(stderr.contains("expected prefix `arcl-t-`"), "{stderr}");
 }
+
+/// Run `task start <task> --claim [name]` with `ARCL_AGENT` set to `agent`, or
+/// unset.
+fn claim_output(directory: &Path, task: &str, name: Option<&str>, agent: Option<&str>) -> std::process::Output {
+    let mut command = arcl_in(directory);
+    command.args(["--json", "task", "start", task, "--claim"]);
+    command.args(name);
+    match agent {
+        Some(agent) => command.env("ARCL_AGENT", agent),
+        None => command.env_remove("ARCL_AGENT"),
+    };
+    command.output().expect("start runs")
+}
+
+#[test]
+fn task_start_claim_sets_the_assignee_and_refuses_another_holder() {
+    let directory = initialized_directory();
+    let task = create_task(directory.path(), "Claimed", None);
+
+    let claimed = claim_output(directory.path(), &task, Some("codex"), None);
+    assert_success(&claimed);
+    let claimed = json(&claimed.stdout);
+    assert_eq!(claimed["data"]["task"]["status"], "in_progress");
+    assert_eq!(claimed["data"]["task"]["assignee"], "codex");
+
+    let again = claim_output(directory.path(), &task, Some("codex"), None);
+    assert_success(&again);
+    assert_eq!(json(&again.stdout)["data"]["task"]["assignee"], "codex");
+
+    let refused = claim_output(directory.path(), &task, Some("claude"), None);
+    assert_eq!(refused.status.code(), Some(4));
+    assert!(refused.stdout.is_empty());
+    let error = json(&refused.stderr);
+    assert_eq!(error["error"]["code"], "conflict");
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .expect("error message")
+            .contains("claimed by `codex`")
+    );
+
+    for force in [None, Some("--force")] {
+        let mut command = arcl_in(directory.path());
+        command.args(["--json", "task", "start", &task]).args(force);
+        let unclaimed = command.output().expect("start runs");
+        assert_eq!(unclaimed.status.code(), Some(4), "{force:?}");
+        assert!(unclaimed.stdout.is_empty(), "{force:?}");
+        assert_eq!(json(&unclaimed.stderr)["error"]["code"], "conflict", "{force:?}");
+    }
+
+    let shown = run_json(directory.path(), ["--json", "show", &task].as_ref());
+    assert_eq!(shown["data"]["task"]["assignee"], "codex");
+    let human = arcl_in(directory.path())
+        .args(["--color", "never", "show", &task])
+        .output()
+        .expect("show runs");
+    assert!(String::from_utf8_lossy(&human.stdout).contains("Assignee: codex"));
+    let context = stdout_of(directory.path(), &["--color", "never", "context", &task]);
+    assert!(context.contains("\nAssignee: codex\n"), "{context}");
+    let context = stdout_of(directory.path(), &["--plain", "context", &task]);
+    assert!(context.contains("\nassignee\tcodex\n"), "{context}");
+
+    let unclaimed = create_task(directory.path(), "Unclaimed", None);
+    let shown = run_json(directory.path(), ["--json", "show", &unclaimed].as_ref());
+    assert!(shown["data"]["task"].get("assignee").is_none());
+}
+
+#[test]
+fn task_start_claim_takes_the_name_from_arcl_agent_then_git() {
+    let directory = initialized_directory();
+    let from_agent = create_task(directory.path(), "From agent", None);
+    let from_git = create_task(directory.path(), "From Git", None);
+    let unnamed = create_task(directory.path(), "Unnamed", None);
+
+    let claimed = claim_output(directory.path(), &from_agent, None, Some("agent-7"));
+    assert_success(&claimed);
+    assert_eq!(json(&claimed.stdout)["data"]["task"]["assignee"], "agent-7");
+
+    let refused = claim_output(directory.path(), &unnamed, None, None);
+    assert_eq!(refused.status.code(), Some(3));
+    let error = json(&refused.stderr);
+    assert_eq!(error["error"]["code"], "invalid_request");
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .expect("error message")
+            .contains("ARCL_AGENT")
+    );
+    let shown = run_json(directory.path(), ["--json", "show", &unnamed].as_ref());
+    assert_eq!(shown["data"]["task"]["status"], "pending");
+
+    let config = directory.path().join("gitconfig");
+    fs::write(&config, "[user]\n\tname = Git Person\n").expect("Git config writes");
+    let mut command = arcl_in(directory.path());
+    let claimed = command
+        .args(["--json", "task", "start", &from_git, "--claim"])
+        .env_remove("ARCL_AGENT")
+        .env("GIT_CONFIG_GLOBAL", &config)
+        .output()
+        .expect("start runs");
+    assert_success(&claimed);
+    assert_eq!(json(&claimed.stdout)["data"]["task"]["assignee"], "Git Person");
+}
+
+#[test]
+fn park_handoff_complete_and_cancel_release_the_claim() {
+    let directory = initialized_directory();
+    for action in ["park", "handoff", "complete", "cancel"] {
+        let task = create_task(directory.path(), action, None);
+        assert_success(&claim_output(directory.path(), &task, Some("codex"), None));
+        let mut args = vec!["--json", "task", action, task.as_str()];
+        if action == "handoff" {
+            args.extend(["--note", "Resume here"]);
+        }
+        let released = run_json(directory.path(), &args);
+        assert!(released["data"]["task"].get("assignee").is_none(), "{action}");
+        let shown = run_json(directory.path(), ["--json", "show", &task].as_ref());
+        assert!(shown["data"]["task"].get("assignee").is_none(), "{action}");
+    }
+}
+
+#[test]
+fn list_filters_tasks_by_assignee() {
+    let directory = initialized_directory();
+    let mine = create_task(directory.path(), "Mine", None);
+    let theirs = create_task(directory.path(), "Theirs", None);
+    create_task(directory.path(), "Nobody's", None);
+    assert_success(&claim_output(directory.path(), &mine, Some("codex"), None));
+    assert_success(&claim_output(directory.path(), &theirs, Some("claude"), None));
+    run_json(directory.path(), ["--json", "capture", "create", "Idea"].as_ref());
+
+    let listed = run_json(directory.path(), ["--json", "list", "--assignee", "codex"].as_ref());
+    let ids: Vec<&str> = listed["data"]["records"]
+        .as_array()
+        .expect("records")
+        .iter()
+        .map(|record| record["id"].as_str().expect("record ID"))
+        .collect();
+    assert_eq!(ids, vec![mine.as_str()]);
+
+    let refused = arcl_in(directory.path())
+        .args(["--json", "list", "--kind", "note", "--assignee", "codex"])
+        .output()
+        .expect("list runs");
+    assert_eq!(refused.status.code(), Some(3));
+}
+
+#[test]
+fn a_new_workspace_starts_at_version_one_until_a_claim() {
+    let directory = tempdir().expect("temporary directory can be created");
+    run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
+    let manifest = directory.path().join(".arcl/workspace/manifest.toml");
+    assert_eq!(
+        fs::read_to_string(&manifest).expect("manifest reads"),
+        "format-version = 1\n"
+    );
+
+    let task = create_task(directory.path(), "Claimed", None);
+    assert_success(&claim_output(directory.path(), &task, Some("codex"), None));
+    assert_success(
+        &arcl_in(directory.path())
+            .args(["workspace", "sync"])
+            .output()
+            .expect("sync runs"),
+    );
+    assert_eq!(
+        fs::read_to_string(&manifest).expect("manifest reads"),
+        "format-version = 2\n"
+    );
+}
+
+#[test]
+fn task_start_claim_refuses_an_invalid_name_as_a_request_error() {
+    let directory = initialized_directory();
+    let task = create_task(directory.path(), "Unclaimed", None);
+    let long = "a".repeat(65);
+    for name in ["", "   ", "a\u{7}b", "a\u{200b}b", long.as_str()] {
+        let refused = claim_output(directory.path(), &task, Some(name), None);
+        assert_eq!(refused.status.code(), Some(3), "{name:?}");
+        assert!(refused.stdout.is_empty(), "{name:?}");
+        let error = json(&refused.stderr);
+        assert_eq!(error["error"]["code"], "invalid_request", "{name:?}");
+        let message = error["error"]["message"].as_str().expect("error message");
+        assert!(message.contains("claim name `"), "{message}");
+        assert!(message.contains("at most 64 characters"), "{message}");
+        assert!(!message.contains("stored"), "{message}");
+    }
+    let shown = run_json(directory.path(), ["--json", "show", &task].as_ref());
+    assert_eq!(shown["data"]["task"]["status"], "pending");
+    assert!(shown["data"]["task"].get("assignee").is_none());
+}
+
+#[test]
+fn the_assignee_round_trips_through_the_workspace() {
+    let source = tempdir().expect("temporary directory can be created");
+    run_json(source.path(), ["--json", "init", "--workspace"].as_ref());
+    let task = create_task(source.path(), "Claimed", None);
+    assert_success(&claim_output(source.path(), &task, Some("codex"), None));
+    assert_success(
+        &arcl_in(source.path())
+            .args(["workspace", "export"])
+            .output()
+            .expect("export runs"),
+    );
+    let record_path = format!(".arcl/workspace/tasks/{task}.md");
+    let record = fs::read_to_string(source.path().join(&record_path)).expect("task record is exported");
+    assert!(record.contains("assignee = \"codex\""), "record: {record}");
+
+    let target = tempdir().expect("temporary directory can be created");
+    run_json(target.path(), ["--json", "init", "--workspace"].as_ref());
+    for file in [".arcl/workspace/manifest.toml", record_path.as_str()] {
+        fs::copy(source.path().join(file), target.path().join(file)).expect("workspace file copies");
+    }
+    assert_success(
+        &arcl_in(target.path())
+            .args(["workspace", "import"])
+            .output()
+            .expect("import runs"),
+    );
+    let shown = run_json(target.path(), ["--json", "show", &task].as_ref());
+    assert_eq!(shown["data"]["task"]["assignee"], "codex");
+    assert_eq!(shown["data"]["task"]["status"], "in_progress");
+}
+
+#[test]
+fn next_start_starts_the_task_next_shows() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let first = create_task(dir, "First", None);
+    let second = create_task(dir, "Second", None);
+    let shown = run_json(dir, ["--json", "next"].as_ref());
+    assert_eq!(shown["data"]["task"]["id"], first.as_str());
+
+    let started = run_json(dir, ["--json", "next", "--start"].as_ref());
+    assert_eq!(started["data"]["task"]["id"], first.as_str());
+    assert_eq!(started["data"]["task"]["status"], "in_progress");
+    assert!(started["data"]["task"].get("assignee").is_none());
+
+    let human = arcl_in(dir)
+        .args(["--color", "never", "next", "--start"])
+        .output()
+        .expect("next runs");
+    assert_success(&human);
+    assert_eq!(
+        String::from_utf8_lossy(&human.stdout).trim(),
+        format!("Started task `{second}`: Second")
+    );
+    let shown = run_json(dir, ["--json", "show", &second].as_ref());
+    assert_eq!(shown["data"]["task"]["status"], "in_progress");
+}
+
+#[test]
+fn next_start_claim_claims_the_task_as_task_start_does() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let named = create_task(dir, "Named", None);
+    let from_agent = create_task(dir, "From agent", None);
+
+    let claimed = arcl_in(dir)
+        .args(["--json", "next", "--start", "--claim", "codex"])
+        .env_remove("ARCL_AGENT")
+        .output()
+        .expect("next runs");
+    assert_success(&claimed);
+    let claimed = json(&claimed.stdout);
+    assert_eq!(claimed["data"]["task"]["id"], named.as_str());
+    assert_eq!(claimed["data"]["task"]["assignee"], "codex");
+
+    let claimed = arcl_in(dir)
+        .args(["--json", "next", "--start", "--claim"])
+        .env("ARCL_AGENT", "agent-7")
+        .output()
+        .expect("next runs");
+    assert_success(&claimed);
+    let claimed = json(&claimed.stdout);
+    assert_eq!(claimed["data"]["task"]["id"], from_agent.as_str());
+    assert_eq!(claimed["data"]["task"]["assignee"], "agent-7");
+
+    let refused = arcl_in(dir)
+        .args(["next", "--claim", "codex"])
+        .output()
+        .expect("next runs");
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("--start"));
+}
+
+#[test]
+fn next_start_claim_refuses_an_invalid_name_as_a_request_error() {
+    let directory = initialized_directory();
+    let task = create_task(directory.path(), "Ready", None);
+    for name in ["", "a\u{7}b", "a\u{200b}b"] {
+        let refused = arcl_in(directory.path())
+            .args(["--json", "next", "--start", "--claim", name])
+            .output()
+            .expect("next runs");
+        assert_eq!(refused.status.code(), Some(3), "{name:?}");
+        let error = json(&refused.stderr);
+        assert_eq!(error["error"]["code"], "invalid_request", "{name:?}");
+        let message = error["error"]["message"].as_str().expect("error message");
+        assert!(message.contains("claim name `"), "{message}");
+        assert!(!message.contains("stored"), "{message}");
+    }
+    let shown = run_json(directory.path(), ["--json", "show", &task].as_ref());
+    assert_eq!(shown["data"]["task"]["status"], "pending");
+}
+
+#[test]
+fn next_start_reports_nothing_to_start_and_exits_zero() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let blocker = create_task(dir, "Blocker", None);
+    let blocked = create_task(dir, "Blocked", None);
+    block_start_task(dir, &blocked, &blocker);
+    run_json(dir, ["--json", "task", "start", &blocker].as_ref());
+
+    let human = arcl_in(dir)
+        .args(["--color", "never", "next", "--start"])
+        .output()
+        .expect("next runs");
+    assert_success(&human);
+    assert_eq!(
+        String::from_utf8_lossy(&human.stdout).trim(),
+        "Nothing to start: no task is ready."
+    );
+
+    let plain = arcl_in(dir)
+        .args(["--plain", "next", "--start", "--claim", "codex"])
+        .output()
+        .expect("next runs");
+    assert_success(&plain);
+    assert!(plain.stdout.is_empty());
+
+    let empty = run_json(dir, ["--json", "next", "--start"].as_ref());
+    assert_eq!(empty["format_version"], 1);
+    assert!(empty["data"]["task"].is_null());
+    let shown = run_json(dir, ["--json", "show", &blocked].as_ref());
+    assert_eq!(shown["data"]["task"]["status"], "pending");
+}
+
+#[test]
+fn next_start_honours_the_next_filters() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let normal = create_task(dir, "Normal", None);
+    let low = run_json(dir, ["--json", "task", "create", "Low", "--priority", "low"].as_ref())["data"]["task"]["id"]
+        .as_str()
+        .expect("task ID")
+        .to_owned();
+
+    let started = run_json(dir, ["--json", "next", "--start", "--priority", "low"].as_ref());
+    assert_eq!(started["data"]["task"]["id"], low.as_str());
+    let empty = run_json(dir, ["--json", "next", "--start", "--priority", "low"].as_ref());
+    assert!(empty["data"]["task"].is_null());
+    let shown = run_json(dir, ["--json", "show", &normal].as_ref());
+    assert_eq!(shown["data"]["task"]["status"], "pending");
+}
+
+/// Spawn `count` `next --start --json` processes at once in `directory` and
+/// return each one's started task ID, or `None` when it found nothing.
+fn concurrent_next_starts(directory: &Path, count: usize) -> Vec<Option<String>> {
+    let children: Vec<_> = (0..count)
+        .map(|_| {
+            isolated_command(assert_cmd::cargo::cargo_bin("arcl"), directory)
+                .args(["--json", "next", "--start"])
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .expect("next spawns")
+        })
+        .collect();
+    children
+        .into_iter()
+        .map(|child| {
+            let output = child.wait_with_output().expect("next finishes");
+            assert_success(&output);
+            json(&output.stdout)["data"]["task"]["id"].as_str().map(str::to_owned)
+        })
+        .collect()
+}
+
+#[test]
+fn concurrent_next_starts_never_start_the_same_task() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let first = create_task(dir, "First", None);
+    let second = create_task(dir, "Second", None);
+    let mut started: Vec<String> = concurrent_next_starts(dir, 2)
+        .into_iter()
+        .map(|id| id.expect("each call starts a task"))
+        .collect();
+    started.sort();
+    let mut expected = vec![first, second];
+    expected.sort();
+    assert_eq!(started, expected);
+
+    // With one ready task, one call starts it and the other finds nothing.
+    let only = create_task(dir, "Only", None);
+    let results = concurrent_next_starts(dir, 2);
+    assert_eq!(results.iter().flatten().collect::<Vec<_>>(), vec![&only]);
+    assert_eq!(results.iter().filter(|id| id.is_none()).count(), 1);
+}
+
+/// Run `arcl prime` with `args` and return its standard output.
+fn prime_output(directory: &Path, args: &[&str]) -> String {
+    let output = arcl_in(directory)
+        .args(["--color", "never"])
+        .args(args)
+        .arg("prime")
+        .output()
+        .expect("prime runs");
+    assert_success(&output);
+    String::from_utf8(output.stdout).expect("prime prints UTF-8")
+}
+
+/// The loop block of `skills/arclightning/SKILL.md`, which `arcl prime`
+/// prints.
+fn skill_loop() -> String {
+    let skill = fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../skills/arclightning/SKILL.md"
+    ))
+    .expect("SKILL.md reads");
+    let (_, rest) = skill
+        .split_once("<!-- arcl-prime:begin -->")
+        .expect("SKILL.md opens the loop block");
+    let (block, _) = rest
+        .split_once("<!-- arcl-prime:end -->")
+        .expect("SKILL.md closes the loop block");
+    block.trim().to_owned()
+}
+
+/// Replace each short ID human output prints for `ids` with its name. A short
+/// ID is the shortest unique suffix of the full ID, so the longest suffix
+/// found after `- ` is the one printed.
+fn name_short_ids(output: &str, ids: &[(&str, &str)]) -> String {
+    let mut output = output.to_owned();
+    for (full, name) in ids {
+        let found = (1..=full.len())
+            .rev()
+            .map(|length| format!("- {} ", &full[full.len() - length..]))
+            .find(|prefix| output.contains(prefix.as_str()))
+            .unwrap_or_else(|| panic!("no short ID of {full} in {output}"));
+        output = output.replace(&found, &format!("- <{name}> "));
+    }
+    output
+}
+
+/// A project with a claimed in-progress task that has a handoff, a parked
+/// task, a ready task and a blocked one. Returns the directory and the IDs.
+fn prime_fixture() -> (TempDir, [String; 4]) {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let claimed = create_task(dir, "Resume the parser", None);
+    let parked = create_task(dir, "Write the docs", None);
+    let ready = create_task(dir, "Ship the release", None);
+    let blocked = create_task(dir, "Announce the release", None);
+    block_start_task(dir, &blocked, &ready);
+
+    assert_success(&claim_output(dir, &claimed, Some("codex"), None));
+    run_json(
+        dir,
+        [
+            "--json",
+            "task",
+            "handoff",
+            &claimed,
+            "--note",
+            "Parser handles literals.\nNext: error recovery.",
+        ]
+        .as_ref(),
+    );
+    run_json(dir, ["--json", "task", "unpark", &claimed].as_ref());
+    assert_success(&claim_output(dir, &claimed, Some("codex"), None));
+
+    run_json(dir, ["--json", "task", "start", &parked].as_ref());
+    run_json(
+        dir,
+        ["--json", "task", "handoff", &parked, "--note", "Drafted the guide."].as_ref(),
+    );
+    (directory, [claimed, parked, ready, blocked])
+}
+
+#[test]
+fn prime_prints_the_loop_open_work_and_ready_tasks() {
+    let (directory, [claimed, parked, ready, _]) = prime_fixture();
+    let output = prime_output(directory.path(), &[]);
+    let output = name_short_ids(
+        &output,
+        &[(&claimed, "claimed"), (&parked, "parked"), (&ready, "ready")],
+    );
+    let expected = format!(
+        "Arc Lightning tracks this project's tasks. Work the loop:\n\
+         \n\
+         {}\n\
+         \n\
+         Open work:\n\
+         - <claimed> in_progress (codex): Resume the parser\n\
+         \x20 Handoff: Parser handles literals.…\n\
+         - <parked> parked: Write the docs\n\
+         \x20 Handoff: Drafted the guide.\n\
+         \n\
+         Ready:\n\
+         - <ready> [normal]: Ship the release\n\
+         \n\
+         `arcl context <id>` shows a task's criteria, blockers and full handoff.\n",
+        skill_loop()
+    );
+    assert_eq!(output, expected);
+}
+
+#[test]
+fn prime_json_returns_the_loop_and_capped_lists_with_full_ids() {
+    let (directory, [claimed, parked, ready, _]) = prime_fixture();
+    let primer = run_json(directory.path(), ["--json", "prime"].as_ref());
+    assert_eq!(primer["format_version"], 1);
+    let data = &primer["data"];
+    assert_eq!(data["loop"], skill_loop());
+
+    let open = data["open"]["tasks"].as_array().expect("open tasks");
+    assert_eq!(data["open"]["more"], 0);
+    assert_eq!(open.len(), 2);
+    assert_eq!(open[0]["id"], claimed);
+    assert_eq!(open[0]["title"], "Resume the parser");
+    assert_eq!(open[0]["status"], "in_progress");
+    assert_eq!(open[0]["priority"], "normal");
+    assert_eq!(open[0]["assignee"], "codex");
+    assert_eq!(open[0]["handoff"], "Parser handles literals.\nNext: error recovery.");
+    assert_eq!(open[1]["id"], parked);
+    assert_eq!(open[1]["status"], "parked");
+    assert!(open[1].get("assignee").is_none());
+
+    let listed = data["ready"]["tasks"].as_array().expect("ready tasks");
+    assert_eq!(data["ready"]["more"], 0);
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0]["id"], ready);
+    assert_eq!(listed[0]["handoff"], "");
+}
+
+#[test]
+fn prime_stays_within_its_size_budget() {
+    use arcl_cli::output::{PRIME_MAX_BYTES, PRIME_MAX_LINES};
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let title = "é".repeat(150);
+    let assignee = "ä".repeat(64);
+    let note = format!("{}\n{}", "ü".repeat(200), "more ".repeat(100));
+    for _ in 0..8 {
+        let task = create_task(dir, &title, None);
+        assert_success(&claim_output(dir, &task, Some(&assignee), None));
+        run_json(dir, ["--json", "task", "handoff", &task, "--note", &note].as_ref());
+        run_json(dir, ["--json", "task", "unpark", &task].as_ref());
+        assert_success(&claim_output(dir, &task, Some(&assignee), None));
+    }
+    for _ in 0..8 {
+        let task = create_task(dir, &title, None);
+        run_json(dir, ["--json", "task", "start", &task].as_ref());
+        run_json(dir, ["--json", "task", "handoff", &task, "--note", &note].as_ref());
+        run_json(dir, ["--json", "task", "unpark", &task].as_ref());
+    }
+
+    // Plain output prints full IDs, so it is the longer of the two.
+    for args in [&[][..], &["--plain"][..]] {
+        let output = prime_output(dir, args);
+        let lines = output.lines().count();
+        assert!(lines <= PRIME_MAX_LINES, "{args:?}: {lines} lines:\n{output}");
+        assert!(
+            output.len() <= PRIME_MAX_BYTES,
+            "{args:?}: {} bytes:\n{output}",
+            output.len()
+        );
+        assert!(output.contains("  and 3 more: arcl list --kind task --status in_progress parked\n"));
+        assert!(output.contains("  and 3 more: arcl ready\n"));
+        assert!(output.lines().all(|line| line.len() <= 200), "{output}");
+    }
+
+    let primer = run_json(dir, ["--json", "prime"].as_ref());
+    assert_eq!(primer["data"]["open"]["tasks"].as_array().map(Vec::len), Some(5));
+    assert_eq!(primer["data"]["open"]["more"], 3);
+    assert_eq!(primer["data"]["ready"]["more"], 3);
+}
+
+#[test]
+fn prime_on_an_empty_project_prints_the_loop_and_no_work() {
+    let directory = initialized_directory();
+    let output = prime_output(directory.path(), &[]);
+    assert!(output.contains(&skill_loop()));
+    assert!(output.contains("\nOpen work: none.\n\nReady: none.\n"));
+    assert_eq!(output, prime_output(directory.path(), &["--plain"]));
+
+    let primer = run_json(directory.path(), ["--json", "prime"].as_ref());
+    assert_eq!(primer["data"]["open"], serde_json::json!({ "tasks": [], "more": 0 }));
+    assert_eq!(primer["data"]["ready"], serde_json::json!({ "tasks": [], "more": 0 }));
+}
+
+#[test]
+fn prime_escapes_control_characters_in_titles_and_handoffs() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let title = "Fix \u{1b}[31mred\u{7} text\r";
+    let task = create_task(dir, title, None);
+    // Assignees refuse control characters, so only titles and handoffs carry them.
+    let refused = claim_output(dir, &task, Some("co\u{1b}dex"), None);
+    assert!(
+        !refused.status.success(),
+        "a control character in an assignee is refused"
+    );
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("without control or format characters"),
+        "{refused:?}"
+    );
+    run_json(dir, ["--json", "task", "start", &task].as_ref());
+    run_json(
+        dir,
+        [
+            "--json",
+            "task",
+            "handoff",
+            &task,
+            "--note",
+            "Cleared \u{1b}]0;owned\u{7} title",
+        ]
+        .as_ref(),
+    );
+
+    for args in [&[][..], &["--plain"][..]] {
+        let output = prime_output(dir, args);
+        assert!(
+            !output.contains('\u{1b}') && !output.contains('\u{7}') && !output.contains('\r'),
+            "{output:?}"
+        );
+        assert!(output.contains(": Fix \\x1b[31mred\\x07 text\\r\n"), "{output}");
+        assert!(
+            output.contains("  Handoff: Cleared \\x1b]0;owned\\x07 title\n"),
+            "{output}"
+        );
+    }
+
+    let primer = run_json(dir, ["--json", "prime"].as_ref());
+    assert_eq!(primer["data"]["open"]["tasks"][0]["title"], title);
+}
+
+#[test]
+fn prime_outside_a_project_says_to_run_init_and_succeeds() {
+    let directory = tempdir().expect("temporary directory can be created");
+    let dir = directory.path();
+    let output = prime_output(dir, &[]);
+    assert!(
+        output.starts_with("Arc Lightning is not initialized in project directory `"),
+        "{output}"
+    );
+    assert!(output.ends_with("; run `arcl init` first\n"), "{output}");
+    assert_eq!(output.lines().count(), 1);
+    assert_eq!(output, prime_output(dir, &["--plain"]));
+
+    let primer = run_json(dir, ["--json", "prime"].as_ref());
+    assert_eq!(primer["format_version"], 1);
+    assert_eq!(primer["data"]["initialized"], false);
+    assert_eq!(primer["data"]["message"], output.trim_end());
+    assert!(primer["data"]["root"].is_string());
+    assert!(primer["data"].get("loop").is_none());
+
+    // A project whose database is missing, as in a fresh clone, is the same case.
+    let project = initialized_directory();
+    fs::remove_file(project.path().join(".arcl").join("arcl.db")).expect("database is removed");
+    assert!(prime_output(project.path(), &[]).ends_with("; run `arcl init` first\n"));
+    assert_eq!(
+        run_json(project.path(), ["--json", "prime"].as_ref())["data"]["initialized"],
+        false
+    );
+}
+
+#[test]
+fn prime_fails_on_a_database_it_cannot_open() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    fs::write(dir.join(".arcl").join("arcl.db"), "not a database").expect("database is overwritten");
+    let output = arcl_in(dir)
+        .args(["--color", "never", "prime"])
+        .output()
+        .expect("prime runs");
+    assert!(!output.status.success(), "prime fails on a corrupt database");
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn prime_shows_the_database_unsynced_when_the_sync_lock_stays_held() {
+    use std::time::{Duration, Instant};
+
+    let directory = tempdir().expect("temporary directory can be created");
+    let dir = directory.path();
+    run_json(dir, ["--json", "init", "--workspace"].as_ref());
+    create_task(dir, "Waits for the lock", None);
+    let lock = fs::OpenOptions::new()
+        .write(true)
+        .open(dir.join(".arcl/arcl.db-sync.lock"))
+        .expect("the lock file opens");
+    lock.lock().expect("the test holds the sync lock");
+
+    let started = Instant::now();
+    let output = arcl_in(dir)
+        .args(["--color", "never", "prime"])
+        .output()
+        .expect("prime runs");
+    let waited = started.elapsed();
+    assert_success(&output);
+    assert!(waited < Duration::from_secs(10), "prime waited {waited:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains(": Waits for the lock\n"), "{stdout}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(stderr.lines().count(), 1, "{stderr}");
+    assert!(
+        stderr.starts_with("warning: the workspace did not sync") && stderr.contains("held the sync lock"),
+        "{stderr}"
+    );
+}

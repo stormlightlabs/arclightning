@@ -193,6 +193,18 @@ before storage changes.
 `start` refuses a pending task that is not ready and lists the reasons. Having
 child tasks is the one reason it skips. `--force` starts the task anyway.
 
+`start --claim [<NAME>]` also sets the task's assignee in the same write. With
+no name it uses `ARCL_AGENT`, then the Git user name. A name is at most 64
+characters, with no control or format characters such as zero-width spaces or
+direction marks. While a task has an assignee, a start without `--claim`, or
+with another name, is refused with exit code `4` and the `conflict` error code;
+`--force` does not override it. Parking, handing off, completing, and
+cancelling clear the assignee, whoever runs them. A claim holds within one
+database, which is one checkout's `.arcl/arcl.db`; agents in separate Git
+worktrees see each other's claims only after the workspace change reaches their
+checkout through Git and a sync.
+`arcl list --assignee <NAME>` lists the tasks one assignee holds.
+
 `handoff` requires either `--note <MARKDOWN>` or `--note-file <PATH|->`.
 
 Completion accepts either `--evidence <MARKDOWN>` or `--evidence-file <PATH|->`.
@@ -220,10 +232,40 @@ task ID, then a `subtask<TAB><id>` line for each completed subtask and an
 | `arcl check`                                                         | Validate database and graph invariants.                            |
 | `arcl ready`                                                         | List actionable leaf tasks in deterministic order.                 |
 | `arcl next`                                                          | Return the first actionable task, if one exists.                   |
+| `arcl next --start [--claim [<NAME>]]`                               | Start the first actionable task, claiming it with `--claim`.       |
+| `arcl prime`                                                         | Print the agent loop, open work, and the first ready tasks.        |
 
 `list` accepts `--kind`, `--status`, `--priority`, `--release`, `--epic`,
 `--milestone`, and `--parent`. `ready` and `next` accept the same priority and
 association filters.
+
+`next --start` selects and starts the task in one write transaction, so two
+concurrent calls never start the same task. The second waits up to 5 seconds
+for the first to finish, then takes the next ready task; if the database stays
+locked longer, it fails with `database is locked` (exit `1`) and can be run
+again. `next --start` selects the task `next` returns, and `--claim` names
+the assignee as `task start --claim` does. When nothing is ready it
+prints `Nothing to start`, prints nothing with `--plain`, returns a null
+`data.task` with `--json`, and exits `0`.
+
+`prime` prints the working loop from the Arc Lightning skill, then the
+in-progress tasks with their assignee and the parked tasks, which have none
+since parking releases the claim, each with the first line of its latest
+handoff, then the first ready tasks, then a pointer to
+`arcl context <id>`. Each list shows at most 5 tasks and ends with
+`and K more` and the command that lists the rest. Titles and handoff lines are
+cut to 80 bytes and assignees to 40, so the output stays within 40 lines and
+4 KiB. Control characters in titles and handoffs print escaped, as `\x1b`.
+`--plain` prints the same text with full IDs. `--json` returns `initialized`
+as `true`, `loop`, the loop as Markdown, and `open` and `ready`, each with
+`tasks` and `more`. Each task has `id`, `title`, `status`, `priority`,
+`assignee` when set, and the full `handoff`, all unescaped.
+
+Outside an initialized project, or where `.arcl/arcl.db` is missing, `prime`
+prints the one-line message other commands fail with there, which says to run
+`arcl init`, and exits `0`, so a session-start hook succeeds in a fresh clone.
+`--json` returns `initialized` as `false`, `root` and that `message`. A
+database `prime` cannot open still fails.
 
 `tree` leaves out promoted and discarded captures in human, `--plain` and
 `--json` output; `--all` includes them. A closed capture named as the root
@@ -402,7 +444,7 @@ record's other fields stay editable.
 
 | Kind    | Fields only a command changes           | Commands                                                 |
 | ------- | --------------------------------------- | -------------------------------------------------------- |
-| task    | `status`, `handoff`, `evidence`         | `arcl task start`, `park`, `unpark`, `handoff`, `complete`, `cancel` |
+| task    | `status`, `handoff`, `evidence`, `assignee` | `arcl task start`, `park`, `unpark`, `handoff`, `complete`, `cancel` |
 | capture | `status`, `promoted-to`                 | `arcl capture promote`, `discard`                        |
 | spec    | `status`, `source-capture`              | `arcl spec complete`, `cancel`; `arcl capture promote`   |
 | plan    | `status`                                | `arcl plan complete`, `cancel`                           |

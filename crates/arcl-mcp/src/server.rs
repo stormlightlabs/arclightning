@@ -374,16 +374,22 @@ impl ArclServer {
     /// Start a ready task, like `arcl task start` without `--force`.
     #[tool(
         description = "Move a ready task to in progress, like `arcl task start`. A task that is not \
-        ready fails with `invalid_request`; read the reasons with `explain`. There is no force option.",
+        ready fails with `invalid_request`; read the reasons with `explain`. There is no force option. \
+        `claim` sets the task's assignee in the same write. A task an assignee holds fails with `conflict` \
+        unless `claim` names that assignee.",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false),
         meta = version_meta(FORMAT_VERSION)
     )]
     pub async fn task_start(
-        &self, Parameters(input): Parameters<TaskInput>, cancelled: CancellationToken,
+        &self, Parameters(input): Parameters<TaskStartInput>, cancelled: CancellationToken,
     ) -> Result<Json<Envelope<TaskData>>, ToolError> {
         let input = input?;
         self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
-            let task = database.start_planning_task(record_id::<TaskId>(database, &input.task_id)?, false)?;
+            let id = record_id::<TaskId>(database, &input.task_id)?;
+            let task = match &input.claim {
+                Some(name) => database.claim_planning_task(id, false, name)?,
+                None => database.start_planning_task(id, false)?,
+            };
             Ok(TaskData { action: "started".to_owned(), task })
         })
         .await

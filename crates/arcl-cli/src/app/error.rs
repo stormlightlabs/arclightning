@@ -113,6 +113,8 @@ pub(super) enum CommandError {
     InvalidConfig { path: PathBuf, source: WorkspaceError },
     #[error("could not open Arc Lightning database `{path}`: {source}")]
     OpenDatabase { path: PathBuf, source: StorageError },
+    #[error("could not open Arc Lightning database `{path}`: {source}")]
+    ProbeDatabase { path: PathBuf, source: io::Error },
     #[error("workspace support is disabled; run `arcl init --workspace` first")]
     WorkspaceDisabled,
     #[error(transparent)]
@@ -153,6 +155,8 @@ pub(super) enum CommandError {
     InvalidStdin,
     #[error("invalid list filter: {message}")]
     InvalidFilter { message: String },
+    #[error("`--claim` has no name; pass one, set `ARCL_AGENT`, or set Git's `user.name`")]
+    NoClaimName,
     #[error("database or graph integrity check failed: {message}")]
     Integrity { message: String },
     #[error("could not read skill file `{path}`: {source}")]
@@ -230,6 +234,7 @@ impl CommandError {
             | Self::ReadMarkdown { .. }
             | Self::ReadStdin { .. }
             | Self::OpenDatabase { source: StorageError::Sqlite(_), .. }
+            | Self::ProbeDatabase { .. }
             | Self::CurrentDirectory { .. }
             | Self::SyncLock { .. }
             | Self::SyncLockBusy { .. }
@@ -244,6 +249,7 @@ impl CommandError {
             Self::InvalidMarkdown { .. }
             | Self::InvalidStdin
             | Self::InvalidFilter { .. }
+            | Self::NoClaimName
             | Self::Integrity { .. }
             | Self::StdinIsTerminal
             | Self::SkillSymlink { .. }

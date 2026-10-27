@@ -170,6 +170,17 @@ pub struct TaskInput {
     pub task_id: String,
 }
 
+/// A task to start, and who claims it.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TaskStartInput {
+    /// The task ID, `arcl-t-…`, or a short ID such as `535B`.
+    pub task_id: String,
+    /// Claim the task for this name, like `arcl task start --claim <name>`.
+    /// A task another name holds fails with `conflict`.
+    pub claim: Option<String>,
+}
+
 /// Filters and a page for `list`.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

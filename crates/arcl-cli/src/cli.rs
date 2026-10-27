@@ -119,6 +119,9 @@ pub enum Command {
         /// The task identifier.
         task_id: String,
     },
+    /// Print the agent loop, open work with handoffs, and the first ready
+    /// tasks, for a session-start hook.
+    Prime,
     /// Validate database and graph invariants.
     Check,
     /// Inspect or synchronize the version-controlled workspace.
@@ -135,6 +138,13 @@ pub enum Command {
     Next {
         #[command(flatten)]
         filters: ReadyArgs,
+        /// Start the task in the same transaction that selects it.
+        #[arg(long)]
+        start: bool,
+        /// Claim the started task for NAME, as `task start --claim` does.
+        /// Without NAME, use `ARCL_AGENT`, then the Git user name.
+        #[arg(long, value_name = "NAME", num_args = 0..=1, requires = "start")]
+        claim: Option<Option<String>>,
     },
     /// Serve the web app on 127.0.0.1 until interrupted.
     Serve {
@@ -578,9 +588,14 @@ pub enum TaskCommand {
     Start {
         /// The task ID to start.
         id: String,
-        /// Start the task even when it is not ready.
+        /// Start the task even when it is not ready. A claimed task still
+        /// needs `--claim` with its holder's name.
         #[arg(long)]
         force: bool,
+        /// Claim the task for NAME, refusing a task someone else holds.
+        /// Without NAME, use `ARCL_AGENT`, then the Git user name.
+        #[arg(long, value_name = "NAME", num_args = 0..=1)]
+        claim: Option<Option<String>>,
     },
     /// Temporarily exclude work from readiness.
     Park {
@@ -833,6 +848,9 @@ pub struct ListArgs {
     /// Restrict tasks to children of one task.
     #[arg(long, value_name = "ID")]
     pub parent: Option<String>,
+    /// Restrict tasks to those claimed by one assignee.
+    #[arg(long, value_name = "NAME")]
+    pub assignee: Option<String>,
 }
 
 /// Filters accepted by ready-work and next-work queries.
@@ -906,6 +924,9 @@ pub struct AcceptanceArgs {
     arcl plan create "Import validation" --spec arcl-s-…
     arcl task create "Validate records" --plan arcl-pl-…
     arcl ready
+    arcl task start arcl-t-… --claim
+    arcl next --start --claim
+    arcl list --assignee codex
     arcl serve
 "#
 )]

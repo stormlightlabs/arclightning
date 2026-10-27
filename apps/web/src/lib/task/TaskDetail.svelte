@@ -360,6 +360,9 @@
     <header>
       <div class="id"><CopyId id={task.id} /></div>
       <h1 id="task-title">{task.title}</h1>
+      {#if task.assignee}
+        <p class="muted">Claimed by <strong>{task.assignee}</strong></p>
+      {/if}
       <div class="actions" role="group" aria-label="Task actions">
         {#each actions as action, index (action)}
           <Button

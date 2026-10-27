@@ -166,7 +166,7 @@ impl Mutations for ServeApp {
     }
 
     fn start_task(&self, id: &str, input: TaskStart) -> Reply {
-        self.task(TaskCommand::Start { id: id.to_owned(), force: input.force })
+        self.task(TaskCommand::Start { id: id.to_owned(), force: input.force, claim: None })
     }
 
     fn park_task(&self, id: &str) -> Reply {

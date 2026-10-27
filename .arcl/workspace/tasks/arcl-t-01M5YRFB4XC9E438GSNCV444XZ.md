@@ -2,9 +2,10 @@
 id = "arcl-t-01M5YRFB4XC9E438GSNCV444XZ"
 phase = "arcl-ph-01M5YRFB35TZ51QW4AG1A8MS5B"
 title = "Claim a task when starting it"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 0
+evidence = "Delivered by #74: `arcl task start --claim [<name>]` sets the assignee and status in one write, a claim held by another assignee fails with `conflict` (exit 4), and the assignee round-trips through workspace files, `list --assignee`, `show` and the web Task view."
 +++
 
 Record who started a task, so two agents working the same repository cannot
@@ -24,9 +25,9 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] `task start --claim` sets the assignee and status atomically
-- [ ] A second claim by a different assignee is refused with a typed error
-- [ ] The assignee round-trips through the workspace files
+- [x] `task start --claim` sets the assignee and status atomically
+- [x] A second claim by a different assignee is refused with a typed error
+- [x] The assignee round-trips through the workspace files
 
 Verification:
 

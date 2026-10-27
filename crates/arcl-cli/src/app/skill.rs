@@ -7,6 +7,12 @@
 use super::support::{nearest_project_root, write_output};
 use super::*;
 
+/// `skills/arclightning/SKILL.md`. `arcl prime` prints the loop it marks.
+pub(super) const SKILL_MARKDOWN: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../skills/arclightning/SKILL.md"
+));
+
 /// The agent skill directories, relative to the project root, that receive
 /// the skill.
 const SKILL_DIRECTORIES: &[&str] = &[".claude/skills", ".agents/skills"];
@@ -17,13 +23,7 @@ const SKILL_NAME: &str = "arclightning";
 /// Every file in `skills/arclightning/`, as a path relative to that directory
 /// and its contents. The `embedded_files_match_the_source_directory` test
 /// fails when a file is added there but not here.
-const SKILL_FILES: &[(&str, &str)] = &[(
-    "SKILL.md",
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../skills/arclightning/SKILL.md"
-    )),
-)];
+const SKILL_FILES: &[(&str, &str)] = &[("SKILL.md", SKILL_MARKDOWN)];
 
 /// One skill file to compare and maybe write, after its path passed the
 /// checks in [`check_target`].
@@ -45,7 +45,9 @@ pub(super) fn exec_skill(command: SkillCommand, renderer: &Renderer) -> anyhow::
         SkillCommand::Install { check } => {
             let start = std::env::current_dir()
                 .map_err(|source| ApplicationError::from_command(CommandError::CurrentDirectory { source }))?;
-            let Some(root) = nearest_project_root(&start) else {
+            let Some(root) = nearest_project_root(&start)
+                .map_err(|(path, source)| ApplicationError::from_command(CommandError::ReadConfig { path, source }))?
+            else {
                 return Err(ApplicationError::from_command(CommandError::NotInitialized { root: start }).into());
             };
             let report = install_skill(&root, check).map_err(ApplicationError::from_command)?;

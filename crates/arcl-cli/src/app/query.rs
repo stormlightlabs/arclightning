@@ -12,9 +12,15 @@ struct ListFilter {
     plan_id: Option<PlanId>,
     phase_id: Option<PhaseId>,
     parent_id: Option<TaskId>,
+    assignee: Option<String>,
 }
 
 impl ListFilter {
+    /// Whether a filter that only tasks carry, a priority or an assignee, is set.
+    fn tasks_only(&self) -> bool {
+        !self.priorities.is_empty() || self.assignee.is_some()
+    }
+
     fn resolve_list_filter(args: ListArgs) -> CResult<Self> {
         let known = ["capture", "release", "spec", "plan", "phase", "task", "note"];
         if let Some(kind) = &args.kind
@@ -31,6 +37,9 @@ impl ListFilter {
             .collect::<Result<Vec<_>, _>>()?;
         if !priorities.is_empty() && args.kind.as_deref().is_some_and(|kind| kind != "task") {
             return Err(CommandError::InvalidFilter { message: "priority filters apply only to tasks".to_owned() });
+        }
+        if args.assignee.is_some() && args.kind.as_deref().is_some_and(|kind| kind != "task") {
+            return Err(CommandError::InvalidFilter { message: "assignee filters apply only to tasks".to_owned() });
         }
         let known_statuses = [
             "captured",
@@ -78,6 +87,7 @@ impl ListFilter {
             spec_id,
             plan_id,
             phase_id,
+            assignee: args.assignee.map(|name| name.trim().to_owned()),
         })
     }
 }
@@ -260,7 +270,7 @@ pub(super) fn list_connected(database: &Database, args: ListArgs) -> CResult<Vec
             && filter.plan_id.is_none()
             && filter.phase_id.is_none()
             && filter.parent_id.is_none()
-            && filter.priorities.is_empty()
+            && !filter.tasks_only()
             && status_matches(&filter.statuses, capture.status.as_str())
         {
             records.push(ConnectedSummary::new(
@@ -277,7 +287,7 @@ pub(super) fn list_connected(database: &Database, args: ListArgs) -> CResult<Vec
             && filter.plan_id.is_none()
             && filter.phase_id.is_none()
             && filter.parent_id.is_none()
-            && filter.priorities.is_empty()
+            && !filter.tasks_only()
             && status_matches(&filter.statuses, release.status.as_str())
             && filter.release_id.is_none_or(|id| id == release.id)
         {
@@ -296,7 +306,7 @@ pub(super) fn list_connected(database: &Database, args: ListArgs) -> CResult<Vec
             && filter.plan_id.is_none()
             && filter.phase_id.is_none()
             && filter.parent_id.is_none()
-            && filter.priorities.is_empty()
+            && !filter.tasks_only()
             && release_member_matches(&graph, "spec", &spec.id.to_string(), filter.release_id)
         {
             records.push(ConnectedSummary::new(
@@ -314,7 +324,7 @@ pub(super) fn list_connected(database: &Database, args: ListArgs) -> CResult<Vec
             && filter.spec_id.is_none_or(|id| id == plan.spec_id)
             && filter.phase_id.is_none()
             && filter.parent_id.is_none()
-            && filter.priorities.is_empty()
+            && !filter.tasks_only()
             && release_member_matches(&graph, "plan", &plan.id.to_string(), filter.release_id)
         {
             records.push(ConnectedSummary::new(
@@ -333,7 +343,7 @@ pub(super) fn list_connected(database: &Database, args: ListArgs) -> CResult<Vec
             && filter.release_id.is_none()
             && filter.spec_id.is_none()
             && filter.parent_id.is_none()
-            && filter.priorities.is_empty()
+            && !filter.tasks_only()
         {
             records.push(ConnectedSummary::new(
                 "phase",
@@ -352,6 +362,10 @@ pub(super) fn list_connected(database: &Database, args: ListArgs) -> CResult<Vec
             && filter.plan_id.is_none_or(|id| ancestry.1 == Some(id))
             && filter.phase_id.is_none_or(|id| ancestry.2 == Some(id))
             && filter.parent_id.is_none_or(|id| task.parent_id == Some(id))
+            && filter
+                .assignee
+                .as_ref()
+                .is_none_or(|name| task.assignee.as_ref() == Some(name))
             && release_member_matches(&graph, "task", &task.id.to_string(), filter.release_id);
         if task_matches {
             records.push(ConnectedSummary::new(
@@ -368,7 +382,7 @@ pub(super) fn list_connected(database: &Database, args: ListArgs) -> CResult<Vec
             && filter.plan_id.is_none()
             && filter.phase_id.is_none()
             && filter.parent_id.is_none()
-            && filter.priorities.is_empty()
+            && !filter.tasks_only()
             && filter
                 .release_id
                 .is_none_or(|id| release_member_matches(&graph, "note", &note.id.to_string(), Some(id)))

@@ -88,7 +88,8 @@ terminals that draw the marks double-width.
 
 ## Explain readiness
 
-`ready` lists actionable leaf tasks, while `next` returns the first one. When a
+`ready` lists actionable leaf tasks, while `next` returns the first one.
+`next --start` starts that task in the same step. When a
 task is absent from that list, ask for every applicable reason:
 
 ```sh

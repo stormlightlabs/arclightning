@@ -15,8 +15,8 @@ use thiserror::Error;
 use arcl_store::{Database, StorageError};
 
 use super::{
-    Change, RecordState, WorkspaceExportError, WorkspaceFile, compare, has_conflict_markers,
-    import::RECORD_DIRECTORIES, project_graph,
+    Change, RecordState, WorkspaceExportError, WorkspaceFile, compare, export::format_floor, has_conflict_markers,
+    import::RECORD_DIRECTORIES, project_graph_at,
 };
 use crate::vcs::{HeadState, PathState, Vcs, VcsError};
 
@@ -124,8 +124,8 @@ pub fn workspace_status(
     root: &Path, database: &Database, vcs: Option<&dyn Vcs>,
 ) -> Result<WorkspaceStatus, WorkspaceStatusError> {
     let base = database.workspace_base()?;
-    let database_files = project_graph(&database.connected_graph()?)?;
     let (workspace_files, unexpected) = read_workspace_bytes(root)?;
+    let database_files = project_graph_at(&database.connected_graph()?, format_floor(&base, &workspace_files))?;
 
     let (head, git_paths) = match vcs {
         Some(vcs) => (Some(vcs.head_state()?), vcs.changed_paths(root)?),

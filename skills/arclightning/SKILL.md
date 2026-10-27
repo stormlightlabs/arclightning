@@ -33,17 +33,45 @@ ID fields.
 
 ## Work the loop
 
-1. Find work. First resume your own parked work:
+In short (`arcl prime` prints this list):
+
+<!-- arcl-prime:begin -->
+
+1. Pick up parked work first. Parking releases the claim, so any session may
+   take it: read the handoff in `arcl context <id>`, then
+   `arcl task unpark <id>` and `arcl task start <id> --claim`.
+2. Otherwise start the first ready task: `arcl next --start --claim`.
+3. Read `arcl context <id>`: acceptance criteria, blockers, last handoff.
+4. Do the work. Record work outside the task with `arcl capture create`.
+5. Finish with `arcl task complete <id> --evidence "<proof>"`, or park it with
+   `arcl task handoff <id> --note "<where it stands, what is next>"`.
+
+<!-- arcl-prime:end -->
+
+In full:
+
+1. Find work. First pick up parked work:
    `arcl --json list --kind task --status parked` [`list`] lists tasks a
-   session handed off. Otherwise `arcl --json ready` [`ready`] returns
-   `data.tasks` in order, and `arcl --json next` returns the first as
-   `data.task`. An empty list means nothing can start. The tools return at
+   session handed off. Parking releases the claim, so these have no assignee;
+   read the handoff before you unpark one. Otherwise `arcl --json ready`
+   [`ready`] returns `data.tasks` in order, and `arcl --json next` returns
+   the first as `data.task`. An empty list means nothing can start. The tools return at
    most `limit` records and a `data.next_cursor` to pass as `cursor` while
    more remain.
-2. Start it. `arcl --json task start <id>` [`task_start`] moves the task to
-   in progress. If it refuses with `invalid_request`, run
-   `arcl --json explain <id>` [`explain`] and read `data.readiness.reasons`.
-   Do not pass `--force` unless the person asks. The tool has no force.
+2. Start it. `arcl --json task start <id> --claim` [`task_start` with
+   `claim`] moves the task to in progress and records you as its assignee.
+   The command names you by `ARCL_AGENT` or else the Git user name. The tool
+   has no default: pass your name in `claim`. From the CLI,
+   `arcl --json next --start --claim` picks and starts the first ready task
+   in one step, so another agent cannot take it in between; a null
+   `data.task` means nothing can start. If it refuses with
+   `invalid_request`, run `arcl --json explain <id>` [`explain`] and read
+   `data.readiness.reasons`. A `conflict` means another assignee holds the
+   task; pick other work. Do not pass `--force` unless the person asks; it
+   does not override a claim. The tool has no force. Completing, parking or
+   handing off releases the claim, whoever runs it. A claim holds only within
+   one checkout's database: an agent in another Git worktree does not see it
+   until the change reaches that checkout through Git and a sync.
 3. Read the context. `arcl --json context <id>` [`context`] returns the task
    with its ancestors, spec, plan, phase, blockers, dependents, readiness, and
    earlier evidence. `data.task.handoff` holds the last resume note, and

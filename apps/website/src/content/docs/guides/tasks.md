@@ -73,7 +73,19 @@ The allowed task statuses are:
 `start` moves pending work to `in_progress` when it is ready, apart from having
 child tasks. Any other reason that `arcl task explain` reports, such as an
 unfinished blocker, refuses the start and lists the reasons; `--force` starts the
-task anyway. Starting a task that is already in progress does nothing. `park`
+task anyway. Starting a task that is already in progress does nothing.
+
+`--claim [<NAME>]` records who started the task as its assignee. While a task
+has an assignee, any other start is refused with exit code `4`, with or without
+`--force`; only `--claim` with the same name succeeds. Completing, parking or
+handing off releases the claim, whoever runs it, and so does cancelling. A claim
+holds within one database, which is one checkout's `.arcl/arcl.db`. Agents in
+separate Git worktrees each have their own database, so both can claim the same
+task; one sees the other's claim only after the workspace change reaches its
+checkout through Git and a sync. The [manual](/reference/manual/) has the
+details.
+
+`park`
 accepts pending or in-progress work. `unpark` always returns parked work to
 `pending`. `complete` accepts pending or in-progress work, and `cancel` accepts
 any non-terminal task.

@@ -1,12 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, TransactionBehavior, params};
 use serde::Serialize;
 
 use super::{Result, StorageError, phases, planning_dependencies, planning_task, planning_tasks, specs};
 use arcl_core::domain::{
     ContainerStatus, DomainError, EdgeViolation, Phase, PhaseId, Plan, PlanId, PlanningTask, ProjectId, Spec, SpecId,
-    TaskAction, TaskDependency, TaskId, TaskPriority, TaskStatus, validate_blocker_edges,
+    TaskAction, TaskDependency, TaskId, TaskPriority, TaskStatus, validate_assignee, validate_blocker_edges,
 };
 
 /// What completing or cancelling a task does with its open descendants.
@@ -389,13 +389,15 @@ pub fn transition_planning_task(
     connection: &mut Connection, project_id: ProjectId, id: TaskId, action: TaskAction, allow_open_children: bool,
 ) -> Result<PlanningTask> {
     let open_subtasks = if allow_open_children { OpenSubtasks::Leave } else { OpenSubtasks::Refuse };
-    transition(connection, project_id, id, action, open_subtasks, false, None).map(|completion| completion.task)
+    transition(connection, project_id, id, action, open_subtasks, false, None, None).map(|completion| completion.task)
 }
 
 /// Start a connected-model task atomically.
 ///
 /// A pending task must be ready, apart from having child tasks, unless `force`
-/// is set. Starting an in-progress task is a no-op either way.
+/// is set. Starting an in-progress task is a no-op either way, except that a
+/// task an assignee holds is refused with [`StorageError::TaskClaimed`]; only
+/// [`claim_planning_task`] with the holder's name starts it again.
 pub fn start_planning_task(
     connection: &mut Connection, project_id: ProjectId, id: TaskId, force: bool,
 ) -> Result<PlanningTask> {
@@ -407,8 +409,67 @@ pub fn start_planning_task(
         OpenSubtasks::Refuse,
         force,
         None,
+        None,
     )
     .map(|completion| completion.task)
+}
+
+/// Start a connected-model task and set its assignee in one transaction.
+///
+/// Readiness and `force` work as in [`start_planning_task`]. A task another
+/// assignee holds is refused with [`StorageError::TaskClaimed`]. A claim by
+/// the current assignee changes nothing, and claiming an unassigned task that
+/// is already in progress only sets the assignee. An invalid `assignee` is
+/// refused with [`StorageError::InvalidClaimName`] before the task is read.
+pub fn claim_planning_task(
+    connection: &mut Connection, project_id: ProjectId, id: TaskId, force: bool, assignee: &str,
+) -> Result<PlanningTask> {
+    let assignee =
+        validate_assignee(assignee).map_err(|_| StorageError::InvalidClaimName { value: assignee.to_owned() })?;
+    transition(
+        connection,
+        project_id,
+        id,
+        TaskAction::Start,
+        OpenSubtasks::Refuse,
+        force,
+        None,
+        Some(assignee),
+    )
+    .map(|completion| completion.task)
+}
+
+/// Start the first task [`planning_ready_tasks`] returns for `filter`, in one
+/// write transaction.
+///
+/// The transaction begins `IMMEDIATE`, so it holds SQLite's write lock from
+/// selection to commit: a second process waits for it and then selects from
+/// the committed state, so two calls never start the same task. With `claim`,
+/// the task gets that assignee, as in [`claim_planning_task`]. Returns `None`,
+/// writing nothing, when no task matches.
+pub fn start_next_planning_task(
+    connection: &mut Connection, project_id: ProjectId, filter: &PlanningReadyFilter, claim: Option<&str>,
+) -> Result<Option<PlanningTask>> {
+    let claim = claim
+        .map(|name| validate_assignee(name).map_err(|_| StorageError::InvalidClaimName { value: name.to_owned() }))
+        .transpose()?;
+    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let next = planning_ready_tasks(&tx, project_id, filter)?.into_iter().next();
+    let Some(next) = next else {
+        return Ok(None);
+    };
+    let completion = transition_in(
+        &tx,
+        project_id,
+        next.id,
+        TaskAction::Start,
+        OpenSubtasks::Refuse,
+        false,
+        None,
+        claim,
+    )?;
+    tx.commit()?;
+    Ok(Some(completion.task))
 }
 
 /// Complete a connected-model task and optionally store Markdown evidence atomically.
@@ -431,6 +492,7 @@ pub fn complete_planning_task(
         open_subtasks,
         false,
         evidence,
+        None,
     )
 }
 
@@ -438,7 +500,9 @@ pub fn complete_planning_task(
 pub fn handoff_planning_task(
     connection: &mut Connection, project_id: ProjectId, id: TaskId, note: String,
 ) -> Result<PlanningTask> {
-    let tx = connection.transaction()?;
+    // Take the write lock before reading so a concurrent claim waits for
+    // this release instead of failing on a lock upgrade.
+    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let current = planning_task(&tx, id)?.ok_or_else(|| StorageError::PlanningTaskNotFound { id: id.to_string() })?;
     ensure_project_task(&current, project_id)?;
     validate_task_graph(&tx, project_id, &current, false)?;
@@ -450,36 +514,76 @@ pub fn handoff_planning_task(
         }));
     }
     tx.execute(
-        "UPDATE planning_tasks SET handoff = ?1, status = 'parked' WHERE id = ?2",
+        "UPDATE planning_tasks SET handoff = ?1, status = 'parked', assignee = NULL WHERE id = ?2",
         params![note, id.to_string()],
     )?;
     tx.commit()?;
-    Ok(PlanningTask { status: TaskStatus::Parked, handoff: note, ..current })
+    Ok(PlanningTask { status: TaskStatus::Parked, handoff: note, assignee: None, ..current })
 }
 
+/// Apply `action` to task `id` in one transaction.
+///
+/// `claim` names the assignee a start sets. A start without the holder's
+/// name is refused while the task has an assignee. Parking, completing and
+/// cancelling clear the assignee, whoever runs them. The transaction is immediate, so a
+/// concurrent writer waits up to the busy timeout rather than failing.
+#[allow(clippy::too_many_arguments)]
 fn transition(
     connection: &mut Connection, project_id: ProjectId, id: TaskId, action: TaskAction, open_subtasks: OpenSubtasks,
-    force: bool, evidence: Option<String>,
+    force: bool, evidence: Option<String>, claim: Option<String>,
 ) -> Result<PlanningCompletion> {
-    let tx = connection.transaction()?;
-    let current = planning_task(&tx, id)?.ok_or_else(|| StorageError::PlanningTaskNotFound { id: id.to_string() })?;
+    // Take the write lock before reading, so two claims on one task run one
+    // after the other and the second sees the first's assignee. A deferred
+    // transaction would fail the second with SQLITE_BUSY on the lock upgrade.
+    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let completion = transition_in(&tx, project_id, id, action, open_subtasks, force, evidence, claim)?;
+    tx.commit()?;
+    Ok(completion)
+}
+
+/// Apply `action` to task `id` inside the caller's transaction, which the
+/// caller commits. See [`transition`].
+#[allow(clippy::too_many_arguments)]
+fn transition_in(
+    tx: &Connection, project_id: ProjectId, id: TaskId, action: TaskAction, open_subtasks: OpenSubtasks, force: bool,
+    evidence: Option<String>, claim: Option<String>,
+) -> Result<PlanningCompletion> {
+    let current = planning_task(tx, id)?.ok_or_else(|| StorageError::PlanningTaskNotFound { id: id.to_string() })?;
     ensure_project_task(&current, project_id)?;
-    validate_task_graph(&tx, project_id, &current, false)?;
+    validate_task_graph(tx, project_id, &current, false)?;
+    // A start by anyone but the holder is refused, with or without a claim
+    // and whatever `force` says: `force` overrides readiness, not claims.
+    if matches!(action, TaskAction::Start)
+        && let Some(holder) = current
+            .assignee
+            .as_ref()
+            .filter(|holder| claim.as_ref() != Some(*holder))
+    {
+        return Err(StorageError::TaskClaimed { id: id.to_string(), assignee: holder.clone() });
+    }
     let next_status = current
         .status
         .apply(action)
         .map_err(StorageError::InvalidPlanningTask)?;
     let completed_subtasks = if open_subtasks == OpenSubtasks::Complete {
-        let data = load_data(&tx, project_id)?;
+        let data = load_data(tx, project_id)?;
         open_subtasks_to_complete(&data, &current)?
     } else {
         Vec::new()
     };
-    if next_status == current.status && evidence.is_none() && completed_subtasks.is_empty() {
+    let assignee = match next_status {
+        TaskStatus::Parked | TaskStatus::Completed | TaskStatus::Cancelled => None,
+        TaskStatus::Pending | TaskStatus::InProgress => claim.or_else(|| current.assignee.clone()),
+    };
+    if next_status == current.status
+        && evidence.is_none()
+        && completed_subtasks.is_empty()
+        && assignee == current.assignee
+    {
         return Ok(PlanningCompletion { task: current, completed_subtasks, unblocked: Vec::new() });
     }
     if matches!(action, TaskAction::Start) && current.status == TaskStatus::Pending && !force {
-        let data = load_data(&tx, project_id)?;
+        let data = load_data(tx, project_id)?;
         let ancestry = effective_ancestry(&data, id, &mut HashSet::new())?;
         let readiness = readiness_counting_children(&data, &current, &ancestry, false)?;
         if !readiness.ready {
@@ -511,7 +615,7 @@ fn transition(
     }
     let completes = matches!(action, TaskAction::Complete);
     let ready_before: HashSet<TaskId> = if completes {
-        planning_ready_tasks(&tx, project_id, &PlanningReadyFilter::default())?
+        planning_ready_tasks(tx, project_id, &PlanningReadyFilter::default())?
             .into_iter()
             .map(|task| task.id)
             .collect()
@@ -520,32 +624,35 @@ fn transition(
     };
     if next_status == current.status {
         tx.execute(
-            "UPDATE planning_tasks SET evidence = ?1 WHERE id = ?2",
-            params![evidence.as_deref().unwrap_or(&current.evidence), id.to_string()],
+            "UPDATE planning_tasks SET evidence = ?1, assignee = ?2 WHERE id = ?3",
+            params![
+                evidence.as_deref().unwrap_or(&current.evidence),
+                assignee,
+                id.to_string()
+            ],
         )?;
     } else {
         tx.execute(
-            "UPDATE planning_tasks SET status = ?1, evidence = COALESCE(?2, evidence) WHERE id = ?3",
-            params![next_status.as_str(), evidence, id.to_string()],
+            "UPDATE planning_tasks SET status = ?1, evidence = COALESCE(?2, evidence), assignee = ?3 WHERE id = ?4",
+            params![next_status.as_str(), evidence, assignee, id.to_string()],
         )?;
     }
     for subtask in &completed_subtasks {
         tx.execute(
-            "UPDATE planning_tasks SET status = ?1 WHERE id = ?2",
+            "UPDATE planning_tasks SET status = ?1, assignee = NULL WHERE id = ?2",
             params![TaskStatus::Completed.as_str(), subtask.id.to_string()],
         )?;
     }
     let unblocked = if completes {
-        planning_ready_tasks(&tx, project_id, &PlanningReadyFilter::default())?
+        planning_ready_tasks(tx, project_id, &PlanningReadyFilter::default())?
             .into_iter()
             .filter(|task| !ready_before.contains(&task.id))
             .collect()
     } else {
         Vec::new()
     };
-    tx.commit()?;
     Ok(PlanningCompletion {
-        task: PlanningTask { status: next_status, evidence: evidence.unwrap_or(current.evidence), ..current },
+        task: PlanningTask { status: next_status, evidence: evidence.unwrap_or(current.evidence), assignee, ..current },
         completed_subtasks,
         unblocked,
     })
@@ -613,7 +720,7 @@ fn open_subtasks_to_complete(data: &PlanningData, task: &PlanningTask) -> Result
     Ok(subtree
         .into_iter()
         .filter(|descendant| is_open(descendant))
-        .map(|descendant| PlanningTask { status: TaskStatus::Completed, ..descendant })
+        .map(|descendant| PlanningTask { status: TaskStatus::Completed, assignee: None, ..descendant })
         .collect())
 }
 
@@ -2463,5 +2570,223 @@ mod tests {
             .complete_planning_task(lone.id, OpenSubtasks::Refuse, None)
             .expect("repeat completion is a no-op");
         assert!(repeat.unblocked.is_empty());
+    }
+
+    #[test]
+    fn claim_sets_the_assignee_and_refuses_another_holder() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let work = task(&mut database, project.id, "Work");
+
+        let claimed = database
+            .claim_planning_task(work.id, false, " codex ")
+            .expect("claim starts the task");
+        assert_eq!(claimed.status, TaskStatus::InProgress);
+        assert_eq!(claimed.assignee.as_deref(), Some("codex"));
+        assert_eq!(
+            database.planning_task(work.id).expect("task reads"),
+            Some(claimed.clone())
+        );
+
+        let again = database
+            .claim_planning_task(work.id, false, "codex")
+            .expect("the holder can claim again");
+        assert_eq!(again, claimed);
+
+        let error = database
+            .claim_planning_task(work.id, false, "claude")
+            .expect_err("another holder is refused");
+        assert!(matches!(error, StorageError::TaskClaimed { ref assignee, .. } if assignee == "codex"));
+        assert_eq!(error.exit_code(), 4);
+        assert_eq!(
+            database.planning_task(work.id).expect("task reads"),
+            Some(claimed.clone())
+        );
+
+        for force in [false, true] {
+            let error = database
+                .start_planning_task(work.id, force)
+                .expect_err("an unclaimed start of a held task is refused");
+            assert!(
+                matches!(error, StorageError::TaskClaimed { ref assignee, .. } if assignee == "codex"),
+                "force {force}: {error:?}"
+            );
+        }
+        assert_eq!(database.planning_task(work.id).expect("task reads"), Some(claimed));
+    }
+
+    #[test]
+    fn claim_refuses_an_unready_task_without_writing() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let blocker = task(&mut database, project.id, "Blocker");
+        let blocked = task(&mut database, project.id, "Blocked");
+        database
+            .add_planning_dependency(blocked.id, blocker.id)
+            .expect("dependency creates");
+
+        database
+            .claim_planning_task(blocked.id, false, "codex")
+            .expect_err("an unready task is refused");
+        let stored = database
+            .planning_task(blocked.id)
+            .expect("task reads")
+            .expect("task exists");
+        assert_eq!((stored.status, stored.assignee), (TaskStatus::Pending, None));
+    }
+
+    #[test]
+    fn park_handoff_complete_and_cancel_release_the_claim() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        for action in ["park", "handoff", "complete", "cancel"] {
+            let work = task(&mut database, project.id, action);
+            database
+                .claim_planning_task(work.id, false, "codex")
+                .expect("claim starts the task");
+            let released = match action {
+                "park" => database.transition_planning_task(work.id, TaskAction::Park, false),
+                "handoff" => database.handoff_planning_task(work.id, "resume".to_owned()),
+                "complete" => database
+                    .complete_planning_task(work.id, OpenSubtasks::Refuse, None)
+                    .map(|completion| completion.task),
+                _ => database.transition_planning_task(work.id, TaskAction::Cancel, false),
+            }
+            .expect("action applies");
+            assert_eq!(released.assignee, None, "{action}");
+            let stored = database
+                .planning_task(work.id)
+                .expect("task reads")
+                .expect("task exists");
+            assert_eq!(stored.assignee, None, "{action}");
+        }
+    }
+
+    #[test]
+    fn completing_with_subtasks_releases_their_claims() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let parent = task(&mut database, project.id, "Parent");
+        let subtask = child(&mut database, project.id, parent.id, "Subtask");
+        database
+            .claim_planning_task(subtask.id, false, "codex")
+            .expect("claim starts the subtask");
+
+        let completion = database
+            .complete_planning_task(parent.id, OpenSubtasks::Complete, None)
+            .expect("task completes with its subtasks");
+        assert_eq!(completion.completed_subtasks[0].assignee, None);
+        let stored = database
+            .planning_task(subtask.id)
+            .expect("task reads")
+            .expect("task exists");
+        assert_eq!(stored.assignee, None);
+    }
+
+    #[test]
+    fn start_next_starts_ready_tasks_in_order_until_none_is_left() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        task(&mut database, project.id, "First");
+        task(&mut database, project.id, "Second");
+        let expected = database
+            .ready_planning_tasks()
+            .expect("ready tasks read")
+            .into_iter()
+            .map(|task| task.id)
+            .collect::<Vec<_>>();
+        assert_eq!(expected.len(), 2);
+
+        let started = database
+            .start_next_planning_task(&PlanningReadyFilter::default(), Some("codex"))
+            .expect("start succeeds")
+            .expect("a task starts");
+        assert_eq!(started.id, expected[0]);
+        assert_eq!(started.status, TaskStatus::InProgress);
+        assert_eq!(started.assignee.as_deref(), Some("codex"));
+
+        let unclaimed = database
+            .start_next_planning_task(&PlanningReadyFilter::default(), None)
+            .expect("start succeeds")
+            .expect("a task starts");
+        assert_eq!(unclaimed.id, expected[1]);
+        assert_eq!(unclaimed.assignee, None);
+
+        assert_eq!(
+            database
+                .start_next_planning_task(&PlanningReadyFilter::default(), None)
+                .expect("start succeeds"),
+            None
+        );
+    }
+
+    #[test]
+    fn racing_start_next_never_starts_one_task_twice() {
+        let directory = tempfile::tempdir().expect("directory creates");
+        let path = directory.path().join("arcl.db");
+        let mut database = Database::open(&path).expect("database opens");
+        let project = database.project().expect("project exists");
+        for round in 0..20 {
+            let ready = if round % 2 == 0 { 2 } else { 1 };
+            let created = (0..ready)
+                .map(|index| task(&mut database, project.id, &format!("Work {round}.{index}")).id)
+                .collect::<Vec<_>>();
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let racers = ["codex", "claude"].map(|name| {
+                let (path, barrier) = (path.clone(), barrier.clone());
+                std::thread::spawn(move || {
+                    let mut database = Database::open(&path).expect("database opens");
+                    barrier.wait();
+                    database.start_next_planning_task(&PlanningReadyFilter::default(), Some(name))
+                })
+            });
+            let results = racers.map(|racer| racer.join().expect("racer finishes"));
+            let started = results
+                .iter()
+                .flat_map(|result| result.as_ref().expect("start succeeds"))
+                .map(|task| task.id)
+                .collect::<Vec<_>>();
+            if ready == 2 {
+                assert_eq!(started.len(), 2, "round {round}: {results:?}");
+                assert_ne!(started[0], started[1], "round {round}: {results:?}");
+            } else {
+                assert_eq!(started, created, "round {round}: {results:?}");
+            }
+            assert!(started.iter().all(|id| created.contains(id)), "round {round}");
+        }
+    }
+
+    #[test]
+    fn racing_claims_leave_one_holder_and_refuse_the_other() {
+        let directory = tempfile::tempdir().expect("directory creates");
+        let path = directory.path().join("arcl.db");
+        let mut database = Database::open(&path).expect("database opens");
+        let project = database.project().expect("project exists");
+        for round in 0..20 {
+            let work = task(&mut database, project.id, &format!("Work {round}"));
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let racers = ["codex", "claude"].map(|name| {
+                let (path, barrier) = (path.clone(), barrier.clone());
+                std::thread::spawn(move || {
+                    let mut database = Database::open(&path).expect("database opens");
+                    barrier.wait();
+                    database.claim_planning_task(work.id, false, name)
+                })
+            });
+            let results = racers.map(|racer| racer.join().expect("racer finishes"));
+            let winners = results
+                .iter()
+                .filter_map(|result| result.as_ref().ok())
+                .collect::<Vec<_>>();
+            assert_eq!(winners.len(), 1, "round {round}: {results:?}");
+            let loser = results
+                .iter()
+                .find_map(|result| result.as_ref().err())
+                .expect("one claim is refused");
+            assert!(
+                matches!(loser, StorageError::TaskClaimed { assignee, .. } if Some(assignee) == winners[0].assignee.as_ref()),
+                "round {round}: {loser:?}"
+            );
+        }
     }
 }

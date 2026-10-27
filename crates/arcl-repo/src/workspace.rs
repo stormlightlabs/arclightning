@@ -16,15 +16,33 @@ pub mod sync;
 
 pub use codec::*;
 pub use edit::{RecordEdit, RecordEditError, RecordSource, edit_record, record_source, source_revision};
-pub use export::{WorkspaceExportError, WorkspaceFile, export_graph, export_graph_with_base, project_graph};
+pub use export::{
+    WorkspaceExportError, WorkspaceFile, export_graph, export_graph_with_base, project_graph, project_graph_at,
+    required_format_version,
+};
 pub use import::{ImportOutcome, WorkspaceImportError, import_graph, import_workspace};
 pub use reconcile::{Change, Comparison, RecordComparison, RecordState, compare};
 pub use status::{GitChange, RecordStatus, RecordStatusKind, WorkspaceStatus, WorkspaceStatusError, workspace_status};
 pub use sync::{Side, SyncOutcome, WorkspaceSyncError, resolve_workspace, sync_workspace, workspace_relative};
 
 pub const CONFIG_FORMAT_VERSION: u32 = 1;
-/// The version of the on-disk workspace format implemented by this crate.
-pub const WORKSPACE_FORMAT_VERSION: u32 = 1;
+/// The newest on-disk workspace format version this crate reads and writes.
+///
+/// Version 2 adds the task `assignee` field; see [`ASSIGNEE_FORMAT_VERSION`]
+/// for when a projection writes it. Reading also accepts
+/// [`OLDEST_WORKSPACE_FORMAT_VERSION`] and later versions up to this one; an
+/// arcl that predates version 2 refuses a version 2 manifest before it reads
+/// any record.
+pub const WORKSPACE_FORMAT_VERSION: u32 = 2;
+/// The oldest workspace format version this crate still reads.
+pub const OLDEST_WORKSPACE_FORMAT_VERSION: u32 = 1;
+/// The workspace format version a task `assignee` needs.
+///
+/// A projection writes this version once a task carries an assignee, and
+/// keeps a manifest at a higher version than its records need, so a workspace
+/// is never moved back to an older version. Otherwise it keeps
+/// [`OLDEST_WORKSPACE_FORMAT_VERSION`], which an older arcl still reads.
+pub const ASSIGNEE_FORMAT_VERSION: u32 = 2;
 
 /// Workspace and configuration validation failures.
 #[derive(Debug, Error)]
@@ -62,6 +80,16 @@ pub enum WorkspaceError {
     EmptyRecordSpecPath,
     #[error("workspace record position {position} is invalid; positions must be non-negative")]
     InvalidRecordPosition { position: i64 },
+    /// A task `assignee` that is empty, longer than 64 characters, or holds a
+    /// control or format character.
+    #[error(
+        "workspace task assignee `{}` must be a non-empty name of at most 64 characters without control or format characters",
+        value.escape_debug()
+    )]
+    InvalidRecordAssignee { value: String },
+    /// A task `assignee` on a task that is not in progress.
+    #[error("workspace task assignee is set on a `{status}` task; only an in-progress task holds a claim")]
+    AssigneeNotInProgress { status: String },
     #[error("workspace capture creation time cannot be empty")]
     EmptyRecordCreatedAt,
     #[error("workspace record relationship is invalid: {0}")]

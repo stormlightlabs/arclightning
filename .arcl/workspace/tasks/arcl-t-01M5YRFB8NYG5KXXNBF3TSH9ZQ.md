@@ -2,9 +2,10 @@
 id = "arcl-t-01M5YRFB8NYG5KXXNBF3TSH9ZQ"
 phase = "arcl-ph-01M5YRFB35TZ51QW4AG1A8MS5B"
 title = "Print an agent primer with arcl prime"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 2
+evidence = "Delivered by #76: `arcl prime` prints the skill's loop block, open work with handoffs and the first ready tasks within 40 lines and 4 KiB; the automation guide shows Claude Code and Codex SessionStart hooks."
 +++
 
 Print the agent loop and the current state of work in one command, for
@@ -23,9 +24,9 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] `arcl prime` prints the loop, open work with handoffs and ready tasks
-- [ ] Output stays within a documented size on this repository
-- [ ] The guide shows a hook that runs it
+- [x] `arcl prime` prints the loop, open work with handoffs and ready tasks
+- [x] Output stays within a documented size on this repository
+- [x] The guide shows a hook that runs it
 
 Verification:
 

@@ -23,14 +23,15 @@ use arcl_store::{Database, StorageError, WorkspaceBaseFile};
 
 use super::{
     Change, RecordState, WorkspaceExportError, WorkspaceImportError, compare, decode_record,
-    export::export_observed,
+    export::{export_observed, format_floor},
     import::{comparison_graph, read_candidate, reject_unmerged, validate_candidate},
-    list_paths, project_graph,
+    list_paths, project_graph_at,
 };
 use crate::vcs::Vcs;
 
-/// The workspace manifest. It has one legal value, which the database
-/// projection always writes, so the workspace's copy is never imported.
+/// The workspace manifest. The database projection always writes it, at the
+/// version the records need or the version it already has, whichever is
+/// higher, so the workspace's copy is never imported.
 const MANIFEST: &str = "manifest.toml";
 
 /// The side of a sync that made a change.
@@ -244,8 +245,11 @@ fn run_sync(
     let read = database.data_version()?;
     let base = database.workspace_base()?;
     let before = database.connected_graph()?;
-    let database_files = project_graph(&before)?;
     let candidate = read_candidate(root)?;
+    // The manifest keeps the version the base or the workspace has, and moves
+    // up only when a record needs it.
+    let floor = format_floor(&base, &candidate.files);
+    let database_files = project_graph_at(&before, floor)?;
     let comparison = compare(&base, &database_files, &candidate.files);
 
     for path in choices.keys() {
@@ -345,7 +349,7 @@ fn run_sync(
         Some(graph)
     };
     let files = match &graph {
-        Some(graph) => project_graph(graph)?,
+        Some(graph) => project_graph_at(graph, floor)?,
         None => database_files,
     };
 
@@ -379,7 +383,7 @@ mod tests {
 
     use super::*;
     use crate::vcs::{FakeVcs, PathState};
-    use crate::workspace::{WorkspaceFile, export::export_graph_with_base};
+    use crate::workspace::{WorkspaceFile, export::export_graph_with_base, project_graph};
 
     struct Project {
         root: tempfile::TempDir,
@@ -706,6 +710,62 @@ mod tests {
         assert_eq!(outcome.converged, std::slice::from_ref(&manifest));
         assert_eq!(project.read(&manifest), "format-version = 1\n");
         assert!(project.sync().expect("second sync succeeds").is_empty());
+    }
+
+    #[test]
+    fn the_manifest_moves_to_version_two_for_a_claim_and_stays_there() {
+        let mut project = Project::synced();
+        let manifest = PathBuf::from(MANIFEST);
+        assert_eq!(project.read(&manifest), "format-version = 1\n");
+
+        let project_id = project.database.project().expect("project exists").id;
+        let task = project
+            .database
+            .create_planning_task(arcl_store::PlanningTaskCreate {
+                project_id,
+                spec_id: None,
+                plan_id: None,
+                phase_id: None,
+                parent_id: None,
+                title: "Task".to_owned(),
+                body: String::new(),
+                priority: arcl_core::domain::TaskPriority::Normal,
+                position: 0,
+            })
+            .expect("task creates");
+        project.sync().expect("sync succeeds");
+        assert_eq!(
+            project.read(&manifest),
+            "format-version = 1\n",
+            "a task without an assignee"
+        );
+
+        project
+            .database
+            .claim_planning_task(task.id, false, "codex")
+            .expect("claim starts the task");
+        project.sync().expect("sync succeeds");
+        assert_eq!(project.read(&manifest), "format-version = 2\n", "a claimed task");
+
+        project
+            .database
+            .transition_planning_task(task.id, arcl_core::domain::TaskAction::Park, false)
+            .expect("park releases the claim");
+        project.sync().expect("sync succeeds");
+        assert_eq!(project.read(&manifest), "format-version = 2\n", "a released claim");
+        assert!(project.sync().expect("repeat sync succeeds").is_empty());
+    }
+
+    #[test]
+    fn a_version_two_manifest_from_the_workspace_is_kept() {
+        let mut project = Project::synced();
+        let manifest = PathBuf::from(MANIFEST);
+        fs::write(project.root.path().join(MANIFEST), "format-version = 2\n").expect("manifest writes");
+
+        let outcome = project.sync().expect("sync succeeds");
+        assert_eq!(outcome.converged, std::slice::from_ref(&manifest));
+        assert_eq!(project.read(&manifest), "format-version = 2\n");
+        assert!(project.sync().expect("repeat sync succeeds").is_empty());
     }
 
     #[test]

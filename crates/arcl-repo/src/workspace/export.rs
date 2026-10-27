@@ -11,9 +11,12 @@ use arcl_core::domain::{CapturePromotionTarget, LinkedRecordKind};
 use arcl_store::{ConnectedGraph, WorkspaceBaseFile};
 
 use super::{
-    CaptureRecord, NoteRecord, PhaseRecord, PlanRecord, ReleaseRecord, SpecRecord, TaskRecord, WorkspaceManifest,
-    WorkspaceRecord, WorkspaceReference, encode_manifest, encode_record,
+    ASSIGNEE_FORMAT_VERSION, CaptureRecord, NoteRecord, OLDEST_WORKSPACE_FORMAT_VERSION, PhaseRecord, PlanRecord,
+    ReleaseRecord, SpecRecord, TaskRecord, WorkspaceManifest, WorkspaceRecord, WorkspaceReference, encode_manifest,
+    encode_record,
 };
+
+const MANIFEST: &str = "manifest.toml";
 
 /// A filesystem failure or edit conflict raised while exporting a workspace.
 #[derive(Debug, Error)]
@@ -47,13 +50,38 @@ pub struct WorkspaceFile {
     pub content: Vec<u8>,
 }
 
-/// Render every connected record and explicit relationship in canonical order.
+/// Return the workspace format version `graph` needs:
+/// [`ASSIGNEE_FORMAT_VERSION`] when a task carries an assignee, and
+/// [`OLDEST_WORKSPACE_FORMAT_VERSION`] otherwise.
+pub fn required_format_version(graph: &ConnectedGraph) -> u32 {
+    if graph.tasks.iter().any(|task| task.assignee.is_some()) {
+        ASSIGNEE_FORMAT_VERSION
+    } else {
+        OLDEST_WORKSPACE_FORMAT_VERSION
+    }
+}
+
+/// Render every connected record and explicit relationship in canonical
+/// order, with the manifest at the version `graph` needs.
+///
+/// A caller comparing against an existing workspace uses
+/// [`project_graph_at`] instead, so the manifest keeps the version it has.
 pub fn project_graph(graph: &ConnectedGraph) -> Result<Vec<WorkspaceFile>, WorkspaceExportError> {
+    project_graph_at(graph, OLDEST_WORKSPACE_FORMAT_VERSION)
+}
+
+/// Render as [`project_graph`] does, with the manifest at `floor` or the
+/// version `graph` needs, whichever is higher.
+///
+/// `floor` is the version the workspace already has, so a projection never
+/// lowers it: a workspace stays at version 2 once a claim has moved it there.
+pub fn project_graph_at(graph: &ConnectedGraph, floor: u32) -> Result<Vec<WorkspaceFile>, WorkspaceExportError> {
+    let manifest = WorkspaceManifest { format_version: required_format_version(graph).max(floor) };
     let mut files = Vec::new();
     files.push(WorkspaceFile {
-        path: PathBuf::from("manifest.toml"),
-        content: encode_manifest(&WorkspaceManifest::default())
-            .map_err(|source| WorkspaceExportError::Encode { path: PathBuf::from("manifest.toml"), source })?
+        path: PathBuf::from(MANIFEST),
+        content: encode_manifest(&manifest)
+            .map_err(|source| WorkspaceExportError::Encode { path: PathBuf::from(MANIFEST), source })?
             .into_bytes(),
     });
 
@@ -157,6 +185,7 @@ pub fn project_graph(graph: &ConnectedGraph) -> Result<Vec<WorkspaceFile>, Works
                     .collect(),
                 handoff: nonempty(&task.handoff),
                 evidence: nonempty(&task.evidence),
+                assignee: task.assignee.clone(),
                 links: links_for(&links, LinkedRecordKind::Task, task.id.to_string()),
                 body: task.body.clone(),
             }),
@@ -173,7 +202,7 @@ pub fn project_graph(graph: &ConnectedGraph) -> Result<Vec<WorkspaceFile>, Works
             }),
         )?;
     }
-    files.sort_by_key(|file| (file.path != Path::new("manifest.toml"), file.path.clone()));
+    files.sort_by_key(|file| (file.path != Path::new(MANIFEST), file.path.clone()));
     Ok(files)
 }
 
@@ -185,7 +214,10 @@ pub fn project_graph(graph: &ConnectedGraph) -> Result<Vec<WorkspaceFile>, Works
 pub fn export_graph_with_base(
     root: &Path, graph: &ConnectedGraph, base: &[WorkspaceBaseFile],
 ) -> Result<Vec<WorkspaceFile>, WorkspaceExportError> {
-    let files = project_graph(graph)?;
+    let on_disk = fs::read(root.join(MANIFEST))
+        .ok()
+        .map(|content| WorkspaceFile { path: PathBuf::from(MANIFEST), content });
+    let files = project_graph_at(graph, format_floor(base, on_disk.as_slice()))?;
     let base = base
         .iter()
         .map(|file| (PathBuf::from(&file.path), file))
@@ -212,6 +244,31 @@ pub fn export_graph_with_base(
 /// Render and export without a stored base. Existing differing files are conflicts.
 pub fn export_graph(root: &Path, graph: &ConnectedGraph) -> Result<Vec<WorkspaceFile>, WorkspaceExportError> {
     export_graph_with_base(root, graph, &[])
+}
+
+/// Return the highest format version among the manifests in `base` and
+/// `files`, or [`OLDEST_WORKSPACE_FORMAT_VERSION`] when neither holds a
+/// readable one. Pass the result to [`project_graph_at`] so a projection keeps
+/// the version the workspace already has.
+pub(super) fn format_floor(base: &[WorkspaceBaseFile], files: &[WorkspaceFile]) -> u32 {
+    let version = |content: &[u8]| {
+        std::str::from_utf8(content)
+            .ok()
+            .and_then(|input| WorkspaceManifest::parse(input).ok())
+            .map(|manifest| manifest.format_version)
+    };
+    let from_base = base
+        .iter()
+        .filter(|file| Path::new(&file.path) == Path::new(MANIFEST))
+        .filter_map(|file| version(&file.content));
+    let from_files = files
+        .iter()
+        .filter(|file| file.path == Path::new(MANIFEST))
+        .filter_map(|file| version(&file.content));
+    from_base
+        .chain(from_files)
+        .max()
+        .unwrap_or(OLDEST_WORKSPACE_FORMAT_VERSION)
 }
 
 /// Write `files` only if the workspace still matches what a sync observed.

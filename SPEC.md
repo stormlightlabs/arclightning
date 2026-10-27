@@ -149,6 +149,8 @@ Tasks retain:
 - dependency edges and deterministic ready-work calculation
 - a current Markdown handoff
 - Markdown completion evidence
+- an optional assignee, set by a claim when the task starts and cleared when
+  it is parked, handed off, completed, or cancelled
 
 Readiness is calculated for actionable leaf tasks. A task is ready when it is
 pending, its applicable ancestors and containers permit work, and every blocker
@@ -162,6 +164,15 @@ readiness and `arcl check`, and by import with the path that forms them.
 Moving a pending task to in progress requires it to be ready unless the caller
 passes `--force`. Starting a task that is already in progress stays a no-op.
 The MCP start tool does not expose force; an agent asks a person instead. A
+start can claim the task for an assignee in the same write. While a task has
+an assignee, a start is refused unless it claims the task for that assignee;
+`--force` does not override this. Parking, handing off, completing and
+cancelling release the claim, whoever runs them. A claim holds within one
+database, so separate Git worktrees, which each have their own database, can
+claim the same task; each sees the other's claim only after the workspace
+change reaches it through Git and a sync. `arcl next --start` selects the
+first ready task and starts it in one write transaction, so two concurrent
+calls on one database never start the same task. A
 cancelled blocker does not complete the relationship; readiness reports it as
 a decision to remove or replace the dependency. Every readiness reason has a
 stable kind and record IDs in machine output, and completing a task reports
@@ -237,6 +248,10 @@ text.
 includes the task, relevant ancestors, spec and plan context, direct blockers,
 latest handoff, and relevant evidence without returning the whole project.
 
+`arcl prime` is the session primer for hooks. It prints the skill's working
+loop, open work with handoffs, and the first ready tasks, within 40 lines and
+4 KiB, and points to `arcl context` for the rest.
+
 ### Repository-native workspace
 
 Repository-native mode projects the database into one record per Markdown/TOML
@@ -256,6 +271,14 @@ file under a configurable workspace directory. The target layout is:
     |-- notes/
     `-- releases/
 ```
+
+`manifest.toml` holds `format-version`. Version 2 adds the task `assignee`
+field. arcl reads versions 1 and 2. It writes version 2 when a task file
+carries an `assignee`, and otherwise keeps the version the workspace already
+has, so a workspace without claims stays at version 1. A workspace never moves
+back from version 2 on its own. An arcl that only reads version 1 checks the
+manifest before any record and refuses a version 2 workspace with an
+unsupported format version error.
 
 Synchronization uses a three-state comparison: compare
 the last common files, current database projection, and current workspace. Arc

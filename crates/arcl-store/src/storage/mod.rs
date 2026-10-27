@@ -12,7 +12,7 @@ use thiserror::Error;
 use arcl_core::domain::*;
 
 /// The newest SQLite schema version understood by the application.
-pub const CURRENT_VERSION: i32 = 4;
+pub const CURRENT_VERSION: i32 = 5;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -98,6 +98,17 @@ pub enum StorageError {
     /// replacing the graph would discard that write.
     #[error("the database changed after this command read it; run the command again")]
     ChangedSinceRead,
+    /// A claim on a task that another assignee holds.
+    #[error("task `{id}` is claimed by `{assignee}`")]
+    TaskClaimed { id: String, assignee: String },
+    /// A claim whose name is empty, longer than 64 characters, or holds a
+    /// control or format character. The name comes from the request, not
+    /// from stored data.
+    #[error(
+        "claim name `{}` is invalid; use a non-empty name of at most 64 characters without control or format characters",
+        value.escape_debug()
+    )]
+    InvalidClaimName { value: String },
     /// A short ID argument names no record, more than one, or is not a
     /// short ID. No match exits 5; the rest exit 3.
     #[error(transparent)]
@@ -137,6 +148,7 @@ impl StorageError {
             | Self::AmbiguousCapturePromotion { .. }
             | Self::InconsistentCapturePromotion { .. }
             | Self::InvalidPlanInput(_)
+            | Self::InvalidClaimName { .. }
             | Self::NewerDatabase { .. }
             | Self::MigrationGap { .. } => 3,
             Self::ShortId(error) => {
@@ -146,7 +158,7 @@ impl StorageError {
                     3
                 }
             }
-            Self::ChangedSinceRead => 4,
+            Self::ChangedSinceRead | Self::TaskClaimed { .. } => 4,
             Self::Sqlite(_) => 1,
         }
     }
@@ -328,8 +340,8 @@ impl Database {
             transaction.execute(
                 "INSERT INTO planning_tasks
                  (id, project_id, spec_id, plan_id, phase_id, parent_id, plan_key, title, body,
-                  status, priority, position, handoff, evidence)
-                 VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                  status, priority, position, handoff, evidence, assignee)
+                 VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                 rusqlite::params![
                     task.id.to_string(),
                     task.project_id.to_string(),
@@ -343,7 +355,8 @@ impl Database {
                     task.priority.as_str(),
                     task.position,
                     task.handoff,
-                    task.evidence
+                    task.evidence,
+                    task.assignee
                 ],
             )?;
         }
@@ -735,6 +748,24 @@ impl Database {
     pub fn start_planning_task(&mut self, id: TaskId, force: bool) -> Result<PlanningTask> {
         let project = self.project()?;
         connected::start_planning_task(&mut self.connection, project.id, id, force)
+    }
+
+    /// Start a connected-model task and set its assignee atomically. A task
+    /// another assignee holds is refused with [`StorageError::TaskClaimed`];
+    /// see [`connected::claim_planning_task`].
+    pub fn claim_planning_task(&mut self, id: TaskId, force: bool, assignee: &str) -> Result<PlanningTask> {
+        let project = self.project()?;
+        connected::claim_planning_task(&mut self.connection, project.id, id, force, assignee)
+    }
+
+    /// Start the first ready task matching `filter` in one write transaction,
+    /// claiming it for `claim` when given. Returns `None` when no task is
+    /// ready; see [`connected::start_next_planning_task`].
+    pub fn start_next_planning_task(
+        &mut self, filter: &PlanningReadyFilter, claim: Option<&str>,
+    ) -> Result<Option<PlanningTask>> {
+        let project = self.project()?;
+        connected::start_next_planning_task(&mut self.connection, project.id, filter, claim)
     }
 
     /// Complete a connected-model task and optionally store Markdown evidence
