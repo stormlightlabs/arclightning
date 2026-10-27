@@ -6,7 +6,7 @@ status = "completed"
 priority = "normal"
 position = 5
 blocked-by = ["arcl-t-01M5VDDDD562QZYTSA0VJNWNTS"]
-evidence = "Delivered by #PR: arcl tree --style full unfolds every phase with short IDs aligned right, and --style outline prints STATUS, ID and TITLE columns with dot indentation and no box characters. Both follow --all, --ascii, --depth and the colour rules; folded, --plain and --json output are byte-identical to main on this repository."
+evidence = "Delivered by #62: arcl tree --style full unfolds every phase with short IDs aligned right, and --style outline prints STATUS, ID and TITLE columns with dot indentation and no box characters. Both follow --all, --ascii, --depth and the colour rules; folded, --plain and --json output are byte-identical to main on this repository."
 +++
 
 Add `--style full` and `--style outline` to `arcl tree`, beside the default
