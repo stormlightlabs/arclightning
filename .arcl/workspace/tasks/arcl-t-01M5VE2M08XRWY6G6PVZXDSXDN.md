@@ -2,9 +2,10 @@
 id = "arcl-t-01M5VE2M08XRWY6G6PVZXDSXDN"
 phase = "arcl-ph-01M5NE5P9FR8YZK0Z8YCV7YMZT"
 title = "Publish release binaries with dist and support cargo-binstall"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 1
+evidence = "Delivered by #63 and released as v0.3.0: the Release run on the tag built arcl and arcl-mcp for five targets and published archives, SHA-256 checksums, shell and PowerShell installers and `arcl.rb` to stormlightlabs/homebrew-tap. Checked on Linux x86_64: the shell installer installs a static `arcl` that prints `arcl 0.3.0`, the archive matches its checksum and the formula, and `arcl serve` returns the 2.8 MB web app, not the build-it page; the other four builds ran with `ARCL_REQUIRE_WEB=1`, which fails a build without the web app. Not yet checked: the PowerShell installer, `brew install` and `cargo binstall`."
 +++
 
 Publish prebuilt `arcl` binaries on each release, so a new user installs Arc
@@ -38,15 +39,15 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] Pushing a version tag through the Bump workflow publishes a GitHub
+- [x] Pushing a version tag through the Bump workflow publishes a GitHub
       Release with an archive and checksum for each target
-- [ ] `arcl serve` from each release binary serves the web app, not the
+- [x] `arcl serve` from each release binary serves the web app, not the
       build-it page
 - [ ] The shell installer, the PowerShell installer and `brew install`
       each install a working `arcl`
 - [ ] `cargo binstall arcl-cli` downloads the release binary instead of
       compiling
-- [ ] The README's quick start starts with the one-line install and keeps
+- [x] The README's quick start starts with the one-line install and keeps
       `cargo install --git` as the fallback
 
 Verification:

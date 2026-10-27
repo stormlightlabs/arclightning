@@ -2,9 +2,10 @@
 id = "arcl-t-01M5YKWJVRBAYQKGCYC4S25D3T"
 phase = "arcl-ph-01M5NE5P9FR8YZK0Z8YCV7YMZT"
 title = "Prepare and tag v0.3.0"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 2
+evidence = "Delivered by #64: the version is 0.3.0 across the workspace, package.json files and the Tauri app, and the quick start installs `--tag v0.3.0`. The Bump workflow tagged `v0.3.0` on d4b9f16, the #64 merge commit, and the Release run built all five targets, uploaded archives and checksums to the GitHub Release, and pushed `Formula/arcl.rb` to stormlightlabs/homebrew-tap."
 +++
 
 Prepare and tag `v0.3.0`, the first release built and published by dist. It
@@ -28,7 +29,7 @@ Acceptance criteria:
 - [x] `arcl --version` prints `arcl 0.3.0`
 - [x] The release record lists the work it ships
 - [x] The quick start installs `--tag v0.3.0`
-- [ ] `v0.3.0` is tagged on the merge commit, the GitHub Release has an
+- [x] `v0.3.0` is tagged on the merge commit, the GitHub Release has an
       archive and checksum for each target, and the release is completed
 
 Verification:
