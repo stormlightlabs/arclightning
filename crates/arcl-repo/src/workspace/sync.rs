@@ -704,7 +704,9 @@ mod tests {
         let outcome = project.sync().expect("sync succeeds");
         assert!(outcome.imported.is_empty());
         assert_eq!(outcome.converged, std::slice::from_ref(&manifest));
-        assert_eq!(project.read(&manifest), "format-version = 1\n");
+        // The canonical manifest is the current version, so a version 1
+        // workspace is upgraded in place.
+        assert_eq!(project.read(&manifest), "format-version = 2\n");
         assert!(project.sync().expect("second sync succeeds").is_empty());
     }
 
@@ -722,7 +724,7 @@ mod tests {
         assert_eq!(outcome.converged, [PathBuf::from(MANIFEST)]);
         assert_eq!(
             fs::read_to_string(root.path().join(MANIFEST)).expect("manifest reads"),
-            "format-version = 1\n"
+            "format-version = 2\n"
         );
     }
 

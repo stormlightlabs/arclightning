@@ -1790,15 +1790,18 @@ impl PlanningContextOutput for PlanningContext {
                 self.task.title
             ),
             format!("Ready: {}", self.readiness.ready),
-            format!(
-                "Ancestors: {}",
-                self.ancestors
-                    .iter()
-                    .map(|task| task.id.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
         ];
+        if let Some(assignee) = &self.task.assignee {
+            lines.push(format!("Assignee: {assignee}"));
+        }
+        lines.push(format!(
+            "Ancestors: {}",
+            self.ancestors
+                .iter()
+                .map(|task| task.id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
         if let Some(spec) = &self.spec {
             lines.push(format!("Spec: {}\n{}", spec.id, spec.body));
         }
@@ -1844,6 +1847,9 @@ impl PlanningContextOutput for PlanningContext {
             format!("handoff\t{}", plain_escape(&self.task.handoff)),
             format!("evidence\t{}", plain_escape(&self.task.evidence)),
         ];
+        if let Some(assignee) = &self.task.assignee {
+            lines.push(format!("assignee\t{}", plain_escape(assignee)));
+        }
         if let Some(spec) = &self.spec {
             lines.push(format!("spec\t{}\t{}", spec.id, plain_escape(&spec.body)));
         }

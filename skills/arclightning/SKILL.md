@@ -41,8 +41,9 @@ ID fields.
    most `limit` records and a `data.next_cursor` to pass as `cursor` while
    more remain.
 2. Start it. `arcl --json task start <id> --claim` [`task_start` with
-   `claim`] moves the task to in progress and records you as its assignee,
-   named by `ARCL_AGENT` or else the Git user name. If it refuses with
+   `claim`] moves the task to in progress and records you as its assignee.
+   The command names you by `ARCL_AGENT` or else the Git user name. The tool
+   has no default: pass your name in `claim`. If it refuses with
    `invalid_request`, run `arcl --json explain <id>` [`explain`] and read
    `data.readiness.reasons`. A `conflict` means another assignee holds the
    task; pick other work. Do not pass `--force` unless the person asks. The
