@@ -110,6 +110,11 @@ it from a session-start hook so the agent starts with the loop and the open
 work in its context. The [manual](/reference/manual/#inspection) describes the
 output.
 
+The hooks below run `arcl prime` only when `arcl` is installed, so a teammate
+without it starts a session with no hook error. In a directory with no
+`.arcl/arcl.db`, such as a fresh clone, `arcl prime` prints one line saying to
+run `arcl init` and exits `0`. It still fails on a database it cannot open.
+
 For Claude Code, add the hook to `.claude/settings.json`. A `SessionStart`
 hook with no matcher also runs after `/clear` and after compaction, so the
 primer comes back once the context is compacted:
@@ -119,7 +124,12 @@ primer comes back once the context is compacted:
 	"hooks": {
 		"SessionStart": [
 			{
-				"hooks": [{ "type": "command", "command": "arcl prime" }]
+				"hooks": [
+					{
+						"type": "command",
+						"command": "if command -v arcl >/dev/null; then arcl prime; fi"
+					}
+				]
 			}
 		]
 	}
@@ -135,7 +145,12 @@ only in a trusted project, after you trust the hook in `/hooks`:
 		"SessionStart": [
 			{
 				"matcher": "startup|resume",
-				"hooks": [{ "type": "command", "command": "arcl prime" }]
+				"hooks": [
+					{
+						"type": "command",
+						"command": "if command -v arcl >/dev/null; then arcl prime; fi"
+					}
+				]
 			}
 		]
 	}

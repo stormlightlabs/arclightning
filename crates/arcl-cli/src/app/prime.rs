@@ -14,9 +14,19 @@ const LOOP_BEGIN: &str = "<!-- arcl-prime:begin -->";
 /// The line that closes the loop block in `SKILL.md`.
 const LOOP_END: &str = "<!-- arcl-prime:end -->";
 
-/// `arcl prime`.
+/// `arcl prime`. Outside an initialized project it says to run `arcl init`
+/// and succeeds, so a session-start hook does not fail in a fresh clone.
 pub(super) fn read_prime(renderer: &Renderer) -> anyhow::Result<Option<String>> {
-    let database = open_database().map_err(ApplicationError::from_command)?;
+    let database = match open_database() {
+        Ok(database) => database,
+        Err(CommandError::NotInitialized { root }) => {
+            let display = root.display().to_string();
+            let message = CommandError::NotInitialized { root }.to_string();
+            let setup = PrimeSetup { initialized: false, root: display, message };
+            return Ok(renderer.render_prime_not_initialized(&setup)?);
+        }
+        Err(error) => return Err(ApplicationError::from_command(error).into()),
+    };
     let primer = primer(&database, renderer).map_err(ApplicationError::from_command)?;
     Ok(renderer.render_primer(&primer)?)
 }
@@ -40,6 +50,7 @@ fn primer(database: &Database, renderer: &Renderer) -> CResult<Primer> {
         .flat_map(|status| tasks.iter().filter(move |task| task.status == status));
     let ready = database.ready_planning_tasks()?;
     Ok(Primer {
+        initialized: true,
         work_loop: primer_loop(),
         open: PrimeList::new(open, &ids),
         ready: PrimeList::new(ready.iter(), &ids),

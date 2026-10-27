@@ -6168,13 +6168,20 @@ fn prime_stays_within_its_size_budget() {
         run_json(dir, ["--json", "task", "unpark", &task].as_ref());
     }
 
-    let output = prime_output(dir, &[]);
-    let lines = output.lines().count();
-    assert!(lines <= PRIME_MAX_LINES, "{lines} lines:\n{output}");
-    assert!(output.len() <= PRIME_MAX_BYTES, "{} bytes:\n{output}", output.len());
-    assert!(output.contains("  and 3 more: arcl list --kind task --status in_progress parked\n"));
-    assert!(output.contains("  and 3 more: arcl ready\n"));
-    assert!(output.lines().all(|line| line.len() <= 200), "{output}");
+    // Plain output prints full IDs, so it is the longer of the two.
+    for args in [&[][..], &["--plain"][..]] {
+        let output = prime_output(dir, args);
+        let lines = output.lines().count();
+        assert!(lines <= PRIME_MAX_LINES, "{args:?}: {lines} lines:\n{output}");
+        assert!(
+            output.len() <= PRIME_MAX_BYTES,
+            "{args:?}: {} bytes:\n{output}",
+            output.len()
+        );
+        assert!(output.contains("  and 3 more: arcl list --kind task --status in_progress parked\n"));
+        assert!(output.contains("  and 3 more: arcl ready\n"));
+        assert!(output.lines().all(|line| line.len() <= 200), "{output}");
+    }
 
     let primer = run_json(dir, ["--json", "prime"].as_ref());
     assert_eq!(primer["data"]["open"]["tasks"].as_array().map(Vec::len), Some(5));
@@ -6193,4 +6200,94 @@ fn prime_on_an_empty_project_prints_the_loop_and_no_work() {
     let primer = run_json(directory.path(), ["--json", "prime"].as_ref());
     assert_eq!(primer["data"]["open"], serde_json::json!({ "tasks": [], "more": 0 }));
     assert_eq!(primer["data"]["ready"], serde_json::json!({ "tasks": [], "more": 0 }));
+}
+
+#[test]
+fn prime_escapes_control_characters_in_titles_and_handoffs() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let title = "Fix \u{1b}[31mred\u{7} text\r";
+    let task = create_task(dir, title, None);
+    // Assignees refuse control characters, so only titles and handoffs carry them.
+    let refused = claim_output(dir, &task, Some("co\u{1b}dex"), None);
+    assert!(
+        !refused.status.success(),
+        "a control character in an assignee is refused"
+    );
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("without control or format characters"),
+        "{refused:?}"
+    );
+    run_json(dir, ["--json", "task", "start", &task].as_ref());
+    run_json(
+        dir,
+        [
+            "--json",
+            "task",
+            "handoff",
+            &task,
+            "--note",
+            "Cleared \u{1b}]0;owned\u{7} title",
+        ]
+        .as_ref(),
+    );
+
+    for args in [&[][..], &["--plain"][..]] {
+        let output = prime_output(dir, args);
+        assert!(
+            !output.contains('\u{1b}') && !output.contains('\u{7}') && !output.contains('\r'),
+            "{output:?}"
+        );
+        assert!(output.contains(": Fix \\x1b[31mred\\x07 text\\r\n"), "{output}");
+        assert!(
+            output.contains("  Handoff: Cleared \\x1b]0;owned\\x07 title\n"),
+            "{output}"
+        );
+    }
+
+    let primer = run_json(dir, ["--json", "prime"].as_ref());
+    assert_eq!(primer["data"]["open"]["tasks"][0]["title"], title);
+}
+
+#[test]
+fn prime_outside_a_project_says_to_run_init_and_succeeds() {
+    let directory = tempdir().expect("temporary directory can be created");
+    let dir = directory.path();
+    let output = prime_output(dir, &[]);
+    assert!(
+        output.starts_with("Arc Lightning is not initialized in project directory `"),
+        "{output}"
+    );
+    assert!(output.ends_with("; run `arcl init` first\n"), "{output}");
+    assert_eq!(output.lines().count(), 1);
+    assert_eq!(output, prime_output(dir, &["--plain"]));
+
+    let primer = run_json(dir, ["--json", "prime"].as_ref());
+    assert_eq!(primer["format_version"], 1);
+    assert_eq!(primer["data"]["initialized"], false);
+    assert_eq!(primer["data"]["message"], output.trim_end());
+    assert!(primer["data"]["root"].is_string());
+    assert!(primer["data"].get("loop").is_none());
+
+    // A project whose database is missing, as in a fresh clone, is the same case.
+    let project = initialized_directory();
+    fs::remove_file(project.path().join(".arcl").join("arcl.db")).expect("database is removed");
+    assert!(prime_output(project.path(), &[]).ends_with("; run `arcl init` first\n"));
+    assert_eq!(
+        run_json(project.path(), ["--json", "prime"].as_ref())["data"]["initialized"],
+        false
+    );
+}
+
+#[test]
+fn prime_fails_on_a_database_it_cannot_open() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    fs::write(dir.join(".arcl").join("arcl.db"), "not a database").expect("database is overwritten");
+    let output = arcl_in(dir)
+        .args(["--color", "never", "prime"])
+        .output()
+        .expect("prime runs");
+    assert!(!output.status.success(), "prime fails on a corrupt database");
+    assert!(output.stdout.is_empty());
 }

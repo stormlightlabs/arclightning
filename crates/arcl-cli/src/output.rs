@@ -611,14 +611,29 @@ impl Renderer {
         Ok(Some(self.style(message)))
     }
 
-    /// Render the `arcl prime` primer. Human and plain output print the same
-    /// unstyled text, within [`PRIME_MAX_LINES`] and [`PRIME_MAX_BYTES`].
+    /// Render the `arcl prime` primer. Human and plain output print unstyled
+    /// text within [`PRIME_MAX_LINES`] and [`PRIME_MAX_BYTES`]; plain prints
+    /// full IDs.
     pub fn render_primer(&self, primer: &Primer) -> Result<Option<String>, OutputError> {
         Ok(match self.mode {
             OutputMode::Human | OutputMode::Plain => Some(primer.human()),
             OutputMode::Json => Some(serde_json::to_string(&Envelope {
                 format_version: FORMAT_VERSION,
                 data: primer,
+            })?),
+            OutputMode::Quiet => None,
+        })
+    }
+
+    /// Render what `arcl prime` prints outside an initialized project: one
+    /// line that says to run `arcl init`, or an envelope with `initialized`
+    /// false.
+    pub fn render_prime_not_initialized(&self, setup: &PrimeSetup) -> Result<Option<String>, OutputError> {
+        Ok(match self.mode {
+            OutputMode::Human | OutputMode::Plain => Some(setup.message.clone()),
+            OutputMode::Json => Some(serde_json::to_string(&Envelope {
+                format_version: FORMAT_VERSION,
+                data: setup,
             })?),
             OutputMode::Quiet => None,
         })
@@ -1188,6 +1203,8 @@ pub struct SkillReport {
 /// work.
 #[derive(Debug, Serialize)]
 pub struct Primer {
+    /// Always true; [`PrimeSetup`] carries false.
+    pub initialized: bool,
     /// The loop block of the Arc Lightning skill, as Markdown.
     #[serde(rename = "loop")]
     pub work_loop: &'static str,
@@ -1218,6 +1235,18 @@ impl Primer {
         lines.push("`arcl context <id>` shows a task's criteria, blockers and full handoff.".to_owned());
         lines.join("\n")
     }
+}
+
+/// What `arcl prime` prints where the directory is not in an initialized
+/// project, so a session-start hook succeeds in a fresh clone.
+#[derive(Debug, Serialize)]
+pub struct PrimeSetup {
+    /// Always false; [`Primer`] carries true.
+    pub initialized: bool,
+    /// The project directory, or the current directory outside any project.
+    pub root: String,
+    /// The line human output prints, which says to run `arcl init`.
+    pub message: String,
 }
 
 /// One `arcl prime` list: at most [`PRIME_LIST_LIMIT`] tasks, and how many
@@ -1269,8 +1298,11 @@ impl PrimeList {
 pub struct PrimeTask {
     /// The full ID, or the short ID in human output.
     pub id: String,
+    /// The full title.
     pub title: String,
+    /// The task's status.
     pub status: TaskStatus,
+    /// The task's priority.
     pub priority: TaskPriority,
     /// Who claimed the task, if anyone did.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1317,22 +1349,24 @@ impl PrimeTask {
     fn claim(&self) -> String {
         self.assignee
             .as_deref()
-            .map(|assignee| format!(" ({})", clip(assignee, PRIME_ASSIGNEE_BYTES, false)))
+            .map(|assignee| format!(" ({})", clip(&human_escape(assignee), PRIME_ASSIGNEE_BYTES, false)))
             .unwrap_or_default()
     }
 
+    /// The title's first line with control characters escaped, clipped, with
+    /// `…` when more follows.
     fn clipped_title(&self) -> String {
         let mut lines = self.title.lines();
         let first = lines.next().unwrap_or_default();
-        clip(first, PRIME_TEXT_BYTES, lines.next().is_some())
+        clip(&human_escape(first), PRIME_TEXT_BYTES, lines.next().is_some())
     }
 
-    /// The handoff's first non-blank line, clipped, with `…` when more
-    /// follows.
+    /// The handoff's first non-blank line with control characters escaped,
+    /// clipped, with `…` when more follows.
     fn handoff_line(&self) -> Option<String> {
         let mut lines = self.handoff.lines().map(str::trim).filter(|line| !line.is_empty());
         let first = lines.next()?;
-        Some(clip(first, PRIME_TEXT_BYTES, lines.next().is_some()))
+        Some(clip(&human_escape(first), PRIME_TEXT_BYTES, lines.next().is_some()))
     }
 }
 

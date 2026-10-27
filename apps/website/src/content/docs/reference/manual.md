@@ -252,10 +252,17 @@ latest handoff, then the first ready tasks, then a pointer to
 `arcl context <id>`. Each list shows at most 5 tasks and ends with
 `and K more` and the command that lists the rest. Titles and handoff lines are
 cut to 80 bytes and assignees to 40, so the output stays within 40 lines and
-4 KiB. `--plain` prints the same text. `--json` returns `loop`, the loop as
-Markdown, and `open` and `ready`, each with `tasks` and `more`. Each task has
-`id`, `title`, `status`, `priority`, `assignee` when set, and the full
-`handoff`.
+4 KiB. Control characters in titles and handoffs print escaped, as `\x1b`.
+`--plain` prints the same text with full IDs. `--json` returns `initialized`
+as `true`, `loop`, the loop as Markdown, and `open` and `ready`, each with
+`tasks` and `more`. Each task has `id`, `title`, `status`, `priority`,
+`assignee` when set, and the full `handoff`, all unescaped.
+
+Outside an initialized project, or where `.arcl/arcl.db` is missing, `prime`
+prints the one-line message other commands fail with there, which says to run
+`arcl init`, and exits `0`, so a session-start hook succeeds in a fresh clone.
+`--json` returns `initialized` as `false`, `root` and that `message`. A
+database `prime` cannot open still fails.
 
 `tree` leaves out promoted and discarded captures in human, `--plain` and
 `--json` output; `--all` includes them. A closed capture named as the root
