@@ -30,6 +30,16 @@ downloads the release binary instead of compiling it:
 cargo binstall --git https://github.com/stormlightlabs/arclightning arcl-cli
 ```
 
+`--git` takes the version from `main`. When `main` carries a version that is
+not released yet, cargo-binstall finds no archive and compiles from source,
+without the web app. To pin a release, and fail instead of compiling, install
+from a clone of its tag:
+
+```sh
+git clone --depth 1 --branch v<version> https://github.com/stormlightlabs/arclightning
+cargo binstall --manifest-path arclightning --disable-strategies compile arcl-cli
+```
+
 Release binaries cover Linux (x86_64 and arm64, static), macOS (arm64 and
 x86_64) and Windows (x86_64), and include the web app that `arcl serve` opens.
 The `latest` links skip pre-releases. To pin a version, as a cloud session or

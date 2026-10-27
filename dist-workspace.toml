@@ -1,5 +1,10 @@
 # Release config for dist (https://axodotdev.github.io/cargo-dist). Edit it,
 # then run `dist generate` to regenerate .github/workflows/release.yml.
+#
+# dist releases only a tag that matches the version in Cargo.toml. Bump
+# `workspace.package.version`, and the other files README.md's "Releasing"
+# lists, in a pull request first. Once it merges, dispatch the Bump workflow
+# with the matching `v<version>` tag.
 
 [workspace]
 members = ["cargo:."]

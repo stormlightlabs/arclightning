@@ -29,6 +29,7 @@ jobs:
           private-key: ${{ secrets.THUNDERBOT_PRIVATE_KEY }}
           owner: stormlightlabs
           repositories: homebrew-tap
+          permission-contents: write
 
       - uses: actions/checkout@v5
         with:
@@ -56,7 +57,13 @@ jobs:
           export PATH="/home/linuxbrew/.linuxbrew/bin:$PATH"
           brew style --except-cops FormulaAudit/Homepage,FormulaAudit/Desc,FormulaAuditStrict --fix Formula/arcl.rb || true
           git config user.name "stormlight-thunderbot[bot]"
-          git config user.email "stormlight-thunderbot[bot]@users.noreply.github.com"
+          git config user.email "340296662+stormlight-thunderbot[bot]@users.noreply.github.com"
           git add Formula/arcl.rb
+          if git diff --cached --quiet; then
+            echo "Formula/arcl.rb is unchanged"
+            exit 0
+          fi
           git commit -m "arcl $version"
+          # Take any tap commit pushed since the checkout.
+          git pull --rebase origin main
           git push origin HEAD:main
