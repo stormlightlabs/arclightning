@@ -19,8 +19,8 @@ tap = "stormlightlabs/homebrew-tap"
 publish-jobs = ["./publish-homebrew"]
 targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl", "x86_64-pc-windows-msvc"]
 install-path = "CARGO_HOME"
-# Pull requests build every target as workflow artifacts and publish nothing.
-pr-run-mode = "upload"
+# Pull requests only run `dist plan`; nothing builds or publishes.
+pr-run-mode = "plan"
 # Path from .github/workflows to the steps that build the web app.
 github-build-setup = "../build-setup.yml"
 # publish-homebrew.yml pushes with its own app token; GITHUB_TOKEN only reads.
