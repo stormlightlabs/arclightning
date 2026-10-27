@@ -99,9 +99,12 @@ pub struct WorkspaceManifest {
 /// Backwards-friendly short name for the workspace manifest.
 pub type Manifest = WorkspaceManifest;
 
+/// The default manifest carries [`OLDEST_WORKSPACE_FORMAT_VERSION`], the
+/// version an empty workspace needs, so an older arcl reads a new workspace
+/// until a claim moves it to a later version.
 impl Default for WorkspaceManifest {
     fn default() -> Self {
-        Self { format_version: WORKSPACE_FORMAT_VERSION }
+        Self { format_version: OLDEST_WORKSPACE_FORMAT_VERSION }
     }
 }
 
@@ -818,9 +821,10 @@ mod tests {
     #[test]
     fn manifest_reads_and_renders_versions_one_and_two() {
         let manifest = WorkspaceManifest::parse("format-version = 1").expect("manifest");
+        assert_eq!(manifest, WorkspaceManifest::default());
         assert_eq!(manifest.render().expect("render"), "format-version = 1\n");
         let manifest = WorkspaceManifest::parse("format-version = 2").expect("manifest");
-        assert_eq!(manifest, WorkspaceManifest::default());
+        assert_eq!(manifest.format_version, WORKSPACE_FORMAT_VERSION);
         assert_eq!(manifest.render().expect("render"), "format-version = 2\n");
         for version in [0, 3] {
             assert!(matches!(
