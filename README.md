@@ -15,6 +15,40 @@ Git worktree for repository-native project files.
 
 ## Quick start
 
+Install `arcl` on macOS or Linux:
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/stormlightlabs/arclightning/releases/latest/download/arcl-cli-installer.sh | sh
+```
+
+On Windows, in PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/stormlightlabs/arclightning/releases/latest/download/arcl-cli-installer.ps1 | iex"
+```
+
+Or with Homebrew or `cargo binstall`:
+
+```sh
+brew install stormlightlabs/tap/arcl
+cargo binstall --git https://github.com/stormlightlabs/arclightning arcl-cli
+```
+
+These install a prebuilt binary that includes the web app `arcl serve` opens.
+`cargo binstall --git` takes the version from `main`. When `main` carries a
+version that is not released yet, it finds no archive and compiles from source
+without the web app. To pin a release, and fail instead of compiling, install
+from a clone of its tag:
+
+```sh
+git clone --depth 1 --branch v<version> https://github.com/stormlightlabs/arclightning
+cargo binstall --manifest-path arclightning --disable-strategies compile arcl-cli
+```
+
+To compile it instead, run
+`cargo install --git https://github.com/stormlightlabs/arclightning arcl-cli`.
+That build leaves out the web app.
+
 Arc Lightning initializes ordinary directories directly and discovers the nearest
 project when commands run from any descendant directory. Inside a non-bare Git
 worktree, initialization uses the worktree root.
@@ -125,3 +159,22 @@ To dogfood the app on claude.ai,
 `pnpm --filter @arclightning/web build:artifact` builds it as an artifact page
 in `apps/web/build-artifact/index.html`. The manual's "Publishing and syncing
 the artifact" covers publishing it and `arcl web export` and `arcl web apply`.
+
+## Releasing
+
+dist builds a release only when the tag matches the version in Cargo.toml.
+
+1. In a pull request, set the new version in `workspace.package.version` in
+   `Cargo.toml` and in `package.json`, `apps/web/package.json`,
+   `apps/desktop/package.json`, `apps/desktop/src-tauri/Cargo.toml`,
+   `apps/desktop/src-tauri/tauri.conf.json` and `packages/ui/package.json`.
+   Run `dist plan --tag=v<version>` to check it.
+2. Once it merges, dispatch the Bump workflow with tag `v<version>` and that
+   commit. The tag starts `.github/workflows/release.yml`.
+
+Pre-release tags skip the Homebrew tap, so the publish-homebrew job first runs
+on the first stable release, after the GitHub Release is public. It needs the
+stormlight-thunderbot app installed on `stormlightlabs/homebrew-tap` with
+contents write. If the job fails, fix the cause and use "Re-run failed jobs" on
+that Release run. The run's artifacts are still there, and the job only pushes
+a changed `Formula/arcl.rb`.

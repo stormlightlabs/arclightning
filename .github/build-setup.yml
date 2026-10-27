@@ -1,0 +1,17 @@
+# Steps dist adds to each build job in release.yml before `cargo build`, so
+# every release binary embeds the web app. ARCL_REQUIRE_WEB makes the
+# arcl-serve build fail if the web build is missing.
+- name: Set up pnpm
+  uses: pnpm/action-setup@v4
+- name: Set up Node
+  uses: actions/setup-node@v5
+  with:
+    node-version: 22
+    cache: pnpm
+- name: Install web dependencies
+  run: pnpm install --frozen-lockfile
+- name: Build the web app
+  run: pnpm --filter @arclightning/web build
+- name: Require the web app in the release build
+  shell: bash
+  run: echo "ARCL_REQUIRE_WEB=1" >> "$GITHUB_ENV"

@@ -2,6 +2,9 @@
 name = "arcl-cli"
 version.workspace = true
 edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Local-first project planning for developers and their agents"
 
 [[bin]]
 name = "arcl"
@@ -24,3 +27,17 @@ unicode-width.workspace = true
 assert_cmd = "2.0"
 rusqlite.workspace = true
 tempfile = "3.23"
+
+[package.metadata.dist]
+formula = "arcl"
+
+# Point `cargo binstall` at the archives the release workflow uploads.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }{ archive-suffix }"
+bin-dir = "{ name }-{ target }/{ bin }{ binary-ext }"
+pkg-fmt = "txz"
+
+# Windows archives are zips with the binary at the top level.
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "zip"

@@ -1,0 +1,74 @@
+# Pushes the arcl Homebrew formula dist built to stormlightlabs/homebrew-tap.
+# release.yml calls it after the GitHub Release is up, and skips it for
+# pre-release tags, as dist's own Homebrew job does. It pushes as
+# stormlight-thunderbot, whose app is installed on the organization, so the
+# tap needs no secret of its own. dist does not regenerate this file.
+#
+# The first stable release is this job's first run. It needs the app installed
+# on stormlightlabs/homebrew-tap with contents write. If it fails, fix the
+# cause and use "Re-run failed jobs" on that Release run: the artifacts are
+# still there, and a re-run pushes only a changed Formula/arcl.rb.
+name: Publish Homebrew formula
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        description: The dist manifest from release.yml's plan job
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    env:
+      PLAN: ${{ inputs.plan }}
+    steps:
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ secrets.THUNDERBOT_APP_ID }}
+          private-key: ${{ secrets.THUNDERBOT_PRIVATE_KEY }}
+          owner: stormlightlabs
+          repositories: homebrew-tap
+          permission-contents: write
+
+      - uses: actions/checkout@v5
+        with:
+          repository: stormlightlabs/homebrew-tap
+          ref: main
+          token: ${{ steps.app.outputs.token }}
+
+      # The build jobs of the same run uploaded the formula as an artifact.
+      - name: Fetch the formula
+        uses: actions/download-artifact@v8
+        with:
+          pattern: artifacts-*
+          path: ${{ runner.temp }}/artifacts
+          merge-multiple: true
+
+      # Write Formula/arcl.rb and nothing else; the tap holds other projects.
+      - name: Commit and push the formula
+        env:
+          ARTIFACTS: ${{ runner.temp }}/artifacts
+        run: |
+          version=$(jq --raw-output '.releases[] | select(.artifacts | index("arcl.rb")) | .app_version' <<< "$PLAN")
+          mkdir -p Formula
+          cp "$ARTIFACTS/arcl.rb" Formula/arcl.rb
+          # Fix layout only; leave the description and homepage as written.
+          export PATH="/home/linuxbrew/.linuxbrew/bin:$PATH"
+          brew style --except-cops FormulaAudit/Homepage,FormulaAudit/Desc,FormulaAuditStrict --fix Formula/arcl.rb || true
+          git config user.name "stormlight-thunderbot[bot]"
+          git config user.email "340296662+stormlight-thunderbot[bot]@users.noreply.github.com"
+          git add Formula/arcl.rb
+          if git diff --cached --quiet; then
+            echo "Formula/arcl.rb is unchanged"
+            exit 0
+          fi
+          git commit -m "arcl $version"
+          # Take any tap commit pushed since the checkout.
+          git pull --rebase origin main
+          git push origin HEAD:main

@@ -1,0 +1,29 @@
+# Release config for dist (https://axodotdev.github.io/cargo-dist). Edit it,
+# then run `dist generate` to regenerate .github/workflows/release.yml.
+#
+# dist releases only a tag that matches the version in Cargo.toml. Bump
+# `workspace.package.version`, and the other files README.md's "Releasing"
+# lists, in a pull request first. Once it merges, dispatch the Bump workflow
+# with the matching `v<version>` tag.
+
+[workspace]
+members = ["cargo:."]
+
+[dist]
+cargo-dist-version = "0.32.0"
+ci = "github"
+installers = ["shell", "powershell", "homebrew"]
+tap = "stormlightlabs/homebrew-tap"
+# A custom job in publish-homebrew.yml pushes Formula/arcl.rb with the
+# stormlight-thunderbot app token, so no tap secret is needed.
+# dist generates `secrets: inherit` for custom jobs and has no setting to pass
+# only named secrets.
+publish-jobs = ["./publish-homebrew"]
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl", "x86_64-pc-windows-msvc"]
+install-path = "CARGO_HOME"
+# Pull requests only run `dist plan`; nothing builds or publishes.
+pr-run-mode = "plan"
+# Path from .github/workflows to the steps that build the web app.
+github-build-setup = "../build-setup.yml"
+# publish-homebrew.yml pushes with its own app token; GITHUB_TOKEN only reads.
+github-custom-job-permissions = { "publish-homebrew" = { contents = "read" } }

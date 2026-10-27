@@ -6,6 +6,9 @@
 //! app is not built, `INDEX_HTML` is `None` and the server answers page
 //! requests with a page that says how to build it.
 //!
+//! With `ARCL_REQUIRE_WEB=1` set, a missing web app fails the build instead.
+//! The release workflow sets it, so no release binary ships without the app.
+//!
 //! `INDEX_SCRIPT_HASHES` lists the CSP source of each inline `<script>` in
 //! the page, such as `'sha256-…'`, so the server's Content-Security-Policy
 //! allows the app's own scripts and no others.
@@ -17,6 +20,9 @@ use sha2::{Digest, Sha256};
 
 /// The standard base64 alphabet, which CSP hash sources use.
 const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// The variable that makes a missing web app a build error.
+const REQUIRE_WEB: &str = "ARCL_REQUIRE_WEB";
 
 fn main() -> io::Result<()> {
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));
@@ -30,6 +36,15 @@ fn main() -> io::Result<()> {
         .find(|path| path.exists())
         .unwrap_or_else(|| manifest.join("build.rs"));
     println!("cargo::rerun-if-changed={}", watched.display());
+    println!("cargo::rerun-if-env-changed={REQUIRE_WEB}");
+
+    if !index.is_file() && env::var_os(REQUIRE_WEB).is_some_and(|value| value == "1") {
+        eprintln!(
+            "{REQUIRE_WEB}=1 and {} is missing. Run `pnpm install` and `pnpm --filter @arclightning/web build` first.",
+            index.display()
+        );
+        std::process::exit(1);
+    }
 
     let (value, hashes) = if index.is_file() {
         let html = fs::read_to_string(&index)?;
