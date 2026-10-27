@@ -757,6 +757,129 @@ mod tests {
     }
 
     #[test]
+    fn notes_move_the_manifest_to_version_three_and_round_trip() {
+        let mut project = Project::synced();
+        let manifest = PathBuf::from(MANIFEST);
+        let project_id = project.database.project().expect("project exists").id;
+        let task = project
+            .database
+            .create_planning_task(arcl_store::PlanningTaskCreate {
+                project_id,
+                spec_id: None,
+                plan_id: None,
+                phase_id: None,
+                parent_id: None,
+                title: "Task".to_owned(),
+                body: String::new(),
+                priority: arcl_core::domain::TaskPriority::Normal,
+                position: 0,
+            })
+            .expect("task creates");
+        project
+            .database
+            .claim_planning_task(task.id, false, "codex")
+            .expect("claim starts the task");
+        project.sync().expect("sync succeeds");
+        assert_eq!(project.read(&manifest), "format-version = 2\n", "a claim alone");
+
+        let first = project
+            .database
+            .add_task_note(task.id, Some(arcl_core::domain::TaskNoteKind::Decision), "Use SQLite")
+            .expect("note adds");
+        let second = project
+            .database
+            .add_task_note(task.id, None, "line one\nline two")
+            .expect("note adds");
+        project.sync().expect("sync succeeds");
+        assert_eq!(project.read(&manifest), "format-version = 3\n", "a note");
+        let path = PathBuf::from(format!("tasks/{}.md", task.id));
+        let file = project.read(&path);
+        assert!(
+            file.contains(&format!(
+                "[[notes]]\ncreated-at = \"{}\"\nkind = \"decision\"\ntext = \"Use SQLite\"\n",
+                first.created_at
+            )),
+            "{file}"
+        );
+
+        // A note added in the file imports, after the ones already there.
+        let added = file.replacen(
+            "\n+++",
+            "\n\n[[notes]]\ncreated-at = \"2099-01-01T00:00:00.000Z\"\nkind = \"result\"\ntext = \"From the file\"\n+++",
+            1,
+        );
+        fs::write(project.root.path().join(&path), added).expect("task file writes");
+        project.sync().expect("sync succeeds");
+        let notes = project.database.task_notes(task.id).expect("notes read");
+        assert_eq!(
+            notes.iter().map(|note| note.text.as_str()).collect::<Vec<_>>(),
+            [first.text.as_str(), second.text.as_str(), "From the file"]
+        );
+        assert_eq!(notes[2].kind, Some(arcl_core::domain::TaskNoteKind::Result));
+
+        project
+            .database
+            .complete_planning_task(task.id, arcl_store::OpenSubtasks::Refuse, None)
+            .expect("task completes");
+        project.sync().expect("sync succeeds");
+        assert_eq!(project.read(&manifest), "format-version = 3\n");
+        assert_eq!(project.database.task_notes(task.id).expect("notes read").len(), 3);
+        assert!(project.sync().expect("repeat sync succeeds").is_empty());
+    }
+
+    /// arcl commands only append notes, but the task file is the shared
+    /// record: editing or deleting a `[[notes]]` entry there and syncing
+    /// changes or removes the note, as the docs for `arcl task note` say.
+    #[test]
+    fn a_note_edited_or_removed_in_the_task_file_syncs() {
+        let mut project = Project::synced();
+        let project_id = project.database.project().expect("project exists").id;
+        let task = project
+            .database
+            .create_planning_task(arcl_store::PlanningTaskCreate {
+                project_id,
+                spec_id: None,
+                plan_id: None,
+                phase_id: None,
+                parent_id: None,
+                title: "Task".to_owned(),
+                body: String::new(),
+                priority: arcl_core::domain::TaskPriority::Normal,
+                position: 0,
+            })
+            .expect("task creates");
+        let kept = project
+            .database
+            .add_task_note(task.id, Some(arcl_core::domain::TaskNoteKind::Decision), "Use SQLite")
+            .expect("note adds");
+        let dropped = project
+            .database
+            .add_task_note(task.id, None, "Drop me")
+            .expect("note adds");
+        project.sync().expect("sync succeeds");
+
+        let path = PathBuf::from(format!("tasks/{}.md", task.id));
+        let file = project.read(&path);
+        let dropped_entry = format!(
+            "\n[[notes]]\ncreated-at = \"{}\"\ntext = \"Drop me\"\n",
+            dropped.created_at
+        );
+        assert!(file.contains(&dropped_entry), "{file}");
+        let edited =
+            file.replacen(&dropped_entry, "\n", 1)
+                .replacen("text = \"Use SQLite\"", "text = \"Use Postgres\"", 1);
+        fs::write(project.root.path().join(&path), edited).expect("task file writes");
+        project.sync().expect("sync succeeds");
+
+        let notes = project.database.task_notes(task.id).expect("notes read");
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert_eq!(notes[0].created_at, kept.created_at);
+        assert_eq!(notes[0].kind, Some(arcl_core::domain::TaskNoteKind::Decision));
+        assert_eq!(notes[0].text, "Use Postgres");
+        assert!(project.sync().expect("repeat sync succeeds").is_empty());
+    }
+
+    #[test]
     fn a_version_two_manifest_from_the_workspace_is_kept() {
         let mut project = Project::synced();
         let manifest = PathBuf::from(MANIFEST);

@@ -69,6 +69,7 @@
   import {
     blockersOf,
     copyLabel,
+    noteTime,
     propertiesOf,
     reasonSegments,
     showsReadiness,
@@ -117,6 +118,7 @@
 
   let task = $derived(detail.task);
   let titles = $derived(titlesOf(detail));
+  let notes = $derived(detail.notes ?? []);
   let blockers = $derived(blockersOf(detail));
   let reasons = $derived(detail.readiness.reasons);
   let reasonCount = $derived(reasons.length === 1 ? "1 reason" : `${reasons.length} reasons`);
@@ -639,6 +641,24 @@
             No evidence recorded.
           </p>{/if}
       </div>
+      <div class="entry" aria-labelledby="task-notes">
+        <h3 id="task-notes">Notes</h3>
+        {#if notes.length > 0}
+          <ol class="notes">
+            {#each notes as note, index (index)}
+              <li>
+                <p class="note-meta">
+                  {#if note.kind}<span class="note-kind">{note.kind}</span>{/if}
+                  <time datetime={note.created_at}>{noteTime(note.created_at)}</time>
+                </p>
+                <p class="note-text">{note.text}</p>
+              </li>
+            {/each}
+          </ol>
+        {:else}
+          <p class="muted">No notes recorded.</p>
+        {/if}
+      </div>
     </section>
   </article>
 
@@ -837,6 +857,28 @@
   }
   .entry + .entry {
     margin-top: var(--arcl-space-2);
+  }
+  .notes {
+    display: grid;
+    gap: var(--arcl-space-3);
+    margin: var(--arcl-space-2) 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .note-meta {
+    display: flex;
+    gap: var(--arcl-space-2);
+    margin: 0;
+    color: var(--arcl-text-muted);
+    font-size: var(--arcl-type-xs);
+  }
+  .note-kind {
+    font-weight: 600;
+    text-transform: capitalize;
+  }
+  .note-text {
+    margin: var(--arcl-space-1) 0 0;
+    white-space: pre-wrap;
   }
   .actions,
   .buttons {

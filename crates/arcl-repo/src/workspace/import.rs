@@ -599,6 +599,23 @@ pub(super) fn validate_candidate(
     tasks.sort_by_key(|value| value.id);
     notes.sort_by_key(|value| value.id);
     releases.sort_by_key(|value| value.id);
+    let mut task_notes = records
+        .values()
+        .filter_map(|record| match record {
+            WorkspaceRecord::Task(task) => Some(task),
+            _ => None,
+        })
+        .flat_map(|task| {
+            task.notes.iter().map(|note| TaskNote {
+                task_id: task.id,
+                created_at: note.created_at.clone(),
+                kind: note.kind,
+                text: note.text.clone(),
+            })
+        })
+        .collect::<Vec<_>>();
+    // A stable sort keeps each task's notes in the order the file lists them.
+    task_notes.sort_by_key(|note| note.task_id);
 
     let graph = ConnectedGraph {
         project,
@@ -609,6 +626,7 @@ pub(super) fn validate_candidate(
         phases,
         tasks,
         dependencies,
+        task_notes,
         notes,
         releases,
         release_memberships: memberships,

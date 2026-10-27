@@ -23,8 +23,9 @@ terminal.
 
 ## Check the format version
 
-A command's `format_version` changes when the shape of its `data` changes. Check
-it before reading fields.
+A command's `format_version` changes when a field in its `data` is renamed,
+removed or given a new type. New fields can appear without a new version, so
+ignore fields you don't know. Check the version before reading fields.
 
 | Version | Commands                                                                                                    |
 | ------- | ----------------------------------------------------------------------------------------------------------- |
@@ -199,6 +200,7 @@ changes nothing. Once its operation starts, a write runs to the end.
 | `note_create`     | `note create`     | `1`                           |
 | `task_start`      | `task start`      | `1`                           |
 | `task_handoff`    | `task handoff`    | `1`                           |
+| `task_note`       | `task note`       | `1`                           |
 | `task_unpark`     | `task unpark`     | `1`                           |
 | `task_complete`   | `task complete`   | `2`                           |
 
@@ -206,9 +208,10 @@ A tool's structured content is the command's envelope: `format_version`,
 `data`, and a `warnings` array of `code` and `message` objects when the call
 went on despite a problem, such as a workspace sync that did not run. Each
 tool lists an input and an output JSON Schema, and its `_meta` names its
-version as `arcl/format_version`. A change to either schema comes with a new
-version. A failure, including arguments the input schema rejects, is an error
-result whose structured content is the version 1 failure object above.
+version as `arcl/format_version`. Renaming, removing or retyping a field in
+either schema comes with a new version; a new field does not. A failure,
+including arguments the input schema rejects, is an error result whose
+structured content is the version 1 failure object above.
 
 `list` and `ready` return at most `limit` records, from 1 to 200 and 50 by
 default. While more remain, `data.next_cursor` holds the `cursor` for the next

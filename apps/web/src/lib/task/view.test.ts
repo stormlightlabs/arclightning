@@ -3,6 +3,7 @@ import { blockedDetail, bareDetail, doneBlockersDetail } from "./fixtures";
 import {
   blockersOf,
   inheritedGroups,
+  noteTime,
   propertiesOf,
   readinessLabel,
   reasonSegments,
@@ -171,5 +172,21 @@ describe("taskKeyAction", () => {
       closest: (selector: string) => (selector.includes("contenteditable") ? {} : null),
     } as unknown as EventTarget;
     expect(taskKeyAction(key("Escape", { target: editor }))).toBeNull();
+  });
+});
+
+describe("noteTime", () => {
+  it("shows a UTC timestamp to the minute", () => {
+    expect(noteTime("2026-10-27T10:05:59.999Z")).toBe("2026-10-27 10:05 UTC");
+  });
+
+  it("shifts an offset timestamp to UTC", () => {
+    expect(noteTime("2026-10-27T15:30:00+05:30")).toBe("2026-10-27 10:00 UTC");
+    expect(noteTime("2026-10-26T22:30:00.123456-03:00")).toBe("2026-10-27 01:30 UTC");
+  });
+
+  it("shows any other text as it is", () => {
+    expect(noteTime("yesterday")).toBe("yesterday");
+    expect(noteTime("2026-10-27T10:00:00")).toBe("2026-10-27T10:00:00");
   });
 });

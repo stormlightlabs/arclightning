@@ -38,6 +38,9 @@ pub struct ConnectedGraph {
     pub tasks: Vec<PlanningTask>,
     /// Task blocking relationships.
     pub dependencies: Vec<arcl_core::domain::TaskDependency>,
+    /// Task notes, grouped by task in task ID order, each task's notes
+    /// oldest first.
+    pub task_notes: Vec<TaskNote>,
     /// Markdown notes.
     pub notes: Vec<Note>,
     /// Named releases.
@@ -236,6 +239,7 @@ pub fn graph(connection: &Connection) -> Result<ConnectedGraph> {
         phases: phases(connection, project_id)?,
         tasks: planning_tasks(connection, project_id)?,
         dependencies: planning_dependencies(connection, project_id)?,
+        task_notes: task_notes(connection, project_id)?,
         notes: notes(connection, project_id)?,
         releases: releases::list(connection)?,
         release_memberships: release_memberships(connection, project_id)?,
@@ -788,6 +792,74 @@ pub fn update_planning_task(
     }
     tx.commit()?;
     Ok(next)
+}
+
+/// Read every task note in the project, grouped by task in task ID order,
+/// each task's notes oldest first.
+pub fn task_notes(connection: &Connection, project_id: ProjectId) -> Result<Vec<TaskNote>> {
+    let mut statement = connection.prepare(
+        "SELECT task_id, created_at, kind, text FROM task_notes
+         WHERE project_id = ?1 ORDER BY task_id, position",
+    )?;
+    let rows = statement.query_map([project_id.to_string()], raw_task_note)?;
+    rows.map(|row| decode_task_note(row?)).collect()
+}
+
+/// Read the notes on task `id`, oldest first.
+pub fn notes_for_task(connection: &Connection, id: TaskId) -> Result<Vec<TaskNote>> {
+    let mut statement = connection.prepare(
+        "SELECT task_id, created_at, kind, text FROM task_notes
+         WHERE task_id = ?1 ORDER BY position",
+    )?;
+    let rows = statement.query_map([id.to_string()], raw_task_note)?;
+    rows.map(|row| decode_task_note(row?)).collect()
+}
+
+/// Append a timestamped note to task `id`, whatever its status.
+///
+/// The text is validated by [`validate_task_note_text`], and the timestamp
+/// is SQLite's current UTC time to the millisecond.
+pub fn add_task_note(
+    connection: &mut Connection, project_id: ProjectId, id: TaskId, kind: Option<TaskNoteKind>, text: &str,
+) -> Result<TaskNote> {
+    let text = validate_task_note_text(text).map_err(StorageError::InvalidTaskNoteText)?;
+    let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let task = planning_task(&tx, id)?.ok_or_else(|| StorageError::PlanningTaskNotFound { id: id.to_string() })?;
+    if task.project_id != project_id {
+        return Err(StorageError::PlanningTaskNotFound { id: id.to_string() });
+    }
+    let created_at: String = tx.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| row.get(0))?;
+    tx.execute(
+        "INSERT INTO task_notes (project_id, task_id, position, created_at, kind, text)
+         VALUES (?1, ?2, (SELECT COALESCE(MAX(position) + 1, 0) FROM task_notes WHERE task_id = ?2), ?3, ?4, ?5)",
+        params![
+            project_id.to_string(),
+            id.to_string(),
+            created_at,
+            kind.map(TaskNoteKind::as_str),
+            text
+        ],
+    )?;
+    tx.commit()?;
+    Ok(TaskNote { task_id: id, created_at, kind, text })
+}
+
+type RawTaskNote = (String, String, Option<String>, String);
+
+fn raw_task_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawTaskNote> {
+    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+}
+
+fn decode_task_note((task, created_at, kind, text): RawTaskNote) -> Result<TaskNote> {
+    let task_id = TaskId::parse(&task)
+        .map_err(DomainError::from)
+        .map_err(StorageError::InvalidPlanningTask)?;
+    let kind = kind
+        .as_deref()
+        .map(TaskNoteKind::parse)
+        .transpose()
+        .map_err(StorageError::InvalidPlanningTask)?;
+    Ok(TaskNote { task_id, created_at, kind, text })
 }
 
 /// Read all connected-model dependency edges, including any that break the

@@ -12,6 +12,7 @@ mod project;
 mod release;
 mod short_id;
 mod spec;
+mod task_note;
 
 pub use capture::{Capture, CaptureAction, CaptureStatus};
 pub use dependency::{
@@ -35,3 +36,4 @@ pub use project::Project;
 pub use release::Release;
 pub use short_id::{MIN_SHORT_ID_LEN, RecordRef, ShortIdError, ShortIds, is_full_id, resolve_short_id};
 pub use spec::Spec;
+pub use task_note::{MAX_TASK_NOTE_CHARS, TaskNote, TaskNoteKind, validate_task_note_text};

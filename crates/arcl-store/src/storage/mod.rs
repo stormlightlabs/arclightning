@@ -4,7 +4,7 @@ mod releases;
 
 pub use connected::*;
 
-use std::{path::Path, time::Duration};
+use std::{collections::HashMap, path::Path, time::Duration};
 
 use rusqlite::{Connection, TransactionBehavior};
 use thiserror::Error;
@@ -12,7 +12,7 @@ use thiserror::Error;
 use arcl_core::domain::*;
 
 /// The newest SQLite schema version understood by the application.
-pub const CURRENT_VERSION: i32 = 5;
+pub const CURRENT_VERSION: i32 = 6;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -109,6 +109,12 @@ pub enum StorageError {
         value.escape_debug()
     )]
     InvalidClaimName { value: String },
+    /// Task note text that [`validate_task_note_text`] refuses. The text
+    /// comes from the request, not from stored data.
+    ///
+    /// [`validate_task_note_text`]: arcl_core::domain::validate_task_note_text
+    #[error(transparent)]
+    InvalidTaskNoteText(DomainError),
     /// A short ID argument names no record, more than one, or is not a
     /// short ID. No match exits 5; the rest exit 3.
     #[error(transparent)]
@@ -149,6 +155,7 @@ impl StorageError {
             | Self::InconsistentCapturePromotion { .. }
             | Self::InvalidPlanInput(_)
             | Self::InvalidClaimName { .. }
+            | Self::InvalidTaskNoteText(_)
             | Self::NewerDatabase { .. }
             | Self::MigrationGap { .. } => 3,
             Self::ShortId(error) => {
@@ -254,6 +261,7 @@ impl Database {
              DELETE FROM release_memberships;
              DELETE FROM capture_promotions;
              DELETE FROM planning_task_dependencies;
+             DELETE FROM task_notes;
              UPDATE planning_tasks SET parent_id = NULL;
              DELETE FROM planning_tasks;
              DELETE FROM phases;
@@ -367,6 +375,23 @@ impl Database {
                     rusqlite::params![parent_id.to_string(), task.id.to_string()],
                 )?;
             }
+        }
+        let mut positions = HashMap::<TaskId, i64>::new();
+        for note in &graph.task_notes {
+            let position = positions.entry(note.task_id).or_default();
+            transaction.execute(
+                "INSERT INTO task_notes (project_id, task_id, position, created_at, kind, text)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![
+                    graph.project.id.to_string(),
+                    note.task_id.to_string(),
+                    *position,
+                    note.created_at,
+                    note.kind.map(TaskNoteKind::as_str),
+                    note.text
+                ],
+            )?;
+            *position += 1;
         }
         for note in &graph.notes {
             transaction.execute(
@@ -782,6 +807,18 @@ impl Database {
     pub fn handoff_planning_task(&mut self, id: TaskId, note: String) -> Result<PlanningTask> {
         let project = self.project()?;
         connected::handoff_planning_task(&mut self.connection, project.id, id, note)
+    }
+
+    /// Append a timestamped note to a task, whatever its status; see
+    /// [`connected::add_task_note`].
+    pub fn add_task_note(&mut self, id: TaskId, kind: Option<TaskNoteKind>, text: &str) -> Result<TaskNote> {
+        let project = self.project()?;
+        connected::add_task_note(&mut self.connection, project.id, id, kind, text)
+    }
+
+    /// Read the notes on a task, oldest first.
+    pub fn task_notes(&self, id: TaskId) -> Result<Vec<TaskNote>> {
+        connected::notes_for_task(&self.connection, id)
     }
 
     /// Read all Markdown notes.

@@ -33,6 +33,7 @@ const TOOLS: &[(&str, u64)] = &[
     ("task_complete", 2),
     ("task_create", 1),
     ("task_handoff", 1),
+    ("task_note", 1),
     ("task_start", 1),
     ("task_unpark", 1),
     ("task_update", 1),
@@ -557,6 +558,19 @@ async fn outputs_match_their_output_schemas() {
         .expect("start")
         .0;
     check("task_start", to_json(&started));
+    let noted = server
+        .task_note(
+            Parameters::from(TaskNoteInput {
+                task_id: first.clone(),
+                kind: Some(TaskNoteKind::Decision),
+                text: "Use SQLite".to_owned(),
+            }),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("note")
+        .0;
+    check("task_note", to_json(&noted));
     let context = server
         .context(
             Parameters::from(TaskInput { task_id: first.clone() }),
@@ -992,4 +1006,49 @@ fn response(stdout: &mut impl BufRead, id: u64) -> Value {
             return message;
         }
     }
+}
+
+#[tokio::test]
+async fn task_note_appends_notes_that_context_lists_newest_first() {
+    let project = project(false);
+    let server = ArclServer::new(project.path().to_owned());
+    let task = create_task(&server, "Noted", &[]).await;
+    let note = |kind: Option<TaskNoteKind>, text: &str| {
+        server.task_note(
+            Parameters::from(TaskNoteInput { task_id: task.clone(), kind, text: text.to_owned() }),
+            CancellationToken::new(),
+        )
+    };
+
+    let first = note(Some(TaskNoteKind::Observation), "Saw a race")
+        .await
+        .expect("note")
+        .0;
+    assert_eq!(first.data.action, "noted");
+    assert_eq!(first.data.note.kind, Some(TaskNoteKind::Observation));
+    assert_eq!(first.data.note.text, "Saw a race");
+    let second = note(None, "No kind").await.expect("note").0;
+    assert_eq!(second.data.note.kind, None);
+
+    let refused = note(None, "  ").await.err().expect("empty text is refused");
+    assert_eq!((refused.code(), refused.exit_code()), ("invalid_request", 3));
+
+    let context = server
+        .context(
+            Parameters::from(TaskInput { task_id: task.clone() }),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("context")
+        .0;
+    assert_eq!(
+        context
+            .data
+            .notes
+            .iter()
+            .map(|note| note.text.as_str())
+            .collect::<Vec<_>>(),
+        ["No kind", "Saw a race"]
+    );
+    assert_eq!(context.data.omitted_notes, 0);
 }

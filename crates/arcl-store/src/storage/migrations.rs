@@ -13,6 +13,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration { version: 3, sql: include_str!("migrations/003_remove_legacy_model.sql") },
     Migration { version: 4, sql: include_str!("migrations/004_workspace_files.sql") },
     Migration { version: 5, sql: include_str!("migrations/005_task_assignee.sql") },
+    Migration { version: 6, sql: include_str!("migrations/006_task_notes.sql") },
 ];
 
 pub fn apply(connection: &mut Connection) -> Result<(), StorageError> {
@@ -232,7 +233,44 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("format version reads");
-        assert_eq!(format, "5");
+        assert_eq!(format, CURRENT_VERSION.to_string());
+    }
+
+    #[test]
+    fn task_notes_migration_leaves_existing_tasks_without_notes() {
+        let mut connection = rusqlite::Connection::open_in_memory().expect("in-memory SQLite opens");
+        for sql in [
+            include_str!("migrations/001_schema.sql"),
+            include_str!("migrations/002_plan_keys.sql"),
+            include_str!("migrations/003_remove_legacy_model.sql"),
+            include_str!("migrations/004_workspace_files.sql"),
+            include_str!("migrations/005_task_assignee.sql"),
+        ] {
+            connection.execute_batch(sql).expect("earlier schema creates");
+        }
+        connection
+            .pragma_update(None, "user_version", 5)
+            .expect("version marker writes");
+        connection
+            .execute(
+                "INSERT INTO planning_tasks (id, project_id, title, body, status, priority, position, handoff, evidence)
+                 VALUES ('arcl-t-01K0B31M6VGK4YH8VKT4C0D2DS', ?1, 'Task', '', 'completed', 'normal', 0, '', '')",
+                [DEFAULT_PROJECT_ID],
+            )
+            .expect("task inserts");
+
+        super::apply(&mut connection).expect("task notes migration applies");
+        let graph = super::super::connected::graph(&connection).expect("connected graph reads");
+        assert_eq!(graph.tasks.len(), 1);
+        assert!(graph.task_notes.is_empty());
+        let format: String = connection
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'database-format-version'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("format version reads");
+        assert_eq!(format, "6");
     }
 
     #[test]

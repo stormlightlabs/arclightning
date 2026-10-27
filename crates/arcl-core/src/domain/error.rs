@@ -89,6 +89,19 @@ pub enum DomainError {
         value.escape_debug()
     )]
     InvalidAssignee { value: String },
+    /// Task note text that is empty, longer than
+    /// [`MAX_TASK_NOTE_CHARS`](super::MAX_TASK_NOTE_CHARS) characters, or
+    /// holds a control character other than a newline or tab, a format
+    /// character, or a line that is exactly `+++`.
+    #[error(
+        "task note text is invalid; use non-empty text of at most 2000 characters without control characters other \
+         than newline and tab, format characters, or a line that is exactly `+++`"
+    )]
+    InvalidTaskNote,
+    /// A task note kind other than `decision`, `observation`, `blocker` or
+    /// `result`.
+    #[error("invalid task note kind `{value}`; use decision, observation, blocker or result")]
+    InvalidTaskNoteKind { value: String },
     #[error(transparent)]
     InvalidId(#[from] IdError),
 }
@@ -117,7 +130,7 @@ pub fn validate_assignee(name: &str) -> Result<String> {
 /// characters, directional marks and embeddings, invisible operators,
 /// directional isolates and the byte order mark. The list is explicit because
 /// the standard library has no general category lookup.
-fn is_format_character(c: char) -> bool {
+pub(super) fn is_format_character(c: char) -> bool {
     matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
 }
 

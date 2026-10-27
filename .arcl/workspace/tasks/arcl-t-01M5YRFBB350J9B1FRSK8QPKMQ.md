@@ -2,9 +2,10 @@
 id = "arcl-t-01M5YRFBB350J9B1FRSK8QPKMQ"
 phase = "arcl-ph-01M5YRFB35TZ51QW4AG1A8MS5B"
 title = "Record typed notes on a task"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 3
+evidence = "Delivered by #77: `arcl task note <id> [--kind decision|observation|blocker|result] <text>` appends a timestamped note, stored in the `task_notes` table (migration 006), in task files as a `[[notes]]` array that moves the workspace to format version 3, and in `--json`. `show` and the web Task view list notes newest first, `context` the 10 most recent with `omitted_notes`, and the MCP server has `task_note`."
 +++
 
 Let an agent append short notes to a task while working on it, so what it
@@ -22,9 +23,9 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] `task note` appends a timestamped note with an optional kind
-- [ ] `show`, `context` and the Task view list notes, newest first
-- [ ] Notes round-trip through the workspace files
+- [x] `task note` appends a timestamped note with an optional kind
+- [x] `show`, `context` and the Task view list notes, newest first
+- [x] Notes round-trip through the workspace files
 
 Verification:
 

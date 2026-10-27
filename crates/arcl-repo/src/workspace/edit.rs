@@ -153,7 +153,7 @@ pub fn record_source(graph: &ConnectedGraph, id: &str) -> Result<Option<RecordSo
 ///
 /// | Kind    | Refused fields                         | Commands                                   |
 /// | ------- | -------------------------------------- | ------------------------------------------ |
-/// | task    | `status`, `handoff`, `evidence`, `assignee` | `arcl task start`, `park`, `unpark`, `handoff`, `complete`, `cancel` |
+/// | task    | `status`, `handoff`, `evidence`, `assignee`, `notes` | `arcl task start`, `park`, `unpark`, `handoff`, `complete`, `cancel`, `note` |
 /// | capture | `status`, `promoted-to`                | `arcl capture promote`, `discard`          |
 /// | spec    | `status`, `source-capture`             | `arcl spec complete`, `cancel`, `arcl capture promote` |
 /// | plan    | `status`                               | `arcl plan complete`, `cancel`             |
@@ -233,6 +233,11 @@ fn command_owned_change(before: &WorkspaceRecord, after: &WorkspaceRecord) -> Op
                 "assignee",
                 "an assignee is set only by `arcl task start --claim`, and cleared when the task is parked, handed off, \
                  completed or cancelled",
+            ),
+            (
+                before.notes != after.notes,
+                "notes",
+                "notes are added only by `arcl task note`; to change or remove one, edit the task file and run `arcl workspace sync`",
             ),
         ],
         (Capture(before), Capture(after)) => vec![
@@ -547,6 +552,28 @@ mod tests {
             "status = \"pending\"",
             "status = \"completed\"",
             "status",
+        );
+    }
+
+    #[test]
+    fn a_task_note_addition_change_or_removal_is_refused() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let id = task(&mut database, "First");
+        assert_owned(
+            &mut database,
+            &id,
+            "\n+++",
+            "\n[[notes]]\ncreated-at = \"2026-10-27T10:00:00.000Z\"\ntext = \"Added\"\n+++",
+            "notes",
+        );
+        let note = database.add_task_note(task_id(&id), None, "Kept").expect("note adds");
+        assert_owned(&mut database, &id, "text = \"Kept\"", "text = \"Changed\"", "notes");
+        assert_owned(
+            &mut database,
+            &id,
+            &format!("[[notes]]\ncreated-at = \"{}\"\ntext = \"Kept\"\n", note.created_at),
+            "",
+            "notes",
         );
     }
 
