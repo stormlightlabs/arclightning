@@ -32,6 +32,10 @@ pub struct PlanningTask {
     pub handoff: String,
     /// Markdown evidence recorded when work was completed.
     pub evidence: String,
+    /// Who claimed the task when starting it. Parking, handing off,
+    /// completing and cancelling the task clear it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assignee: Option<String>,
 }
 
 impl PlanningTask {
@@ -58,6 +62,7 @@ impl PlanningTask {
             position,
             handoff: String::new(),
             evidence: String::new(),
+            assignee: None,
         })
     }
 }

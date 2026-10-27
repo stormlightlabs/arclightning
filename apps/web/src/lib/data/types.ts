@@ -26,6 +26,8 @@ export interface Task {
   position: number;
   handoff: string;
   evidence: string;
+  /** Who claimed the task when starting it. Absent while nobody holds it. */
+  assignee?: string;
 }
 
 /** A milestone: a phase of a plan. */

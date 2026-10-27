@@ -153,7 +153,7 @@ pub fn record_source(graph: &ConnectedGraph, id: &str) -> Result<Option<RecordSo
 ///
 /// | Kind    | Refused fields                         | Commands                                   |
 /// | ------- | -------------------------------------- | ------------------------------------------ |
-/// | task    | `status`, `handoff`, `evidence`        | `arcl task start`, `park`, `unpark`, `handoff`, `complete`, `cancel` |
+/// | task    | `status`, `handoff`, `evidence`, `assignee` | `arcl task start`, `park`, `unpark`, `handoff`, `complete`, `cancel` |
 /// | capture | `status`, `promoted-to`                | `arcl capture promote`, `discard`          |
 /// | spec    | `status`, `source-capture`             | `arcl spec complete`, `cancel`, `arcl capture promote` |
 /// | plan    | `status`                               | `arcl plan complete`, `cancel`             |
@@ -227,6 +227,12 @@ fn command_owned_change(before: &WorkspaceRecord, after: &WorkspaceRecord) -> Op
                 before.evidence.as_deref().unwrap_or_default() != after.evidence.as_deref().unwrap_or_default(),
                 "evidence",
                 "evidence is set only by `arcl task complete --evidence` or the web app's Complete action",
+            ),
+            (
+                before.assignee != after.assignee,
+                "assignee",
+                "an assignee is set only by `arcl task start --claim`, and cleared when the task is parked, handed off, \
+                 completed or cancelled",
             ),
         ],
         (Capture(before), Capture(after)) => vec![
@@ -545,7 +551,7 @@ mod tests {
     }
 
     #[test]
-    fn a_task_handoff_or_evidence_change_is_refused() {
+    fn a_task_handoff_evidence_or_assignee_change_is_refused() {
         let mut database = Database::open_in_memory().expect("database opens");
         let id = task(&mut database, "First");
         assert_owned(
@@ -556,6 +562,7 @@ mod tests {
             "handoff",
         );
         assert_owned(&mut database, &id, "+++\n", "+++\nevidence = \"Done\"\n", "evidence");
+        assert_owned(&mut database, &id, "+++\n", "+++\nassignee = \"codex\"\n", "assignee");
     }
 
     #[test]

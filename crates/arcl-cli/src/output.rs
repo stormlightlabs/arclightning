@@ -1669,6 +1669,11 @@ impl PlanningTaskViewOutput for PlanningTaskView {
                 self.task.title
             ),
             format!("Ready: {}", self.readiness.ready),
+        ];
+        if let Some(assignee) = &self.task.assignee {
+            lines.push(format!("Assignee: {assignee}"));
+        }
+        lines.extend([
             format!(
                 "Blockers: {}",
                 self.blockers
@@ -1693,7 +1698,7 @@ impl PlanningTaskViewOutput for PlanningTaskView {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-        ];
+        ]);
         if let Some(spec) = &self.spec {
             lines.push(format!("Spec: {}", ids.short(&spec.id.to_string())));
         }
@@ -1752,6 +1757,9 @@ impl PlanningTaskViewOutput for PlanningTaskView {
             format!("handoff\t{}", plain_escape(&self.task.handoff)),
             format!("evidence\t{}", plain_escape(&self.task.evidence)),
         ];
+        if let Some(assignee) = &self.task.assignee {
+            lines.push(format!("assignee\t{}", plain_escape(assignee)));
+        }
         lines.extend(self.inherited_blockers.iter().filter_map(|blocker| {
             blocker
                 .ancestor

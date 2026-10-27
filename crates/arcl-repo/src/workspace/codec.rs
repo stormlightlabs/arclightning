@@ -209,6 +209,8 @@ pub struct TaskRecord {
     pub blocked_by: Vec<TaskId>,
     pub handoff: Option<String>,
     pub evidence: Option<String>,
+    /// Who claimed the task when starting it.
+    pub assignee: Option<String>,
     pub links: Vec<WorkspaceReference>,
     pub body: String,
 }
@@ -413,6 +415,8 @@ struct TaskFrontMatter {
     handoff: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     evidence: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assignee: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     links: Vec<WorkspaceReference>,
 }
@@ -589,6 +593,7 @@ impl TaskRecord {
             blocked_by,
             handoff: normalize_optional_markdown(front_matter.handoff),
             evidence: normalize_optional_markdown(front_matter.evidence),
+            assignee: normalize_assignee(front_matter.assignee)?,
             links: normalize_references(front_matter.links),
             body,
         })
@@ -615,6 +620,7 @@ impl TaskRecord {
             blocked_by,
             handoff: normalize_optional_markdown(self.handoff.clone()),
             evidence: normalize_optional_markdown(self.evidence.clone()),
+            assignee: normalize_assignee(self.assignee.clone())?,
             links,
         })
     }
@@ -752,6 +758,16 @@ fn validate_position(position: i64) -> Result<()> {
     if position < 0 { Err(WorkspaceError::InvalidRecordPosition { position }) } else { Ok(()) }
 }
 
+/// Trim a task's `assignee`, or refuse one that is empty or holds a control
+/// character.
+fn normalize_assignee(value: Option<String>) -> Result<Option<String>> {
+    value
+        .map(|value| {
+            arcl_core::domain::validate_assignee(&value).map_err(|_| WorkspaceError::InvalidRecordAssignee { value })
+        })
+        .transpose()
+}
+
 fn normalize_line_endings(value: &str) -> String {
     value.replace("\r\n", "\n").replace('\r', "\n")
 }
@@ -858,6 +874,7 @@ mod tests {
                 blocked_by: vec![TaskId::parse(OTHER_TASK_ID).unwrap()],
                 handoff: Some("Resume here".to_owned()),
                 evidence: Some("Evidence".to_owned()),
+                assignee: Some("codex".to_owned()),
                 links: vec![WorkspaceReference::new("spec", SPEC_ID)],
                 body: "Task body".to_owned(),
             }),
@@ -894,6 +911,7 @@ mod tests {
             blocked_by: vec![TaskId::parse(OTHER_TASK_ID).unwrap(), TaskId::parse(TASK_ID).unwrap()],
             handoff: Some(String::new()),
             evidence: None,
+            assignee: None,
             links: vec![],
             body: String::new(),
         });

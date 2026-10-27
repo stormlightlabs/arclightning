@@ -581,6 +581,10 @@ pub enum TaskCommand {
         /// Start the task even when it is not ready.
         #[arg(long)]
         force: bool,
+        /// Claim the task for NAME, refusing a task someone else holds.
+        /// Without NAME, use `ARCL_AGENT`, then the Git user name.
+        #[arg(long, value_name = "NAME", num_args = 0..=1)]
+        claim: Option<Option<String>>,
     },
     /// Temporarily exclude work from readiness.
     Park {
@@ -833,6 +837,9 @@ pub struct ListArgs {
     /// Restrict tasks to children of one task.
     #[arg(long, value_name = "ID")]
     pub parent: Option<String>,
+    /// Restrict tasks to those claimed by one assignee.
+    #[arg(long, value_name = "NAME")]
+    pub assignee: Option<String>,
 }
 
 /// Filters accepted by ready-work and next-work queries.
@@ -906,6 +913,8 @@ pub struct AcceptanceArgs {
     arcl plan create "Import validation" --spec arcl-s-…
     arcl task create "Validate records" --plan arcl-pl-…
     arcl ready
+    arcl task start arcl-t-… --claim
+    arcl list --assignee codex
     arcl serve
 "#
 )]

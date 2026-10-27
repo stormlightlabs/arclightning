@@ -78,6 +78,10 @@ pub enum DomainError {
     /// subtree has an unfinished blocker from outside it.
     #[error("cannot complete task `{id}` with its subtasks: {}", reasons.join("; "))]
     SubtasksNotCompletable { id: String, reasons: Vec<String> },
+    /// A task claim with an empty name, or one that holds a control
+    /// character such as a newline.
+    #[error("assignee `{value}` is invalid; use a non-empty name without control characters")]
+    InvalidAssignee { value: String },
     #[error(transparent)]
     InvalidId(#[from] IdError),
 }
@@ -86,10 +90,39 @@ pub fn validate_title(title: &str) -> Result<()> {
     if title.trim().is_empty() { Err(DomainError::EmptyTitle) } else { Ok(()) }
 }
 
+/// Return `name` trimmed, or refuse an empty name or one with a control
+/// character.
+pub fn validate_assignee(name: &str) -> Result<String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() || trimmed.chars().any(char::is_control) {
+        Err(DomainError::InvalidAssignee { value: name.to_owned() })
+    } else {
+        Ok(trimmed.to_owned())
+    }
+}
+
 pub fn validate_position(position: i64) -> Result<()> {
     if position < 0 { Err(DomainError::InvalidPosition { position }) } else { Ok(()) }
 }
 
 pub fn invalid_transition(entity: &'static str, action: &'static str, from: impl Into<String>) -> DomainError {
     DomainError::InvalidTransition { entity, action, from: from.into() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn assignee_is_trimmed_and_must_hold_a_name() {
+        assert_eq!(validate_assignee("  codex  "), Ok("codex".to_owned()));
+        assert!(matches!(
+            validate_assignee("   "),
+            Err(DomainError::InvalidAssignee { .. })
+        ));
+        assert!(matches!(
+            validate_assignee("a\nb"),
+            Err(DomainError::InvalidAssignee { .. })
+        ));
+    }
 }

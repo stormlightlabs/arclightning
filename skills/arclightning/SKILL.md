@@ -40,10 +40,13 @@ ID fields.
    `data.task`. An empty list means nothing can start. The tools return at
    most `limit` records and a `data.next_cursor` to pass as `cursor` while
    more remain.
-2. Start it. `arcl --json task start <id>` [`task_start`] moves the task to
-   in progress. If it refuses with `invalid_request`, run
-   `arcl --json explain <id>` [`explain`] and read `data.readiness.reasons`.
-   Do not pass `--force` unless the person asks. The tool has no force.
+2. Start it. `arcl --json task start <id> --claim` [`task_start` with
+   `claim`] moves the task to in progress and records you as its assignee,
+   named by `ARCL_AGENT` or else the Git user name. If it refuses with
+   `invalid_request`, run `arcl --json explain <id>` [`explain`] and read
+   `data.readiness.reasons`. A `conflict` means another assignee holds the
+   task; pick other work. Do not pass `--force` unless the person asks. The
+   tool has no force.
 3. Read the context. `arcl --json context <id>` [`context`] returns the task
    with its ancestors, spec, plan, phase, blockers, dependents, readiness, and
    earlier evidence. `data.task.handoff` holds the last resume note, and

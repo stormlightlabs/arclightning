@@ -157,6 +157,7 @@ pub fn project_graph(graph: &ConnectedGraph) -> Result<Vec<WorkspaceFile>, Works
                     .collect(),
                 handoff: nonempty(&task.handoff),
                 evidence: nonempty(&task.evidence),
+                assignee: task.assignee.clone(),
                 links: links_for(&links, LinkedRecordKind::Task, task.id.to_string()),
                 body: task.body.clone(),
             }),

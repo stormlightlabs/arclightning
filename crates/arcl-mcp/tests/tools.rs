@@ -73,8 +73,12 @@ fn tools_publish_versions_and_schemas() {
         .expect("task_start is listed");
     assert_eq!(
         start.input_schema["properties"],
-        json!({ "task_id": start.input_schema["properties"]["task_id"] })
+        json!({
+            "task_id": start.input_schema["properties"]["task_id"],
+            "claim": start.input_schema["properties"]["claim"],
+        })
     );
+    assert_eq!(start.input_schema["required"], json!(["task_id"]));
 
     let list = tools.iter().find(|tool| tool.name == "list").expect("list is listed");
     assert_eq!(list.input_schema["properties"]["limit"]["minimum"], json!(1));
@@ -99,7 +103,7 @@ async fn an_agent_claims_hands_off_and_completes_work() {
 
     let refused = server
         .task_start(
-            Parameters::from(TaskInput { task_id: second.clone() }),
+            Parameters::from(TaskStartInput { task_id: second.clone(), claim: None }),
             CancellationToken::new(),
         )
         .await
@@ -124,7 +128,7 @@ async fn an_agent_claims_hands_off_and_completes_work() {
 
     let started = server
         .task_start(
-            Parameters::from(TaskInput { task_id: first.clone() }),
+            Parameters::from(TaskStartInput { task_id: first.clone(), claim: None }),
             CancellationToken::new(),
         )
         .await
@@ -154,7 +158,7 @@ async fn an_agent_claims_hands_off_and_completes_work() {
         .expect("unpark");
     server
         .task_start(
-            Parameters::from(TaskInput { task_id: first.clone() }),
+            Parameters::from(TaskStartInput { task_id: first.clone(), claim: None }),
             CancellationToken::new(),
         )
         .await
@@ -433,7 +437,7 @@ async fn ready_pages_by_ready_order_key() {
     assert_eq!(ids(&first.data.tasks), vec![created[0].clone()]);
     server
         .task_start(
-            Parameters::from(TaskInput { task_id: created[0].clone() }),
+            Parameters::from(TaskStartInput { task_id: created[0].clone(), claim: None }),
             CancellationToken::new(),
         )
         .await
@@ -546,7 +550,7 @@ async fn outputs_match_their_output_schemas() {
     check("explain", to_json(&explain));
     let started = server
         .task_start(
-            Parameters::from(TaskInput { task_id: first.clone() }),
+            Parameters::from(TaskStartInput { task_id: first.clone(), claim: None }),
             CancellationToken::new(),
         )
         .await
@@ -648,7 +652,10 @@ async fn a_divergent_sync_names_workspace_resolve() {
     drop(database);
 
     let refused = server
-        .task_start(Parameters::from(TaskInput { task_id: id }), CancellationToken::new())
+        .task_start(
+            Parameters::from(TaskStartInput { task_id: id, claim: None }),
+            CancellationToken::new(),
+        )
         .await
         .err()
         .expect("a divergent sync stops the write");
@@ -845,7 +852,7 @@ async fn short_ids_resolve_like_the_cli() {
 
     let started = server
         .task_start(
-            Parameters::from(TaskInput { task_id: short.clone() }),
+            Parameters::from(TaskStartInput { task_id: short.clone(), claim: None }),
             CancellationToken::new(),
         )
         .await
@@ -904,6 +911,27 @@ fn hold_sync_lock(root: &std::path::Path) -> fs::File {
         .expect("open the sync lock");
     lock.lock().expect("hold the sync lock");
     lock
+}
+
+#[tokio::test]
+async fn task_start_claims_and_refuses_another_holder() {
+    let project = project(false);
+    let server = ArclServer::new(project.path().to_owned());
+    let task = create_task(&server, "Claimed", &[]).await;
+    let start = |claim: &str| {
+        server.task_start(
+            Parameters::from(TaskStartInput { task_id: task.clone(), claim: Some(claim.to_owned()) }),
+            CancellationToken::new(),
+        )
+    };
+
+    let claimed = start("codex").await.expect("claim").0;
+    assert_eq!(claimed.data.task.status, TaskStatus::InProgress);
+    assert_eq!(claimed.data.task.assignee.as_deref(), Some("codex"));
+
+    start("codex").await.expect("the holder can claim again");
+    let refused = start("claude").await.err().expect("another holder is refused");
+    assert_eq!((refused.code(), refused.exit_code()), ("conflict", 4));
 }
 
 async fn create_task(server: &ArclServer, title: &str, blocked_by: &[&str]) -> String {

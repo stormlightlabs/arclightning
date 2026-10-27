@@ -153,6 +153,8 @@ pub(super) enum CommandError {
     InvalidStdin,
     #[error("invalid list filter: {message}")]
     InvalidFilter { message: String },
+    #[error("`--claim` has no name; pass one, set `ARCL_AGENT`, or set Git's `user.name`")]
+    NoClaimName,
     #[error("database or graph integrity check failed: {message}")]
     Integrity { message: String },
     #[error("could not read skill file `{path}`: {source}")]
@@ -244,6 +246,7 @@ impl CommandError {
             Self::InvalidMarkdown { .. }
             | Self::InvalidStdin
             | Self::InvalidFilter { .. }
+            | Self::NoClaimName
             | Self::Integrity { .. }
             | Self::StdinIsTerminal
             | Self::SkillSymlink { .. }

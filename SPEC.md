@@ -149,6 +149,8 @@ Tasks retain:
 - dependency edges and deterministic ready-work calculation
 - a current Markdown handoff
 - Markdown completion evidence
+- an optional assignee, set by a claim when the task starts and cleared when
+  it is parked, handed off, completed, or cancelled
 
 Readiness is calculated for actionable leaf tasks. A task is ready when it is
 pending, its applicable ancestors and containers permit work, and every blocker
@@ -162,6 +164,8 @@ readiness and `arcl check`, and by import with the path that forms them.
 Moving a pending task to in progress requires it to be ready unless the caller
 passes `--force`. Starting a task that is already in progress stays a no-op.
 The MCP start tool does not expose force; an agent asks a person instead. A
+start can claim the task for an assignee in the same write, and is refused
+while another assignee holds it. A
 cancelled blocker does not complete the relationship; readiness reports it as
 a decision to remove or replace the dependency. Every readiness reason has a
 stable kind and record IDs in machine output, and completing a task reports

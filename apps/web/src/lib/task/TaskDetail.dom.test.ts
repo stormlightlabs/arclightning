@@ -267,6 +267,22 @@ describe("TaskDetail readiness", () => {
   });
 });
 
+describe("TaskDetail assignee", () => {
+  it("names the assignee of a claimed task", () => {
+    const detail = blockedDetail();
+    detail.task.assignee = "codex";
+    stubSource(detail);
+    const root = view(detail);
+    expect(root.querySelector("header")?.textContent).toContain("Claimed by codex");
+  });
+
+  it("leaves the assignee out of an unclaimed task", () => {
+    stubSource(blockedDetail());
+    const root = view(blockedDetail());
+    expect(root.textContent).not.toContain("Claimed by");
+  });
+});
+
 describe("TaskDetail IDs", () => {
   afterEach(() => {
     delete (navigator as { clipboard?: unknown }).clipboard;

@@ -62,6 +62,9 @@ pub enum WorkspaceError {
     EmptyRecordSpecPath,
     #[error("workspace record position {position} is invalid; positions must be non-negative")]
     InvalidRecordPosition { position: i64 },
+    /// A task `assignee` that is empty or holds a control character.
+    #[error("workspace task assignee `{value}` must be a non-empty name without control characters")]
+    InvalidRecordAssignee { value: String },
     #[error("workspace capture creation time cannot be empty")]
     EmptyRecordCreatedAt,
     #[error("workspace record relationship is invalid: {0}")]

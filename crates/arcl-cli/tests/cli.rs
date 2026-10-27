@@ -5673,3 +5673,168 @@ fn input_that_starts_an_id_is_refused_and_a_capitalized_full_id_keeps_its_error(
     let stderr = String::from_utf8_lossy(&refused.stderr);
     assert!(stderr.contains("expected prefix `arcl-t-`"), "{stderr}");
 }
+
+/// Run `task start <task> --claim [name]` with `ARCL_AGENT` set to `agent`, or
+/// unset.
+fn claim_output(directory: &Path, task: &str, name: Option<&str>, agent: Option<&str>) -> std::process::Output {
+    let mut command = arcl_in(directory);
+    command.args(["--json", "task", "start", task, "--claim"]);
+    command.args(name);
+    match agent {
+        Some(agent) => command.env("ARCL_AGENT", agent),
+        None => command.env_remove("ARCL_AGENT"),
+    };
+    command.output().expect("start runs")
+}
+
+#[test]
+fn task_start_claim_sets_the_assignee_and_refuses_another_holder() {
+    let directory = initialized_directory();
+    let task = create_task(directory.path(), "Claimed", None);
+
+    let claimed = claim_output(directory.path(), &task, Some("codex"), None);
+    assert_success(&claimed);
+    let claimed = json(&claimed.stdout);
+    assert_eq!(claimed["data"]["task"]["status"], "in_progress");
+    assert_eq!(claimed["data"]["task"]["assignee"], "codex");
+
+    let again = claim_output(directory.path(), &task, Some("codex"), None);
+    assert_success(&again);
+    assert_eq!(json(&again.stdout)["data"]["task"]["assignee"], "codex");
+
+    let refused = claim_output(directory.path(), &task, Some("claude"), None);
+    assert_eq!(refused.status.code(), Some(4));
+    assert!(refused.stdout.is_empty());
+    let error = json(&refused.stderr);
+    assert_eq!(error["error"]["code"], "conflict");
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .expect("error message")
+            .contains("claimed by `codex`")
+    );
+
+    let shown = run_json(directory.path(), ["--json", "show", &task].as_ref());
+    assert_eq!(shown["data"]["task"]["assignee"], "codex");
+    let human = arcl_in(directory.path())
+        .args(["--color", "never", "show", &task])
+        .output()
+        .expect("show runs");
+    assert!(String::from_utf8_lossy(&human.stdout).contains("Assignee: codex"));
+
+    let unclaimed = create_task(directory.path(), "Unclaimed", None);
+    let shown = run_json(directory.path(), ["--json", "show", &unclaimed].as_ref());
+    assert!(shown["data"]["task"].get("assignee").is_none());
+}
+
+#[test]
+fn task_start_claim_takes_the_name_from_arcl_agent_then_git() {
+    let directory = initialized_directory();
+    let from_agent = create_task(directory.path(), "From agent", None);
+    let from_git = create_task(directory.path(), "From Git", None);
+    let unnamed = create_task(directory.path(), "Unnamed", None);
+
+    let claimed = claim_output(directory.path(), &from_agent, None, Some("agent-7"));
+    assert_success(&claimed);
+    assert_eq!(json(&claimed.stdout)["data"]["task"]["assignee"], "agent-7");
+
+    let refused = claim_output(directory.path(), &unnamed, None, None);
+    assert_eq!(refused.status.code(), Some(3));
+    let error = json(&refused.stderr);
+    assert_eq!(error["error"]["code"], "invalid_request");
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .expect("error message")
+            .contains("ARCL_AGENT")
+    );
+    let shown = run_json(directory.path(), ["--json", "show", &unnamed].as_ref());
+    assert_eq!(shown["data"]["task"]["status"], "pending");
+
+    let config = directory.path().join("gitconfig");
+    fs::write(&config, "[user]\n\tname = Git Person\n").expect("Git config writes");
+    let mut command = arcl_in(directory.path());
+    let claimed = command
+        .args(["--json", "task", "start", &from_git, "--claim"])
+        .env_remove("ARCL_AGENT")
+        .env("GIT_CONFIG_GLOBAL", &config)
+        .output()
+        .expect("start runs");
+    assert_success(&claimed);
+    assert_eq!(json(&claimed.stdout)["data"]["task"]["assignee"], "Git Person");
+}
+
+#[test]
+fn park_handoff_complete_and_cancel_release_the_claim() {
+    let directory = initialized_directory();
+    for action in ["park", "handoff", "complete", "cancel"] {
+        let task = create_task(directory.path(), action, None);
+        assert_success(&claim_output(directory.path(), &task, Some("codex"), None));
+        let mut args = vec!["--json", "task", action, task.as_str()];
+        if action == "handoff" {
+            args.extend(["--note", "Resume here"]);
+        }
+        let released = run_json(directory.path(), &args);
+        assert!(released["data"]["task"].get("assignee").is_none(), "{action}");
+        let shown = run_json(directory.path(), ["--json", "show", &task].as_ref());
+        assert!(shown["data"]["task"].get("assignee").is_none(), "{action}");
+    }
+}
+
+#[test]
+fn list_filters_tasks_by_assignee() {
+    let directory = initialized_directory();
+    let mine = create_task(directory.path(), "Mine", None);
+    let theirs = create_task(directory.path(), "Theirs", None);
+    create_task(directory.path(), "Nobody's", None);
+    assert_success(&claim_output(directory.path(), &mine, Some("codex"), None));
+    assert_success(&claim_output(directory.path(), &theirs, Some("claude"), None));
+    run_json(directory.path(), ["--json", "capture", "create", "Idea"].as_ref());
+
+    let listed = run_json(directory.path(), ["--json", "list", "--assignee", "codex"].as_ref());
+    let ids: Vec<&str> = listed["data"]["records"]
+        .as_array()
+        .expect("records")
+        .iter()
+        .map(|record| record["id"].as_str().expect("record ID"))
+        .collect();
+    assert_eq!(ids, vec![mine.as_str()]);
+
+    let refused = arcl_in(directory.path())
+        .args(["--json", "list", "--kind", "note", "--assignee", "codex"])
+        .output()
+        .expect("list runs");
+    assert_eq!(refused.status.code(), Some(3));
+}
+
+#[test]
+fn the_assignee_round_trips_through_the_workspace() {
+    let source = tempdir().expect("temporary directory can be created");
+    run_json(source.path(), ["--json", "init", "--workspace"].as_ref());
+    let task = create_task(source.path(), "Claimed", None);
+    assert_success(&claim_output(source.path(), &task, Some("codex"), None));
+    assert_success(
+        &arcl_in(source.path())
+            .args(["workspace", "export"])
+            .output()
+            .expect("export runs"),
+    );
+    let record_path = format!(".arcl/workspace/tasks/{task}.md");
+    let record = fs::read_to_string(source.path().join(&record_path)).expect("task record is exported");
+    assert!(record.contains("assignee = \"codex\""), "record: {record}");
+
+    let target = tempdir().expect("temporary directory can be created");
+    run_json(target.path(), ["--json", "init", "--workspace"].as_ref());
+    for file in [".arcl/workspace/manifest.toml", record_path.as_str()] {
+        fs::copy(source.path().join(file), target.path().join(file)).expect("workspace file copies");
+    }
+    assert_success(
+        &arcl_in(target.path())
+            .args(["workspace", "import"])
+            .output()
+            .expect("import runs"),
+    );
+    let shown = run_json(target.path(), ["--json", "show", &task].as_ref());
+    assert_eq!(shown["data"]["task"]["assignee"], "codex");
+    assert_eq!(shown["data"]["task"]["status"], "in_progress");
+}

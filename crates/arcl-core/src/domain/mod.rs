@@ -17,7 +17,7 @@ pub use capture::{Capture, CaptureAction, CaptureStatus};
 pub use dependency::{
     EdgeViolation, Kinship, TaskDependency, caused_violation, partition_violations, validate_blocker_edges,
 };
-pub use error::{DomainError, validate_position, validate_title};
+pub use error::{DomainError, validate_assignee, validate_position, validate_title};
 pub use id::{
     CaptureId, EpicId, IdError, IdeaId, MilestoneId, NoteId, PhaseId, PlanId, PrefixedId, ProjectId, ReleaseId, SpecId,
     TaskId,

@@ -176,6 +176,7 @@ struct RawTask {
     position: i64,
     handoff: String,
     evidence: String,
+    assignee: Option<String>,
 }
 
 pub fn project(connection: &Connection) -> Result<Project> {
@@ -660,7 +661,7 @@ fn has_open_phase_descendants(connection: &Connection, id: PhaseId) -> Result<bo
 /// Check a structured plan against an existing persistent plan without writing.
 pub fn planning_tasks(connection: &Connection, project_id: ProjectId) -> Result<Vec<PlanningTask>> {
     let mut statement = connection.prepare(
-        "SELECT id, project_id, spec_id, plan_id, phase_id, parent_id, plan_key, title, body, status, priority, position, handoff, evidence
+        "SELECT id, project_id, spec_id, plan_id, phase_id, parent_id, plan_key, title, body, status, priority, position, handoff, evidence, assignee
          FROM planning_tasks WHERE project_id = ?1
          ORDER BY COALESCE(phase_id, ''), COALESCE(plan_id, ''), COALESCE(spec_id, ''), COALESCE(parent_id, ''), position, id",
     )?;
@@ -670,7 +671,7 @@ pub fn planning_tasks(connection: &Connection, project_id: ProjectId) -> Result<
 
 pub fn planning_task(connection: &Connection, id: TaskId) -> Result<Option<PlanningTask>> {
     let raw = connection.query_row(
-        "SELECT id, project_id, spec_id, plan_id, phase_id, parent_id, plan_key, title, body, status, priority, position, handoff, evidence FROM planning_tasks WHERE id = ?1",
+        "SELECT id, project_id, spec_id, plan_id, phase_id, parent_id, plan_key, title, body, status, priority, position, handoff, evidence, assignee FROM planning_tasks WHERE id = ?1",
         [id.to_string()], raw_task,
     ).optional()?;
     raw.map(decode_task).transpose()
@@ -775,6 +776,7 @@ pub fn update_planning_task(
         position: update.position.unwrap_or(current.position),
         handoff: current.handoff,
         evidence: current.evidence,
+        assignee: current.assignee,
     };
     validate_task_ancestry(&tx, &next)?;
     tx.execute(
@@ -1249,6 +1251,7 @@ fn raw_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawTask> {
         position: row.get(11)?,
         handoff: row.get(12)?,
         evidence: row.get(13)?,
+        assignee: row.get(14)?,
     })
 }
 fn decode_task(raw: RawTask) -> Result<PlanningTask> {
@@ -1279,6 +1282,7 @@ fn decode_task(raw: RawTask) -> Result<PlanningTask> {
         position: raw.position,
         handoff: raw.handoff,
         evidence: raw.evidence,
+        assignee: raw.assignee,
     })
 }
 fn parse_id<T>(
@@ -1450,7 +1454,7 @@ pub(super) fn validate_task_graph_candidates(
 }
 
 fn insert_task(c: &Connection, task: &PlanningTask) -> Result<()> {
-    c.execute("INSERT INTO planning_tasks (id, project_id, spec_id, plan_id, phase_id, parent_id, plan_key, title, body, status, priority, position, handoff, evidence) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)", params![task.id.to_string(), task.project_id.to_string(), task.spec_id.map(|x|x.to_string()), task.plan_id.map(|x|x.to_string()), task.phase_id.map(|x|x.to_string()), task.parent_id.map(|x|x.to_string()), task.plan_key, task.title, task.body, task.status.as_str(), task.priority.as_str(), task.position, task.handoff, task.evidence])?;
+    c.execute("INSERT INTO planning_tasks (id, project_id, spec_id, plan_id, phase_id, parent_id, plan_key, title, body, status, priority, position, handoff, evidence, assignee) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)", params![task.id.to_string(), task.project_id.to_string(), task.spec_id.map(|x|x.to_string()), task.plan_id.map(|x|x.to_string()), task.phase_id.map(|x|x.to_string()), task.parent_id.map(|x|x.to_string()), task.plan_key, task.title, task.body, task.status.as_str(), task.priority.as_str(), task.position, task.handoff, task.evidence, task.assignee])?;
     Ok(())
 }
 fn insert_phase(c: &Connection, phase: &Phase) -> Result<()> {

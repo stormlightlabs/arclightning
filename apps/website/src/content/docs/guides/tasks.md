@@ -73,7 +73,9 @@ The allowed task statuses are:
 `start` moves pending work to `in_progress` when it is ready, apart from having
 child tasks. Any other reason that `arcl task explain` reports, such as an
 unfinished blocker, refuses the start and lists the reasons; `--force` starts the
-task anyway. Starting a task that is already in progress does nothing. `park`
+task anyway. Starting a task that is already in progress does nothing.
+`--claim [<NAME>]` records who started the task, so two agents cannot take the
+same one; the [manual](/reference/manual/) has the rules. `park`
 accepts pending or in-progress work. `unpark` always returns parked work to
 `pending`. `complete` accepts pending or in-progress work, and `cancel` accepts
 any non-terminal task.

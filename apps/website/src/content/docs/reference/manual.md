@@ -193,6 +193,12 @@ before storage changes.
 `start` refuses a pending task that is not ready and lists the reasons. Having
 child tasks is the one reason it skips. `--force` starts the task anyway.
 
+`start --claim [<NAME>]` also sets the task's assignee in the same write. With
+no name it uses `ARCL_AGENT`, then the Git user name. A task another assignee
+holds is refused with exit code `4` and the `conflict` error code. Parking,
+handing off, completing, and cancelling clear the assignee.
+`arcl list --assignee <NAME>` lists the tasks one assignee holds.
+
 `handoff` requires either `--note <MARKDOWN>` or `--note-file <PATH|->`.
 
 Completion accepts either `--evidence <MARKDOWN>` or `--evidence-file <PATH|->`.
@@ -402,7 +408,7 @@ record's other fields stay editable.
 
 | Kind    | Fields only a command changes           | Commands                                                 |
 | ------- | --------------------------------------- | -------------------------------------------------------- |
-| task    | `status`, `handoff`, `evidence`         | `arcl task start`, `park`, `unpark`, `handoff`, `complete`, `cancel` |
+| task    | `status`, `handoff`, `evidence`, `assignee` | `arcl task start`, `park`, `unpark`, `handoff`, `complete`, `cancel` |
 | capture | `status`, `promoted-to`                 | `arcl capture promote`, `discard`                        |
 | spec    | `status`, `source-capture`              | `arcl spec complete`, `cancel`; `arcl capture promote`   |
 | plan    | `status`                                | `arcl plan complete`, `cancel`                           |
