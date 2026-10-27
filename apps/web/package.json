@@ -20,7 +20,7 @@
     "test:visual:update": "node scripts/e2e-build.mjs web && playwright test --project visual --update-snapshots",
     "screenshots": "node scripts/e2e-build.mjs web && playwright test --project screenshots"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "dependencies": {
     "@arclightning/ui": "workspace:*"
   },

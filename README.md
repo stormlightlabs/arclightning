@@ -178,3 +178,7 @@ stormlight-thunderbot app installed on `stormlightlabs/homebrew-tap` with
 contents write. If the job fails, fix the cause and use "Re-run failed jobs" on
 that Release run. The run's artifacts are still there, and the job only pushes
 a changed `Formula/arcl.rb`.
+
+## License
+
+Arc Lightning is licensed under the [Apache License 2.0](LICENSE).
