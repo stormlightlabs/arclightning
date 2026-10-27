@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { blockedDetail, bareDetail, doneBlockersDetail } from "./fixtures";
-import { shownReasons } from "$lib/work";
 import {
   blockersOf,
   inheritedGroups,
@@ -130,22 +129,13 @@ describe("readiness under a completed phase", () => {
       expect(showsReadiness(detail)).toBe(false);
       expect(readinessLabel(detail)).toBeNull();
       expect(readiness(detail)).toBeNull();
-      expect(shownReasons(detail.task, detail.readiness).map((reason) => reason.kind)).toEqual([
-        "direct_blocker",
-        "inherited_blocker",
-      ]);
     });
   }
 
-  it("keeps every reason on an open task, including the closed phase", () => {
+  it("shows readiness on an open task", () => {
     const detail = blockedDetail();
     expect(showsReadiness(detail)).toBe(true);
     expect(readiness(detail)).toBe("Blocked");
-    expect(shownReasons(detail.task, detail.readiness).map((reason) => reason.kind)).toEqual([
-      "direct_blocker",
-      "inherited_blocker",
-      "closed_container",
-    ]);
   });
 });
 

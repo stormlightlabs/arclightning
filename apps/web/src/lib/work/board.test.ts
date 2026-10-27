@@ -39,25 +39,23 @@ describe("boardColumns", () => {
     expect(boardOrder(columns)).toEqual(["t-3", "t-8", "t-7", "t-2", "t-5", "t-4", "t-6", "t-1"]);
   });
 
-  it("puts readiness, priority and the reasons with titles on each card", () => {
+  it("puts the glyph, priority and the reasons with titles on each card", () => {
     const pending = boardColumns(sampleList(), none)[0].cards;
     expect(pending.find((card) => card.id === "t-3")).toMatchObject({
-      readiness: "blocked",
       glyph: "blocked",
       reasons: ["blocked by Task t-2 (pending)"],
     });
     expect(pending.find((card) => card.id === "t-2")).toMatchObject({
-      readiness: "ready",
       glyph: "ready",
       priority: "high",
     });
   });
 
-  it("gives a closed card no readiness and no status or closed phase reason", () => {
+  it("gives a closed card its status glyph and no status or closed phase reason", () => {
     const list = sampleList();
     list.items[0].readiness.reasons.push({ kind: "closed_container", message: "phase `ph-10` is `completed`" });
     const completed = boardColumns(list, none)[3].cards;
-    expect(completed.find((card) => card.id === "t-1")).toMatchObject({ readiness: null, glyph: "done", reasons: [] });
+    expect(completed.find((card) => card.id === "t-1")).toMatchObject({ glyph: "done", reasons: [] });
   });
 
   it("follows the filters and keeps every column", () => {

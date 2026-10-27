@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { isFiltered, matches, parseFilters, readinessOf, withKnownMilestone, writeFilters } from "./filters";
+import {
+  isFiltered,
+  matches,
+  parseFilters,
+  readinessOf,
+  shownReasons,
+  withKnownMilestone,
+  writeFilters,
+} from "./filters";
 import { agents, blocked, closed, ready } from "./fixtures";
 
 describe("parseFilters", () => {
@@ -86,5 +94,32 @@ describe("readinessOf", () => {
       expect(matches(closed("a", status, null), waiting)).toBe(false);
     }
     expect(matches(closed("a", "parked", null), waiting)).toBe(true);
+  });
+});
+
+describe("shownReasons", () => {
+  /** `item` with a direct blocker and a completed phase added to its reasons. */
+  function underCompletedPhase(item: ReturnType<typeof closed>) {
+    item.readiness.reasons.push(
+      { kind: "direct_blocker", message: "blocked by `b` (pending)", blocker: "b" },
+      { kind: "closed_container", message: "phase `ph-5` is `completed`" },
+    );
+    return item;
+  }
+  const kinds = (item: ReturnType<typeof closed>) =>
+    shownReasons(item.task, item.readiness).map((reason) => reason.kind);
+
+  for (const status of ["completed", "cancelled"] as const) {
+    it(`drops the status and closed phase reasons of a ${status} task`, () => {
+      expect(kinds(underCompletedPhase(closed("a", status, agents)))).toEqual(["direct_blocker"]);
+    });
+  }
+
+  it("keeps every reason on an open task under a completed phase", () => {
+    expect(kinds(underCompletedPhase(closed("a", "parked", agents)))).toEqual([
+      "status",
+      "direct_blocker",
+      "closed_container",
+    ]);
   });
 });
