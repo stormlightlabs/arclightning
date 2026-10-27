@@ -5838,3 +5838,161 @@ fn the_assignee_round_trips_through_the_workspace() {
     assert_eq!(shown["data"]["task"]["assignee"], "codex");
     assert_eq!(shown["data"]["task"]["status"], "in_progress");
 }
+
+#[test]
+fn next_start_starts_the_task_next_shows() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let first = create_task(dir, "First", None);
+    let second = create_task(dir, "Second", None);
+    let shown = run_json(dir, ["--json", "next"].as_ref());
+    assert_eq!(shown["data"]["task"]["id"], first.as_str());
+
+    let started = run_json(dir, ["--json", "next", "--start"].as_ref());
+    assert_eq!(started["data"]["task"]["id"], first.as_str());
+    assert_eq!(started["data"]["task"]["status"], "in_progress");
+    assert!(started["data"]["task"].get("assignee").is_none());
+
+    let human = arcl_in(dir)
+        .args(["--color", "never", "next", "--start"])
+        .output()
+        .expect("next runs");
+    assert_success(&human);
+    assert_eq!(
+        String::from_utf8_lossy(&human.stdout).trim(),
+        format!("Started task `{second}`: Second")
+    );
+    let shown = run_json(dir, ["--json", "show", &second].as_ref());
+    assert_eq!(shown["data"]["task"]["status"], "in_progress");
+}
+
+#[test]
+fn next_start_claim_claims_the_task_as_task_start_does() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let named = create_task(dir, "Named", None);
+    let from_agent = create_task(dir, "From agent", None);
+
+    let claimed = arcl_in(dir)
+        .args(["--json", "next", "--start", "--claim", "codex"])
+        .env_remove("ARCL_AGENT")
+        .output()
+        .expect("next runs");
+    assert_success(&claimed);
+    let claimed = json(&claimed.stdout);
+    assert_eq!(claimed["data"]["task"]["id"], named.as_str());
+    assert_eq!(claimed["data"]["task"]["assignee"], "codex");
+
+    let claimed = arcl_in(dir)
+        .args(["--json", "next", "--start", "--claim"])
+        .env("ARCL_AGENT", "agent-7")
+        .output()
+        .expect("next runs");
+    assert_success(&claimed);
+    let claimed = json(&claimed.stdout);
+    assert_eq!(claimed["data"]["task"]["id"], from_agent.as_str());
+    assert_eq!(claimed["data"]["task"]["assignee"], "agent-7");
+
+    let refused = arcl_in(dir)
+        .args(["next", "--claim", "codex"])
+        .output()
+        .expect("next runs");
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("--start"));
+}
+
+#[test]
+fn next_start_reports_nothing_to_start_and_exits_zero() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let blocker = create_task(dir, "Blocker", None);
+    let blocked = create_task(dir, "Blocked", None);
+    block_start_task(dir, &blocked, &blocker);
+    run_json(dir, ["--json", "task", "start", &blocker].as_ref());
+
+    let human = arcl_in(dir)
+        .args(["--color", "never", "next", "--start"])
+        .output()
+        .expect("next runs");
+    assert_success(&human);
+    assert_eq!(
+        String::from_utf8_lossy(&human.stdout).trim(),
+        "Nothing to start: no task is ready."
+    );
+
+    let plain = arcl_in(dir)
+        .args(["--plain", "next", "--start", "--claim", "codex"])
+        .output()
+        .expect("next runs");
+    assert_success(&plain);
+    assert!(plain.stdout.is_empty());
+
+    let empty = run_json(dir, ["--json", "next", "--start"].as_ref());
+    assert_eq!(empty["format_version"], 1);
+    assert!(empty["data"]["task"].is_null());
+    let shown = run_json(dir, ["--json", "show", &blocked].as_ref());
+    assert_eq!(shown["data"]["task"]["status"], "pending");
+}
+
+#[test]
+fn next_start_honours_the_next_filters() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let normal = create_task(dir, "Normal", None);
+    let low = run_json(dir, ["--json", "task", "create", "Low", "--priority", "low"].as_ref())["data"]["task"]["id"]
+        .as_str()
+        .expect("task ID")
+        .to_owned();
+
+    let started = run_json(dir, ["--json", "next", "--start", "--priority", "low"].as_ref());
+    assert_eq!(started["data"]["task"]["id"], low.as_str());
+    let empty = run_json(dir, ["--json", "next", "--start", "--priority", "low"].as_ref());
+    assert!(empty["data"]["task"].is_null());
+    let shown = run_json(dir, ["--json", "show", &normal].as_ref());
+    assert_eq!(shown["data"]["task"]["status"], "pending");
+}
+
+/// Spawn `count` `next --start --json` processes at once in `directory` and
+/// return each one's started task ID, or `None` when it found nothing.
+fn concurrent_next_starts(directory: &Path, count: usize) -> Vec<Option<String>> {
+    let children: Vec<_> = (0..count)
+        .map(|_| {
+            isolated_command(assert_cmd::cargo::cargo_bin("arcl"), directory)
+                .args(["--json", "next", "--start"])
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .expect("next spawns")
+        })
+        .collect();
+    children
+        .into_iter()
+        .map(|child| {
+            let output = child.wait_with_output().expect("next finishes");
+            assert_success(&output);
+            json(&output.stdout)["data"]["task"]["id"].as_str().map(str::to_owned)
+        })
+        .collect()
+}
+
+#[test]
+fn concurrent_next_starts_never_start_the_same_task() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let first = create_task(dir, "First", None);
+    let second = create_task(dir, "Second", None);
+    let mut started: Vec<String> = concurrent_next_starts(dir, 2)
+        .into_iter()
+        .map(|id| id.expect("each call starts a task"))
+        .collect();
+    started.sort();
+    let mut expected = vec![first, second];
+    expected.sort();
+    assert_eq!(started, expected);
+
+    // With one ready task, one call starts it and the other finds nothing.
+    let only = create_task(dir, "Only", None);
+    let results = concurrent_next_starts(dir, 2);
+    assert_eq!(results.iter().flatten().collect::<Vec<_>>(), vec![&only]);
+    assert_eq!(results.iter().filter(|id| id.is_none()).count(), 1);
+}

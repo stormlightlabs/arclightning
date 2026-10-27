@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, TransactionBehavior, params};
 use serde::Serialize;
 
 use super::{Result, StorageError, phases, planning_dependencies, planning_task, planning_tasks, specs};
@@ -435,6 +435,45 @@ pub fn claim_planning_task(
     .map(|completion| completion.task)
 }
 
+/// Start the first task [`planning_ready_tasks`] returns for `filter`, in one
+/// write transaction.
+///
+/// The transaction begins `IMMEDIATE`, so it holds SQLite's write lock from
+/// selection to commit: a second process waits for it and then selects from
+/// the committed state, so two calls never start the same task. With `claim`,
+/// the task gets that assignee, as in [`claim_planning_task`], and a ready task
+/// someone else holds is passed over. Returns `None`, writing nothing, when no
+/// task matches.
+pub fn start_next_planning_task(
+    connection: &mut Connection, project_id: ProjectId, filter: &PlanningReadyFilter, claim: Option<&str>,
+) -> Result<Option<PlanningTask>> {
+    let claim = claim
+        .map(validate_assignee)
+        .transpose()
+        .map_err(StorageError::InvalidPlanningTask)?;
+    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let next = planning_ready_tasks(&tx, project_id, filter)?.into_iter().find(|task| {
+        claim
+            .as_ref()
+            .is_none_or(|name| task.assignee.as_ref().is_none_or(|holder| holder == name))
+    });
+    let Some(next) = next else {
+        return Ok(None);
+    };
+    let completion = transition_in(
+        &tx,
+        project_id,
+        next.id,
+        TaskAction::Start,
+        OpenSubtasks::Refuse,
+        false,
+        None,
+        claim,
+    )?;
+    tx.commit()?;
+    Ok(Some(completion.task))
+}
+
 /// Complete a connected-model task and optionally store Markdown evidence atomically.
 ///
 /// `open_subtasks` chooses what happens to open descendants. With
@@ -492,9 +531,21 @@ fn transition(
     force: bool, evidence: Option<String>, claim: Option<String>,
 ) -> Result<PlanningCompletion> {
     let tx = connection.transaction()?;
-    let current = planning_task(&tx, id)?.ok_or_else(|| StorageError::PlanningTaskNotFound { id: id.to_string() })?;
+    let completion = transition_in(&tx, project_id, id, action, open_subtasks, force, evidence, claim)?;
+    tx.commit()?;
+    Ok(completion)
+}
+
+/// Apply `action` to task `id` inside the caller's transaction, which the
+/// caller commits. See [`transition`].
+#[allow(clippy::too_many_arguments)]
+fn transition_in(
+    tx: &Connection, project_id: ProjectId, id: TaskId, action: TaskAction, open_subtasks: OpenSubtasks, force: bool,
+    evidence: Option<String>, claim: Option<String>,
+) -> Result<PlanningCompletion> {
+    let current = planning_task(tx, id)?.ok_or_else(|| StorageError::PlanningTaskNotFound { id: id.to_string() })?;
     ensure_project_task(&current, project_id)?;
-    validate_task_graph(&tx, project_id, &current, false)?;
+    validate_task_graph(tx, project_id, &current, false)?;
     if let Some(claim) = &claim
         && let Some(holder) = current.assignee.as_ref().filter(|holder| *holder != claim)
     {
@@ -505,7 +556,7 @@ fn transition(
         .apply(action)
         .map_err(StorageError::InvalidPlanningTask)?;
     let completed_subtasks = if open_subtasks == OpenSubtasks::Complete {
-        let data = load_data(&tx, project_id)?;
+        let data = load_data(tx, project_id)?;
         open_subtasks_to_complete(&data, &current)?
     } else {
         Vec::new()
@@ -522,7 +573,7 @@ fn transition(
         return Ok(PlanningCompletion { task: current, completed_subtasks, unblocked: Vec::new() });
     }
     if matches!(action, TaskAction::Start) && current.status == TaskStatus::Pending && !force {
-        let data = load_data(&tx, project_id)?;
+        let data = load_data(tx, project_id)?;
         let ancestry = effective_ancestry(&data, id, &mut HashSet::new())?;
         let readiness = readiness_counting_children(&data, &current, &ancestry, false)?;
         if !readiness.ready {
@@ -554,7 +605,7 @@ fn transition(
     }
     let completes = matches!(action, TaskAction::Complete);
     let ready_before: HashSet<TaskId> = if completes {
-        planning_ready_tasks(&tx, project_id, &PlanningReadyFilter::default())?
+        planning_ready_tasks(tx, project_id, &PlanningReadyFilter::default())?
             .into_iter()
             .map(|task| task.id)
             .collect()
@@ -583,14 +634,13 @@ fn transition(
         )?;
     }
     let unblocked = if completes {
-        planning_ready_tasks(&tx, project_id, &PlanningReadyFilter::default())?
+        planning_ready_tasks(tx, project_id, &PlanningReadyFilter::default())?
             .into_iter()
             .filter(|task| !ready_before.contains(&task.id))
             .collect()
     } else {
         Vec::new()
     };
-    tx.commit()?;
     Ok(PlanningCompletion {
         task: PlanningTask { status: next_status, evidence: evidence.unwrap_or(current.evidence), assignee, ..current },
         completed_subtasks,
@@ -2607,5 +2657,49 @@ mod tests {
             .expect("task reads")
             .expect("task exists");
         assert_eq!(stored.assignee, None);
+    }
+
+    #[test]
+    fn start_next_starts_the_first_ready_task_and_passes_over_other_holders() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project = database.project().expect("project exists");
+        let first = task(&mut database, project.id, "First");
+        let second = task(&mut database, project.id, "Second");
+        let expected = database
+            .ready_planning_tasks()
+            .expect("ready tasks read")
+            .into_iter()
+            .map(|task| task.id)
+            .collect::<Vec<_>>();
+        assert_eq!(expected.len(), 2);
+        database
+            .connection
+            .execute(
+                "UPDATE planning_tasks SET assignee = 'claude' WHERE id = ?1",
+                [expected[0].to_string()],
+            )
+            .expect("assignee writes");
+
+        let started = database
+            .start_next_planning_task(&PlanningReadyFilter::default(), Some("codex"))
+            .expect("start succeeds")
+            .expect("a task starts");
+        assert_eq!(started.id, expected[1]);
+        assert_eq!(started.status, TaskStatus::InProgress);
+        assert_eq!(started.assignee.as_deref(), Some("codex"));
+
+        let unclaimed = database
+            .start_next_planning_task(&PlanningReadyFilter::default(), None)
+            .expect("start succeeds")
+            .expect("a task starts");
+        assert_eq!(unclaimed.id, expected[0]);
+        assert!([first.id, second.id].contains(&unclaimed.id));
+
+        assert_eq!(
+            database
+                .start_next_planning_task(&PlanningReadyFilter::default(), None)
+                .expect("start succeeds"),
+            None
+        );
     }
 }

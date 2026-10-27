@@ -135,6 +135,13 @@ pub enum Command {
     Next {
         #[command(flatten)]
         filters: ReadyArgs,
+        /// Start the task in the same transaction that selects it.
+        #[arg(long)]
+        start: bool,
+        /// Claim the started task for NAME, as `task start --claim` does.
+        /// Without NAME, use `ARCL_AGENT`, then the Git user name.
+        #[arg(long, value_name = "NAME", num_args = 0..=1, requires = "start")]
+        claim: Option<Option<String>>,
     },
     /// Serve the web app on 127.0.0.1 until interrupted.
     Serve {
@@ -914,6 +921,7 @@ pub struct AcceptanceArgs {
     arcl task create "Validate records" --plan arcl-pl-…
     arcl ready
     arcl task start arcl-t-… --claim
+    arcl next --start --claim
     arcl list --assignee codex
     arcl serve
 "#

@@ -165,7 +165,9 @@ Moving a pending task to in progress requires it to be ready unless the caller
 passes `--force`. Starting a task that is already in progress stays a no-op.
 The MCP start tool does not expose force; an agent asks a person instead. A
 start can claim the task for an assignee in the same write, and is refused
-while another assignee holds it. A
+while another assignee holds it. `arcl next --start` selects the first ready
+task and starts it in one write transaction, so two concurrent calls never
+start the same task. A
 cancelled blocker does not complete the relationship; readiness reports it as
 a decision to remove or replace the dependency. Every readiness reason has a
 stable kind and record IDs in machine output, and completing a task reports

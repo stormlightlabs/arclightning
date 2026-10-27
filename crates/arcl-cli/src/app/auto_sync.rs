@@ -75,8 +75,9 @@ pub(super) fn command_access(command: Option<&Command>) -> Access {
             | Command::Context { .. }
             | Command::Check
             | Command::Ready { .. }
-            | Command::Next { .. },
+            | Command::Next { start: false, .. },
         ) => Access::Read,
+        Some(Command::Next { start: true, .. }) => Access::Write,
         Some(Command::Capture { command }) => {
             read_when(matches!(command, CaptureCommand::Show { .. } | CaptureCommand::List))
         }

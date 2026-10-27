@@ -879,7 +879,7 @@ fn transition_phase(
 
 /// The name `task start --claim` claims for: `name` when given, then a
 /// non-empty `ARCL_AGENT`, then the Git user name.
-fn claim_name(name: Option<String>) -> CResult<String> {
+pub(super) fn claim_name(name: Option<String>) -> CResult<String> {
     if let Some(name) = name {
         return Ok(name);
     }

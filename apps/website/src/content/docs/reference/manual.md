@@ -226,10 +226,18 @@ task ID, then a `subtask<TAB><id>` line for each completed subtask and an
 | `arcl check`                                                         | Validate database and graph invariants.                            |
 | `arcl ready`                                                         | List actionable leaf tasks in deterministic order.                 |
 | `arcl next`                                                          | Return the first actionable task, if one exists.                   |
+| `arcl next --start [--claim [<NAME>]]`                               | Start the first actionable task, claiming it with `--claim`.       |
 
 `list` accepts `--kind`, `--status`, `--priority`, `--release`, `--epic`,
 `--milestone`, and `--parent`. `ready` and `next` accept the same priority and
 association filters.
+
+`next --start` selects and starts the task in one write transaction, so two
+concurrent calls never start the same task; the second waits and takes the
+next one. `--claim` names the assignee as `task start --claim` does, and
+passes over a ready task another assignee holds. When nothing is ready it
+prints `Nothing to start`, prints nothing with `--plain`, returns a null
+`data.task` with `--json`, and exits `0`.
 
 `tree` leaves out promoted and discarded captures in human, `--plain` and
 `--json` output; `--all` includes them. A closed capture named as the root

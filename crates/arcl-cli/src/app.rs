@@ -36,8 +36,8 @@ mod web;
 mod workspace;
 
 use commands::{
-    apply_plan_document, exec_dependency, exec_note, exec_plan, exec_release, exec_spec, exec_task, run_capture,
-    run_plan, run_spec, run_task,
+    apply_plan_document, claim_name, exec_dependency, exec_note, exec_plan, exec_release, exec_spec, exec_task,
+    run_capture, run_plan, run_spec, run_task,
 };
 pub use error::ApplicationError;
 use error::{CResult, CommandError};
@@ -206,7 +206,19 @@ fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Wa
             }
         }
         Some(Command::Ready { filters }) => write_output(read_ready(filters, renderer)?),
-        Some(Command::Next { filters }) => {
+        Some(Command::Next { filters, start: true, claim }) => {
+            let claim = claim
+                .map(claim_name)
+                .transpose()
+                .map_err(ApplicationError::from_command)?;
+            let mut database = open_database().map_err(ApplicationError::from_command)?;
+            let filter = resolve_ready_filter(filters).map_err(ApplicationError::from_command)?;
+            let task = database
+                .start_next_planning_task(&filter, claim.as_deref())
+                .map_err(ApplicationError::from_command)?;
+            write_output(renderer.render_started_next_planning_task(task.as_ref())?)
+        }
+        Some(Command::Next { filters, .. }) => {
             let database = open_database().map_err(ApplicationError::from_command)?;
             let filter = resolve_ready_filter(filters).map_err(ApplicationError::from_command)?;
             let task = database

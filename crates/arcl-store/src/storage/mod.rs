@@ -749,6 +749,16 @@ impl Database {
         connected::claim_planning_task(&mut self.connection, project.id, id, force, assignee)
     }
 
+    /// Start the first ready task matching `filter` in one write transaction,
+    /// claiming it for `claim` when given. Returns `None` when no task is
+    /// ready; see [`connected::start_next_planning_task`].
+    pub fn start_next_planning_task(
+        &mut self, filter: &PlanningReadyFilter, claim: Option<&str>,
+    ) -> Result<Option<PlanningTask>> {
+        let project = self.project()?;
+        connected::start_next_planning_task(&mut self.connection, project.id, filter, claim)
+    }
+
     /// Complete a connected-model task and optionally store Markdown evidence
     /// atomically. `open_subtasks` chooses what happens to open descendants;
     /// see [`connected::complete_planning_task`].

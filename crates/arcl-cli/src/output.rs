@@ -576,6 +576,24 @@ impl Renderer {
         Ok(Some(self.style(message)))
     }
 
+    /// Render the task `next --start` started, or that nothing was ready.
+    /// JSON uses the `next` shape, `{"task": ...}`, with a null task when
+    /// nothing started; plain output prints the task ID or nothing.
+    pub fn render_started_next_planning_task(
+        &self, task: Option<&PlanningTask>,
+    ) -> Result<Option<String>, OutputError> {
+        let message = match (self.mode, task) {
+            (OutputMode::Human, Some(task)) => format!("Started task `{}`: {}", task.id, task.title),
+            (OutputMode::Human, None) => "Nothing to start: no task is ready.".to_owned(),
+            (OutputMode::Plain, Some(task)) => task.id.to_string(),
+            (OutputMode::Json, _) => {
+                serde_json::to_string(&Envelope { format_version: FORMAT_VERSION, data: NextPlanningData { task } })?
+            }
+            (OutputMode::Plain, None) | (OutputMode::Quiet, _) => return Ok(None),
+        };
+        Ok(Some(self.style(message)))
+    }
+
     /// Render structured plan changes.
     pub fn render_plan_diff(&self, diff: &PlanDiff) -> Result<Option<String>, OutputError> {
         let message = match self.mode {
