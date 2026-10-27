@@ -27,6 +27,11 @@ describe("CopyId", () => {
     expect(writeText).toHaveBeenCalledWith(ID);
   });
 
+  it("shows the full ID in the tooltip, since a narrow ID drops its start", async () => {
+    await render(CopyId, { id: ID });
+    expect(page.getByText(ID).element().closest("code")?.title).toContain(ID);
+  });
+
   it("copies when the ID itself is clicked", async () => {
     const writeText = vi.fn(async () => {});
     setClipboard({ writeText });

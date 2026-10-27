@@ -82,7 +82,8 @@
   <!-- The button beside it is the keyboard route; a click on the ID is a shortcut. -->
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
   <span class="arcl-copy-id__value">
-    <code bind:this={text} title="Click to copy" onclick={copy}>{id}</code>
+    <!-- IDs share their start, so a narrow ID drops characters there and keeps its end. -->
+    <code bind:this={text} title={`${id} (click to copy)`} onclick={copy}><span dir="ltr">{id}</span></code>
     <button type="button" aria-label={label} title={label} onclick={copy}>
       <Icon name="copy" size="0.875rem" />
     </button>
@@ -109,6 +110,8 @@
   code {
     min-width: 6ch;
     overflow: hidden;
+    direction: rtl;
+    text-align: start;
     font: inherit;
     font-family: var(--arcl-font-code);
     text-overflow: ellipsis;
