@@ -101,6 +101,14 @@ pub enum StorageError {
     /// A claim on a task that another assignee holds.
     #[error("task `{id}` is claimed by `{assignee}`")]
     TaskClaimed { id: String, assignee: String },
+    /// A claim whose name is empty, longer than 64 characters, or holds a
+    /// control or format character. The name comes from the request, not
+    /// from stored data.
+    #[error(
+        "claim name `{}` is invalid; use a non-empty name of at most 64 characters without control or format characters",
+        value.escape_debug()
+    )]
+    InvalidClaimName { value: String },
     /// A short ID argument names no record, more than one, or is not a
     /// short ID. No match exits 5; the rest exit 3.
     #[error(transparent)]
@@ -140,6 +148,7 @@ impl StorageError {
             | Self::AmbiguousCapturePromotion { .. }
             | Self::InconsistentCapturePromotion { .. }
             | Self::InvalidPlanInput(_)
+            | Self::InvalidClaimName { .. }
             | Self::NewerDatabase { .. }
             | Self::MigrationGap { .. } => 3,
             Self::ShortId(error) => {
