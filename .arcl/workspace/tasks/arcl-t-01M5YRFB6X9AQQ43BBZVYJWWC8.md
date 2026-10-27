@@ -6,7 +6,7 @@ status = "completed"
 priority = "normal"
 position = 1
 blocked-by = ["arcl-t-01M5YRFB4XC9E438GSNCV444XZ"]
-evidence = "Delivered by #PR: `arcl next --start [--claim [<name>]]` selects and starts the first ready task in one IMMEDIATE write transaction, honours the `next` filters, and prints nothing to start (exit 0, null `data.task` in JSON) when nothing is ready. A CLI test runs two concurrent calls and checks they start different tasks, and that with one ready task the other finds nothing."
+evidence = "Delivered by #75: `arcl next --start [--claim [<name>]]` selects and starts the first ready task in one IMMEDIATE write transaction, honours the `next` filters, and prints nothing to start (exit 0, null `data.task` in JSON) when nothing is ready. A CLI test runs two concurrent calls and checks they start different tasks, and that with one ready task the other finds nothing."
 +++
 
 Let an agent pick and start the first ready task in one transaction with
