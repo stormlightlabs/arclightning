@@ -21,8 +21,8 @@ arcl list --milestone arcl-m-01J... --status pending in_progress
 `--milestone`, and `--parent`. Association filters include the matching
 container and work below it where applicable.
 
-Human output from `show`, `list` and `tree` prints short IDs, the shortest
-unique end of each ID, such as `GBA5`. Any command accepts one in place of the
+Human output from `show` and `list` prints short IDs, the shortest unique end
+of each ID, such as `GBA5`. Any command accepts one in place of the
 full ID, with an optional kind: `arcl show GBA5` or `arcl task start t-GBA5`.
 A short ID can become ambiguous as records are added, so write full IDs in
 files and links. The [manual](/reference/manual/#record-ids) gives the rule.
@@ -36,27 +36,49 @@ arcl tree
 arcl tree arcl-e-01J...
 arcl tree arcl-t-01J...
 arcl tree --all
+arcl tree --ascii --depth 3
 ```
 
-Specs and their plans print first, then tasks outside any spec. Captures,
-notes and releases follow under `Inbox`, `Notes` and `Releases` headings.
-Records use deterministic position and ID ordering. Promoted and discarded
-captures are left out; `--all` includes them. Each record line starts with a
-status mark:
+`tree` draws specs and their plans first, then tasks outside any spec, in
+position and ID order. Each line shows a status mark and a title. A phase
+shows its completed and total tasks, and a blocked task names its blockers by
+short ID. Finished phases fold into one line, and a footer counts the open
+captures and notes and names the releases. This is Arc Lightning's own plan,
+with milestones 5 to 8 and the tasks of milestone 11 cut:
 
-| Mark | Status                                                                                    |
-| ---- | ----------------------------------------------------------------------------------------- |
-| `✓`  | completed; capture promoted                                                               |
-| `✗`  | cancelled; capture discarded                                                              |
-| `◐`  | task in progress; open spec, plan or phase with a started or finished task                |
-| `‖`  | task parked                                                                               |
-| `●`  | pending task that is ready                                                                |
-| `○`  | pending task that is not ready or has subtasks; other open record; captured capture; note |
+```text
+◐ Arc Lightning first release and desktop app
+└── ◐ Roadmap
+    ├── ✓ Milestones 1–4  done · 20 tasks
+    ├── ○ Milestone 9: Integrated release  0/2
+    │   ├── ○ T15: Verify the integrated release  blocked by B7MS
+    │   └── ● Publish release binaries with dist and support cargo-binstall
+    ├── ○ Milestone 10: Desktop planning and execution  0/2
+    │   ├── ○ T12: Build the desktop shell and project inbox  blocked by EGMS
+    │   └── ○ T13: Add desktop work, planning, and task views  blocked by AGNY
+    └── ◐ Milestone 11: CLI formatting  5/6
+Inbox: 24 open · Notes: 17 · Releases: v0.1.0, v0.2.0
+```
 
-A task with subtasks is never ready itself; its subtasks are. Terminals that
-draw ambiguous-width characters double-width can misalign the marks.
+`--all` unfolds every phase, lists the captures, notes and releases under
+`Inbox`, `Notes` and `Releases` headings, and includes promoted and discarded
+captures. `--depth N` stops after `N` levels. Each line starts with a status
+mark:
 
-![arcl tree with a status mark on each line](/images/arcl-tree-status.png)
+| Mark | ASCII | Status                                                                                    |
+| ---- | ----- | ----------------------------------------------------------------------------------------- |
+| `✓`  | `+`   | completed; capture promoted                                                               |
+| `✗`  | `x`   | cancelled; capture discarded                                                              |
+| `◐`  | `~`   | task in progress; open spec, plan or phase with a started or finished task                |
+| `‖`  | `=`   | task parked                                                                               |
+| `●`  | `*`   | pending task that is ready                                                                |
+| `○`  | `o`   | pending task that is not ready or has subtasks; other open record; captured capture; note |
+
+A task with subtasks is never ready itself; its subtasks are. `--ascii` draws
+the tree and the marks with ASCII characters, which avoids misalignment in
+terminals that draw the marks double-width.
+
+![arcl tree folding finished milestones, with a status mark on each line](/images/arcl-tree-status.png)
 
 `--plain` and `--json` give the stored status instead.
 

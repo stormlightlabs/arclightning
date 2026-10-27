@@ -779,9 +779,16 @@ pub enum WorkspaceCommand {
 /// Options that choose what `arcl tree` shows.
 #[derive(Clone, Copy, Debug, Default, Args)]
 pub struct TreeArgs {
-    /// Include promoted and discarded captures.
+    /// Include promoted and discarded captures. Human output also unfolds
+    /// finished phases and lists the Inbox, Notes and Releases sections.
     #[arg(long)]
     pub all: bool,
+    /// Draw human output with ASCII characters only, status marks included.
+    #[arg(long)]
+    pub ascii: bool,
+    /// Stop human output after this many levels of records.
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u16).range(1..))]
+    pub depth: Option<u16>,
 }
 
 /// Filters accepted by broad connected-record queries.

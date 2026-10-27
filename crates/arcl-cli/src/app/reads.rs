@@ -75,15 +75,41 @@ pub(super) fn read_tree(root: Option<&str>, options: TreeArgs, renderer: &Render
         .map(|task| task.id)
         .collect();
     let mut nodes = connected_tree(&graph, &ready, root.as_deref(), options).map_err(ApplicationError::from_command)?;
+    if root.is_some() {
+        add_inherited_blockers(&database, &mut nodes).map_err(ApplicationError::from_command)?;
+    }
     let ids = display_ids(&database, renderer).map_err(ApplicationError::from_command)?;
     shorten_tree(&mut nodes, &ids);
-    Ok(renderer.render_connected_tree(&nodes, root.is_some())?)
+    let view = TreeView { rooted: root.is_some(), all: options.all, ascii: options.ascii, depth: options.depth };
+    Ok(renderer.render_connected_tree(&nodes, view)?)
 }
 
-/// Replace each node's ID with its short ID.
+/// Adds the open blockers a rooted tree's task inherits from its ancestors,
+/// nearest ancestor first, after its own. No ancestor line is drawn above the
+/// root to name them. Other roots, and finished tasks, are left as they are.
+fn add_inherited_blockers(database: &Database, nodes: &mut [ConnectedTreeNode]) -> CResult<()> {
+    let [root] = nodes else { return Ok(()) };
+    let finished = [TaskStatus::Completed, TaskStatus::Cancelled].map(TaskStatus::as_str);
+    if root.kind != "task" || finished.contains(&root.status.as_str()) {
+        return Ok(());
+    }
+    let view = database.planning_task_view(parse_task_id(&root.id)?)?;
+    for blocker in view.inherited_blockers.iter().filter(|blocker| !blocker.completed) {
+        let id = blocker.task.id.to_string();
+        if !root.blocked_by.contains(&id) {
+            root.blocked_by.push(id);
+        }
+    }
+    Ok(())
+}
+
+/// Replace each node's ID, and each blocker ID, with its short ID.
 fn shorten_tree(nodes: &mut [ConnectedTreeNode], ids: &ShortIds) {
     for node in nodes {
         node.id = ids.short(&node.id).to_owned();
+        for blocker in &mut node.blocked_by {
+            *blocker = ids.short(blocker).to_owned();
+        }
         shorten_tree(&mut node.children, ids);
     }
 }

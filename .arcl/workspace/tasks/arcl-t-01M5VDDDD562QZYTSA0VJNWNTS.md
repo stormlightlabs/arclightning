@@ -2,10 +2,11 @@
 id = "arcl-t-01M5VDDDD562QZYTSA0VJNWNTS"
 phase = "arcl-ph-01M5VDD6PCB2B64MKW9TX01XXG"
 title = "Fold finished milestones in arcl tree"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 4
 blocked-by = ["arcl-t-01M5VDDD42HZQ1FEN49X80GBA5", "arcl-t-01M5VDDD61CZH33T5S34E02BKM", "arcl-t-01M5VDDD8HBGD5CTHESBV2SSQH", "arcl-t-01M5VDDDAS9P34RVKCAGHXRSFH"]
+evidence = "Delivered by #61: arcl tree draws a box-drawing tree that folds finished phases, ends with an Inbox/Notes/Releases footer, and takes --ascii and --depth; --all unfolds it. --plain and --json are byte-identical to main on this repository."
 +++
 
 Make `arcl tree`'s default human output a box-drawing tree that folds
@@ -58,20 +59,20 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] Default output is a box-drawing tree with a status mark on each line
-- [ ] Phases show done/total counts, and blocked tasks name a blocker by
+- [x] Default output is a box-drawing tree with a status mark on each line
+- [x] Phases show done/total counts, and blocked tasks name a blocker by
       short ID
-- [ ] Consecutive finished milestones fold into one line; open ones expand
-- [ ] By default a footer counts open captures and notes and names the
+- [x] Consecutive finished milestones fold into one line; open ones expand
+- [x] By default a footer counts open captures and notes and names the
       releases, in place of the Inbox, Notes and Releases sections
-- [ ] `--all` shows the Inbox, Notes and Releases sections expanded
-- [ ] Colour appears only on a TTY, and never with `NO_COLOR` or
+- [x] `--all` shows the Inbox, Notes and Releases sections expanded
+- [x] Colour appears only on a TTY, and never with `NO_COLOR` or
       `--color never`
-- [ ] `--ascii` uses only ASCII, status marks included; `--all` unfolds
+- [x] `--ascii` uses only ASCII, status marks included; `--all` unfolds
       everything and lists closed captures; `--depth N` limits depth
-- [ ] The README shows the output of a real `arcl tree` run on this
+- [x] The README shows the output of a real `arcl tree` run on this
       repository
-- [ ] `--json` output is unchanged
+- [x] `--json` output is unchanged
 
 Verification:
 
