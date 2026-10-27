@@ -13,7 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 arcl-core = { path = "../arcl-core", features = ["schema"] }
-arcl-repo = { path = "../arcl-repo" }
+arcl-repo = { path = "../arcl-repo", features = ["schema"] }
 arcl-store = { path = "../arcl-store", features = ["schema"] }
 rmcp.workspace = true
 schemars.workspace = true

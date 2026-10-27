@@ -312,6 +312,49 @@ describe("TaskDetail notes", () => {
   });
 });
 
+describe("TaskDetail gates", () => {
+  it("lists each gate with its kind, target and status", () => {
+    const detail = blockedDetail();
+    detail.gates = [
+      {
+        id: "arcl-g-01K0B2ZWTX7JX9PH7W5G1S6A9R",
+        task_id: detail.task.id,
+        kind: "pr",
+        target: "https://github.com/o/r/pull/7",
+        status: "open",
+        created_at: "2026-10-27T10:00:00.000Z",
+      },
+      {
+        id: "arcl-g-01K0B2ZWTX7JX9PH7W5G1S6A9S",
+        task_id: detail.task.id,
+        kind: "date",
+        target: "2026-10-01",
+        status: "met",
+        created_at: "2026-10-27T10:05:00.000Z",
+        met_at: "2026-10-27T11:00:00.000Z",
+      },
+    ];
+    stubSource(detail);
+    const root = view(detail);
+    const items = [...root.querySelectorAll<HTMLElement>("[aria-labelledby='task-gates'] li")];
+    expect(items.map((item) => item.querySelector(".gate-kind")?.textContent)).toEqual(["Pull request", "Date"]);
+    const link = items[0].querySelector<HTMLAnchorElement>("a.gate-target");
+    expect(link?.getAttribute("href")).toBe("https://github.com/o/r/pull/7");
+    expect(link?.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(items[0].querySelector(".gate-status")?.textContent?.trim()).toBe("Open");
+    expect(items[1].querySelector("a")).toBeNull();
+    expect(items[1].querySelector(".gate-target")?.textContent).toBe("2026-10-01");
+    expect(items[1].querySelector(".gate-status time")?.getAttribute("datetime")).toBe("2026-10-27T11:00:00.000Z");
+    expect(root.querySelector("[aria-labelledby='task-gates'] button")).toBeNull();
+  });
+
+  it("says so when a task has no gates", () => {
+    stubSource(blockedDetail());
+    const root = view(blockedDetail());
+    expect(root.querySelector("[aria-labelledby='task-gates']")?.textContent).toContain("No gates.");
+  });
+});
+
 describe("TaskDetail IDs", () => {
   afterEach(() => {
     delete (navigator as { clipboard?: unknown }).clipboard;

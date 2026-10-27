@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use owo_colors::{OwoColorize, Stream};
@@ -8,10 +9,11 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::cli::{ColorChoice, TreeStyle};
 use arcl_core::domain::{
-    Capture, CaptureStatus, ContainerStatus, Note, Phase, Plan, PlanningTask, Release, ShortIds, Spec, TaskDependency,
-    TaskNote, TaskPriority, TaskStatus,
+    Capture, CaptureStatus, ContainerStatus, Gate, GateStatus, Note, Phase, Plan, PlanningTask, Release, ShortIds,
+    Spec, TaskDependency, TaskId, TaskNote, TaskPriority, TaskStatus,
 };
 use arcl_repo::{
+    gate::{GH_MISSING, GateCheckReport},
     vcs::{HeadState, PathState},
     workspace::{Change, RecordSource, RecordStatusKind, WorkspaceStatus},
 };
@@ -415,6 +417,120 @@ impl Renderer {
             OutputMode::Json => serde_json::to_string(&Envelope {
                 format_version: FORMAT_VERSION,
                 data: serde_json::json!({ "action": "noted", "note": note }),
+            })?,
+            OutputMode::Quiet => return Ok(None),
+        };
+        Ok(Some(self.style(message)))
+    }
+
+    /// Render a gate that `action`, `added` or `removed`, changed. Human
+    /// output names the gate and task as `ids` shortens them, plain output
+    /// prints the gate's `gate` line, as `show` does, and JSON returns
+    /// `{action, gate}`.
+    pub fn render_gate(&self, action: &str, gate: &Gate, ids: &ShortIds) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human => {
+                let (verb, preposition) = if action == "removed" { ("Removed", "from") } else { ("Added", "to") };
+                format!(
+                    "{verb} gate `{}` {preposition} task `{}`: waits {}",
+                    ids.short(&gate.id.to_string()),
+                    ids.short(&gate.task_id.to_string()),
+                    gate.condition()
+                )
+            }
+            OutputMode::Plain => plain_gate(gate),
+            OutputMode::Json => serde_json::to_string(&Envelope {
+                format_version: FORMAT_VERSION,
+                data: serde_json::json!({ "action": action, "gate": gate }),
+            })?,
+            OutputMode::Quiet => return Ok(None),
+        };
+        Ok(Some(self.style(message)))
+    }
+
+    /// Render a gate list. Human output prints one line per gate with its
+    /// task, or `No gates.`; plain output prints a `gate` line per
+    /// gate; JSON returns `{gates}`.
+    pub fn render_gates(&self, gates: &[Gate], ids: &ShortIds) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human if gates.is_empty() => "No gates.".to_owned(),
+            OutputMode::Human => gates
+                .iter()
+                .map(|gate| {
+                    format!(
+                        "{} on task `{}`",
+                        human_gate(gate, ids),
+                        ids.short(&gate.task_id.to_string())
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            OutputMode::Plain => gates.iter().map(plain_gate).collect::<Vec<_>>().join("\n"),
+            OutputMode::Json => serde_json::to_string(&Envelope {
+                format_version: FORMAT_VERSION,
+                data: serde_json::json!({ "gates": gates }),
+            })?,
+            OutputMode::Quiet => return Ok(None),
+        };
+        Ok(Some(self.style(message)))
+    }
+
+    /// Render a gate check. Human output prints one line per checked gate,
+    /// ``<Outcome>: gate `<id>` on task `<id>`: <detail>``, then the `gh`
+    /// missing line once when it applies, or `No open gates.`; plain output
+    /// prints `<outcome>\t<gate-id>\t<task-id>\t<detail>` per gate and
+    /// `gh_missing` when it applies; JSON returns `{action: "checked",
+    /// checks, gh_missing}`.
+    pub fn render_gate_check(&self, report: &GateCheckReport, ids: &ShortIds) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human if report.checks.is_empty() => "No open gates.".to_owned(),
+            OutputMode::Human => {
+                let mut lines = report
+                    .checks
+                    .iter()
+                    .map(|check| {
+                        let outcome = check.outcome.as_str();
+                        format!(
+                            "{}{}: gate `{}` on task `{}`: {}",
+                            outcome[..1].to_uppercase(),
+                            &outcome[1..],
+                            ids.short(&check.gate.id.to_string()),
+                            ids.short(&check.gate.task_id.to_string()),
+                            check.detail
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                if report.gh_missing {
+                    lines.push(GH_MISSING.to_owned());
+                }
+                lines.join("\n")
+            }
+            OutputMode::Plain => {
+                let mut lines = report
+                    .checks
+                    .iter()
+                    .map(|check| {
+                        format!(
+                            "{}\t{}\t{}\t{}",
+                            check.outcome.as_str(),
+                            check.gate.id,
+                            check.gate.task_id,
+                            plain_escape(&check.detail)
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                if report.gh_missing {
+                    lines.push("gh_missing".to_owned());
+                }
+                lines.join("\n")
+            }
+            OutputMode::Json => serde_json::to_string(&Envelope {
+                format_version: FORMAT_VERSION,
+                data: serde_json::json!({
+                    "action": "checked",
+                    "checks": report.checks,
+                    "gh_missing": report.gh_missing,
+                }),
             })?,
             OutputMode::Quiet => return Ok(None),
         };
@@ -1280,13 +1396,17 @@ pub struct PrimeList {
 }
 
 impl PrimeList {
-    /// Keep the first [`PRIME_LIST_LIMIT`] of `tasks`, with IDs from `ids`,
-    /// and count the rest.
-    pub fn new<'a>(tasks: impl IntoIterator<Item = &'a PlanningTask>, ids: &ShortIds) -> Self {
+    /// Keep the first [`PRIME_LIST_LIMIT`] of `tasks`, with IDs from `ids`
+    /// and each task's open gate count from `open_gates`, and count the
+    /// rest.
+    pub fn new<'a>(
+        tasks: impl IntoIterator<Item = &'a PlanningTask>, ids: &ShortIds, open_gates: &HashMap<TaskId, usize>,
+    ) -> Self {
         let mut list = Self { tasks: Vec::new(), more: 0 };
         for task in tasks {
             if list.tasks.len() < PRIME_LIST_LIMIT {
-                list.tasks.push(PrimeTask::new(task, ids));
+                let gates = open_gates.get(&task.id).copied().unwrap_or_default();
+                list.tasks.push(PrimeTask::new(task, ids, gates));
             } else {
                 list.more += 1;
             }
@@ -1329,10 +1449,13 @@ pub struct PrimeTask {
     pub assignee: Option<String>,
     /// The latest handoff note in full, or empty.
     pub handoff: String,
+    /// How many open gates the task has; JSON omits it at zero.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub open_gates: usize,
 }
 
 impl PrimeTask {
-    fn new(task: &PlanningTask, ids: &ShortIds) -> Self {
+    fn new(task: &PlanningTask, ids: &ShortIds, open_gates: usize) -> Self {
         let id = task.id.to_string();
         Self {
             id: ids.short(&id).to_owned(),
@@ -1341,13 +1464,20 @@ impl PrimeTask {
             priority: task.priority,
             assignee: task.assignee.clone(),
             handoff: task.handoff.clone(),
+            open_gates,
         }
     }
 
-    /// `- <id> <status> (<assignee>): <title>`.
+    /// `- <id> <status> (<assignee>) [<n> open gate(s)]: <title>`, with the
+    /// gate count only when the task has an open gate.
     fn open_line(&self) -> String {
+        let gates = match self.open_gates {
+            0 => String::new(),
+            1 => " [1 open gate]".to_owned(),
+            count => format!(" [{count} open gates]"),
+        };
         format!(
-            "- {} {}{}: {}",
+            "- {} {}{}{gates}: {}",
             self.id,
             self.status.as_str(),
             self.claim(),
@@ -1978,6 +2108,7 @@ impl PlanningTaskViewOutput for PlanningTaskView {
             lines.push(format!("Evidence: {}", indent_continuation(&self.task.evidence)));
         }
         lines.extend(self.notes.iter().map(human_task_note));
+        lines.extend(self.gates.iter().map(|gate| format!("Gate: {}", human_gate(gate, ids))));
         lines.join("\n")
     }
 
@@ -2021,6 +2152,7 @@ impl PlanningTaskViewOutput for PlanningTaskView {
                 .map(|ancestor| format!("inherited\t{}\t{ancestor}", blocker.task.id))
         }));
         lines.extend(self.notes.iter().map(plain_task_note));
+        lines.extend(self.gates.iter().map(plain_gate));
         lines.extend(
             self.readiness
                 .reasons
@@ -2094,6 +2226,11 @@ impl PlanningContextOutput for PlanningContext {
                 self.omitted_notes, self.task.id
             ));
         }
+        lines.extend(
+            self.gates
+                .iter()
+                .map(|gate| format!("Gate: {}", human_gate(gate, &ShortIds::default()))),
+        );
         lines.join("\n")
     }
 
@@ -2140,6 +2277,7 @@ impl PlanningContextOutput for PlanningContext {
         if self.omitted_notes > 0 {
             lines.push(format!("omitted_notes\t{}", self.omitted_notes));
         }
+        lines.extend(self.gates.iter().map(plain_gate));
         lines.extend(
             self.readiness
                 .reasons
@@ -2240,6 +2378,42 @@ fn human_task_note(note: &TaskNote) -> String {
 /// field of its own, such as `Ready: true`.
 fn indent_continuation(text: &str) -> Cow<'_, str> {
     if text.contains('\n') { Cow::Owned(text.replace('\n', "\n  ")) } else { Cow::Borrowed(text) }
+}
+
+/// Whether a count is zero, for `skip_serializing_if`.
+fn is_zero(value: &usize) -> bool {
+    *value == 0
+}
+
+/// A gate as one human line, `` `<id>` [<status>] <kind> <target> ``, with
+/// `, met <met-at>` after a met gate.
+fn human_gate(gate: &Gate, ids: &ShortIds) -> String {
+    let met = match (&gate.status, &gate.met_at) {
+        (GateStatus::Met, Some(met_at)) => format!(", met {met_at}"),
+        _ => String::new(),
+    };
+    format!(
+        "`{}` [{}] {} {}{met}",
+        ids.short(&gate.id.to_string()),
+        gate.status.as_str(),
+        gate.kind.as_str(),
+        gate.target
+    )
+}
+
+/// A gate as a plain line,
+/// `gate\t<id>\t<task-id>\t<kind>\t<target>\t<status>\t<met-at>`, with an
+/// empty `met-at` field while the gate is open.
+fn plain_gate(gate: &Gate) -> String {
+    format!(
+        "gate\t{}\t{}\t{}\t{}\t{}\t{}",
+        gate.id,
+        gate.task_id,
+        gate.kind.as_str(),
+        gate.target,
+        gate.status.as_str(),
+        gate.met_at.as_deref().unwrap_or_default()
+    )
 }
 
 /// A task note as a plain line, `note\t<created-at>\t<kind>\t<text>`, with an

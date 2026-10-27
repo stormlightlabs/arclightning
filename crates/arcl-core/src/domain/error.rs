@@ -102,6 +102,20 @@ pub enum DomainError {
     /// `result`.
     #[error("invalid task note kind `{value}`; use decision, observation, blocker or result")]
     InvalidTaskNoteKind { value: String },
+    /// A gate kind other than `pr`, `run` or `date`.
+    #[error("invalid gate kind `{value}`; use pr, run or date")]
+    InvalidGateKind { value: String },
+    /// A pull request or run gate whose target is not a GitHub URL of the
+    /// right shape. `shape` is the form the kind takes.
+    #[error("invalid {kind} URL `{}`; use {shape}", value.escape_debug())]
+    InvalidGateUrl {
+        kind: &'static str,
+        value: String,
+        shape: &'static str,
+    },
+    /// A date gate whose target is not a calendar date written `YYYY-MM-DD`.
+    #[error("invalid gate date `{}`; use a calendar date written YYYY-MM-DD", value.escape_debug())]
+    InvalidGateDate { value: String },
     #[error(transparent)]
     InvalidId(#[from] IdError),
 }

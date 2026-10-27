@@ -46,8 +46,9 @@ macro_rules! read_description {
 
 const INSTRUCTIONS: &str = "Arc Lightning tracks this project's tasks. Find work with `ready`, \
 claim it with `task_start`, read `context`, leave notes on decisions and findings with \
-`task_note`, then finish with `task_complete` or park it with `task_handoff`. `explain` says why a task is not ready. Record work outside the task with \
-`capture_create`. Every result is `{format_version, data}`; check the version before reading data.";
+`task_note`, make a task wait on a pull request, run or date with `gate_add`, then finish with \
+`task_complete` or park it with `task_handoff`. `explain` says why a task is not ready. Record work \
+outside the task with `capture_create`. Every result is `{format_version, data}`; check the version before reading data.";
 
 /// The Arc Lightning MCP server for the project that holds its directory.
 #[derive(Clone, Debug)]
@@ -432,6 +433,73 @@ impl ArclServer {
             let id = record_id::<TaskId>(database, &input.task_id)?;
             let note = database.add_task_note(id, input.kind, &input.text)?;
             Ok(TaskNoteData { action: "noted".to_owned(), note })
+        })
+        .await
+    }
+
+    /// Add an open gate to a task, like `arcl gate add`.
+    #[tool(
+        description = "Make a task wait on a pull request merging, a GitHub Actions run succeeding or a date \
+        arriving, like `arcl gate add`. The task is not ready while the gate is open; `gate_check` marks it met. \
+        A target of the wrong shape, or a completed or cancelled task, fails with `invalid_request`.",
+        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false),
+        meta = version_meta(FORMAT_VERSION)
+    )]
+    pub async fn gate_add(
+        &self, Parameters(input): Parameters<GateAddInput>, cancelled: CancellationToken,
+    ) -> Result<Json<Envelope<GateData>>, ToolError> {
+        let input = input?;
+        self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
+            let id = record_id::<TaskId>(database, &input.task_id)?;
+            let gate = database.add_gate(id, input.kind, &input.target)?;
+            Ok(GateData { action: "added".to_owned(), gate })
+        })
+        .await
+    }
+
+    /// List gates on one task or on every task, like `arcl gate list`.
+    #[tool(
+        description = read_description!("List the gates on one task, or on every task, open and met, like \
+        `arcl gate list`."),
+        annotations(read_only_hint = true, open_world_hint = false),
+        meta = version_meta(FORMAT_VERSION)
+    )]
+    pub async fn gate_list(
+        &self, Parameters(input): Parameters<GateScopeInput>, cancelled: CancellationToken,
+    ) -> Result<Json<Envelope<GateListData>>, ToolError> {
+        let input = input?;
+        self.call(Access::Read, FORMAT_VERSION, cancelled, move |database| {
+            let task = input
+                .task_id
+                .as_deref()
+                .map(|id| record_id::<TaskId>(database, id))
+                .transpose()?;
+            Ok(GateListData { gates: database.gates(task)? })
+        })
+        .await
+    }
+
+    /// Check open gates and mark met ones, like `arcl gate check`.
+    #[tool(
+        description = "Check the open gates on one task, or on every task, and mark the met ones, like \
+        `arcl gate check`. Date gates compare with today's UTC date. Pull request and run gates ask the GitHub \
+        CLI, `gh`; without it they are `skipped` and `gh_missing` is true. One gate's error is reported as its \
+        `error` outcome and never fails the call.",
+        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = true),
+        meta = version_meta(FORMAT_VERSION)
+    )]
+    pub async fn gate_check(
+        &self, Parameters(input): Parameters<GateScopeInput>, cancelled: CancellationToken,
+    ) -> Result<Json<Envelope<GateCheckData>>, ToolError> {
+        let input = input?;
+        self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
+            let task = input
+                .task_id
+                .as_deref()
+                .map(|id| record_id::<TaskId>(database, id))
+                .transpose()?;
+            let report = arcl_repo::gate::check_gates(database, task, &today_utc())?;
+            Ok(GateCheckData { action: "checked".to_owned(), checks: report.checks, gh_missing: report.gh_missing })
         })
         .await
     }

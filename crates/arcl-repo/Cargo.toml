@@ -4,11 +4,17 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+# Derive JSON Schemas for the gate check report, for adapters that publish it.
+schema = ["dep:schemars", "arcl-core/schema", "arcl-store/schema"]
+
 [dependencies]
 arcl-core = { path = "../arcl-core" }
 arcl-store = { path = "../arcl-store" }
 gix.workspace = true
+schemars = { workspace = true, optional = true }
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 sha2 = "0.10"
 toml.workspace = true

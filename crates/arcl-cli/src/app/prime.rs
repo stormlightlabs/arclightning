@@ -44,7 +44,8 @@ fn primer_loop() -> &'static str {
 }
 
 /// In-progress tasks, then parked tasks, then ready tasks, each list capped
-/// at [`PRIME_LIST_LIMIT`].
+/// at [`PRIME_LIST_LIMIT`]. An open task's line counts its open gates; a
+/// ready task has none.
 fn primer(database: &Database, renderer: &Renderer) -> CResult<Primer> {
     let ids = display_ids(database, renderer)?;
     let tasks = database.planning_tasks()?;
@@ -52,11 +53,17 @@ fn primer(database: &Database, renderer: &Renderer) -> CResult<Primer> {
         .into_iter()
         .flat_map(|status| tasks.iter().filter(move |task| task.status == status));
     let ready = database.ready_planning_tasks()?;
+    let mut open_gates = std::collections::HashMap::new();
+    for gate in database.gates(None)? {
+        if gate.status == GateStatus::Open {
+            *open_gates.entry(gate.task_id).or_default() += 1;
+        }
+    }
     Ok(Primer {
         initialized: true,
         work_loop: primer_loop(),
-        open: PrimeList::new(open, &ids),
-        ready: PrimeList::new(ready.iter(), &ids),
+        open: PrimeList::new(open, &ids, &open_gates),
+        ready: PrimeList::new(ready.iter(), &ids, &open_gates),
     })
 }
 

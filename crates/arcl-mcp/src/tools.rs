@@ -368,6 +368,29 @@ pub struct TaskNoteInput {
     pub text: String,
 }
 
+/// A gate to add to a task.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GateAddInput {
+    /// The task ID, `arcl-t-…`, or a short ID such as `535B`.
+    pub task_id: String,
+    /// What the gate waits for: `pr`, `run` or `date`.
+    pub kind: GateKind,
+    /// For `pr`, `https://github.com/OWNER/REPO/pull/NUMBER`; for `run`,
+    /// `https://github.com/OWNER/REPO/actions/runs/RUN_ID`; for `date`,
+    /// `YYYY-MM-DD`, met from the start of that day in UTC.
+    pub target: String,
+}
+
+/// The task whose gates to list or check, or none for every task.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GateScopeInput {
+    /// The task ID, `arcl-t-…`, or a short ID such as `535B`. Leave it out
+    /// for every task.
+    pub task_id: Option<String>,
+}
+
 /// A task to complete.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -465,6 +488,33 @@ pub struct TaskNoteData {
     pub action: String,
     /// The note as stored, with its timestamp.
     pub note: TaskNote,
+}
+
+/// A gate added to a task, as `arcl gate add` returns it.
+#[derive(Debug, JsonSchema, Serialize)]
+pub struct GateData {
+    /// `added`.
+    pub action: String,
+    /// The gate as stored, open.
+    pub gate: Gate,
+}
+
+/// Gates, as `arcl gate list` returns them.
+#[derive(Debug, JsonSchema, Serialize)]
+pub struct GateListData {
+    /// Each task's gates oldest first, tasks in ID order.
+    pub gates: Vec<Gate>,
+}
+
+/// A gate check, as `arcl gate check` returns it.
+#[derive(Debug, JsonSchema, Serialize)]
+pub struct GateCheckData {
+    /// `checked`.
+    pub action: String,
+    /// One entry per open gate checked.
+    pub checks: Vec<arcl_repo::gate::GateCheck>,
+    /// Whether `gh` was missing, so pull request and run gates were skipped.
+    pub gh_missing: bool,
 }
 
 /// A completed task, as `arcl task complete` returns it.

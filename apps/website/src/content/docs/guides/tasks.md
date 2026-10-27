@@ -107,6 +107,33 @@ completed. arcl commands only append notes; to change or remove one, edit the
 task file and run `arcl workspace sync`. `show` and the Task view list them newest
 first; `context` lists the 10 most recent.
 
+## Wait on a pull request, run or date
+
+A gate holds a task back until something outside arcl happens: a pull request
+merges, a CI run passes, or a date arrives.
+
+```sh
+arcl gate add arcl-t-01J... --pr https://github.com/acme/app/pull/42
+arcl gate add arcl-t-01J... --run https://github.com/acme/app/actions/runs/123456
+arcl gate add arcl-t-01J... --until 2026-11-15
+```
+
+While a gate is open, the task is not ready and `arcl explain` names the gate.
+Gates do not resolve on their own. Run `arcl gate check` to mark the met
+ones, for one task or for all:
+
+```sh
+arcl gate check
+```
+
+A date gate is met from the start of its date in UTC, with no network. Pull
+request and run gates ask the GitHub CLI, `gh`, so it must be installed and
+signed in. Without it, those gates stay open and the check says
+`gh not found; PR/run gates left open`. A pull request that closed without
+merging, or a run that failed, is reported as failed and stays open; remove
+or replace that gate. `arcl gate list` shows gates and `arcl gate remove`
+deletes one.
+
 ## Close parent tasks
 
 By default, a task cannot become terminal while a descendant is still open.

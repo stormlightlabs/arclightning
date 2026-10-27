@@ -6225,6 +6225,9 @@ fn prime_stays_within_its_size_budget() {
         run_json(dir, ["--json", "task", "handoff", &task, "--note", &note].as_ref());
         run_json(dir, ["--json", "task", "unpark", &task].as_ref());
         assert_success(&claim_output(dir, &task, Some(&assignee), None));
+        for _ in 0..10 {
+            add_gate(dir, &task, "--until", "2999-12-31");
+        }
     }
     for _ in 0..8 {
         let task = create_task(dir, &title, None);
@@ -6708,4 +6711,417 @@ fn workspace_import_normalizes_note_times_to_utc_and_refuses_others() {
         json(&shown.stdout)["data"]["notes"][0]["created_at"],
         "2026-10-27T10:00:00.250Z"
     );
+}
+
+/// Run `arcl` in `directory` with `args` and `PATH` set to `path`, and
+/// return its output whatever its status.
+fn arcl_with_path(directory: &Path, path: &std::ffi::OsStr, args: &[&str]) -> std::process::Output {
+    arcl_in(directory)
+        .env("PATH", path)
+        .args(args)
+        .output()
+        .expect("command runs")
+}
+
+/// An empty directory to use as `PATH`, so `gh` is not found.
+fn no_gh_path() -> TempDir {
+    tempdir().expect("temporary directory can be created")
+}
+
+/// Add a gate to `task` with `flag` and `target`, and return the gate's ID.
+fn add_gate(directory: &Path, task: &str, flag: &str, target: &str) -> String {
+    let added = run_json(directory, ["--json", "gate", "add", task, flag, target].as_ref());
+    assert_eq!(added["data"]["action"], "added");
+    assert_eq!(added["data"]["gate"]["status"], "open");
+    added["data"]["gate"]["id"].as_str().expect("gate ID").to_owned()
+}
+
+/// The JSON `gate check` writes in `directory` with `PATH` set to `path`.
+fn gate_check(directory: &Path, path: &std::ffi::OsStr, extra: &[&str]) -> Value {
+    let mut args = vec!["--json", "gate", "check"];
+    args.extend(extra);
+    let output = arcl_with_path(directory, path, &args);
+    assert_success(&output);
+    json(&output.stdout)
+}
+
+/// Each checked gate's ID and outcome, in report order.
+fn outcomes(report: &Value) -> Vec<(String, String)> {
+    report["data"]["checks"]
+        .as_array()
+        .expect("checks")
+        .iter()
+        .map(|check| {
+            (
+                check["gate"]["id"].as_str().expect("gate ID").to_owned(),
+                check["outcome"].as_str().expect("outcome").to_owned(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn a_gated_task_is_not_ready_and_explain_names_the_gate() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let task = create_task(dir, "Release notes", None);
+    let gate = add_gate(dir, &task, "--pr", "https://github.com/o/r/pull/7/");
+
+    let explained = run_json(dir, ["--json", "explain", &task].as_ref());
+    let readiness = &explained["data"]["readiness"];
+    assert_eq!(readiness["ready"], false);
+    assert_eq!(readiness["blocked"], true);
+    let reason = &readiness["reasons"][0];
+    assert_eq!(reason["kind"], "open_gate");
+    assert_eq!(reason["gate"]["id"], gate);
+    assert_eq!(reason["gate"]["kind"], "pr");
+    assert_eq!(reason["gate"]["target"], "https://github.com/o/r/pull/7");
+    assert_eq!(
+        reason["message"],
+        format!("gate `{gate}` waits for pull request `https://github.com/o/r/pull/7` to merge")
+    );
+
+    let human = arcl_in(dir).args(["explain", &task]).output().expect("explain runs");
+    let human = String::from_utf8(human.stdout).expect("UTF-8");
+    assert!(
+        human.contains("Reason: gate `") && human.contains("waits for pull request `https://github.com/o/r/pull/7`"),
+        "{human}"
+    );
+    assert!(human.contains("] pr https://github.com/o/r/pull/7"), "{human}");
+
+    assert_eq!(
+        run_json(dir, ["--json", "ready"].as_ref())["data"]["tasks"],
+        serde_json::json!([])
+    );
+    let next = run_json(dir, ["--json", "next", "--start"].as_ref());
+    assert!(next["data"]["task"].is_null(), "{next}");
+    let refused = refused(dir, &["--json", "task", "start", &task]);
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains(&gate)),
+        "{refused}"
+    );
+
+    let context = run_json(dir, ["--json", "context", &task].as_ref());
+    assert_eq!(context["data"]["gates"][0]["id"], gate);
+    let plain = arcl_in(dir)
+        .args(["--plain", "show", &task])
+        .output()
+        .expect("show runs");
+    let plain = String::from_utf8(plain.stdout).expect("UTF-8");
+    assert!(
+        plain.contains(&format!(
+            "gate\t{gate}\t{task}\tpr\thttps://github.com/o/r/pull/7\topen\t\n"
+        )),
+        "{plain}"
+    );
+
+    let removed = run_json(dir, ["--json", "gate", "remove", &gate[gate.len() - 6..]].as_ref());
+    assert_eq!(removed["data"]["action"], "removed");
+    assert_eq!(removed["data"]["gate"]["id"], gate);
+    let next = run_json(dir, ["--json", "next", "--start"].as_ref());
+    assert_eq!(next["data"]["task"]["id"], task);
+    let missing = arcl_in(dir)
+        .args(["--json", "gate", "remove", &gate])
+        .output()
+        .expect("remove runs");
+    assert_eq!(missing.status.code(), Some(5));
+}
+
+#[test]
+fn gate_add_refuses_bad_targets_and_closed_tasks() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let task = create_task(dir, "Work", None);
+    for (flag, target, expected) in [
+        ("--pr", "https://github.com/o/r/issues/7", "invalid pull request URL"),
+        (
+            "--pr",
+            "https://github.com/o/r/actions/runs/7",
+            "invalid pull request URL",
+        ),
+        ("--run", "https://github.com/o/r/pull/7", "invalid run URL"),
+        ("--until", "2026-02-30", "invalid gate date"),
+        ("--until", "next week", "invalid gate date"),
+    ] {
+        let error = refused(dir, &["--json", "gate", "add", &task, flag, target]);
+        assert!(
+            error["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains(expected)),
+            "{target}: {error}"
+        );
+    }
+    let both = arcl_in(dir)
+        .args([
+            "gate",
+            "add",
+            &task,
+            "--until",
+            "2026-11-01",
+            "--pr",
+            "https://github.com/o/r/pull/7",
+        ])
+        .output()
+        .expect("gate add runs");
+    assert!(!both.status.success());
+    let neither = arcl_in(dir)
+        .args(["gate", "add", &task])
+        .output()
+        .expect("gate add runs");
+    assert!(!neither.status.success());
+
+    run_json(dir, ["--json", "task", "complete", &task].as_ref());
+    let error = refused(dir, &["--json", "gate", "add", &task, "--until", "2026-11-01"]);
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("while it is `completed`")),
+        "{error}"
+    );
+    let gates = run_json(dir, ["--json", "gate", "list"].as_ref());
+    assert_eq!(gates["data"]["gates"], serde_json::json!([]));
+}
+
+#[test]
+fn date_gates_resolve_offline_against_today_in_utc() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let task = create_task(dir, "Dated", None);
+    let today = arcl_core::domain::today_utc();
+    let past = add_gate(dir, &task, "--until", "2000-01-01");
+    let on_today = add_gate(dir, &task, "--until", &today);
+    let future = add_gate(dir, &task, "--until", "2999-12-31");
+
+    // No `gh` on PATH: date gates need no network.
+    let path = no_gh_path();
+    let report = gate_check(dir, path.path().as_os_str(), &[]);
+    assert_eq!(report["data"]["action"], "checked");
+    assert_eq!(report["data"]["gh_missing"], false);
+    assert_eq!(
+        outcomes(&report),
+        [
+            (past.clone(), "met".to_owned()),
+            (on_today.clone(), "met".to_owned()),
+            (future.clone(), "waiting".to_owned()),
+        ]
+    );
+    let met_at = report["data"]["checks"][0]["gate"]["met_at"]
+        .as_str()
+        .expect("met time");
+    assert!(met_at.ends_with('Z'), "{met_at}");
+
+    let explained = run_json(dir, ["--json", "explain", &task].as_ref());
+    let reasons = explained["data"]["readiness"]["reasons"].as_array().expect("reasons");
+    assert_eq!(reasons.len(), 1);
+    assert_eq!(reasons[0]["gate"]["id"], future);
+    assert_eq!(reasons[0]["gate"]["target"], "2999-12-31");
+
+    // A second check leaves met gates alone and checks only the open one.
+    let again = gate_check(dir, path.path().as_os_str(), &[&task]);
+    assert_eq!(outcomes(&again), [(future.clone(), "waiting".to_owned())]);
+
+    let listed = arcl_in(dir).args(["gate", "list", &task]).output().expect("list runs");
+    let listed = String::from_utf8(listed.stdout).expect("UTF-8");
+    assert_eq!(listed.lines().count(), 3, "{listed}");
+    assert!(listed.contains("[met] date 2000-01-01, met "), "{listed}");
+    assert!(listed.contains("[open] date 2999-12-31 on task `"), "{listed}");
+
+    run_json(dir, ["--json", "gate", "remove", &future].as_ref());
+    assert_eq!(run_json(dir, ["--json", "next"].as_ref())["data"]["task"]["id"], task);
+    let human = arcl_with_path(dir, path.path().as_os_str(), &["gate", "check"]);
+    assert_eq!(String::from_utf8_lossy(&human.stdout), "No open gates.\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn pull_request_and_run_gates_ask_gh_and_report_each_gate() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let bin = tempdir().expect("temporary directory can be created");
+    let log = bin.path().join("gh.log");
+    let script = format!(
+        "#!/bin/sh\n\
+         echo \"$*\" >> '{}'\n\
+         case \"$*\" in\n\
+         'pr view https://github.com/o/r/pull/1 '*) echo '{{\"state\":\"MERGED\",\"mergedAt\":\"2026-10-27T10:00:00Z\"}}' ;;\n\
+         'pr view https://github.com/o/r/pull/2 '*) echo '{{\"state\":\"OPEN\",\"mergedAt\":null}}' ;;\n\
+         'pr view https://github.com/o/r/pull/3 '*) echo '{{\"state\":\"CLOSED\",\"mergedAt\":null}}' ;;\n\
+         'pr view https://github.com/o/r/pull/4 '*) echo 'GraphQL: Could not resolve to a PullRequest' >&2; exit 1 ;;\n\
+         'run view 11 '*) echo '{{\"status\":\"completed\",\"conclusion\":\"success\"}}' ;;\n\
+         'run view 12 '*) echo '{{\"status\":\"completed\",\"conclusion\":\"failure\"}}' ;;\n\
+         'run view 13 '*) echo '{{\"status\":\"in_progress\",\"conclusion\":\"\"}}' ;;\n\
+         *) echo \"unexpected: $*\" >&2; exit 2 ;;\n\
+         esac\n",
+        log.display()
+    );
+    let gh = bin.path().join("gh");
+    fs::write(&gh, script).expect("fake gh writes");
+    fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).expect("fake gh is executable");
+    let path = std::env::join_paths(
+        std::iter::once(bin.path().to_owned())
+            .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())),
+    )
+    .expect("PATH joins");
+
+    let task = create_task(dir, "Gated", None);
+    let mut expected = Vec::new();
+    for (number, outcome) in [(1, "met"), (2, "waiting"), (3, "failed"), (4, "error")] {
+        let gate = add_gate(dir, &task, "--pr", &format!("https://github.com/o/r/pull/{number}"));
+        expected.push((gate, outcome.to_owned()));
+    }
+    for (number, outcome) in [(11, "met"), (12, "failed"), (13, "waiting")] {
+        let gate = add_gate(
+            dir,
+            &task,
+            "--run",
+            &format!("https://github.com/o/r/actions/runs/{number}"),
+        );
+        expected.push((gate, outcome.to_owned()));
+    }
+
+    let report = gate_check(dir, &path, &[]);
+    assert_eq!(outcomes(&report), expected);
+    assert_eq!(report["data"]["gh_missing"], false);
+    let details = report["data"]["checks"]
+        .as_array()
+        .expect("checks")
+        .iter()
+        .map(|check| check["detail"].as_str().expect("detail").to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(details[0], "merged");
+    assert_eq!(details[2], "closed without merging");
+    assert!(
+        details[3].contains("Could not resolve to a PullRequest"),
+        "{}",
+        details[3]
+    );
+    assert_eq!(details[5], "run concluded failure");
+    assert_eq!(details[6], "run is in_progress");
+
+    let calls = fs::read_to_string(&log).expect("gh log reads");
+    assert!(
+        calls.contains("pr view https://github.com/o/r/pull/1 --json state,mergedAt\n"),
+        "{calls}"
+    );
+    assert!(
+        calls.contains("run view 11 --repo github.com/o/r --json status,conclusion\n"),
+        "{calls}"
+    );
+
+    // Only the gates still open are checked again.
+    let again = gate_check(dir, &path, &[]);
+    assert_eq!(again["data"]["checks"].as_array().map(Vec::len), Some(5));
+
+    let human = arcl_with_path(dir, &path, &["gate", "check", &task]);
+    assert_success(&human);
+    let human = String::from_utf8(human.stdout).expect("UTF-8");
+    assert!(human.contains("Waiting: gate `"), "{human}");
+    assert!(human.contains(": closed without merging\n"), "{human}");
+    assert!(human.contains("Error: gate `"), "{human}");
+}
+
+#[test]
+fn without_gh_pull_request_and_run_gates_stay_open() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let task = create_task(dir, "Gated", None);
+    let pr = add_gate(dir, &task, "--pr", "https://github.com/o/r/pull/1");
+    let run = add_gate(dir, &task, "--run", "https://github.com/o/r/actions/runs/2");
+    let date = add_gate(dir, &task, "--until", "2000-01-01");
+    let path = no_gh_path();
+
+    let report = gate_check(dir, path.path().as_os_str(), &[]);
+    assert_eq!(report["data"]["gh_missing"], true);
+    let mut found = outcomes(&report);
+    found.sort();
+    let mut expected = vec![
+        (pr.clone(), "skipped".to_owned()),
+        (run.clone(), "skipped".to_owned()),
+        (date, "met".to_owned()),
+    ];
+    expected.sort();
+    assert_eq!(found, expected);
+
+    let human = arcl_with_path(dir, path.path().as_os_str(), &["gate", "check"]);
+    assert_success(&human);
+    let human = String::from_utf8(human.stdout).expect("UTF-8");
+    assert!(human.ends_with("gh not found; PR/run gates left open\n"), "{human}");
+    let plain = arcl_with_path(dir, path.path().as_os_str(), &["--plain", "gate", "check"]);
+    let plain = String::from_utf8(plain.stdout).expect("UTF-8");
+    assert!(plain.contains(&format!("skipped\t{pr}\t{task}\t")), "{plain}");
+    assert!(plain.ends_with("gh_missing\n"), "{plain}");
+
+    let explained = run_json(dir, ["--json", "explain", &task].as_ref());
+    assert_eq!(
+        explained["data"]["readiness"]["reasons"].as_array().map(Vec::len),
+        Some(2)
+    );
+}
+
+#[test]
+fn gates_round_trip_through_workspace_files_at_format_four() {
+    let source = tempdir().expect("temporary directory can be created");
+    let dir = source.path();
+    run_json(dir, ["--json", "init", "--workspace"].as_ref());
+    let task = create_task(dir, "Gated", None);
+    let manifest = dir.join(".arcl/workspace/manifest.toml");
+    assert_eq!(
+        fs::read_to_string(&manifest).expect("manifest reads"),
+        "format-version = 1\n"
+    );
+
+    let gate = add_gate(dir, &task, "--until", "2000-01-01");
+    gate_check(dir, no_gh_path().path().as_os_str(), &[]);
+    let open = add_gate(dir, &task, "--pr", "https://github.com/o/r/pull/9");
+    assert_eq!(
+        fs::read_to_string(&manifest).expect("manifest reads"),
+        "format-version = 4\n"
+    );
+    let path = format!(".arcl/workspace/tasks/{task}.md");
+    let file = fs::read_to_string(dir.join(&path)).expect("task file reads");
+    assert!(
+        file.contains(&format!("[[gates]]\nid = \"{gate}\"\nkind = \"date\"\n")),
+        "{file}"
+    );
+    assert!(file.contains("status = \"met\"\n"), "{file}");
+    assert!(file.contains(&format!("id = \"{open}\"\nkind = \"pr\"\n")), "{file}");
+
+    let target = tempdir().expect("temporary directory can be created");
+    run_json(target.path(), ["--json", "init", "--workspace"].as_ref());
+    for file in [".arcl/workspace/manifest.toml", path.as_str()] {
+        fs::copy(dir.join(file), target.path().join(file)).expect("workspace file copies");
+    }
+    assert_success(
+        &arcl_in(target.path())
+            .args(["workspace", "import"])
+            .output()
+            .expect("import runs"),
+    );
+    let before = run_json(dir, ["--json", "gate", "list"].as_ref());
+    let after = run_json(target.path(), ["--json", "gate", "list"].as_ref());
+    assert_eq!(after, before);
+    let explained = run_json(target.path(), ["--json", "explain", &task].as_ref());
+    assert_eq!(explained["data"]["readiness"]["reasons"][0]["gate"]["id"], open);
+}
+
+#[test]
+fn prime_counts_the_open_gates_of_open_work() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let task = create_task(dir, "Waiting on review", None);
+    run_json(dir, ["--json", "task", "start", &task].as_ref());
+    add_gate(dir, &task, "--pr", "https://github.com/o/r/pull/1");
+    add_gate(dir, &task, "--until", "2999-12-31");
+
+    let output = prime_output(dir, &[]);
+    assert!(
+        output.contains(" in_progress [2 open gates]: Waiting on review\n"),
+        "{output}"
+    );
+    let primer = run_json(dir, ["--json", "prime"].as_ref());
+    assert_eq!(primer["data"]["open"]["tasks"][0]["open_gates"], 2);
 }

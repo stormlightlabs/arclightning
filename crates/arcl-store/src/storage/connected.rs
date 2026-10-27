@@ -9,10 +9,12 @@ use super::{Result, StorageError, releases};
 use arcl_core::domain::*;
 
 mod execution;
+mod gates;
 mod plan_ops;
 mod promotions;
 
 pub use execution::*;
+pub use gates::*;
 pub use plan_ops::*;
 pub use promotions::{CapturePromotionInput, CapturePromotionRecord, CapturePromotionResult, CaptureTaskPromotion};
 
@@ -41,6 +43,9 @@ pub struct ConnectedGraph {
     /// Task notes, grouped by task in task ID order, each task's notes
     /// oldest first.
     pub task_notes: Vec<TaskNote>,
+    /// Task gates, grouped by task in task ID order, each task's gates
+    /// oldest first.
+    pub gates: Vec<Gate>,
     /// Markdown notes.
     pub notes: Vec<Note>,
     /// Named releases.
@@ -240,6 +245,7 @@ pub fn graph(connection: &Connection) -> Result<ConnectedGraph> {
         tasks: planning_tasks(connection, project_id)?,
         dependencies: planning_dependencies(connection, project_id)?,
         task_notes: task_notes(connection, project_id)?,
+        gates: gates(connection, project_id)?,
         notes: notes(connection, project_id)?,
         releases: releases::list(connection)?,
         release_memberships: release_memberships(connection, project_id)?,

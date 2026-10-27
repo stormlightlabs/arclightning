@@ -660,6 +660,55 @@ pub(super) fn exec_dependency(command: DependencyCommand, renderer: &Renderer) -
     write_output(message)
 }
 
+pub(super) fn exec_gate(command: GateCommand, renderer: &Renderer) -> anyhow::Result<()> {
+    write_output(run_gate(command, renderer).map_err(ApplicationError::from_command)?)
+}
+
+/// Run one `arcl gate` command and render its result.
+fn run_gate(command: GateCommand, renderer: &Renderer) -> CResult<Option<String>> {
+    let rendered = |result: Result<Option<String>, OutputError>| {
+        result.map_err(|error| CommandError::InvalidFilter { message: error.to_string() })
+    };
+    match command {
+        GateCommand::Add { task_id, target } => {
+            let (kind, value) = match target {
+                GateTargetArgs { pr: Some(url), .. } => (GateKind::Pr, url),
+                GateTargetArgs { run: Some(url), .. } => (GateKind::Run, url),
+                GateTargetArgs { until: Some(date), .. } => (GateKind::Date, date),
+                GateTargetArgs { .. } => unreachable!("clap requires one gate target"),
+            };
+            let task_id = parse_task_id(&task_id)?;
+            let mut database = open_database()?;
+            let gate = database.add_gate(task_id, kind, &value)?;
+            let ids = display_ids(&database, renderer)?;
+            rendered(renderer.render_gate("added", &gate, &ids))
+        }
+        GateCommand::List { task_id } => {
+            let task_id = task_id.as_deref().map(parse_task_id).transpose()?;
+            let database = open_database()?;
+            let gates = database.gates(task_id)?;
+            let ids = display_ids(&database, renderer)?;
+            rendered(renderer.render_gates(&gates, &ids))
+        }
+        GateCommand::Remove { gate_id } => {
+            let gate_id = parse_id::<GateId>(&gate_id)?;
+            let mut database = open_database()?;
+            // Short IDs are computed before the gate goes, so the output
+            // names it as the user saw it.
+            let ids = display_ids(&database, renderer)?;
+            let gate = database.remove_gate(gate_id)?;
+            rendered(renderer.render_gate("removed", &gate, &ids))
+        }
+        GateCommand::Check { task_id } => {
+            let task_id = task_id.as_deref().map(parse_task_id).transpose()?;
+            let mut database = open_database()?;
+            let report = arcl_repo::gate::check_gates(&mut database, task_id, &today_utc())?;
+            let ids = display_ids(&database, renderer)?;
+            rendered(renderer.render_gate_check(&report, &ids))
+        }
+    }
+}
+
 pub(super) fn exec_note(command: NoteCommand, renderer: &Renderer) -> anyhow::Result<()> {
     let message = match command {
         NoteCommand::Create { title, body } => {

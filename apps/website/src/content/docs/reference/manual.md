@@ -25,7 +25,8 @@ A full record ID is `arcl-<kind>-<ULID>`, such as
 `arcl-t-01M5VDDD42HZQ1FEN49X80GBA5`. Every command that takes a record ID also
 takes a short ID: the end of the ULID, at least 4 characters, such as `GBA5`.
 Put the kind and a dash in front to match only that kind: `t-GBA5`. The kinds
-are `c`, `r`, `s`, `pl`, `ph`, `t` and `n`. Letters match in either case.
+are `c`, `r`, `s`, `pl`, `ph`, `t`, `n` and `g`, for gates. Letters match in
+either case.
 
 A command that expects one kind, such as `task start` or `--spec`, matches a
 short ID without a kind only against records of that kind.
@@ -235,6 +236,60 @@ not ready before the command and are ready after it. Plain output prints the
 task ID, then a `subtask<TAB><id>` line for each completed subtask and an
 `unblocked<TAB><id>` line for each task it made ready.
 
+## Gates
+
+A gate makes a task wait on something outside arcl. An open gate keeps its
+task from being ready, and only `gate check` marks it met.
+
+| Command                                  | Purpose                                                    |
+| ---------------------------------------- | ---------------------------------------------------------- |
+| `arcl gate add <task-id> --pr <URL>`     | Wait for a pull request to merge.                          |
+| `arcl gate add <task-id> --run <URL>`    | Wait for a GitHub Actions run to succeed.                  |
+| `arcl gate add <task-id> --until <DATE>` | Wait until a date, `YYYY-MM-DD`, arrives in UTC.           |
+| `arcl gate list [<task-id>]`             | List gates on one task, or on every task, open and met.    |
+| `arcl gate remove <gate-id>`             | Remove a gate, open or met.                                |
+| `arcl gate check [<task-id>]`            | Check open gates and mark the met ones.                    |
+
+`gate add` takes exactly one of `--pr`, `--run` and `--until`. A pull request
+URL is `https://<host>/<owner>/<repo>/pull/<number>` and a run URL
+`https://<host>/<owner>/<repo>/actions/runs/<id>`; a trailing slash is
+dropped and the host lowercased. A date must be a real calendar date. Other
+targets, and a completed or cancelled task, are refused with exit code `3`.
+Gate IDs are `arcl-g-<ULID>`, and take short IDs such as `g-535B`.
+
+An open gate adds an `open_gate` readiness reason, such as
+``gate `arcl-g-…` waits for pull request `https://…/pull/7` to merge``, and
+sets `blocked`. In JSON the reason carries `gate` with the gate's `id`,
+`kind`, `target` and `status`. `ready`, `next`, `next --start` and `start`
+without `--force` all respect it. A gate holds back only its own task, not its
+children.
+
+`gate check` checks every open gate in scope:
+
+| Kind   | Met when                                                | Asks                                                                 |
+| ------ | ------------------------------------------------------- | -------------------------------------------------------------------- |
+| `date` | today's UTC date is on or after the gate's date         | nothing; it needs no network                                         |
+| `pr`   | the pull request merged                                 | `gh pr view <url> --json state,mergedAt`                             |
+| `run`  | the run completed with conclusion `success`             | `gh run view <id> --repo <host/owner/repo> --json status,conclusion` |
+
+Each gate's outcome is `met`, `waiting`, `failed` (a pull request closed
+without merging, or a run that finished without succeeding), `error` (`gh`
+failed or printed something unreadable) or `skipped`. Only `met` changes the
+gate. When `gh` is not on `PATH`, pull request and run gates are `skipped` and
+the check reports `gh not found; PR/run gates left open`. One gate's error
+never fails the check, which exits `0` unless the database fails.
+
+Human output prints one line per checked gate, such as
+``Met: gate `QYF6` on task `H3TN`: merged``, or `No open gates.`. Plain output
+prints `<outcome><TAB><gate-id><TAB><task-id><TAB><detail>` per gate, then
+`gh_missing` when it applies. JSON returns `{action: "checked", checks,
+gh_missing}`, where each check has `gate`, `outcome` and `detail`. In JSON a
+gate has `id`, `task_id`, `kind`, `target`, `status`, `created_at` and, once
+met, `met_at`. `gate add` and `gate remove` return `{action, gate}` and
+`gate list` returns `{gates}`. Plain output prints a gate as
+`gate<TAB><id><TAB><task-id><TAB><kind><TAB><target><TAB><status><TAB><met-at>`,
+which `show` and `context` also print for each gate on the task.
+
 ## Inspection
 
 | Command                                                              | Purpose                                                            |
@@ -271,10 +326,13 @@ handoff, then the first ready tasks, then a pointer to
 `and K more` and the command that lists the rest. Titles and handoff lines are
 cut to 80 bytes and assignees to 40, so the output stays within 40 lines and
 4 KiB. Control characters in titles and handoffs print escaped, as `\x1b`.
+An open task with open gates shows their count after its assignee, as
+`[2 open gates]`.
 `--plain` prints the same text with full IDs. `--json` returns `initialized`
 as `true`, `loop`, the loop as Markdown, and `open` and `ready`, each with
 `tasks` and `more`. Each task has `id`, `title`, `status`, `priority`,
-`assignee` when set, and the full `handoff`, all unescaped.
+`assignee` when set, the full `handoff`, all unescaped, and `open_gates` when
+it has any.
 
 Outside an initialized project, or where `.arcl/arcl.db` is missing, `prime`
 prints the one-line message other commands fail with there, which says to run
@@ -459,7 +517,7 @@ record's other fields stay editable.
 
 | Kind    | Fields only a command changes           | Commands                                                 |
 | ------- | --------------------------------------- | -------------------------------------------------------- |
-| task    | `status`, `handoff`, `evidence`, `assignee`, `notes` | `arcl task start`, `park`, `unpark`, `handoff`, `complete`, `cancel`, `note` |
+| task    | `status`, `handoff`, `evidence`, `assignee`, `notes`, `gates` | `arcl task start`, `park`, `unpark`, `handoff`, `complete`, `cancel`, `note`; `arcl gate` |
 | capture | `status`, `promoted-to`                 | `arcl capture promote`, `discard`                        |
 | spec    | `status`, `source-capture`              | `arcl spec complete`, `cancel`; `arcl capture promote`   |
 | plan    | `status`                                | `arcl plan complete`, `cancel`                           |

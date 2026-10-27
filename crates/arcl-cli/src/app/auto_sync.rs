@@ -99,6 +99,7 @@ pub(super) fn command_access(command: Option<&Command>) -> Access {
             TaskCommand::Show { .. } | TaskCommand::List | TaskCommand::Explain { .. } | TaskCommand::Context { .. }
         )),
         Some(Command::Dependency { command }) => read_when(matches!(command, DependencyCommand::List)),
+        Some(Command::Gate { command }) => read_when(matches!(command, GateCommand::List { .. })),
         // Each applied edit takes the lock for itself, as `serve` does.
         Some(Command::Web { command: WebCommand::Apply { .. } }) => Access::Untracked,
         Some(Command::Web { command: WebCommand::Export { .. } }) => Access::Read,

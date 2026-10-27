@@ -1,6 +1,7 @@
 mod capture;
 mod dependency;
 mod error;
+mod gate;
 mod id;
 mod lifecycle;
 mod membership;
@@ -19,9 +20,10 @@ pub use dependency::{
     EdgeViolation, Kinship, TaskDependency, caused_violation, partition_violations, validate_blocker_edges,
 };
 pub use error::{DomainError, MAX_ASSIGNEE_CHARS, validate_assignee, validate_position, validate_title};
+pub use gate::{Gate, GateKind, GateStatus, GithubUrl, is_calendar_date, today_utc, validate_gate_target};
 pub use id::{
-    CaptureId, EpicId, IdError, IdeaId, MilestoneId, NoteId, PhaseId, PlanId, PrefixedId, ProjectId, ReleaseId, SpecId,
-    TaskId,
+    CaptureId, EpicId, GateId, IdError, IdeaId, MilestoneId, NoteId, PhaseId, PlanId, PrefixedId, ProjectId, ReleaseId,
+    SpecId, TaskId,
 };
 pub use lifecycle::{ContainerAction, ContainerStatus, TaskAction, TaskPriority, TaskStatus};
 pub use membership::{

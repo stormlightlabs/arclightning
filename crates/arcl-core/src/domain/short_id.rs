@@ -25,7 +25,7 @@ const ULID_LEN: usize = 26;
 
 /// The kinds a short ID can name, as they appear in full IDs: `t` in
 /// `arcl-t-…`.
-const KINDS: [&str; 7] = ["c", "r", "s", "pl", "ph", "t", "n"];
+const KINDS: [&str; 8] = ["c", "r", "s", "pl", "ph", "t", "n", "g"];
 
 /// The Crockford base32 alphabet ULIDs use.
 const CROCKFORD: &str = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -43,7 +43,7 @@ pub enum ShortIdError {
     #[error("`{input}` is not a record ID; give a full ID or the end of one, such as `535B` or `t-535B`")]
     Invalid { input: String },
     /// A kind before the dash that no record ID uses.
-    #[error("short ID `{input}` names unknown kind `{kind}`; use c, r, s, pl, ph, t or n")]
+    #[error("short ID `{input}` names unknown kind `{kind}`; use c, r, s, pl, ph, t, n or g")]
     UnknownKind { input: String, kind: String },
     /// The input matches the start of a record's ULID, not only its end.
     /// `matches` lists the records whose ULIDs start with it.

@@ -82,6 +82,11 @@ pub enum Command {
         #[command(subcommand)]
         command: DependencyCommand,
     },
+    /// Make a task wait on a pull request, a CI run or a date.
+    Gate {
+        #[command(subcommand)]
+        command: GateCommand,
+    },
     /// Create and manage Markdown notes.
     Note {
         #[command(subcommand)]
@@ -692,6 +697,34 @@ pub enum DependencyCommand {
     List,
 }
 
+/// Gate commands. A gate keeps its task from being ready until `gate check`
+/// finds it met.
+#[derive(Clone, Debug, Subcommand)]
+pub enum GateCommand {
+    /// Add an open gate to a task.
+    Add {
+        /// The task to hold back.
+        task_id: String,
+        #[command(flatten)]
+        target: GateTargetArgs,
+    },
+    /// List gates on one task, or on every task.
+    List {
+        /// The task whose gates to list.
+        task_id: Option<String>,
+    },
+    /// Remove a gate, open or met.
+    Remove {
+        /// The gate ID, `arcl-g-…`, or a short ID such as `g-535B`.
+        gate_id: String,
+    },
+    /// Check open gates on one task, or on every task, and mark met ones.
+    Check {
+        /// The task whose gates to check.
+        task_id: Option<String>,
+    },
+}
+
 /// Markdown note commands.
 #[derive(Clone, Debug, Subcommand)]
 pub enum NoteCommand {
@@ -813,6 +846,23 @@ pub enum WorkspaceCommand {
         #[arg(required = true, value_name = "PATH")]
         paths: Vec<PathBuf>,
     },
+}
+
+/// What a new gate waits for. Exactly one is required.
+#[derive(Args, Clone, Debug)]
+#[group(required = true, multiple = false)]
+pub struct GateTargetArgs {
+    /// Wait for this pull request to merge, given as
+    /// `https://github.com/OWNER/REPO/pull/NUMBER`.
+    #[arg(long, value_name = "URL")]
+    pub pr: Option<String>,
+    /// Wait for this GitHub Actions run to succeed, given as
+    /// `https://github.com/OWNER/REPO/actions/runs/RUN_ID`.
+    #[arg(long, value_name = "URL")]
+    pub run: Option<String>,
+    /// Wait until this date, YYYY-MM-DD, arrives in UTC.
+    #[arg(long, value_name = "DATE")]
+    pub until: Option<String>,
 }
 
 /// Options that choose what `arcl tree` shows.

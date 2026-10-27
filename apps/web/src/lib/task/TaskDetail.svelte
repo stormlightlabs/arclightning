@@ -69,6 +69,7 @@
   import {
     blockersOf,
     copyLabel,
+    gateKindLabel,
     noteTime,
     propertiesOf,
     reasonSegments,
@@ -119,6 +120,7 @@
   let task = $derived(detail.task);
   let titles = $derived(titlesOf(detail));
   let notes = $derived(detail.notes ?? []);
+  let gates = $derived(detail.gates ?? []);
   let blockers = $derived(blockersOf(detail));
   let reasons = $derived(detail.readiness.reasons);
   let reasonCount = $derived(reasons.length === 1 ? "1 reason" : `${reasons.length} reasons`);
@@ -627,6 +629,33 @@
       {/if}
     </section>
 
+    <section aria-labelledby="task-gates">
+      <h2 id="task-gates">Gates</h2>
+      {#if gates.length > 0}
+        <ul class="gates">
+          {#each gates as gate (gate.id)}
+            <li class:met={gate.status === "met"}>
+              <span class="gate-kind">{gateKindLabel(gate.kind)}</span>
+              {#if gate.kind === "date"}
+                <span class="gate-target">{gate.target}</span>
+              {:else}
+                <a class="gate-target" href={gate.target} target="_blank" rel="noopener noreferrer">{gate.target}</a>
+              {/if}
+              <span class="gate-status">
+                {#if gate.status === "met" && gate.met_at}
+                  Met <time datetime={gate.met_at}>{noteTime(gate.met_at)}</time>
+                {:else}
+                  Open
+                {/if}
+              </span>
+            </li>
+          {/each}
+        </ul>
+      {:else}
+        <p class="muted">No gates.</p>
+      {/if}
+    </section>
+
     <section aria-labelledby="task-activity">
       <h2 id="task-activity">Activity</h2>
       <div class="entry" aria-labelledby="task-handoff">
@@ -857,6 +886,29 @@
   }
   .entry + .entry {
     margin-top: var(--arcl-space-2);
+  }
+  .gates {
+    display: grid;
+    gap: var(--arcl-space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .gates li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--arcl-space-2);
+    align-items: baseline;
+  }
+  .gate-kind {
+    font-weight: 600;
+  }
+  .gate-target {
+    overflow-wrap: anywhere;
+  }
+  .gate-status {
+    color: var(--arcl-text-muted);
+    font-size: var(--arcl-type-xs);
   }
   .notes {
     display: grid;

@@ -880,6 +880,78 @@ mod tests {
     }
 
     #[test]
+    fn gates_move_the_manifest_to_version_four_and_round_trip() {
+        let mut project = Project::synced();
+        let manifest = PathBuf::from(MANIFEST);
+        let project_id = project.database.project().expect("project exists").id;
+        let task = project
+            .database
+            .create_planning_task(arcl_store::PlanningTaskCreate {
+                project_id,
+                spec_id: None,
+                plan_id: None,
+                phase_id: None,
+                parent_id: None,
+                title: "Task".to_owned(),
+                body: String::new(),
+                priority: arcl_core::domain::TaskPriority::Normal,
+                position: 0,
+            })
+            .expect("task creates");
+        project.sync().expect("sync succeeds");
+        assert_eq!(project.read(&manifest), "format-version = 1\n", "no gate");
+
+        let gate = project
+            .database
+            .add_gate(
+                task.id,
+                arcl_core::domain::GateKind::Pr,
+                "https://github.com/o/r/pull/3",
+            )
+            .expect("gate adds");
+        project.sync().expect("sync succeeds");
+        assert_eq!(project.read(&manifest), "format-version = 4\n", "a gate");
+        let path = PathBuf::from(format!("tasks/{}.md", task.id));
+        let file = project.read(&path);
+        assert!(
+            file.contains(&format!(
+                "[[gates]]\nid = \"{}\"\nkind = \"pr\"\ntarget = \"https://github.com/o/r/pull/3\"\n\
+                 status = \"open\"\ncreated-at = \"{}\"\n",
+                gate.id, gate.created_at
+            )),
+            "{file}"
+        );
+
+        // A gate met in the file imports with its time.
+        let met = file.replacen(
+            "status = \"open\"",
+            "status = \"met\"\nmet-at = \"2099-01-01T00:00:00.000Z\"",
+            1,
+        );
+        fs::write(project.root.path().join(&path), met).expect("task file writes");
+        project.sync().expect("sync succeeds");
+        let gates = project.database.gates(Some(task.id)).expect("gates read");
+        assert_eq!(gates.len(), 1);
+        assert_eq!(gates[0].status, arcl_core::domain::GateStatus::Met);
+        assert_eq!(gates[0].met_at.as_deref(), Some("2099-01-01T00:00:00.000Z"));
+        assert!(
+            project
+                .database
+                .planning_task_view(task.id)
+                .expect("view reads")
+                .readiness
+                .ready
+        );
+
+        // Removing the last gate keeps the version the workspace has.
+        project.database.remove_gate(gate.id).expect("gate removes");
+        project.sync().expect("sync succeeds");
+        assert_eq!(project.read(&manifest), "format-version = 4\n");
+        assert!(!project.read(&path).contains("[[gates]]"));
+        assert!(project.sync().expect("repeat sync succeeds").is_empty());
+    }
+
+    #[test]
     fn a_version_two_manifest_from_the_workspace_is_kept() {
         let mut project = Project::synced();
         let manifest = PathBuf::from(MANIFEST);
