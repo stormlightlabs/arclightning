@@ -28,13 +28,14 @@ contract. The packages have no ESLint setup today, so it needs one first.
 Acceptance criteria:
 
 - [x] Every remaining `interface` in `apps/web` and `packages/ui` is one a
-      class implements
+      class implements, or a global augmentation in `app.d.ts` that needs
+      declaration merging
 - [x] `AGENTS.md` states the rule
 - [x] No behaviour changes; type checks and tests pass unchanged
 
 Verification:
 
 - `grep -rn 'interface ' apps/web/src packages/ui/src` lists only class
-  contracts
+  contracts and the `app.d.ts` augmentations
 - `pnpm check`, `pnpm test`
 - `just check`
