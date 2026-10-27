@@ -262,7 +262,13 @@ parts, and an empty project prints none.
 
 `--style full` draws the same tree with every phase unfolded. Each record line
 ends with the record's short ID, aligned right two spaces past the widest
-record line, counted in characters. Headings and the footer carry no ID.
+record line, counted in terminal columns, so a wide character such as `日`
+counts as two. Every line pads to that widest line whatever the terminal's
+width, so one long title widens the whole view. Headings and the footer carry
+no ID.
+
+Terminals that draw East Asian Ambiguous characters double-width, common in
+CJK locales, misalign the marks and box lines. Use `--ascii` there.
 
 `--style outline` prints a `STATUS`, `ID` and `TITLE` header, then one row per
 record, with no box characters and no marks:

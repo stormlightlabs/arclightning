@@ -7,6 +7,7 @@ use std::{
 use assert_cmd::Command;
 use serde_json::Value;
 use tempfile::{TempDir, tempdir};
+use unicode_width::UnicodeWidthStr;
 
 /// Git variables that point a command at another repository, index or object
 /// store. A Git hook in a linked worktree exports an absolute `GIT_DIR` and
@@ -1244,11 +1245,8 @@ fn tree_styles_print_full_and_outline_views() {
         lines[1].starts_with("├── ◐ Active child") && lines[1].ends_with(&active_short),
         "{full}"
     );
-    let width = lines[0].chars().count();
-    assert!(
-        lines.iter().all(|line| line.chars().count() == width),
-        "IDs align:\n{full}"
-    );
+    let width = lines[0].width();
+    assert!(lines.iter().all(|line| line.width() == width), "IDs align:\n{full}");
     let ascii = stdout_of(
         dir,
         &["--color", "never", "tree", "--style", "full", "--ascii", "--depth", "1"],

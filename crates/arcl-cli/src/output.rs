@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use owo_colors::{OwoColorize, Stream};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use unicode_width::UnicodeWidthStr;
 
 use crate::cli::{ColorChoice, TreeStyle};
 use arcl_core::domain::{
@@ -1348,9 +1349,8 @@ struct TreeChars {
 struct TreeLine<'a> {
     /// The record the line draws, or `None` for a heading or a folded run.
     record: Option<&'a ConnectedTreeNode>,
-    /// The connectors before the text, empty at the top level.
-    prefix: String,
-    /// The mark, title and suffixes, or the heading or folded run.
+    /// The connectors, then the mark, title and suffixes, or the heading or
+    /// folded run.
     text: String,
     /// The levels below the top level, or below a section heading, that
     /// `--style outline` indents the title by.
@@ -1408,7 +1408,7 @@ fn human_tree(nodes: &[ConnectedTreeNode], view: TreeView) -> String {
         .partition(|node| !view.rooted && tree_section(node.kind).is_some());
     let mut lines = Vec::new();
     for node in records {
-        lines.push(TreeLine { record: Some(node), prefix: String::new(), text: node.human_line(view), indent: 0 });
+        lines.push(TreeLine { record: Some(node), text: node.human_line(view), indent: 0 });
         push_children(&mut lines, &node.children, "", 2, 1, view);
     }
     if !view.rooted && view.all {
@@ -1419,13 +1419,13 @@ fn human_tree(nodes: &[ConnectedTreeNode], view: TreeView) -> String {
                 .filter(|node| node.kind == kind)
                 .collect::<Vec<_>>();
             if !members.is_empty() {
-                lines.push(TreeLine { record: None, prefix: String::new(), text: heading.to_owned(), indent: 0 });
+                lines.push(TreeLine { record: None, text: heading.to_owned(), indent: 0 });
                 push_children(&mut lines, members, "", 1, 1, view);
             }
         }
     }
     let mut output = match view.style {
-        TreeStyle::Folded => lines.into_iter().map(|line| line.prefix + &line.text).collect(),
+        TreeStyle::Folded => lines.into_iter().map(|line| line.text).collect(),
         TreeStyle::Full => full_lines(lines),
         TreeStyle::Outline => outline_lines(&lines),
     };
@@ -1458,8 +1458,7 @@ fn push_children<'a>(
             TreeItem::Record(node) => {
                 lines.push(TreeLine {
                     record: Some(node),
-                    prefix: format!("{prefix}{connector}"),
-                    text: node.human_line(view),
+                    text: format!("{prefix}{connector}{}", node.human_line(view)),
                     indent,
                 });
                 let below = format!("{prefix}{}", if last { chars.blank } else { chars.pipe });
@@ -1467,8 +1466,7 @@ fn push_children<'a>(
             }
             TreeItem::Folded(run) => lines.push(TreeLine {
                 record: None,
-                prefix: format!("{prefix}{connector}"),
-                text: folded_line(&run, view),
+                text: format!("{prefix}{connector}{}", folded_line(&run, view)),
                 indent,
             }),
         }
@@ -1476,27 +1474,21 @@ fn push_children<'a>(
 }
 
 /// The `--style full` lines: each record line padded to the widest record
-/// line, measured in characters, then two spaces and its short ID aligned
-/// right. Headings keep no ID.
+/// line, measured in terminal columns, then two spaces and its short ID
+/// aligned right. Headings keep no ID. East Asian Ambiguous characters count
+/// as one column.
 fn full_lines(lines: Vec<TreeLine>) -> Vec<String> {
     let records = lines.iter().filter_map(|line| line.record.map(|node| (line, node)));
-    let width = records
-        .clone()
-        .map(|(line, _)| line.prefix.chars().count() + line.text.chars().count())
-        .max()
-        .unwrap_or(0);
-    let id_width = records.map(|(_, node)| node.id.chars().count()).max().unwrap_or(0);
+    let width = records.clone().map(|(line, _)| line.text.width()).max().unwrap_or(0);
+    let id_width = records.map(|(_, node)| node.id.width()).max().unwrap_or(0);
     lines
         .into_iter()
-        .map(|line| {
-            let text = line.prefix + &line.text;
-            match line.record {
-                Some(node) => {
-                    let pad = width - text.chars().count();
-                    format!("{text}{:pad$}  {:>id_width$}", "", node.id)
-                }
-                None => text,
+        .map(|line| match line.record {
+            Some(node) => {
+                let pad = width - line.text.width();
+                format!("{}{:pad$}  {:>id_width$}", line.text, "", node.id)
             }
+            None => line.text,
         })
         .collect()
 }
@@ -2567,6 +2559,20 @@ Releases
 |-- o v0.1.0    17
 `-- o v0.2.0    18"
         );
+    }
+
+    #[test]
+    fn full_tree_measures_wide_titles_in_terminal_columns() {
+        let mut spec = node(
+            "spec",
+            "日本語のタスク",
+            StatusMark::Active,
+            vec![node("task", "Plain", StatusMark::Waiting, Vec::new())],
+        );
+        spec.id = "1".to_owned();
+        spec.children[0].id = "2".to_owned();
+        let full = TreeView { style: TreeStyle::Full, ..TreeView::default() };
+        assert_eq!(human(&[spec], full), "◐ 日本語のタスク  1\n└── ○ Plain       2");
     }
 
     #[test]

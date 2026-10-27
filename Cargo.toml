@@ -28,3 +28,4 @@ tokio = { version = "1", features = ["macros", "rt"] }
 tokio-util = "0.7"
 toml = "1.1"
 ulid = { version = "3", features = ["serde"] }
+unicode-width = "0.2"
