@@ -110,7 +110,7 @@ describe("TaskDetail", () => {
   it("expands or collapses the properties panel with its state", () => {
     const open = show({ panelOpen: true });
     expect(open).toContain('aria-expanded="true"');
-    expect(slice(open, "<dl", "</dl>")).not.toContain("hidden");
+    expect(slice(open, "<dl", ">")).not.toContain("hidden");
     expect(open).toContain('href="/tasks/t-10">T10: Add the MCP server</a></dd>');
     const closed = show({ panelOpen: false });
     expect(closed).toContain('aria-expanded="false"');

@@ -12,6 +12,10 @@
     status?: RecordStatus;
     /** Show the value as a priority badge. */
     priority?: Priority;
+    /** Show the value as a record ID with a copy button. */
+    copy?: boolean;
+    /** The copy button's accessible name; defaults to "Copy <label>". */
+    copyLabel?: string;
   }
 
   /** Props for a record's collapsible properties panel. */
@@ -26,6 +30,7 @@
 </script>
 
 <script lang="ts">
+  import CopyId from "./CopyId.svelte";
   import PriorityBadge from "./PriorityBadge.svelte";
   import StatusBadge from "./StatusBadge.svelte";
 
@@ -54,6 +59,8 @@
             <span class="arcl-properties__none">None</span>
           {:else if property.status}
             <StatusBadge status={property.status} />
+          {:else if property.copy}
+            <CopyId id={property.value} label={property.copyLabel ?? `Copy ${property.label}`} />
           {:else if property.priority}
             <PriorityBadge priority={property.priority} />
           {:else if property.href}

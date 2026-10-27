@@ -243,3 +243,22 @@ test("the artifact asks to be opened in claude.ai when it has no database", asyn
   await expect(page.getByRole("heading", { name: "Open this page in claude.ai" })).toBeVisible();
   expect(new Set(requests)).toEqual(new Set([PAGE]));
 });
+
+test("the artifact copies a task's ID, and selects it when the host refuses the clipboard", async ({ page }) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await openArtifact(page, recorded.documents);
+  await page.getByRole("link", { name: /Sync the database/ }).click();
+  const header = page.getByRole("article").locator("header");
+  await header.getByRole("button", { name: "Copy ID" }).click();
+  await expect(header.getByRole("status")).toHaveText("Copied");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(BLOCKED);
+
+  // claude.ai may not grant the artifact iframe `clipboard-write`.
+  await page.evaluate(() => {
+    navigator.clipboard.writeText = () =>
+      Promise.reject(new DOMException("Write permission denied.", "NotAllowedError"));
+  });
+  await header.getByText(BLOCKED, { exact: true }).click();
+  await expect(header.getByRole("status")).toHaveText("Selected. Copy it by hand.");
+  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(BLOCKED);
+});

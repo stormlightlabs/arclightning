@@ -29,6 +29,7 @@
 <script lang="ts">
   import {
     Button,
+    CopyId,
     Dialog,
     MarkdownEditor,
     PriorityBadge,
@@ -169,7 +170,7 @@
             ondragend={() => ((dragging = null), (over = null))}
           >
             <div class="top">
-              <code>{card.id}</code>
+              <span class="id"><CopyId id={card.id} label={`Copy the ID of ${card.title} (${card.id})`} /></span>
               <PriorityBadge priority={card.priority} />
             </div>
             <a
@@ -288,6 +289,8 @@
   .column ul {
     display: grid;
     flex: 1;
+    /* Size cards to the column, not to the full ID's width. */
+    grid-template-columns: minmax(0, 1fr);
     align-content: start;
     gap: var(--arcl-space-2);
     overflow-y: auto;
@@ -295,6 +298,7 @@
   }
   .card {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--arcl-space-1);
     padding: var(--arcl-space-2) var(--arcl-space-3);
     border: var(--arcl-border-width) solid var(--arcl-surface-hover);
@@ -321,12 +325,10 @@
     justify-content: space-between;
     gap: var(--arcl-space-2);
   }
-  code {
-    overflow: hidden;
-    color: var(--arcl-text-muted);
-    font: var(--arcl-type-xs) var(--arcl-font-code);
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .id {
+    display: flex;
+    min-width: 0;
+    font-size: var(--arcl-type-xs);
   }
   .card a {
     color: var(--arcl-text);

@@ -57,6 +57,14 @@ export function taskKeyAction(event: TaskKey, unsaved = false): TaskKeyAction | 
   return null;
 }
 
+/**
+ * The name of the copy button beside a related task. The ID tells apart tasks
+ * that share a title, and `where` tells apart one task listed in two sections.
+ */
+export function copyLabel(task: { id: string; title: string }, where: string): string {
+  return `Copy the ID of ${task.title} (${task.id}), ${where}`;
+}
+
 /** The title of every record `detail` names, by ID. */
 export function titlesOf(detail: TaskDetail): Map<string, string> {
   const tasks: Task[] = [
@@ -129,6 +137,7 @@ export function propertiesOf(detail: TaskDetail): PropertyItem[] {
   const { task } = detail;
   const parent = detail.ancestors.at(-1) ?? null;
   return [
+    { label: "ID", value: task.id, copy: true, copyLabel: "Copy this task's ID" },
     { label: "Status", value: formatStatus(task.status), status: task.status },
     { label: "Readiness", value: readinessLabel(detail) },
     { label: "Priority", value: task.priority, priority: task.priority },

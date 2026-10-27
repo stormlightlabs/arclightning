@@ -34,6 +34,7 @@
   import { tick, untrack } from "svelte";
   import {
     Button,
+    CopyId,
     Feedback,
     Field,
     Markdown,
@@ -61,7 +62,7 @@
     type ActionFailure,
     type TaskDraft,
   } from "./actions";
-  import { blockersOf, propertiesOf, reasonSegments, titlesOf, type DoneBlocker } from "./view";
+  import { blockersOf, copyLabel, propertiesOf, reasonSegments, titlesOf, type DoneBlocker } from "./view";
 
   let {
     detail,
@@ -306,10 +307,10 @@
   {/if}
 {/snippet}
 
-{#snippet relation(related: Task)}
+{#snippet relation(related: Task, where: string)}
   <li>
     <a href={taskHref(related.id)}>{related.title}</a>
-    <code>{related.id}</code>
+    <CopyId id={related.id} label={copyLabel(related, where)} />
     <StatusBadge status={related.status} />
   </li>
 {/snippet}
@@ -318,7 +319,13 @@
   <li>
     <div class="row">
       <a href={taskHref(blocker.task.id)}>{blocker.task.title}</a>
-      <code>{blocker.task.id}</code>
+      <CopyId
+        id={blocker.task.id}
+        label={copyLabel(
+          blocker.task,
+          ancestor ? `Completed blockers inherited from ${ancestor.title} (${ancestor.id})` : "Completed blockers",
+        )}
+      />
       <StatusBadge status={blocker.task.status} />
     </div>
     {#if ancestor}<p class="muted via">Inherited from <a href={taskHref(ancestor.id)}>{ancestor.title}</a></p>{/if}
@@ -343,7 +350,7 @@
 <div class="layout" data-panel={panelOpen ? "open" : "closed"}>
   <article aria-labelledby="task-title">
     <header>
-      <code class="id">{task.id}</code>
+      <div class="id"><CopyId id={task.id} /></div>
       <h1 id="task-title">{task.title}</h1>
       <div class="actions" role="group" aria-label="Task actions">
         {#each actions as action, index (action)}
@@ -434,7 +441,10 @@
             Unblocked:
             <ul>
               {#each unblockedTasks(unblocked, detail) as ready (ready.id)}
-                <li><a href={taskHref(ready.id)}>{ready.title}</a> <code>{ready.id}</code></li>
+                <li>
+                  <a href={taskHref(ready.id)}>{ready.title}</a>
+                  <CopyId id={ready.id} label={copyLabel(ready, "Unblocked")} />
+                </li>
               {/each}
             </ul>
           {:else}
@@ -568,13 +578,16 @@
         <h2 id="task-blockers">Blocked by</h2>
         {#if blockers.direct.length}
           <ul class="relations" aria-label="Direct blockers">
-            {#each blockers.direct as blocker (blocker.task.id)}{@render relation(blocker.task)}{/each}
+            {#each blockers.direct as blocker (blocker.task.id)}{@render relation(blocker.task, "Blocked by")}{/each}
           </ul>
         {/if}
         {#each blockers.inherited as group (group.ancestor.id)}
           <h3>Inherited from <a href={taskHref(group.ancestor.id)}>{group.ancestor.title}</a></h3>
           <ul class="relations" aria-label={`Inherited from ${group.ancestor.title}`}>
-            {#each group.blockers as blocker (blocker.task.id)}{@render relation(blocker.task)}{/each}
+            {#each group.blockers as blocker (blocker.task.id)}{@render relation(
+                blocker.task,
+                `Inherited from ${group.ancestor.title} (${group.ancestor.id})`,
+              )}{/each}
           </ul>
         {/each}
       </section>
@@ -595,7 +608,7 @@
       <section aria-labelledby="task-children">
         <h2 id="task-children">Subtasks</h2>
         <ul class="relations">
-          {#each detail.children as child (child.id)}{@render relation(child)}{/each}
+          {#each detail.children as child (child.id)}{@render relation(child, "Subtasks")}{/each}
         </ul>
       </section>
     {/if}
@@ -604,7 +617,7 @@
       <h2 id="task-unblocks">Unblocks</h2>
       {#if detail.dependents.length}
         <ul class="relations">
-          {#each detail.dependents as dependent (dependent.id)}{@render relation(dependent)}{/each}
+          {#each detail.dependents as dependent (dependent.id)}{@render relation(dependent, "Unblocks")}{/each}
         </ul>
       {:else}
         <p class="muted">No other task waits on this one.</p>
@@ -683,8 +696,8 @@
     gap: var(--arcl-space-1);
   }
   .id {
-    color: var(--arcl-text-muted);
-    font: var(--arcl-type-sm) var(--arcl-font-code);
+    display: flex;
+    font-size: var(--arcl-type-sm);
   }
   h1 {
     margin: 0;
@@ -799,9 +812,8 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .relations code {
-    color: var(--arcl-text-muted);
-    font: var(--arcl-type-xs) var(--arcl-font-code);
+  .relations :global(.arcl-copy-id) {
+    font-size: var(--arcl-type-xs);
   }
   .done li {
     display: grid;
@@ -860,9 +872,8 @@
   .notice a {
     color: var(--arcl-link);
   }
-  .notice code {
-    color: var(--arcl-text-muted);
-    font: var(--arcl-type-xs) var(--arcl-font-code);
+  .notice :global(.arcl-copy-id) {
+    font-size: var(--arcl-type-xs);
   }
   @media (max-width: 60rem) {
     .layout,

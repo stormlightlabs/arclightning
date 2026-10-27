@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
     Button,
+    CopyId,
     DataTable,
     Dialog,
     EmptyState,
@@ -408,7 +409,8 @@
       <section class="triage" aria-label="Triage" bind:this={pane}>
         {#if selectedCapture !== null}
           <p class="meta">
-            Capture{#if detail !== null && created(detail)}{` · ${created(detail)}`}{/if}
+            Capture{#if detail !== null && created(detail)}{` · ${created(detail)}`}{/if} ·
+            <CopyId id={selectedCapture.id} />
           </p>
           <h2>{detail?.title ?? selectedCapture.title}</h2>
           {#if detailFailure !== null}
