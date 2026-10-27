@@ -5,7 +5,7 @@ title = "Remove the barrel files in apps/web"
 status = "completed"
 priority = "normal"
 position = 8
-evidence = "Delivered by #PR: the feature folders' index.ts files are gone, data/index.ts moved to data/source.ts, and every import names its defining module."
+evidence = "Delivered by #72: the feature folders' index.ts files are gone, data/index.ts moved to data/source.ts, and every import names its defining module."
 +++
 
 Remove the barrel files in `apps/web` and import from the source modules
