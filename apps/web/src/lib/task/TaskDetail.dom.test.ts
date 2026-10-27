@@ -289,3 +289,32 @@ describe("TaskDetail IDs", () => {
     expect(names.filter((name) => name?.startsWith("Copy the ID of ")).length).toBe(names.length - 2);
   });
 });
+
+describe("TaskDetail edit icons", () => {
+  /** A data source that can also read and save the record's file, so Edit file shows. */
+  function fileSource(detail: Detail) {
+    const source = stubSource(detail);
+    Object.assign(source, { recordSource: vi.fn(), saveRecordSource: vi.fn() });
+    return source;
+  }
+
+  for (const [label, name, icon, command] of [
+    ["Edit", "edit", "i-ri-pencil-line", "task:edit"],
+    ["Edit file", "editFile", "i-ri-file-edit-line", "task:edit-file"],
+  ] as const) {
+    it(`gives ${label} its icon beside its label and the same icon in the command menu`, () => {
+      fileSource(blockedDetail());
+      const root = view(blockedDetail());
+      const found = button(root.querySelector('[aria-label="Task actions"]')!, label);
+      const glyph = found.querySelector(".arcl-icon")!;
+      expect(glyph.classList.contains(icon)).toBe(true);
+      expect(glyph.getAttribute("aria-hidden")).toBe("true");
+      expect(found.getAttribute("aria-label")).toBeNull();
+      expect(found.textContent?.trim()).toBe(label);
+
+      const entry = registeredCommands().find((each) => each.id === command)!;
+      expect(entry.label).toBe(label);
+      expect(entry.icon).toBe(name);
+    });
+  }
+});
