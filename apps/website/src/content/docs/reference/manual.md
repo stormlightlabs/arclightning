@@ -234,8 +234,8 @@ association filters.
 
 `next --start` selects and starts the task in one write transaction, so two
 concurrent calls never start the same task; the second waits and takes the
-next one. `--claim` names the assignee as `task start --claim` does, and
-passes over a ready task another assignee holds. When nothing is ready it
+next one. `next --start` selects the task `next` returns, and `--claim` names
+the assignee as `task start --claim` does. When nothing is ready it
 prints `Nothing to start`, prints nothing with `--plain`, returns a null
 `data.task` with `--json`, and exits `0`.
 
