@@ -263,9 +263,9 @@ parts, and an empty project prints none.
 `--style full` draws the same tree with every phase unfolded. Each record line
 ends with the record's short ID, aligned right two spaces past the widest
 record line, counted in terminal columns, so a wide character such as `日`
-counts as two. Every line pads to that widest line whatever the terminal's
-width, so one long title widens the whole view. Headings and the footer carry
-no ID.
+counts as two. Every record line pads to that widest line whatever the
+terminal's width, so one long title widens the whole view. Headings and the
+footer carry no ID and no padding.
 
 Terminals that draw East Asian Ambiguous characters double-width, common in
 CJK locales, misalign the marks and box lines. Use `--ascii` there.
@@ -287,6 +287,8 @@ column.
 
 Every style keeps the footer, or the section headings with `--all`, and
 follows `--all`, `--ascii`, `--depth` and the colour rules below.
+Every style prints control characters in titles escaped, as `\n`, `\t` or
+`\x1b`, so a title cannot add a line or send the terminal an escape sequence.
 
 `arcl tree <id>` draws that record and its subtree, never folding the root,
 with no headings and no footer.

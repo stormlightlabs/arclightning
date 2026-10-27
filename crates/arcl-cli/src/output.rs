@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use owo_colors::{OwoColorize, Stream};
@@ -1269,7 +1270,7 @@ impl ConnectedTreeNode {
     /// The human line for this record: its mark and title, a phase's
     /// done/total task count, and a task's open blockers.
     fn human_line(&self, view: TreeView) -> String {
-        let mut line = format!("{} {}", view.mark(self.mark), self.title);
+        let mut line = format!("{} {}", view.mark(self.mark), human_escape(&self.title));
         if self.kind == "phase" {
             let (done, total) = task_progress(&self.children);
             if total > 0 {
@@ -1510,7 +1511,7 @@ fn outline_lines(lines: &[TreeLine]) -> Vec<String> {
             node.status,
             node.id,
             ". ".repeat(line.indent),
-            node.title
+            human_escape(&node.title)
         ),
         None => format!("{:status_width$}  {:id_width$}  {}", "", "", line.text),
     }));
@@ -1554,7 +1555,7 @@ fn folded_line(run: &[&ConnectedTreeNode], view: TreeView) -> String {
     let chars = view.chars();
     let tasks = run.iter().map(|phase| task_progress(&phase.children).1).sum::<usize>();
     let label = match run {
-        [phase] => phase.title.clone(),
+        [phase] => human_escape(&phase.title).into_owned(),
         _ => folded_range(run, chars.dash).unwrap_or_else(|| format!("{} phases", run.len())),
     };
     let noun = if tasks == 1 { "task" } else { "tasks" };
@@ -1620,7 +1621,7 @@ fn tree_footer(nodes: &[&ConnectedTreeNode], view: TreeView) -> Option<String> {
     let releases = nodes
         .iter()
         .filter(|node| node.kind == "release")
-        .map(|node| node.title.as_str())
+        .map(|node| human_escape(&node.title))
         .collect::<Vec<_>>();
     let mut parts = Vec::new();
     if open > 0 {
@@ -1924,6 +1925,31 @@ fn format_change(change: arcl_store::PlanChange) -> &'static str {
         arcl_store::PlanChange::Update => "update",
         arcl_store::PlanChange::Unchanged => "unchanged",
     }
+}
+
+/// `value` with each control character written out visibly, as `\n`, `\t`,
+/// `\r`, `\x1b` or `\u{85}`, for human tree output. A title holding a
+/// newline would otherwise start a fake row, and one holding an escape
+/// sequence would reach the terminal. Other text, backslashes included, is
+/// left as it is.
+fn human_escape(value: &str) -> Cow<'_, str> {
+    if !value.chars().any(char::is_control) {
+        return Cow::Borrowed(value);
+    }
+    let mut escaped = String::with_capacity(value.len() + 4);
+    for character in value.chars() {
+        match character {
+            '\n' => escaped.push_str("\\n"),
+            '\t' => escaped.push_str("\\t"),
+            '\r' => escaped.push_str("\\r"),
+            control if u32::from(control) < 0x80 && control.is_control() => {
+                escaped.push_str(&format!("\\x{:02x}", u32::from(control)));
+            }
+            control if control.is_control() => escaped.push_str(&format!("\\u{{{:x}}}", u32::from(control))),
+            other => escaped.push(other),
+        }
+    }
+    Cow::Owned(escaped)
 }
 
 fn plain_escape(value: &str) -> String {
@@ -2573,6 +2599,46 @@ Releases
         spec.children[0].id = "2".to_owned();
         let full = TreeView { style: TreeStyle::Full, ..TreeView::default() };
         assert_eq!(human(&[spec], full), "◐ 日本語のタスク  1\n└── ○ Plain       2");
+    }
+
+    #[test]
+    fn outline_tree_escapes_a_newline_so_it_adds_no_row() {
+        let mut task = node(
+            "task",
+            "Line one\nin_progress  FAKE  injected",
+            StatusMark::Waiting,
+            Vec::new(),
+        );
+        task.id = "1".to_owned();
+        let outline = TreeView { style: TreeStyle::Outline, ..TreeView::default() };
+        assert_eq!(
+            human(&[task], outline),
+            "STATUS  ID  TITLE\nopen    1   Line one\\nin_progress  FAKE  injected"
+        );
+    }
+
+    #[test]
+    fn full_tree_measures_tab_and_escape_titles_after_escaping_them() {
+        let mut spec = node(
+            "spec",
+            "A\tB",
+            StatusMark::Active,
+            vec![node("task", "\u{1b}[31mRed", StatusMark::Waiting, Vec::new())],
+        );
+        spec.id = "1".to_owned();
+        spec.children[0].id = "2".to_owned();
+        let full = TreeView { style: TreeStyle::Full, ..TreeView::default() };
+        assert_eq!(human(&[spec], full), "◐ A\\tB             1\n└── ○ \\x1b[31mRed  2");
+    }
+
+    #[test]
+    fn folded_tree_escapes_control_characters_in_titles_and_the_footer() {
+        let task = node("task", "Bell\u{7} and\r\nbreak", StatusMark::Waiting, Vec::new());
+        let release = node("release", "v1\n", StatusMark::Done, Vec::new());
+        assert_eq!(
+            human(&[task, release], TreeView::default()),
+            "○ Bell\\x07 and\\r\\nbreak\nReleases: v1\\n"
+        );
     }
 
     #[test]
