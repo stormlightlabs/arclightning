@@ -73,7 +73,7 @@ not built.
 out the web app for the same reason:
 
 ```sh
-cargo install --git https://github.com/stormlightlabs/arclightning --tag v0.2.0 arcl-cli
+cargo install --git https://github.com/stormlightlabs/arclightning --tag v0.3.0 arcl-cli
 ```
 
 For development, keep the checkout and run the CLI with Cargo instead:
