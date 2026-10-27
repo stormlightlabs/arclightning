@@ -49,3 +49,14 @@ test("clicking a board card's ID copies it", async ({ page }) => {
   await expect(card.getByRole("status")).toHaveText("Copied");
   expect(await clipboard(page)).toBe(id);
 });
+
+test("board cards that share a title get distinct copy buttons", async ({ page }) => {
+  const first: string = served!.cli("task", "create", "Board twin").task.id;
+  const second: string = served!.cli("task", "create", "Board twin").task.id;
+  await page.goto(served!.url);
+  await page.getByRole("button", { name: "Board" }).click();
+  const board = page.getByRole("region", { name: "Board" });
+  for (const id of [first, second]) {
+    await expect(board.getByRole("button", { name: `Copy the ID of Board twin (${id})`, exact: true })).toHaveCount(1);
+  }
+});

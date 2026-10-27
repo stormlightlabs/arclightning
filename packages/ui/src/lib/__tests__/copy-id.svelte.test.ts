@@ -69,4 +69,52 @@ describe("CopyId", () => {
     expect(writeText).toHaveBeenCalledWith(ID);
     expect(window.getSelection()?.toString()).toBe(ID);
   });
+
+  it("drops the message when the ID changes", async () => {
+    setClipboard({ writeText: async () => {} });
+    const screen = await render(CopyId, { id: ID });
+    await page.getByRole("button", { name: "Copy ID" }).click();
+    await expect.element(page.getByRole("status")).toHaveTextContent(COPIED);
+    await screen.rerender({ id: "arcl-t-OTHER" });
+    await expect.element(page.getByText("arcl-t-OTHER")).toBeInTheDocument();
+    expect(page.getByRole("status").element().textContent).toBe("");
+  });
+
+  it("keeps the newer message when an earlier copy finishes late", async () => {
+    let finishFirst = () => {};
+    const writeText = vi
+      .fn<() => Promise<void>>()
+      .mockImplementationOnce(() => new Promise((resolve) => (finishFirst = resolve)))
+      .mockImplementationOnce(async () => {
+        throw new DOMException("Write permission denied.", "NotAllowedError");
+      });
+    setClipboard({ writeText });
+    await render(CopyId, { id: ID });
+    const button = page.getByRole("button", { name: "Copy ID" });
+    await button.click();
+    await expect.poll(() => writeText.mock.calls.length).toBe(1);
+    await button.click();
+    await expect.element(page.getByRole("status")).toHaveTextContent(COPY_BY_HAND);
+    finishFirst();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(page.getByRole("status").element().textContent).toBe(COPY_BY_HAND);
+  });
+
+  it("clears the message in the DOM before a repeat, so it is announced again", async () => {
+    setClipboard({ writeText: async () => {} });
+    await render(CopyId, { id: ID });
+    const button = page.getByRole("button", { name: "Copy ID" });
+    await button.click();
+    const status = page.getByRole("status");
+    await expect.element(status).toHaveTextContent(COPIED);
+    const seen: string[] = [];
+    const observer = new MutationObserver(() => seen.push(status.element().textContent ?? ""));
+    observer.observe(status.element(), { childList: true, characterData: true, subtree: true });
+    try {
+      await button.click();
+      await expect.poll(() => seen).toEqual(["", COPIED]);
+    } finally {
+      observer.disconnect();
+    }
+  });
 });

@@ -2,7 +2,8 @@ import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { registeredCommands } from "$lib/commands";
 import { DataError, setDataSource, type Changed, type DataSource, type TaskDetail as Detail } from "$lib/data";
-import { blockedDetail } from "./fixtures";
+import { task } from "$lib/work/fixtures";
+import { blockedDetail, doneBlockersDetail } from "./fixtures";
 import TaskDetail from "./TaskDetail.svelte";
 
 /** `value` as a change that saved with no warnings. */
@@ -268,8 +269,18 @@ describe("TaskDetail IDs", () => {
   });
 
   it("gives each copy button a distinct name", () => {
-    stubSource(blockedDetail());
-    const root = view(blockedDetail());
+    // T17 blocks the task directly and through T10, done and not, two subtasks
+    // share a title, and one of them also waits on the task.
+    const detail = doneBlockersDetail();
+    const t17 = detail.inherited_blockers[0];
+    detail.blockers.push({ task: t17.task, completed: false, evidence: "" });
+    const t9 = detail.inherited_blockers[1];
+    detail.blockers.push({ task: t9.task, completed: true, evidence: "" });
+    const twin = (id: string) => task(id, { title: "Write the docs", parent_id: "t-10.4" });
+    detail.children.push(twin("t-10.4.1"), twin("t-10.4.2"));
+    detail.dependents.push(twin("t-10.4.1"));
+    stubSource(detail);
+    const root = view(detail);
     const names = [...root.querySelectorAll(".arcl-copy-id button")].map((button) => button.getAttribute("aria-label"));
     expect(names.length).toBeGreaterThan(2);
     expect(new Set(names).size).toBe(names.length);

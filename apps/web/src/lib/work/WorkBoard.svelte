@@ -170,7 +170,7 @@
             ondragend={() => ((dragging = null), (over = null))}
           >
             <div class="top">
-              <span class="id"><CopyId id={card.id} label={`Copy the ID of ${card.title}`} /></span>
+              <span class="id"><CopyId id={card.id} label={`Copy the ID of ${card.title} (${card.id})`} /></span>
               <PriorityBadge priority={card.priority} />
             </div>
             <a
@@ -289,6 +289,8 @@
   .column ul {
     display: grid;
     flex: 1;
+    /* Size cards to the column, not to the full ID's width. */
+    grid-template-columns: minmax(0, 1fr);
     align-content: start;
     gap: var(--arcl-space-2);
     overflow-y: auto;
@@ -296,6 +298,7 @@
   }
   .card {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--arcl-space-1);
     padding: var(--arcl-space-2) var(--arcl-space-3);
     border: var(--arcl-border-width) solid var(--arcl-surface-hover);
