@@ -87,9 +87,9 @@ describe("TaskDetail", () => {
       detail.task.status = status;
       return [
         ...slice(show({}, detail), 'aria-label="Task actions"', "</div>").matchAll(
-          /<button[^>]*>\s*<span>([^<]*)<\/span>/g,
+          /<button[^>]*>([\s\S]*?)<\/button>/g,
         ),
-      ].map((match) => match[1].trim());
+      ].map((match) => match[1].replace(/<[^>]*>/g, "").trim());
     };
     expect(buttons("pending")).toEqual(["Start", "Park", "Edit", "Edit file"]);
     expect(buttons("in_progress")).toEqual(["Complete", "Hand off", "Park", "Edit", "Edit file"]);

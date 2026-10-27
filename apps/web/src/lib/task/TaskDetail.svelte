@@ -146,7 +146,7 @@
                     label: "Edit",
                     scope: "selection",
                     keys: [EDIT_KEY],
-                    icon: "markdown",
+                    icon: "edit",
                     run: openEdit,
                   } satisfies Command,
                 ]
@@ -157,7 +157,7 @@
                     id: "task:edit-file",
                     label: "Edit file",
                     scope: "selection",
-                    icon: "markdown",
+                    icon: "editFile",
                     run: openFile,
                   } satisfies Command,
                 ]
@@ -364,11 +364,12 @@
           />
         {/each}
         {#if draft === null}
-          <Button label="Edit" variant="ghost" disabled={busy !== null} onclick={openEdit} />
+          <Button label="Edit" icon="edit" variant="ghost" disabled={busy !== null} onclick={openEdit} />
         {/if}
         {#if canEditFile && file === null}
           <Button
             label="Edit file"
+            icon="editFile"
             variant="ghost"
             busy={busy === "file"}
             disabled={busy !== null || fileQueued}

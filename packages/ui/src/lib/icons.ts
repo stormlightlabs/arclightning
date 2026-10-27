@@ -7,6 +7,8 @@ export const ICONS = {
   chevronDown: "i-ri-arrow-down-s-line",
   close: "i-ri-close-line",
   copy: "i-ri-file-copy-line",
+  edit: "i-ri-pencil-line",
+  editFile: "i-ri-file-edit-line",
   github: "i-ri-github-fill",
   inbox: "i-ph-tray",
   markdown: "i-ri-markdown-line",
