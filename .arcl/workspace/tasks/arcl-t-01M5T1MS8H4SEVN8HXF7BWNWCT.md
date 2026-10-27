@@ -5,7 +5,7 @@ title = "Declare TypeScript data shapes with type"
 status = "completed"
 priority = "normal"
 position = 9
-evidence = "Delivered by #PR: 129 `interface` declarations in `apps/web` and `packages/ui` become `type`; `ArtifactDb`, which `FakeDb` implements, and the `app.d.ts` global augmentations stay interfaces, and `AGENTS.md` states the rule."
+evidence = "Delivered by #73: 129 `interface` declarations in `apps/web` and `packages/ui` become `type`; `ArtifactDb`, which `FakeDb` implements, and the `app.d.ts` global augmentations stay interfaces, and `AGENTS.md` states the rule."
 +++
 
 Declare TypeScript data shapes with `type` instead of `interface` in
