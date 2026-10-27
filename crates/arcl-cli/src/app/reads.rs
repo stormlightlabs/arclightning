@@ -80,7 +80,13 @@ pub(super) fn read_tree(root: Option<&str>, options: TreeArgs, renderer: &Render
     }
     let ids = display_ids(&database, renderer).map_err(ApplicationError::from_command)?;
     shorten_tree(&mut nodes, &ids);
-    let view = TreeView { rooted: root.is_some(), all: options.all, ascii: options.ascii, depth: options.depth };
+    let view = TreeView {
+        rooted: root.is_some(),
+        all: options.all,
+        ascii: options.ascii,
+        depth: options.depth,
+        style: options.style,
+    };
     Ok(renderer.render_connected_tree(&nodes, view)?)
 }
 

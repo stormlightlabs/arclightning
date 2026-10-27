@@ -7,6 +7,7 @@ use std::{
 use assert_cmd::Command;
 use serde_json::Value;
 use tempfile::{TempDir, tempdir};
+use unicode_width::UnicodeWidthStr;
 
 /// Git variables that point a command at another repository, index or object
 /// store. A Git hook in a linked worktree exports an absolute `GIT_DIR` and
@@ -1209,6 +1210,64 @@ fn tree_folds_finished_phases_and_limits_depth() {
 }
 
 #[test]
+fn tree_styles_print_full_and_outline_views() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let parent = create_task(dir, "Parent", None);
+    let active = create_task(dir, "Active child", Some(&parent));
+    create_task(dir, "Waiting child", Some(&parent));
+    run_json(dir, ["--json", "task", "start", &active].as_ref());
+    let (parent_short, active_short) = (short_id(dir, &parent), short_id(dir, &active));
+
+    let outline = stdout_of(dir, &["--color", "never", "tree", "--style", "outline"]);
+    assert!(outline.starts_with("STATUS  "), "{outline}");
+    assert!(outline.is_ascii(), "no box characters or marks:\n{outline}");
+    let in_progress = outline
+        .lines()
+        .filter(|line| line.contains("in_progress"))
+        .collect::<Vec<_>>();
+    assert_eq!(in_progress, [format!("in_progress  {active_short}  . Active child")]);
+    assert!(
+        outline
+            .lines()
+            .any(|line| line == format!("pending      {parent_short}  Parent")),
+        "{outline}"
+    );
+
+    let full = stdout_of(dir, &["--color", "never", "tree", "--style", "full"]);
+    let lines = full.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 3, "{full}");
+    assert!(
+        lines[0].starts_with("○ Parent") && lines[0].ends_with(&parent_short),
+        "{full}"
+    );
+    assert!(
+        lines[1].starts_with("├── ◐ Active child") && lines[1].ends_with(&active_short),
+        "{full}"
+    );
+    let width = lines[0].width();
+    assert!(lines.iter().all(|line| line.width() == width), "IDs align:\n{full}");
+    let ascii = stdout_of(
+        dir,
+        &["--color", "never", "tree", "--style", "full", "--ascii", "--depth", "1"],
+    );
+    assert_eq!(ascii.trim_end(), format!("o Parent  {parent_short}"));
+
+    for flag in ["--plain", "--json"] {
+        assert_eq!(
+            stdout_of(dir, &[flag, "tree", "--style", "outline"]),
+            stdout_of(dir, &[flag, "tree"]),
+            "{flag} ignores --style"
+        );
+    }
+    let refused = arcl_in(dir)
+        .args(["tree", "--style", "wide"])
+        .output()
+        .expect("tree runs");
+    assert!(!refused.status.success());
+}
+
+#[test]
 fn tree_colour_follows_the_terminal_no_color_and_the_flag() {
     let directory = initialized_directory();
     let dir = directory.path();
@@ -1231,24 +1290,27 @@ fn tree_colour_follows_the_terminal_no_color_and_the_flag() {
         for (key, value) in envs {
             command.env(key, value);
         }
-        let output = command.args(args).arg("tree").output().expect("tree runs");
+        let output = command.args(args).output().expect("tree runs");
         assert_success(&output);
         String::from_utf8(output.stdout).expect("output is UTF-8")
     };
     let terminal = ("IGNORE_IS_TERMINAL", "1");
     let coloured = |output: &str| output.contains('\u{1b}');
 
-    assert!(coloured(&tree(&[], &[terminal])), "a terminal gets colour");
-    assert!(!coloured(&tree(&[], &[])), "a pipe gets none");
-    assert!(
-        !coloured(&tree(&[], &[terminal, ("NO_COLOR", "1")])),
-        "NO_COLOR turns it off"
-    );
-    assert!(!coloured(&tree(&["--color", "never"], &[terminal])));
-    assert!(
-        coloured(&tree(&["--color", "always"], &[])),
-        "--color always colours a pipe"
-    );
+    for style in ["folded", "full", "outline"] {
+        let with = |flags: &[&'static str]| [flags, &["tree", "--style", style]].concat();
+        assert!(coloured(&tree(&with(&[]), &[terminal])), "a terminal gets colour");
+        assert!(!coloured(&tree(&with(&[]), &[])), "a pipe gets none");
+        assert!(
+            !coloured(&tree(&with(&[]), &[terminal, ("NO_COLOR", "1")])),
+            "NO_COLOR turns it off"
+        );
+        assert!(!coloured(&tree(&with(&["--color", "never"]), &[terminal])));
+        assert!(
+            coloured(&tree(&with(&["--color", "always"]), &[])),
+            "--color always colours a pipe"
+        );
+    }
 }
 
 #[test]

@@ -1,10 +1,12 @@
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use owo_colors::{OwoColorize, Stream};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use unicode_width::UnicodeWidthStr;
 
-use crate::cli::ColorChoice;
+use crate::cli::{ColorChoice, TreeStyle};
 use arcl_core::domain::{
     Capture, CaptureStatus, ContainerStatus, Note, Phase, Plan, PlanningTask, Release, ShortIds, Spec, TaskDependency,
     TaskStatus,
@@ -1268,7 +1270,7 @@ impl ConnectedTreeNode {
     /// The human line for this record: its mark and title, a phase's
     /// done/total task count, and a task's open blockers.
     fn human_line(&self, view: TreeView) -> String {
-        let mut line = format!("{} {}", view.mark(self.mark), self.title);
+        let mut line = format!("{} {}", view.mark(self.mark), human_escape(&self.title));
         if self.kind == "phase" {
             let (done, total) = task_progress(&self.children);
             if total > 0 {
@@ -1308,6 +1310,8 @@ pub struct TreeView {
     pub ascii: bool,
     /// The number of record levels to print, or `None` for every level.
     pub depth: Option<u16>,
+    /// The layout: folded, full or outline.
+    pub style: TreeStyle,
 }
 
 impl TreeView {
@@ -1340,6 +1344,18 @@ struct TreeChars {
     dot: &'static str,
     /// Between the first and last number of a folded range.
     dash: &'static str,
+}
+
+/// One line of human `arcl tree` output before its style lays it out.
+struct TreeLine<'a> {
+    /// The record the line draws, or `None` for a heading or a folded run.
+    record: Option<&'a ConnectedTreeNode>,
+    /// The connectors, then the mark, title and suffixes, or the heading or
+    /// folded run.
+    text: String,
+    /// The levels below the top level, or below a section heading, that
+    /// `--style outline` indents the title by.
+    indent: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -1380,9 +1396,9 @@ pub fn tree_section(kind: &str) -> Option<usize> {
     TREE_SECTIONS.iter().position(|(section, _)| *section == kind)
 }
 
-/// Renders tree nodes for human output as a box-drawing tree. Nodes outside
-/// [`TREE_SECTIONS`] print flush-left with their subtrees below, folding each
-/// run of finished phases into one line.
+/// Renders tree nodes for human output in `view.style`. Nodes outside
+/// [`TREE_SECTIONS`] print flush-left with their subtrees below. The folded
+/// style folds each run of finished phases into one line.
 ///
 /// Unless `view` is rooted, the section nodes follow as a one-line footer,
 /// or with `view.all` under each section's heading. A rooted tree prints its
@@ -1393,13 +1409,10 @@ fn human_tree(nodes: &[ConnectedTreeNode], view: TreeView) -> String {
         .partition(|node| !view.rooted && tree_section(node.kind).is_some());
     let mut lines = Vec::new();
     for node in records {
-        lines.push(node.human_line(view));
-        push_children(&mut lines, &node.children, "", 2, view);
+        lines.push(TreeLine { record: Some(node), text: node.human_line(view), indent: 0 });
+        push_children(&mut lines, &node.children, "", 2, 1, view);
     }
-    if view.rooted {
-        return lines.join("\n");
-    }
-    if view.all {
+    if !view.rooted && view.all {
         for (kind, heading) in TREE_SECTIONS {
             let members = sectioned
                 .iter()
@@ -1407,40 +1420,102 @@ fn human_tree(nodes: &[ConnectedTreeNode], view: TreeView) -> String {
                 .filter(|node| node.kind == kind)
                 .collect::<Vec<_>>();
             if !members.is_empty() {
-                lines.push(heading.to_owned());
-                push_children(&mut lines, members, "", 1, view);
+                lines.push(TreeLine { record: None, text: heading.to_owned(), indent: 0 });
+                push_children(&mut lines, members, "", 1, 1, view);
             }
         }
-    } else if let Some(footer) = tree_footer(&sectioned, view) {
-        lines.push(footer);
     }
-    lines.join("\n")
+    let mut output = match view.style {
+        TreeStyle::Folded => lines.into_iter().map(|line| line.text).collect(),
+        TreeStyle::Full => full_lines(lines),
+        TreeStyle::Outline => outline_lines(&lines),
+    };
+    if !view.rooted
+        && !view.all
+        && let Some(footer) = tree_footer(&sectioned, view)
+    {
+        output.push(footer);
+    }
+    output.join("\n")
 }
 
-/// Appends `children`, at `level`, below a line drawn with `prefix`. Each
-/// run of finished phases folds into one line unless `view.all` is set.
+/// Appends `children`, at `level` and `indent`, below a line drawn with
+/// `prefix`. Each run of finished phases folds into one line in the folded
+/// style unless `view.all` is set.
 fn push_children<'a>(
-    lines: &mut Vec<String>, children: impl IntoIterator<Item = &'a ConnectedTreeNode>, prefix: &str, level: usize,
-    view: TreeView,
+    lines: &mut Vec<TreeLine<'a>>, children: impl IntoIterator<Item = &'a ConnectedTreeNode>, prefix: &str,
+    level: usize, indent: usize, view: TreeView,
 ) {
     if !view.shows(level) {
         return;
     }
     let chars = view.chars();
-    let items = tree_items(children, !view.all);
+    let items = tree_items(children, view.style == TreeStyle::Folded && !view.all);
     let count = items.len();
     for (index, item) in items.into_iter().enumerate() {
         let last = index + 1 == count;
         let connector = if last { chars.last } else { chars.branch };
         match item {
             TreeItem::Record(node) => {
-                lines.push(format!("{prefix}{connector}{}", node.human_line(view)));
+                lines.push(TreeLine {
+                    record: Some(node),
+                    text: format!("{prefix}{connector}{}", node.human_line(view)),
+                    indent,
+                });
                 let below = format!("{prefix}{}", if last { chars.blank } else { chars.pipe });
-                push_children(lines, &node.children, &below, level + 1, view);
+                push_children(lines, &node.children, &below, level + 1, indent + 1, view);
             }
-            TreeItem::Folded(run) => lines.push(format!("{prefix}{connector}{}", folded_line(&run, view))),
+            TreeItem::Folded(run) => lines.push(TreeLine {
+                record: None,
+                text: format!("{prefix}{connector}{}", folded_line(&run, view)),
+                indent,
+            }),
         }
     }
+}
+
+/// The `--style full` lines: each record line padded to the widest record
+/// line, measured in terminal columns, then two spaces and its short ID
+/// aligned right. Headings keep no ID. East Asian Ambiguous characters count
+/// as one column.
+fn full_lines(lines: Vec<TreeLine>) -> Vec<String> {
+    let records = lines.iter().filter_map(|line| line.record.map(|node| (line, node)));
+    let width = records.clone().map(|(line, _)| line.text.width()).max().unwrap_or(0);
+    let id_width = records.map(|(_, node)| node.id.width()).max().unwrap_or(0);
+    lines
+        .into_iter()
+        .map(|line| match line.record {
+            Some(node) => {
+                let pad = width - line.text.width();
+                format!("{}{:pad$}  {:>id_width$}", line.text, "", node.id)
+            }
+            None => line.text,
+        })
+        .collect()
+}
+
+/// The `--style outline` lines: a STATUS, ID and TITLE header, then one row
+/// per record with its stored status, short ID and title, the title behind
+/// `. ` per indent. A heading sits in the TITLE column. No records, no rows.
+fn outline_lines(lines: &[TreeLine]) -> Vec<String> {
+    let records = lines.iter().filter_map(|line| line.record);
+    let status_width = records.clone().map(|node| node.status.len()).max();
+    let Some(status_width) = status_width.map(|width| width.max("STATUS".len())) else {
+        return Vec::new();
+    };
+    let id_width = records.map(|node| node.id.len()).max().unwrap_or(0).max("ID".len());
+    let mut rows = vec![format!("{:<status_width$}  {:<id_width$}  TITLE", "STATUS", "ID")];
+    rows.extend(lines.iter().map(|line| match line.record {
+        Some(node) => format!(
+            "{:<status_width$}  {:<id_width$}  {}{}",
+            node.status,
+            node.id,
+            ". ".repeat(line.indent),
+            human_escape(&node.title)
+        ),
+        None => format!("{:status_width$}  {:id_width$}  {}", "", "", line.text),
+    }));
+    rows
 }
 
 /// Groups `nodes` into tree lines, with each run of consecutive finished
@@ -1480,7 +1555,7 @@ fn folded_line(run: &[&ConnectedTreeNode], view: TreeView) -> String {
     let chars = view.chars();
     let tasks = run.iter().map(|phase| task_progress(&phase.children).1).sum::<usize>();
     let label = match run {
-        [phase] => phase.title.clone(),
+        [phase] => human_escape(&phase.title).into_owned(),
         _ => folded_range(run, chars.dash).unwrap_or_else(|| format!("{} phases", run.len())),
     };
     let noun = if tasks == 1 { "task" } else { "tasks" };
@@ -1546,7 +1621,7 @@ fn tree_footer(nodes: &[&ConnectedTreeNode], view: TreeView) -> Option<String> {
     let releases = nodes
         .iter()
         .filter(|node| node.kind == "release")
-        .map(|node| node.title.as_str())
+        .map(|node| human_escape(&node.title))
         .collect::<Vec<_>>();
     let mut parts = Vec::new();
     if open > 0 {
@@ -1850,6 +1925,31 @@ fn format_change(change: arcl_store::PlanChange) -> &'static str {
         arcl_store::PlanChange::Update => "update",
         arcl_store::PlanChange::Unchanged => "unchanged",
     }
+}
+
+/// `value` with each control character written out visibly, as `\n`, `\t`,
+/// `\r`, `\x1b` or `\u{85}`, for human tree output. A title holding a
+/// newline would otherwise start a fake row, and one holding an escape
+/// sequence would reach the terminal. Other text, backslashes included, is
+/// left as it is.
+fn human_escape(value: &str) -> Cow<'_, str> {
+    if !value.chars().any(char::is_control) {
+        return Cow::Borrowed(value);
+    }
+    let mut escaped = String::with_capacity(value.len() + 4);
+    for character in value.chars() {
+        match character {
+            '\n' => escaped.push_str("\\n"),
+            '\t' => escaped.push_str("\\t"),
+            '\r' => escaped.push_str("\\r"),
+            control if u32::from(control) < 0x80 && control.is_control() => {
+                escaped.push_str(&format!("\\x{:02x}", u32::from(control)));
+            }
+            control if control.is_control() => escaped.push_str(&format!("\\u{{{:x}}}", u32::from(control))),
+            other => escaped.push(other),
+        }
+    }
+    Cow::Owned(escaped)
 }
 
 fn plain_escape(value: &str) -> String {
@@ -2420,6 +2520,181 @@ Inbox: 1 open · Notes: 1 · Releases: v0.1.0, v0.2.0"
 └── ◐ Milestone 3: Third  0/1
     └── ○ T3: Next  blocked by T2"
         );
+    }
+
+    /// [`sample_tree`] with IDs numbered in tree order from `1`, so they
+    /// differ in width, and each task's stored status read off its mark.
+    fn numbered_tree() -> Vec<ConnectedTreeNode> {
+        fn number(nodes: &mut [ConnectedTreeNode], next: &mut usize) {
+            for node in nodes {
+                *next += 1;
+                node.id = next.to_string();
+                node.status = match (node.kind, node.mark) {
+                    (_, StatusMark::Done) => "completed",
+                    (_, StatusMark::Cancelled) => "cancelled",
+                    ("task", StatusMark::Active) => "in_progress",
+                    ("task", _) => "pending",
+                    _ => node.status.as_str(),
+                }
+                .to_owned();
+                number(&mut node.children, next);
+            }
+        }
+        let mut nodes = sample_tree();
+        number(&mut nodes, &mut 0);
+        nodes
+    }
+
+    #[test]
+    fn full_tree_unfolds_every_phase_and_aligns_short_ids_on_the_right() {
+        let full = TreeView { style: TreeStyle::Full, ..TreeView::default() };
+        assert_eq!(
+            human(&numbered_tree(), full),
+            "\
+◐ Spec                                       1
+└── ◐ Roadmap                                2
+    ├── ✓ Milestone 1: First  1/1            3
+    │   └── ✓ T1: One                        4
+    ├── ✓ Milestone 2: Second  2/2           5
+    │   └── ✓ T2: Two                        6
+    │       └── ✓ T2.1: Sub                  7
+    ├── ◐ Milestone 3: Third  1/3            8
+    │   ├── ✓ T3: Done                       9
+    │   ├── ◐ T4: Active                    10
+    │   ├── ✗ T6: Dropped                   11
+    │   └── ○ T5: Blocked  blocked by 1A2B  12
+    └── ✓ Milestone 4: Fourth  1/1          13
+        └── ✓ T7: Seven                     14
+Inbox: 1 open · Notes: 1 · Releases: v0.1.0, v0.2.0"
+        );
+    }
+
+    #[test]
+    fn full_tree_follows_ascii_all_and_depth() {
+        let view = TreeView { style: TreeStyle::Full, ascii: true, all: true, depth: Some(2), ..TreeView::default() };
+        assert_eq!(
+            human(&numbered_tree(), view),
+            "\
+~ Spec           1
+`-- ~ Roadmap    2
+Inbox
+`-- o Idea      15
+Notes
+`-- o Decision  16
+Releases
+|-- o v0.1.0    17
+`-- o v0.2.0    18"
+        );
+    }
+
+    #[test]
+    fn full_tree_measures_wide_titles_in_terminal_columns() {
+        let mut spec = node(
+            "spec",
+            "日本語のタスク",
+            StatusMark::Active,
+            vec![node("task", "Plain", StatusMark::Waiting, Vec::new())],
+        );
+        spec.id = "1".to_owned();
+        spec.children[0].id = "2".to_owned();
+        let full = TreeView { style: TreeStyle::Full, ..TreeView::default() };
+        assert_eq!(human(&[spec], full), "◐ 日本語のタスク  1\n└── ○ Plain       2");
+    }
+
+    #[test]
+    fn outline_tree_escapes_a_newline_so_it_adds_no_row() {
+        let mut task = node(
+            "task",
+            "Line one\nin_progress  FAKE  injected",
+            StatusMark::Waiting,
+            Vec::new(),
+        );
+        task.id = "1".to_owned();
+        let outline = TreeView { style: TreeStyle::Outline, ..TreeView::default() };
+        assert_eq!(
+            human(&[task], outline),
+            "STATUS  ID  TITLE\nopen    1   Line one\\nin_progress  FAKE  injected"
+        );
+    }
+
+    #[test]
+    fn full_tree_measures_tab_and_escape_titles_after_escaping_them() {
+        let mut spec = node(
+            "spec",
+            "A\tB",
+            StatusMark::Active,
+            vec![node("task", "\u{1b}[31mRed", StatusMark::Waiting, Vec::new())],
+        );
+        spec.id = "1".to_owned();
+        spec.children[0].id = "2".to_owned();
+        let full = TreeView { style: TreeStyle::Full, ..TreeView::default() };
+        assert_eq!(human(&[spec], full), "◐ A\\tB             1\n└── ○ \\x1b[31mRed  2");
+    }
+
+    #[test]
+    fn folded_tree_escapes_control_characters_in_titles_and_the_footer() {
+        let task = node("task", "Bell\u{7} and\r\nbreak", StatusMark::Waiting, Vec::new());
+        let release = node("release", "v1\n", StatusMark::Done, Vec::new());
+        assert_eq!(
+            human(&[task, release], TreeView::default()),
+            "○ Bell\\x07 and\\r\\nbreak\nReleases: v1\\n"
+        );
+    }
+
+    #[test]
+    fn outline_tree_prints_status_id_and_title_columns_with_dots() {
+        let outline = TreeView { style: TreeStyle::Outline, ..TreeView::default() };
+        assert_eq!(
+            human(&numbered_tree(), outline),
+            "\
+STATUS       ID  TITLE
+open         1   Spec
+open         2   . Roadmap
+completed    3   . . Milestone 1: First
+completed    4   . . . T1: One
+completed    5   . . Milestone 2: Second
+completed    6   . . . T2: Two
+completed    7   . . . . T2.1: Sub
+open         8   . . Milestone 3: Third
+completed    9   . . . T3: Done
+in_progress  10  . . . T4: Active
+cancelled    11  . . . T6: Dropped
+pending      12  . . . T5: Blocked
+completed    13  . . Milestone 4: Fourth
+completed    14  . . . T7: Seven
+Inbox: 1 open · Notes: 1 · Releases: v0.1.0, v0.2.0"
+        );
+    }
+
+    #[test]
+    fn outline_tree_follows_ascii_all_and_depth() {
+        let view =
+            TreeView { style: TreeStyle::Outline, ascii: true, all: true, depth: Some(2), ..TreeView::default() };
+        let outline = human(&numbered_tree(), view);
+        assert_eq!(
+            outline,
+            "\
+STATUS    ID  TITLE
+open      1   Spec
+open      2   . Roadmap
+              Inbox
+captured  15  . Idea
+              Notes
+open      16  . Decision
+              Releases
+open      17  . v0.1.0
+open      18  . v0.2.0"
+        );
+        let footer = human(
+            &numbered_tree(),
+            TreeView { style: TreeStyle::Outline, ascii: true, depth: Some(1), ..TreeView::default() },
+        );
+        assert_eq!(
+            footer,
+            "STATUS  ID  TITLE\nopen    1   Spec\nInbox: 1 open - Notes: 1 - Releases: v0.1.0, v0.2.0"
+        );
+        let rooted = TreeView { style: TreeStyle::Outline, rooted: true, ..TreeView::default() };
+        assert_eq!(human(&[], rooted), "");
     }
 
     #[test]
