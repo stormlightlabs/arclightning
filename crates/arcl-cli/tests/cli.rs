@@ -1214,14 +1214,20 @@ fn tree_colour_follows_the_terminal_no_color_and_the_flag() {
     let dir = directory.path();
     create_task(dir, "Task", None);
     // `IGNORE_IS_TERMINAL` makes the colour check treat stdout as a terminal.
+    // The other variables are every one the check reads that could force
+    // colour on or off whatever the case sets.
     let tree = |args: &[&str], envs: &[(&str, &str)]| {
         let mut command = arcl_in(dir);
-        command
-            .env_remove("NO_COLOR")
-            .env_remove("FORCE_COLOR")
-            .env_remove("IGNORE_IS_TERMINAL")
-            .env_remove("CLICOLOR")
-            .env("TERM", "xterm");
+        for key in [
+            "NO_COLOR",
+            "FORCE_COLOR",
+            "CLICOLOR_FORCE",
+            "CLICOLOR",
+            "IGNORE_IS_TERMINAL",
+        ] {
+            command.env_remove(key);
+        }
+        command.env("TERM", "xterm");
         for (key, value) in envs {
             command.env(key, value);
         }

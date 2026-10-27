@@ -210,16 +210,16 @@ task ID, then a `subtask<TAB><id>` line for each completed subtask and an
 
 ## Inspection
 
-| Command                    | Purpose                                                            |
-| -------------------------- | ------------------------------------------------------------------ |
-| `arcl show <id>`           | Show one record by its full or short ID.                           |
-| `arcl list`                | List records using kind, state, priority, and association filters. |
-| `arcl tree [<id>]`         | Show the complete hierarchy or one rooted subtree.                 |
-| `arcl explain <task-id>`   | Report every condition affecting task readiness.                   |
-| `arcl context <task-id>`   | Return the bounded context needed to work on a task.               |
-| `arcl check`               | Validate database and graph invariants.                            |
-| `arcl ready`               | List actionable leaf tasks in deterministic order.                 |
-| `arcl next`                | Return the first actionable task, if one exists.                   |
+| Command                                            | Purpose                                                            |
+| -------------------------------------------------- | ------------------------------------------------------------------ |
+| `arcl show <id>`                                   | Show one record by its full or short ID.                           |
+| `arcl list`                                        | List records using kind, state, priority, and association filters. |
+| `arcl tree [<id>] [--all] [--ascii] [--depth <N>]` | Show the complete hierarchy or one rooted subtree.                 |
+| `arcl explain <task-id>`                           | Report every condition affecting task readiness.                   |
+| `arcl context <task-id>`                           | Return the bounded context needed to work on a task.               |
+| `arcl check`                                       | Validate database and graph invariants.                            |
+| `arcl ready`                                       | List actionable leaf tasks in deterministic order.                 |
+| `arcl next`                                        | Return the first actionable task, if one exists.                   |
 
 `list` accepts `--kind`, `--status`, `--priority`, `--release`, `--epic`,
 `--milestone`, and `--parent`. `ready` and `next` accept the same priority and
@@ -239,11 +239,14 @@ record's title, with no ID. A phase adds its completed and total task counts,
 such as `7/12`, counting subtasks and leaving out cancelled tasks. A task with
 unfinished direct blockers ends with `blocked by` and their short IDs.
 
-Each run of consecutive completed phases folds into one line. A run of one
-keeps its title, as in `✓ Milestone 6: Shared interface system  done · 1 task`.
-A longer run names its range when every title starts with `Milestone` or
-`Phase` and consecutive numbers, as in `✓ Milestones 1–4  done · 20 tasks`, and
-reads `✓ 3 phases  done · 9 tasks` otherwise.
+Each run of consecutive completed phases folds into one line. A completed
+phase with an unfinished task does not fold, so that task still shows. A run of
+one keeps its title, as in
+`✓ Milestone 6: Shared interface system  done · 1 task`. A longer run names its
+range when the part of each title before the first colon is `Milestone <n>` or
+`Phase <n>`, with the same word and consecutive numbers, as in
+`✓ Milestones 1–4  done · 20 tasks`. Otherwise it reads
+`✓ 3 phases  done · 9 tasks`.
 
 A footer sums up the captures, notes and releases, such as
 `Inbox: 24 open · Notes: 17 · Releases: v0.1.0, v0.2.0`. It leaves out empty
@@ -258,8 +261,9 @@ parts, and an empty project prints none.
 `arcl tree <id>` draws that record and its subtree, never folding the root,
 with no headings and no footer.
 
-Colour appears only when stdout is a terminal and `NO_COLOR` is unset, and
-`--color` overrides that check.
+Colour appears only when stdout is a terminal and `NO_COLOR` is unset.
+`FORCE_COLOR` or `CLICOLOR_FORCE` turns it on, and `--color` overrides every
+check.
 
 See [Inspecting Work](/guides/inspect-work/) for the query workflow and context contents.
 

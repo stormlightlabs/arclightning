@@ -1443,12 +1443,12 @@ fn push_children<'a>(
     }
 }
 
-/// Groups `nodes` into tree lines, with each run of consecutive completed
+/// Groups `nodes` into tree lines, with each run of consecutive finished
 /// phases in one [`TreeItem::Folded`] when `fold` is set.
 fn tree_items<'a>(nodes: impl IntoIterator<Item = &'a ConnectedTreeNode>, fold: bool) -> Vec<TreeItem<'a>> {
     let mut items = Vec::new();
     for node in nodes {
-        if fold && node.kind == "phase" && node.mark == StatusMark::Done {
+        if fold && is_finished_phase(node) {
             if let Some(TreeItem::Folded(run)) = items.last_mut() {
                 run.push(node);
             } else {
@@ -1461,10 +1461,21 @@ fn tree_items<'a>(nodes: impl IntoIterator<Item = &'a ConnectedTreeNode>, fold: 
     items
 }
 
+/// Whether `node` is a completed phase whose counted tasks are all done. A
+/// phase completed over open tasks stays expanded so those tasks show.
+fn is_finished_phase(node: &ConnectedTreeNode) -> bool {
+    if node.kind != "phase" || node.mark != StatusMark::Done {
+        return false;
+    }
+    let (done, total) = task_progress(&node.children);
+    done == total
+}
+
 /// The line for a run of finished phases, such as
 /// `✓ Milestones 1–6  done · 29 tasks`. One phase keeps its title. A longer
-/// run names its range when every title is `Milestone` or `Phase` with
-/// consecutive numbers, such as `Milestone 1:`, and counts phases otherwise.
+/// run names its range when each title before its first colon is
+/// `Milestone <n>` or `Phase <n>`, with consecutive numbers, and counts
+/// phases otherwise.
 fn folded_line(run: &[&ConnectedTreeNode], view: TreeView) -> String {
     let chars = view.chars();
     let tasks = run.iter().map(|phase| task_progress(&phase.children).1).sum::<usize>();
@@ -2367,6 +2378,47 @@ Inbox: 1 open · Notes: 1 · Releases: v0.1.0, v0.2.0"
         assert_eq!(
             human(&nodes[..1], TreeView::default()),
             "◐ Plan\n└── ✓ 2 phases  done · 0 tasks"
+        );
+    }
+
+    #[test]
+    fn completed_phase_with_open_tasks_stays_expanded() {
+        let task = |title: &str, mark| node("task", title, mark, Vec::new());
+        let mut blocked = task("T3: Next", StatusMark::Waiting);
+        blocked.blocked_by = vec!["T2".to_owned()];
+        let nodes = [node(
+            "plan",
+            "Plan",
+            StatusMark::Active,
+            vec![
+                node(
+                    "phase",
+                    "Milestone 1: First",
+                    StatusMark::Done,
+                    vec![task("T1: One", StatusMark::Done)],
+                ),
+                node(
+                    "phase",
+                    "Milestone 2: Second",
+                    StatusMark::Done,
+                    vec![
+                        task("T2: Open", StatusMark::Waiting),
+                        task("T4: Dropped", StatusMark::Cancelled),
+                    ],
+                ),
+                node("phase", "Milestone 3: Third", StatusMark::Active, vec![blocked]),
+            ],
+        )];
+        assert_eq!(
+            human(&nodes, TreeView::default()),
+            "\
+◐ Plan
+├── ✓ Milestone 1: First  done · 1 task
+├── ✓ Milestone 2: Second  0/1
+│   ├── ○ T2: Open
+│   └── ✗ T4: Dropped
+└── ◐ Milestone 3: Third  0/1
+    └── ○ T3: Next  blocked by T2"
         );
     }
 
