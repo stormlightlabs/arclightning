@@ -37,7 +37,6 @@
     CopyId,
     Feedback,
     Field,
-    Icon,
     Markdown,
     MarkdownEditor,
     PropertiesPanel,
@@ -365,14 +364,17 @@
           />
         {/each}
         {#if draft === null}
-          <Button variant="ghost" disabled={busy !== null} onclick={openEdit}>
-            <Icon name="edit" size="1rem" />Edit
-          </Button>
+          <Button label="Edit" icon="edit" variant="ghost" disabled={busy !== null} onclick={openEdit} />
         {/if}
         {#if canEditFile && file === null}
-          <Button variant="ghost" busy={busy === "file"} disabled={busy !== null || fileQueued} onclick={openFile}>
-            <Icon name="editFile" size="1rem" />Edit file
-          </Button>
+          <Button
+            label="Edit file"
+            icon="editFile"
+            variant="ghost"
+            busy={busy === "file"}
+            disabled={busy !== null || fileQueued}
+            onclick={openFile}
+          />
         {/if}
       </div>
       {#if canEditFile && fileQueued}
@@ -842,9 +844,6 @@
     flex-wrap: wrap;
     gap: var(--arcl-space-2);
     margin-top: var(--arcl-space-2);
-  }
-  .actions :global(.arcl-icon) {
-    margin-inline-end: var(--arcl-space-2);
   }
   .ask,
   .edit {

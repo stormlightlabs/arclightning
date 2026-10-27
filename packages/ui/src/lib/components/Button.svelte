@@ -1,6 +1,7 @@
 <script module lang="ts">
   import type { Snippet } from "svelte";
   import type { HTMLButtonAttributes } from "svelte/elements";
+  import type { IconName } from "../icons";
 
   /** Visual emphasis available to shared actions. */
   export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
@@ -9,17 +10,21 @@
   export interface ButtonProps extends Omit<HTMLButtonAttributes, "children"> {
     busy?: boolean;
     children?: Snippet;
+    /** Icon drawn before the label and hidden from assistive tech. The spinner replaces it while busy. */
+    icon?: IconName;
     label?: string;
     variant?: ButtonVariant;
   }
 </script>
 
 <script lang="ts">
+  import Icon from "./Icon.svelte";
   let {
     busy = false,
     children,
     class: className = "",
     disabled = false,
+    icon,
     label,
     type = "button",
     variant = "secondary",
@@ -35,7 +40,10 @@
   disabled={disabled || busy}
   {type}
 >
-  {#if busy}<span class="arcl-button__spinner" aria-hidden="true"></span>{/if}
+  {#if busy}<span class="arcl-button__spinner" aria-hidden="true"></span>{:else if icon}<Icon
+      name={icon}
+      size="1rem"
+    />{/if}
   <span
     >{#if children}{@render children()}{:else}{label}{/if}</span
   >

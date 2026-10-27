@@ -35,6 +35,23 @@ describe("surfaces", () => {
     expect(parseFloat(getComputedStyle(header.element()).borderBottomLeftRadius)).toBe(outer - border);
   });
 
+  it("spaces a button's icon from its label with the button's gap, and swaps it for the spinner while busy", async () => {
+    const { rerender } = await render(Button, { label: "Edit", icon: "edit" });
+    const button = page.getByRole("button", { name: "Edit" }).element();
+    const icon = button.querySelector(".arcl-icon")!;
+    expect(icon.getAttribute("aria-hidden")).toBe("true");
+    expect(icon.parentElement).toBe(button);
+    const label = icon.nextElementSibling!;
+    expect(label.textContent).toBe("Edit");
+    const gap = parseFloat(getComputedStyle(button).columnGap);
+    expect(gap).toBeGreaterThan(0);
+    expect(label.getBoundingClientRect().left - icon.getBoundingClientRect().right).toBeCloseTo(gap, 0);
+
+    await rerender({ label: "Edit", icon: "edit", busy: true });
+    expect(button.querySelector(".arcl-button__spinner")).not.toBeNull();
+    expect(button.querySelector(".arcl-icon")).toBeNull();
+  });
+
   it("gives buttons and select triggers a 6 px radius and keeps badges round", async () => {
     await render(Button, { label: "Promote" });
     expect(getComputedStyle(page.getByRole("button", { name: "Promote" }).element()).borderRadius).toBe("6px");
