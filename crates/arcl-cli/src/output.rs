@@ -22,6 +22,14 @@ use arcl_store::{
 /// the specs and the tasks outside any spec.
 pub const TREE_SECTIONS: [(&str, &str); 3] = [("capture", "Inbox"), ("note", "Notes"), ("release", "Releases")];
 
+/// The characters human `arcl tree` output draws with by default.
+const UNICODE_TREE: TreeChars =
+    TreeChars { branch: "├── ", last: "└── ", pipe: "│   ", blank: "    ", dot: " · ", dash: "–" };
+
+/// The characters `arcl tree --ascii` draws with, as GNU `tree -A` does.
+const ASCII_TREE: TreeChars =
+    TreeChars { branch: "|-- ", last: "`-- ", pipe: "|   ", blank: "    ", dot: " - ", dash: "-" };
+
 /// The heading for files with lines that look like conflict markers.
 const MARKER_LABEL: &str = "Lines that look like conflict markers (sync accepts them as content):";
 
@@ -198,7 +206,7 @@ impl StatusMark {
         }
     }
 
-    /// The ASCII form, for the `--ascii` tree view the fold task adds.
+    /// The ASCII form, for `arcl tree --ascii`.
     pub const fn ascii(self) -> char {
         match self {
             Self::Done => '+',
@@ -216,6 +224,14 @@ impl StatusMark {
 pub enum OutputError {
     #[error("could not serialize JSON output: {0}")]
     Json(#[from] serde_json::Error),
+}
+
+/// One line among a parent's children in human `arcl tree` output.
+enum TreeItem<'a> {
+    /// A record, drawn with its subtree.
+    Record(&'a ConnectedTreeNode),
+    /// A run of consecutive finished phases, drawn as one line.
+    Folded(Vec<&'a ConnectedTreeNode>),
 }
 
 /// The renderer used by the application boundary.
@@ -590,14 +606,13 @@ impl Renderer {
         self.render_collection("records", records, records)
     }
 
-    /// Render the connected planning hierarchy. A `rooted` tree prints its
-    /// nodes at depth `0` with no section headings.
+    /// Render the connected planning hierarchy. `view` shapes human output
+    /// only; `--plain` and `--json` print every node given.
     pub fn render_connected_tree(
-        &self, nodes: &[ConnectedTreeNode], rooted: bool,
+        &self, nodes: &[ConnectedTreeNode], view: TreeView,
     ) -> Result<Option<String>, OutputError> {
         let message = match self.mode {
-            OutputMode::Human if rooted => nodes.iter().map(|node| node.human(0)).collect::<Vec<_>>().join("\n"),
-            OutputMode::Human => human_tree(nodes),
+            OutputMode::Human => human_tree(nodes, view),
             OutputMode::Plain => nodes
                 .iter()
                 .flat_map(|node| node.plain_lines(0))
@@ -1240,22 +1255,29 @@ pub struct ConnectedTreeNode {
     /// `--json` carry `status` instead.
     #[serde(skip)]
     pub mark: StatusMark,
+    /// The unfinished tasks that block this task directly, which human
+    /// output names at the end of the line.
+    #[serde(skip)]
+    pub blocked_by: Vec<String>,
     /// Child records in the planning hierarchy.
     pub children: Vec<ConnectedTreeNode>,
 }
 
 impl ConnectedTreeNode {
-    fn human(&self, depth: usize) -> String {
-        let mut lines = vec![format!(
-            "{}{} {} `{}` [{}]",
-            "  ".repeat(depth),
-            self.mark.glyph(),
-            self.kind,
-            self.id,
-            self.title
-        )];
-        lines.extend(self.children.iter().map(|child| child.human(depth + 1)));
-        lines.join("\n")
+    /// The human line for this record: its mark and title, a phase's
+    /// done/total task count, and a task's open blockers.
+    fn human_line(&self, view: TreeView) -> String {
+        let mut line = format!("{} {}", view.mark(self.mark), self.title);
+        if self.kind == "phase" {
+            let (done, total) = task_progress(&self.children);
+            if total > 0 {
+                line.push_str(&format!("  {done}/{total}"));
+            }
+        }
+        if !self.blocked_by.is_empty() {
+            line.push_str(&format!("  blocked by {}", self.blocked_by.join(", ")));
+        }
+        line
     }
 
     fn plain_lines(&self, depth: usize) -> Vec<String> {
@@ -1270,6 +1292,53 @@ impl ConnectedTreeNode {
         lines.extend(self.children.iter().flat_map(|child| child.plain_lines(depth + 1)));
         lines
     }
+}
+
+/// What human `arcl tree` output shows and how it draws it.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TreeView {
+    /// The nodes are one record's subtree, from `arcl tree <id>`: no
+    /// sections and no footer.
+    pub rooted: bool,
+    /// Unfold finished phases, and list the Inbox, Notes and Releases
+    /// sections in place of the footer.
+    pub all: bool,
+    /// Draw with ASCII characters only.
+    pub ascii: bool,
+    /// The number of record levels to print, or `None` for every level.
+    pub depth: Option<u16>,
+}
+
+impl TreeView {
+    const fn chars(self) -> TreeChars {
+        if self.ascii { ASCII_TREE } else { UNICODE_TREE }
+    }
+
+    const fn mark(self, mark: StatusMark) -> char {
+        if self.ascii { mark.ascii() } else { mark.glyph() }
+    }
+
+    /// Whether records at `level`, counting top-level records as `1`, print.
+    fn shows(self, level: usize) -> bool {
+        self.depth.is_none_or(|depth| level <= usize::from(depth))
+    }
+}
+
+/// The connectors and separators of one human `arcl tree` drawing style.
+#[derive(Clone, Copy, Debug)]
+struct TreeChars {
+    /// Before a child that has a later sibling.
+    branch: &'static str,
+    /// Before the last child.
+    last: &'static str,
+    /// Below a child that has a later sibling.
+    pipe: &'static str,
+    /// Below the last child.
+    blank: &'static str,
+    /// Between the parts of a folded line or the footer.
+    dot: &'static str,
+    /// Between the first and last number of a folded range.
+    dash: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -1310,22 +1379,164 @@ pub fn tree_section(kind: &str) -> Option<usize> {
     TREE_SECTIONS.iter().position(|(section, _)| *section == kind)
 }
 
-/// Renders top-level tree nodes for human output in the order given: nodes
-/// outside [`TREE_SECTIONS`] flush-left, and a section's heading before its
-/// first node, with its nodes indented below it. A section with no nodes
-/// prints nothing.
-fn human_tree(nodes: &[ConnectedTreeNode]) -> String {
+/// Renders tree nodes for human output as a box-drawing tree. Nodes outside
+/// [`TREE_SECTIONS`] print flush-left with their subtrees below, folding each
+/// run of finished phases into one line.
+///
+/// Unless `view` is rooted, the section nodes follow as a one-line footer,
+/// or with `view.all` under each section's heading. A rooted tree prints its
+/// root as a record of any kind.
+fn human_tree(nodes: &[ConnectedTreeNode], view: TreeView) -> String {
+    let (sectioned, records): (Vec<_>, Vec<_>) = nodes
+        .iter()
+        .partition(|node| !view.rooted && tree_section(node.kind).is_some());
     let mut lines = Vec::new();
-    let mut current = None;
-    for node in nodes {
-        let section = tree_section(node.kind);
-        if let Some(index) = section.filter(|_| section != current) {
-            lines.push(TREE_SECTIONS[index].1.to_owned());
+    for node in records {
+        lines.push(node.human_line(view));
+        push_children(&mut lines, &node.children.iter().collect::<Vec<_>>(), "", 2, view);
+    }
+    if view.rooted {
+        return lines.join("\n");
+    }
+    if view.all {
+        for (kind, heading) in TREE_SECTIONS {
+            let members = sectioned
+                .iter()
+                .copied()
+                .filter(|node| node.kind == kind)
+                .collect::<Vec<_>>();
+            if !members.is_empty() {
+                lines.push(heading.to_owned());
+                push_children(&mut lines, &members, "", 1, view);
+            }
         }
-        current = section;
-        lines.push(node.human(usize::from(section.is_some())));
+    } else if let Some(footer) = tree_footer(&sectioned, view) {
+        lines.push(footer);
     }
     lines.join("\n")
+}
+
+/// Appends `children`, at `level`, below a line drawn with `prefix`. Each
+/// run of finished phases folds into one line unless `view.all` is set.
+fn push_children(lines: &mut Vec<String>, children: &[&ConnectedTreeNode], prefix: &str, level: usize, view: TreeView) {
+    if !view.shows(level) {
+        return;
+    }
+    let chars = view.chars();
+    let items = tree_items(children, !view.all);
+    let count = items.len();
+    for (index, item) in items.into_iter().enumerate() {
+        let last = index + 1 == count;
+        let connector = if last { chars.last } else { chars.branch };
+        match item {
+            TreeItem::Record(node) => {
+                lines.push(format!("{prefix}{connector}{}", node.human_line(view)));
+                let below = format!("{prefix}{}", if last { chars.blank } else { chars.pipe });
+                push_children(
+                    lines,
+                    &node.children.iter().collect::<Vec<_>>(),
+                    &below,
+                    level + 1,
+                    view,
+                );
+            }
+            TreeItem::Folded(run) => lines.push(format!("{prefix}{connector}{}", folded_line(&run, view))),
+        }
+    }
+}
+
+/// Groups `nodes` into tree lines, with each run of consecutive completed
+/// phases in one [`TreeItem::Folded`] when `fold` is set.
+fn tree_items<'a>(nodes: &[&'a ConnectedTreeNode], fold: bool) -> Vec<TreeItem<'a>> {
+    let mut items = Vec::new();
+    for &node in nodes {
+        if fold && node.kind == "phase" && node.mark == StatusMark::Done {
+            if let Some(TreeItem::Folded(run)) = items.last_mut() {
+                run.push(node);
+            } else {
+                items.push(TreeItem::Folded(vec![node]));
+            }
+        } else {
+            items.push(TreeItem::Record(node));
+        }
+    }
+    items
+}
+
+/// The line for a run of finished phases, such as
+/// `✓ Milestones 1–6  done · 29 tasks`. One phase keeps its title. A longer
+/// run names its range when the first and last titles start with the same
+/// word and a number, such as `Milestone 1:`, and counts phases otherwise.
+fn folded_line(run: &[&ConnectedTreeNode], view: TreeView) -> String {
+    let chars = view.chars();
+    let tasks = run.iter().map(|phase| task_progress(&phase.children).1).sum::<usize>();
+    let label = match run {
+        [phase] => phase.title.clone(),
+        [first, .., last] => match (numbered_title(&first.title), numbered_title(&last.title)) {
+            (Some((word, from)), Some((last_word, to))) if word == last_word => {
+                format!("{word}s {from}{}{to}", chars.dash)
+            }
+            _ => format!("{} phases", run.len()),
+        },
+        [] => String::new(),
+    };
+    let noun = if tasks == 1 { "task" } else { "tasks" };
+    format!(
+        "{} {label}  done{}{tasks} {noun}",
+        view.mark(StatusMark::Done),
+        chars.dot
+    )
+}
+
+/// Splits a title such as `Milestone 7: Local web app` into its word and
+/// number, `("Milestone", "7")`, or `None` when the part before the first
+/// colon does not end in a number.
+fn numbered_title(title: &str) -> Option<(&str, &str)> {
+    let head = title.split(':').next()?.trim();
+    let (word, number) = head.rsplit_once(' ')?;
+    (!number.is_empty() && number.chars().all(|character| character.is_ascii_digit())).then_some((word, number))
+}
+
+/// Counts the completed tasks and all tasks at any depth in `nodes`,
+/// leaving out cancelled tasks.
+fn task_progress(nodes: &[ConnectedTreeNode]) -> (usize, usize) {
+    nodes.iter().fold((0, 0), |(done, total), node| {
+        let (child_done, child_total) = task_progress(&node.children);
+        let (own_done, own_total) = match node.mark {
+            _ if node.kind != "task" => (0, 0),
+            StatusMark::Cancelled => (0, 0),
+            StatusMark::Done => (1, 1),
+            _ => (0, 1),
+        };
+        (done + own_done + child_done, total + own_total + child_total)
+    })
+}
+
+/// The footer that sums up the section nodes: open captures, notes and
+/// release names, such as `Inbox: 21 open · Notes: 17 · Releases: v0.1.0`.
+/// Leaves out empty parts, and returns `None` when every part is empty.
+fn tree_footer(nodes: &[&ConnectedTreeNode], view: TreeView) -> Option<String> {
+    let open = nodes
+        .iter()
+        .filter(|node| node.kind == "capture" && node.status == CaptureStatus::Captured.as_str())
+        .count();
+    let notes = nodes.iter().filter(|node| node.kind == "note").count();
+    let releases = nodes
+        .iter()
+        .filter(|node| node.kind == "release")
+        .map(|node| node.title.as_str())
+        .collect::<Vec<_>>();
+    let mut parts = Vec::new();
+    if open > 0 {
+        parts.push(format!("Inbox: {open} open"));
+    }
+    if notes > 0 {
+        parts.push(format!("Notes: {notes}"));
+    }
+    if !releases.is_empty() {
+        parts.push(format!("Releases: {}", releases.join(", ")));
+    }
+    (!parts.is_empty()).then(|| parts.join(view.chars().dot))
 }
 
 fn human_action(action: &str) -> &str {
@@ -1896,25 +2107,27 @@ mod tests {
             title: "Phase".to_owned(),
             status: "open".to_owned(),
             mark: StatusMark::Active,
+            blocked_by: Vec::new(),
             children: vec![ConnectedTreeNode {
                 kind: "task",
                 id: "arcl-t-1".to_owned(),
                 title: "Task".to_owned(),
                 status: "pending".to_owned(),
                 mark: StatusMark::Ready,
+                blocked_by: vec!["arcl-t-2".to_owned()],
                 children: Vec::new(),
             }],
         };
         let nodes = [node];
         let render = |mode| {
             Renderer::new(mode, ColorChoice::Never)
-                .render_connected_tree(&nodes, false)
+                .render_connected_tree(&nodes, TreeView::default())
                 .expect("rendering succeeds")
                 .expect("output is not quiet")
         };
         assert_eq!(
             render(OutputMode::Human),
-            "◐ phase `arcl-ph-1` [Phase]\n  ● task `arcl-t-1` [Task]"
+            "◐ Phase  0/1\n└── ● Task  blocked by arcl-t-2"
         );
         assert_eq!(
             render(OutputMode::Plain),
@@ -1934,5 +2147,215 @@ mod tests {
         let expected = ["children", "id", "kind", "status", "title"];
         assert_eq!(keys(&json["data"]["nodes"][0]), expected);
         assert_eq!(keys(&json["data"]["nodes"][0]["children"][0]), expected);
+    }
+
+    /// A tree node of `kind` with `title`, `mark` and `children`.
+    fn node(kind: &'static str, title: &str, mark: StatusMark, children: Vec<ConnectedTreeNode>) -> ConnectedTreeNode {
+        let status = if kind == "capture" { "captured" } else { "open" };
+        ConnectedTreeNode {
+            kind,
+            id: format!("id-{title}"),
+            title: title.to_owned(),
+            status: status.to_owned(),
+            mark,
+            blocked_by: Vec::new(),
+            children,
+        }
+    }
+
+    /// A spec over a plan with two finished phases, an open one and a
+    /// finished one, then a capture, a note and two releases.
+    fn sample_tree() -> Vec<ConnectedTreeNode> {
+        let task = |title: &str, mark| node("task", title, mark, Vec::new());
+        let mut blocked = task("T5: Blocked", StatusMark::Waiting);
+        blocked.blocked_by = vec!["1A2B".to_owned()];
+        let plan = node(
+            "plan",
+            "Roadmap",
+            StatusMark::Active,
+            vec![
+                node(
+                    "phase",
+                    "Milestone 1: First",
+                    StatusMark::Done,
+                    vec![task("T1: One", StatusMark::Done)],
+                ),
+                node(
+                    "phase",
+                    "Milestone 2: Second",
+                    StatusMark::Done,
+                    vec![node(
+                        "task",
+                        "T2: Two",
+                        StatusMark::Done,
+                        vec![task("T2.1: Sub", StatusMark::Done)],
+                    )],
+                ),
+                node(
+                    "phase",
+                    "Milestone 3: Third",
+                    StatusMark::Active,
+                    vec![
+                        task("T3: Done", StatusMark::Done),
+                        task("T4: Active", StatusMark::Active),
+                        task("T6: Dropped", StatusMark::Cancelled),
+                        blocked,
+                    ],
+                ),
+                node(
+                    "phase",
+                    "Milestone 4: Fourth",
+                    StatusMark::Done,
+                    vec![task("T7: Seven", StatusMark::Done)],
+                ),
+            ],
+        );
+        vec![
+            node("spec", "Spec", StatusMark::Active, vec![plan]),
+            node("capture", "Idea", StatusMark::Waiting, Vec::new()),
+            node("note", "Decision", StatusMark::Waiting, Vec::new()),
+            node("release", "v0.1.0", StatusMark::Waiting, Vec::new()),
+            node("release", "v0.2.0", StatusMark::Waiting, Vec::new()),
+        ]
+    }
+
+    fn human(nodes: &[ConnectedTreeNode], view: TreeView) -> String {
+        Renderer::new(OutputMode::Human, ColorChoice::Never)
+            .render_connected_tree(nodes, view)
+            .expect("rendering succeeds")
+            .expect("output is not quiet")
+    }
+
+    #[test]
+    fn folded_tree_folds_finished_phase_runs_and_ends_with_the_footer() {
+        assert_eq!(
+            human(&sample_tree(), TreeView::default()),
+            "\
+◐ Spec
+└── ◐ Roadmap
+    ├── ✓ Milestones 1–2  done · 3 tasks
+    ├── ◐ Milestone 3: Third  1/3
+    │   ├── ✓ T3: Done
+    │   ├── ◐ T4: Active
+    │   ├── ✗ T6: Dropped
+    │   └── ○ T5: Blocked  blocked by 1A2B
+    └── ✓ Milestone 4: Fourth  done · 1 task
+Inbox: 1 open · Notes: 1 · Releases: v0.1.0, v0.2.0"
+        );
+    }
+
+    #[test]
+    fn unfolded_tree_shows_every_phase_and_the_sections() {
+        assert_eq!(
+            human(&sample_tree(), TreeView { all: true, ..TreeView::default() }),
+            "\
+◐ Spec
+└── ◐ Roadmap
+    ├── ✓ Milestone 1: First  1/1
+    │   └── ✓ T1: One
+    ├── ✓ Milestone 2: Second  2/2
+    │   └── ✓ T2: Two
+    │       └── ✓ T2.1: Sub
+    ├── ◐ Milestone 3: Third  1/3
+    │   ├── ✓ T3: Done
+    │   ├── ◐ T4: Active
+    │   ├── ✗ T6: Dropped
+    │   └── ○ T5: Blocked  blocked by 1A2B
+    └── ✓ Milestone 4: Fourth  1/1
+        └── ✓ T7: Seven
+Inbox
+└── ○ Idea
+Notes
+└── ○ Decision
+Releases
+├── ○ v0.1.0
+└── ○ v0.2.0"
+        );
+    }
+
+    #[test]
+    fn ascii_tree_uses_only_ascii() {
+        let folded = human(&sample_tree(), TreeView { ascii: true, ..TreeView::default() });
+        assert_eq!(
+            folded,
+            "\
+~ Spec
+`-- ~ Roadmap
+    |-- + Milestones 1-2  done - 3 tasks
+    |-- ~ Milestone 3: Third  1/3
+    |   |-- + T3: Done
+    |   |-- ~ T4: Active
+    |   |-- x T6: Dropped
+    |   `-- o T5: Blocked  blocked by 1A2B
+    `-- + Milestone 4: Fourth  done - 1 task
+Inbox: 1 open - Notes: 1 - Releases: v0.1.0, v0.2.0"
+        );
+        let all = human(
+            &sample_tree(),
+            TreeView { ascii: true, all: true, ..TreeView::default() },
+        );
+        assert!(all.is_ascii(), "{all}");
+    }
+
+    #[test]
+    fn depth_limits_the_record_levels() {
+        assert_eq!(
+            human(&sample_tree(), TreeView { depth: Some(3), ..TreeView::default() }),
+            "\
+◐ Spec
+└── ◐ Roadmap
+    ├── ✓ Milestones 1–2  done · 3 tasks
+    ├── ◐ Milestone 3: Third  1/3
+    └── ✓ Milestone 4: Fourth  done · 1 task
+Inbox: 1 open · Notes: 1 · Releases: v0.1.0, v0.2.0"
+        );
+        assert_eq!(
+            human(
+                &sample_tree(),
+                TreeView { depth: Some(1), all: true, ..TreeView::default() }
+            ),
+            "◐ Spec\nInbox\n└── ○ Idea\nNotes\n└── ○ Decision\nReleases\n├── ○ v0.1.0\n└── ○ v0.2.0"
+        );
+    }
+
+    #[test]
+    fn rooted_tree_prints_the_root_without_folding_it_or_a_footer() {
+        let phase = node(
+            "phase",
+            "Milestone 1: First",
+            StatusMark::Done,
+            vec![node("task", "T1: One", StatusMark::Done, Vec::new())],
+        );
+        let rooted = TreeView { rooted: true, ..TreeView::default() };
+        assert_eq!(
+            human(std::slice::from_ref(&phase), rooted),
+            "✓ Milestone 1: First  1/1\n└── ✓ T1: One"
+        );
+        let capture = node("capture", "Idea", StatusMark::Waiting, Vec::new());
+        assert_eq!(human(std::slice::from_ref(&capture), rooted), "○ Idea");
+    }
+
+    #[test]
+    fn footer_leaves_out_empty_parts_and_runs_without_numbers_count_phases() {
+        let nodes = [
+            node(
+                "plan",
+                "Plan",
+                StatusMark::Active,
+                vec![
+                    node("phase", "Design", StatusMark::Done, Vec::new()),
+                    node("phase", "Build", StatusMark::Done, Vec::new()),
+                ],
+            ),
+            node("note", "Decision", StatusMark::Waiting, Vec::new()),
+        ];
+        assert_eq!(
+            human(&nodes, TreeView::default()),
+            "◐ Plan\n└── ✓ 2 phases  done · 0 tasks\nNotes: 1"
+        );
+        assert_eq!(
+            human(&nodes[..1], TreeView::default()),
+            "◐ Plan\n└── ✓ 2 phases  done · 0 tasks"
+        );
     }
 }

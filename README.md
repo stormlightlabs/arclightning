@@ -78,6 +78,34 @@ its only plan. On a fresh clone, run `arcl init`; the next command imports
 them. Run `arcl tree` for the whole plan and `arcl ready` for the work that can
 start.
 
+`arcl tree` folds finished milestones and sums up the inbox in a footer. Here
+it is on this repository, with the tasks of milestones 5 and 7 cut:
+
+```text
+◐ Arc Lightning first release and desktop app
+└── ◐ Roadmap
+    ├── ✓ Milestones 1–4  done · 20 tasks
+    ├── ◐ Milestone 5: Agent interface  7/7
+    ├── ✓ Milestone 6: Shared interface system  done · 1 task
+    ├── ◐ Milestone 7: Local web app  15/21
+    ├── ○ Milestone 8: Website and documentation  0/1
+    │   └── ● T14: Rebuild the website and documentation shell
+    ├── ○ Milestone 9: Integrated release  0/2
+    │   ├── ○ T15: Verify the integrated release  blocked by B7MS
+    │   └── ● Publish release binaries with dist and support cargo-binstall
+    ├── ○ Milestone 10: Desktop planning and execution  0/2
+    │   ├── ○ T12: Build the desktop shell and project inbox  blocked by EGMS
+    │   └── ○ T13: Add desktop work, planning, and task views  blocked by AGNY
+    └── ◐ Milestone 11: CLI formatting  5/6
+        ├── ✓ Accept and show short record IDs
+        ├── ✓ Show status on each arcl tree line
+        ├── ✓ Leave closed captures out of arcl tree by default
+        ├── ✓ Put the plan first in arcl tree
+        ├── ✓ Fold finished milestones in arcl tree
+        └── ● Add full and outline styles to arcl tree
+Inbox: 24 open · Notes: 17 · Releases: v0.1.0, v0.2.0
+```
+
 Install the pnpm workspace and run the documentation site:
 
 ```sh

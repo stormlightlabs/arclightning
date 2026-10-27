@@ -937,19 +937,17 @@ fn tree_lines_start_with_the_status_mark() {
     block_start_task(dir, &blocked, &ready);
 
     let human = stdout_of(dir, &["--color", "never", "tree"]);
-    let mark = |title: &str| {
-        let line = human
-            .lines()
-            .find(|line| line.ends_with(&format!("[{title}]")))
-            .unwrap_or_else(|| panic!("a tree line for {title} in:\n{human}"));
-        line.chars().next().expect("a non-empty line")
-    };
+    let mark = |title: &str| tree_line(&human, title).0;
     assert_eq!(mark("Done"), '✓');
     assert_eq!(mark("Active"), '◐');
     assert_eq!(mark("Parked"), '‖');
     assert_eq!(mark("Dropped"), '✗');
     assert_eq!(mark("Ready"), '●');
     assert_eq!(mark("Blocked"), '○');
+    assert_eq!(
+        tree_line(&human, "Blocked").1,
+        format!("Blocked  blocked by {}", short_id(dir, &ready))
+    );
 
     let plain = stdout_of(dir, &["--plain", "tree"]);
     for (id, status, title) in [
@@ -1012,26 +1010,19 @@ fn tree_leaves_out_closed_captures_unless_all() {
     );
 
     let human = stdout_of(dir, &["--color", "never", "tree"]);
-    let capture_lines = |output: &str| -> Vec<String> {
-        output
-            .lines()
-            .filter(|line| line.contains(" capture `"))
-            .map(str::to_owned)
-            .collect()
-    };
-    let lines = capture_lines(&human);
-    assert_eq!(lines.len(), 1, "{human}");
-    assert!(lines[0].ends_with("[Open idea]"), "{human}");
+    // The promoted capture's task prints first.
+    assert_eq!(human.lines().collect::<Vec<_>>(), ["● Promoted idea", "Inbox: 1 open"]);
     let human_all = stdout_of(dir, &["--color", "never", "tree", "--all"]);
-    let mark = |title: &str| {
-        let line = capture_lines(&human_all)
-            .into_iter()
-            .find(|line| line.ends_with(&format!("[{title}]")))
-            .unwrap_or_else(|| panic!("a tree line for {title} in:\n{human_all}"));
-        line.trim_start().chars().next().expect("a non-empty line")
-    };
-    assert_eq!(mark("Promoted idea"), '✓');
-    assert_eq!(mark("Discarded idea"), '✗');
+    assert_eq!(
+        human_all.lines().collect::<Vec<_>>(),
+        [
+            "● Promoted idea",
+            "Inbox",
+            "├── ○ Open idea",
+            "├── ✓ Promoted idea",
+            "└── ✗ Discarded idea"
+        ]
+    );
 
     for closed in [&promoted, &discarded] {
         let rooted = run_json(dir, ["--json", "tree", closed].as_ref());
@@ -1053,23 +1044,24 @@ fn tree_puts_specs_first_and_unplaced_records_under_sections() {
     run_json(dir, ["--json", "spec", "create", "Feature"].as_ref());
 
     let human = stdout_of(dir, &["--color", "never", "tree"]);
-    let lines = human.lines().collect::<Vec<_>>();
-    assert_eq!(lines.len(), 8, "{human}");
-    let record = |index: usize, prefix: &str, title: &str| {
-        let line = lines[index];
-        assert!(
-            line.starts_with(prefix) && line.ends_with(&format!("[{title}]")),
-            "{human}"
-        );
-    };
-    record(0, "○ spec `", "Feature");
-    record(1, "● task `", "Loose");
-    assert_eq!(lines[2], "Inbox", "{human}");
-    record(3, "  ○ capture `", "Idea");
-    assert_eq!(lines[4], "Notes", "{human}");
-    record(5, "  ○ note `", "Decision");
-    assert_eq!(lines[6], "Releases", "{human}");
-    record(7, "  ○ release `", "v1");
+    assert_eq!(
+        human.lines().collect::<Vec<_>>(),
+        ["○ Feature", "● Loose", "Inbox: 1 open · Notes: 1 · Releases: v1"]
+    );
+    let human_all = stdout_of(dir, &["--color", "never", "tree", "--all"]);
+    assert_eq!(
+        human_all.lines().collect::<Vec<_>>(),
+        [
+            "○ Feature",
+            "● Loose",
+            "Inbox",
+            "└── ○ Idea",
+            "Notes",
+            "└── ○ Decision",
+            "Releases",
+            "└── ○ v1"
+        ]
+    );
 
     let expected = ["spec", "task", "capture", "note", "release"];
     let plain = stdout_of(dir, &["--plain", "tree"]);
@@ -1105,6 +1097,130 @@ fn tree_puts_specs_first_and_unplaced_records_under_sections() {
 }
 
 #[test]
+fn tree_folds_finished_phases_and_limits_depth() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let spec = run_json(dir, ["--json", "spec", "create", "Feature"].as_ref());
+    let spec_id = spec["data"]["spec"]["id"].as_str().expect("spec ID").to_owned();
+    let plan = run_json(
+        dir,
+        ["--json", "plan", "create", "Roadmap", "--spec", &spec_id].as_ref(),
+    );
+    let plan_id = plan["data"]["plan"]["id"].as_str().expect("plan ID").to_owned();
+    let create_phase = |title: &str, position: &str| {
+        let phase = run_json(
+            dir,
+            [
+                "--json",
+                "plan",
+                "phase",
+                "create",
+                title,
+                "--plan",
+                &plan_id,
+                "--position",
+                position,
+            ]
+            .as_ref(),
+        );
+        phase["data"]["phase"]["id"].as_str().expect("phase ID").to_owned()
+    };
+    let create_in = |title: &str, phase: &str| {
+        let task = run_json(dir, ["--json", "task", "create", title, "--phase", phase].as_ref());
+        task["data"]["task"]["id"].as_str().expect("task ID").to_owned()
+    };
+    for (title, position) in [("Milestone 1: First", "0"), ("Milestone 2: Second", "1")] {
+        let phase = create_phase(title, position);
+        let task = create_in("Shipped", &phase);
+        run_json(
+            dir,
+            ["--json", "task", "complete", &task, "--evidence", "Verified"].as_ref(),
+        );
+        run_json(dir, ["--json", "plan", "phase", "complete", &phase].as_ref());
+    }
+    let open = create_phase("Milestone 3: Third", "2");
+    let blocker = create_in("Blocker", &open);
+    let blocked = create_in("Blocked", &open);
+    block_start_task(dir, &blocked, &blocker);
+    let blocker_short = short_id(dir, &blocker);
+
+    let folded = stdout_of(dir, &["--color", "never", "tree"]);
+    assert_eq!(
+        folded.lines().collect::<Vec<_>>(),
+        [
+            "◐ Feature",
+            "└── ◐ Roadmap",
+            "    ├── ✓ Milestones 1–2  done · 2 tasks",
+            "    └── ○ Milestone 3: Third  0/2",
+            "        ├── ● Blocker",
+            &format!("        └── ○ Blocked  blocked by {blocker_short}"),
+        ]
+    );
+    let ascii_all = stdout_of(dir, &["--color", "never", "tree", "--ascii", "--all"]);
+    assert!(ascii_all.is_ascii(), "{ascii_all}");
+    assert_eq!(ascii_all.lines().nth(2), Some("    |-- + Milestone 1: First  1/1"));
+    assert_eq!(ascii_all.lines().count(), 9, "{ascii_all}");
+    let shallow = stdout_of(dir, &["--color", "never", "tree", "--depth", "3"]);
+    assert_eq!(
+        shallow.lines().collect::<Vec<_>>(),
+        [
+            "◐ Feature",
+            "└── ◐ Roadmap",
+            "    ├── ✓ Milestones 1–2  done · 2 tasks",
+            "    └── ○ Milestone 3: Third  0/2"
+        ]
+    );
+    let rooted = stdout_of(dir, &["--color", "never", "tree", &open, "--depth", "1"]);
+    assert_eq!(rooted.trim_end(), "○ Milestone 3: Third  0/2");
+    for flag in ["--ascii", "--all"] {
+        assert_eq!(
+            stdout_of(dir, &["--plain", "tree", flag, "--depth", "1"]),
+            stdout_of(dir, &["--plain", "tree", "--all"]),
+            "--plain prints every record whatever {flag} and --depth say"
+        );
+    }
+    let refused = arcl_in(dir).args(["tree", "--depth", "0"]).output().expect("tree runs");
+    assert!(!refused.status.success());
+}
+
+#[test]
+fn tree_colour_follows_the_terminal_no_color_and_the_flag() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    create_task(dir, "Task", None);
+    // `IGNORE_IS_TERMINAL` makes the colour check treat stdout as a terminal.
+    let tree = |args: &[&str], envs: &[(&str, &str)]| {
+        let mut command = arcl_in(dir);
+        command
+            .env_remove("NO_COLOR")
+            .env_remove("FORCE_COLOR")
+            .env_remove("IGNORE_IS_TERMINAL")
+            .env_remove("CLICOLOR")
+            .env("TERM", "xterm");
+        for (key, value) in envs {
+            command.env(key, value);
+        }
+        let output = command.args(args).arg("tree").output().expect("tree runs");
+        assert_success(&output);
+        String::from_utf8(output.stdout).expect("output is UTF-8")
+    };
+    let terminal = ("IGNORE_IS_TERMINAL", "1");
+    let coloured = |output: &str| output.contains('\u{1b}');
+
+    assert!(coloured(&tree(&[], &[terminal])), "a terminal gets colour");
+    assert!(!coloured(&tree(&[], &[])), "a pipe gets none");
+    assert!(
+        !coloured(&tree(&[], &[terminal, ("NO_COLOR", "1")])),
+        "NO_COLOR turns it off"
+    );
+    assert!(!coloured(&tree(&["--color", "never"], &[terminal])));
+    assert!(
+        coloured(&tree(&["--color", "always"], &[])),
+        "--color always colours a pipe"
+    );
+}
+
+#[test]
 fn rooted_tree_prints_the_record_without_a_section_heading() {
     let directory = initialized_directory();
     let dir = directory.path();
@@ -1115,14 +1231,9 @@ fn rooted_tree_prints_the_record_without_a_section_heading() {
         .to_owned();
     let capture_id = create_capture(dir, "Idea", "Later");
 
-    for (id, prefix, title) in [(&release_id, "○ release `", "v1"), (&capture_id, "○ capture `", "Idea")] {
+    for (id, line) in [(&release_id, "○ v1"), (&capture_id, "○ Idea")] {
         let human = stdout_of(dir, &["--color", "never", "tree", id]);
-        let lines = human.lines().collect::<Vec<_>>();
-        assert_eq!(lines.len(), 1, "{human}");
-        assert!(
-            lines[0].starts_with(prefix) && lines[0].ends_with(&format!("[{title}]")),
-            "{human}"
-        );
+        assert_eq!(human.trim_end(), line, "no heading and no footer");
     }
 }
 
@@ -1171,14 +1282,8 @@ fn open_containers_show_started_when_a_task_below_them_started() {
     let parent = create_in("Parent", "--phase", &nested);
     complete(&create_task(dir, "Child", Some(&parent)));
 
-    let human = stdout_of(dir, &["--color", "never", "tree"]);
-    let mark = |title: &str| {
-        let line = human
-            .lines()
-            .find(|line| line.ends_with(&format!("[{title}]")))
-            .unwrap_or_else(|| panic!("a tree line for {title} in:\n{human}"));
-        line.trim_start().chars().next().expect("a non-empty line")
-    };
+    let human = stdout_of(dir, &["--color", "never", "tree", "--all"]);
+    let mark = |title: &str| tree_line(&human, title).0;
     assert_eq!(mark("Started"), '◐', "a completed task starts its phase");
     assert_eq!(mark("Direct"), '◐', "and the plan above it");
     assert_eq!(mark("Feature"), '◐', "and the spec above that");
@@ -2333,6 +2438,20 @@ fn stdout_of(directory: &Path, args: &[&str]) -> String {
     let output = arcl_in(directory).args(args).output().expect("arcl runs");
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     String::from_utf8(output.stdout).expect("stdout is UTF-8")
+}
+
+/// The status mark and the text after it on the human `arcl tree` line
+/// whose title is `title`, with the box-drawing prefix removed.
+fn tree_line(tree: &str, title: &str) -> (char, String) {
+    tree.lines()
+        .find_map(|line| {
+            let record = line.trim_start_matches(['│', '├', '└', '─', ' ']);
+            let mut chars = record.chars();
+            let mark = chars.next()?;
+            let text = chars.as_str().strip_prefix(' ')?;
+            (text.split("  ").next() == Some(title)).then(|| (mark, text.to_owned()))
+        })
+        .unwrap_or_else(|| panic!("a tree line for {title} in:\n{tree}"))
 }
 
 #[test]
@@ -5134,21 +5253,13 @@ fn short_ids_select_records_and_grow_when_suffixes_collide() {
     let suffix = |id: &str, length: usize| id[id.len() - length..].to_owned();
 
     // The two tasks that share four characters show five; the other shows four.
-    let tree = human_stdout(dir, &["tree"]);
-    assert!(
-        tree.contains(&format!("task `{}` [First]", suffix(&first, 5))),
-        "{tree}"
-    );
-    assert!(tree.contains(&format!("task `{}` [Twin]", suffix(&twin, 5))), "{tree}");
-    assert!(
-        tree.contains(&format!("task `{}` [Other]", suffix(&other, 4))),
-        "{tree}"
-    );
     let list = human_stdout(dir, &["list", "--kind", "task"]);
-    assert!(
-        list.contains(&format!("task\t{}\t[pending]\tFirst", suffix(&first, 5))),
-        "{list}"
-    );
+    for (id, length, title) in [(&first, 5, "First"), (&twin, 5, "Twin"), (&other, 4, "Other")] {
+        assert!(
+            list.contains(&format!("task\t{}\t[pending]\t{title}", suffix(id, length))),
+            "{list}"
+        );
+    }
     let plain = human_stdout(dir, &["--plain", "tree"]);
     assert!(plain.contains(&format!("0\ttask\t{other}\tpending\tOther")), "{plain}");
 
@@ -5162,7 +5273,7 @@ fn short_ids_select_records_and_grow_when_suffixes_collide() {
     let shown = run_json(dir, ["--json", "show", &lower].as_ref());
     assert_eq!(shown["data"]["task"]["id"], other.as_str(), "JSON keeps the full ID");
     let rooted = human_stdout(dir, &["tree", &suffix(&twin, 6)]);
-    assert_eq!(rooted.trim(), format!("● task `{}` [Twin]", suffix(&twin, 5)));
+    assert_eq!(rooted.trim(), "● Twin");
     let started = run_json(dir, ["--json", "task", "start", &suffix(&first, 5)].as_ref());
     assert_eq!(started["data"]["task"]["id"], first.as_str());
     assert_eq!(started["data"]["task"]["status"], "in_progress");
@@ -5229,9 +5340,9 @@ fn records_sharing_a_whole_ulid_show_their_kind_and_resolve_by_command() {
     );
 
     // Each record sharing the ULID shows its kind, and that short ID resolves.
-    let tree = human_stdout(dir, &["tree"]);
-    assert!(tree.contains(&format!("task `t-{ulid}` [Task]")), "{tree}");
-    assert!(tree.contains(&format!("spec `s-{ulid}` [Copy]")), "{tree}");
+    let list = human_stdout(dir, &["list"]);
+    assert!(list.contains(&format!("task\tt-{ulid}\t[pending]\tTask")), "{list}");
+    assert!(list.contains(&format!("spec\ts-{ulid}\t[open]\tCopy")), "{list}");
     let shown = run_json(dir, ["--json", "show", &format!("s-{ulid}")].as_ref());
     assert_eq!(shown["data"]["spec"]["id"], copy.as_str());
 

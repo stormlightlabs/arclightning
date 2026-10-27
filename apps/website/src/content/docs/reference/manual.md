@@ -39,9 +39,10 @@ always the end, never the start. Input that matches the start of any record's
 ULID, such as `01M5`, fails with status 3 and lists matching records with the
 last characters to type instead. A whole ULID still resolves.
 
-Human output from `show`, `list`, `tree`, `explain`, `task show` and
-`task explain` prints each ID, readiness reasons included, as its shortest
-suffix that ends no other record's ID and starts none, at least 4 characters.
+Human output from `show`, `list`, `explain`, `task show` and `task explain`,
+and the blockers `tree` names, prints each ID, readiness reasons included, as
+its shortest suffix that ends no other record's ID and starts none, at least 4
+characters.
 Records of different kinds that share a whole ULID, as a copied workspace file
 can, print as `<kind>-<ULID>`, such as `t-01M5VDDD42HZQ1FEN49X80GBA5`.
 `--plain` and `--json` output keep full IDs.
@@ -213,7 +214,7 @@ task ID, then a `subtask<TAB><id>` line for each completed subtask and an
 | -------------------------- | ------------------------------------------------------------------ |
 | `arcl show <id>`           | Show one record by its full or short ID.                           |
 | `arcl list`                | List records using kind, state, priority, and association filters. |
-| `arcl tree [<id>] [--all]` | Show the complete hierarchy or one rooted subtree.                 |
+| `arcl tree [<id>]`         | Show the complete hierarchy or one rooted subtree.                 |
 | `arcl explain <task-id>`   | Report every condition affecting task readiness.                   |
 | `arcl context <task-id>`   | Return the bounded context needed to work on a task.               |
 | `arcl check`               | Validate database and graph invariants.                            |
@@ -229,12 +230,36 @@ association filters.
 still shows. The JSON nodes keep their shape either way.
 
 `tree` prints specs first, then tasks outside any spec, then captures, notes
-and releases, each kind in ID order. Human output puts the captures, notes and
-releases under `Inbox`, `Notes` and `Releases` headings, with their records
-indented below. `arcl tree <id>` prints that record at depth `0` with no
-heading. `--plain` keeps one record per row, with top-level records at depth
-`0` and no heading rows, and `--json` lists the top-level nodes in the same
-order.
+and releases, each kind in ID order. `--plain` keeps one record per row, with
+top-level records at depth `0`, and `--json` lists the top-level nodes in the
+same order. Both print every record and ignore `--ascii` and `--depth`.
+
+Human output draws a box-drawing tree. Each line holds a status mark and the
+record's title, with no ID. A phase adds its completed and total task counts,
+such as `7/12`, counting subtasks and leaving out cancelled tasks. A task with
+unfinished direct blockers ends with `blocked by` and their short IDs.
+
+Each run of consecutive completed phases folds into one line. A run of one
+keeps its title, as in `✓ Milestone 6: Shared interface system  done · 1 task`.
+A longer run names its range when the first and last titles start with the
+same word and a number, as in `✓ Milestones 1–4  done · 20 tasks`, and reads
+`✓ 3 phases  done · 9 tasks` otherwise.
+
+A footer sums up the captures, notes and releases, such as
+`Inbox: 24 open · Notes: 17 · Releases: v0.1.0, v0.2.0`. It leaves out empty
+parts, and an empty project prints none.
+
+| Flag        | Human output                                                                                                                      |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `--all`     | Unfolds every phase and lists captures, notes and releases under `Inbox`, `Notes` and `Releases` headings in place of the footer. |
+| `--ascii`   | Draws with `\|--`, `` `-- `` and `\|`, as GNU `tree -A` does, and uses each mark's ASCII form.                                    |
+| `--depth N` | Stops after `N` levels of records, counting top-level records as `1`.                                                             |
+
+`arcl tree <id>` draws that record and its subtree, never folding the root,
+with no headings and no footer.
+
+Colour appears only when stdout is a terminal and `NO_COLOR` is unset, and
+`--color` overrides that check.
 
 See [Inspecting Work](/guides/inspect-work/) for the query workflow and context contents.
 

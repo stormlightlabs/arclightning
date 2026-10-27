@@ -77,13 +77,17 @@ pub(super) fn read_tree(root: Option<&str>, options: TreeArgs, renderer: &Render
     let mut nodes = connected_tree(&graph, &ready, root.as_deref(), options).map_err(ApplicationError::from_command)?;
     let ids = display_ids(&database, renderer).map_err(ApplicationError::from_command)?;
     shorten_tree(&mut nodes, &ids);
-    Ok(renderer.render_connected_tree(&nodes, root.is_some())?)
+    let view = TreeView { rooted: root.is_some(), all: options.all, ascii: options.ascii, depth: options.depth };
+    Ok(renderer.render_connected_tree(&nodes, view)?)
 }
 
-/// Replace each node's ID with its short ID.
+/// Replace each node's ID, and each blocker ID, with its short ID.
 fn shorten_tree(nodes: &mut [ConnectedTreeNode], ids: &ShortIds) {
     for node in nodes {
         node.id = ids.short(&node.id).to_owned();
+        for blocker in &mut node.blocked_by {
+            *blocker = ids.short(blocker).to_owned();
+        }
         shorten_tree(&mut node.children, ids);
     }
 }

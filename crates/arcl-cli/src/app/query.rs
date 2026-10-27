@@ -168,6 +168,7 @@ pub(super) fn connected_tree(
             title: release.title.clone(),
             status: release.status.as_str().to_owned(),
             mark: StatusMark::of(TreeStatus::Container { status: release.status, started: false }),
+            blocked_by: Vec::new(),
             children: Vec::new(),
         });
     }
@@ -183,6 +184,7 @@ pub(super) fn connected_tree(
             title: capture.title.clone(),
             status: capture.status.as_str().to_owned(),
             mark: StatusMark::of(TreeStatus::Capture(capture.status)),
+            blocked_by: Vec::new(),
             children: Vec::new(),
         });
     }
@@ -213,6 +215,7 @@ pub(super) fn connected_tree(
             title: spec.title.clone(),
             status: spec.status.as_str().to_owned(),
             mark: StatusMark::of(TreeStatus::Container { status: spec.status, started }),
+            blocked_by: Vec::new(),
             children,
         });
     }
@@ -233,6 +236,7 @@ pub(super) fn connected_tree(
             title: note.title.clone(),
             status: "available".to_owned(),
             mark: StatusMark::of(TreeStatus::Note),
+            blocked_by: Vec::new(),
             children: Vec::new(),
         });
     }
@@ -428,6 +432,7 @@ fn plan_tree_node(graph: &ConnectedGraph, ready: &HashSet<TaskId>, plan: &Plan) 
                 title: phase.title.clone(),
                 status: phase.status.as_str().to_owned(),
                 mark: StatusMark::of(TreeStatus::Container { status: phase.status, started }),
+                blocked_by: Vec::new(),
                 children: tasks,
             };
             Ok((node, started))
@@ -450,6 +455,7 @@ fn plan_tree_node(graph: &ConnectedGraph, ready: &HashSet<TaskId>, plan: &Plan) 
         title: plan.title.clone(),
         status: plan.status.as_str().to_owned(),
         mark: StatusMark::of(TreeStatus::Container { status: plan.status, started }),
+        blocked_by: Vec::new(),
         children,
     };
     Ok((node, started))
@@ -471,6 +477,7 @@ fn task_tree_node(
         .collect::<CResult<Vec<_>>>()?;
     path.remove(&task.id);
     let (children, child_started) = unzip_started(children);
+    let blocked_by = open_blockers(graph, task);
     let started = child_started || matches!(task.status, TaskStatus::InProgress | TaskStatus::Completed);
     let node = ConnectedTreeNode {
         kind: "task",
@@ -478,9 +485,33 @@ fn task_tree_node(
         title: task.title.clone(),
         status: task.status.as_str().to_owned(),
         mark: StatusMark::of(TreeStatus::Task { status: task.status, ready: ready.contains(&task.id) }),
+        blocked_by,
         children,
     };
     Ok((node, started))
+}
+
+/// The IDs of the unfinished tasks that block `task` directly, in ID order,
+/// or none when `task` is completed or cancelled.
+fn open_blockers(graph: &ConnectedGraph, task: &PlanningTask) -> Vec<String> {
+    if matches!(task.status, TaskStatus::Completed | TaskStatus::Cancelled) {
+        return Vec::new();
+    }
+    let mut blockers = graph
+        .dependencies
+        .iter()
+        .filter(|dependency| dependency.task_id == task.id)
+        .filter(|dependency| {
+            graph
+                .tasks
+                .iter()
+                .find(|blocker| blocker.id == dependency.blocker_id)
+                .is_none_or(|blocker| blocker.status != TaskStatus::Completed)
+        })
+        .map(|dependency| dependency.blocker_id)
+        .collect::<Vec<_>>();
+    blockers.sort();
+    blockers.into_iter().map(|id| id.to_string()).collect()
 }
 
 /// Splits built subtrees into their nodes and whether any of them holds a
