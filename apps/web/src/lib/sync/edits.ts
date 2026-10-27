@@ -1,4 +1,4 @@
-import type { QueuedEdit, SyncStatus } from "$lib/data";
+import type { QueuedEdit, SyncStatus } from "$lib/data/types";
 
 /** What each queued operation does, as a verb phrase. */
 const VERBS: Record<string, string> = {

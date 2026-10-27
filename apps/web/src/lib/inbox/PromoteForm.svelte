@@ -18,7 +18,7 @@
 
 <script lang="ts">
   import { Button, Field, SelectMenu } from "@arclightning/ui";
-  import { PRIORITIES } from "$lib/work";
+  import { PRIORITIES } from "$lib/work/filters";
   import { TRIAGE_LABELS } from "./triage";
 
   let { form = $bindable(), phases = [], parents = [], busy = false, onsubmit, oncancel }: PromoteFormProps = $props();

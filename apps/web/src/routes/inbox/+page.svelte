@@ -12,33 +12,36 @@
     type SelectOption,
   } from "@arclightning/ui";
   import { onMount, tick, untrack } from "svelte";
-  import { formatKeys, useCommands, type Command } from "$lib/commands";
+  import { formatKeys } from "$lib/commands/keys";
+  import { useCommands } from "$lib/commands/registry.svelte";
+  import type { Command } from "$lib/commands/menu";
   import {
     QUEUED,
-    dataSource,
-    latestRead,
     type Capture,
     type CaptureSummary,
     type ChangeWarning,
     type Promoted,
     type WorkList,
-  } from "$lib/data";
+  } from "$lib/data/types";
+  import { dataSource } from "$lib/data/source";
+  import { latestRead } from "$lib/data/latest";
   import {
     TRIAGE_KEYS,
     TRIAGE_LABELS,
     afterRemoval,
-    createdAt,
     formFor,
     promotionOf,
-    shortAge,
     type PromotionForm,
     type TriageAction,
-  } from "$lib/inbox";
+  } from "$lib/inbox/triage";
+  import { createdAt, shortAge } from "$lib/inbox/created";
   import PromoteForm from "$lib/inbox/PromoteForm.svelte";
   import { failureNotice } from "$lib/notice";
   import { appHref } from "$lib/route";
-  import { failureOf, type ActionFailure } from "$lib/task";
-  import { moveSelection, orderMilestones, orderTasks, taskHref, visibleSelection, workKeyAction } from "$lib/work";
+  import { failureOf, type ActionFailure } from "$lib/task/actions";
+  import { moveSelection, visibleSelection, workKeyAction } from "$lib/work/keys";
+  import { orderMilestones, orderTasks } from "$lib/work/grouping";
+  import { taskHref } from "$lib/work/links";
 
   const ACTIONS: TriageAction[] = ["task", "spec", "note", "discard"];
   const ICONS: Record<TriageAction, IconName> = { task: "task", spec: "spec", note: "note", discard: "close" };

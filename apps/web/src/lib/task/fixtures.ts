@@ -1,4 +1,4 @@
-import type { TaskDetail } from "$lib/data";
+import type { TaskDetail } from "$lib/data/types";
 import { task } from "$lib/work/fixtures";
 
 /**

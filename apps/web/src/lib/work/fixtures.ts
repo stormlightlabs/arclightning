@@ -1,4 +1,4 @@
-import type { Milestone, Task, WorkItem, WorkList } from "$lib/data";
+import type { Milestone, Task, WorkItem, WorkList } from "$lib/data/types";
 
 /** A task with defaults for the fields a test does not care about. */
 export function task(id: string, fields: Partial<Task> = {}): Task {

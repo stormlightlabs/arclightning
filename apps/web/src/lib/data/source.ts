@@ -1,5 +1,5 @@
 /**
- * The one module views read records through. Views call {@link dataSource};
+ * The data source views read records through. Views call {@link dataSource};
  * a build that reads from somewhere other than `arcl serve` calls
  * {@link setDataSource} before the first view loads. The artifact build calls
  * {@link connectArtifact} instead.
@@ -7,18 +7,6 @@
 import { type ArtifactHost, artifactSource } from "./artifact";
 import { serveSource } from "./serve";
 import { DataError, type DataSource } from "./types";
-
-export {
-  artifactSource,
-  QUEUED_MESSAGE,
-  type ArtifactDb,
-  type ArtifactHost,
-  type ArtifactOptions,
-  type ArtifactUser,
-} from "./artifact";
-export { latestRead, type LatestRead, type ReadReport } from "./latest";
-export { serveSource, type ServeOptions } from "./serve";
-export * from "./types";
 
 /**
  * Whether this is the claude.ai artifact build, which reads the artifact's

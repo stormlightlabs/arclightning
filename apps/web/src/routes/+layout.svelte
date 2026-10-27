@@ -7,36 +7,17 @@
   import { page } from "$app/state";
   import { MediaQuery } from "svelte/reactivity";
   import QuickCapture from "$lib/capture/QuickCapture.svelte";
-  import {
-    SEQUENCE_TIMEOUT,
-    TASK_RESULT_PREFIX,
-    boundCommands,
-    formatKeys,
-    isMac,
-    menuGroups,
-    opensMenu,
-    registeredCommands,
-    registeredContext,
-    shortcutStep,
-    takesShortcut,
-    useCommands,
-    type Command,
-  } from "$lib/commands";
-  import {
-    ARTIFACT_BUILD,
-    OPEN_IN_CLAUDE,
-    connectArtifact,
-    dataSource,
-    type ChangeWarning,
-    type SyncStatus as Sync,
-    type TaskSummary,
-  } from "$lib/data";
+  import { SEQUENCE_TIMEOUT, formatKeys, isMac, opensMenu, shortcutStep, takesShortcut } from "$lib/commands/keys";
+  import { TASK_RESULT_PREFIX, boundCommands, menuGroups, type Command } from "$lib/commands/menu";
+  import { registeredCommands, registeredContext, useCommands } from "$lib/commands/registry.svelte";
+  import { ARTIFACT_BUILD, OPEN_IN_CLAUDE, connectArtifact, dataSource } from "$lib/data/source";
+  import type { ChangeWarning, SyncStatus as Sync, TaskSummary } from "$lib/data/types";
   import { appHref, appUrl } from "$lib/route";
   import { SIDEBAR_KEY, rememberSidebar, sidebarCollapsed } from "$lib/sidebar";
-  import { setSyncStatus, syncStatus } from "$lib/sync";
+  import { setSyncStatus, syncStatus } from "$lib/sync/status.svelte";
   import SyncStatus from "$lib/sync/SyncStatus.svelte";
   import { adoptToken } from "$lib/token";
-  import { taskHref } from "$lib/work";
+  import { taskHref } from "$lib/work/links";
 
   let { children } = $props();
 

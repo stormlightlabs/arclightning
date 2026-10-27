@@ -1,4 +1,4 @@
-import { QUEUED } from "$lib/data";
+import { QUEUED } from "$lib/data/types";
 
 /** The props of the `Feedback` that shows a failed change. */
 export interface FailureNotice {

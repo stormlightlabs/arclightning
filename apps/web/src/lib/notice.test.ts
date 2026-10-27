@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { QUEUED } from "$lib/data";
+import { QUEUED } from "$lib/data/types";
 import { failureNotice } from "./notice";
 
 describe("failureNotice", () => {

@@ -1,5 +1,5 @@
 import { formatStatus, type TaskGlyphKind, type TaskGroup, type TaskRowItem } from "@arclightning/ui";
-import type { Milestone, ReadinessReason, WorkItem, WorkList } from "$lib/data";
+import type { Milestone, ReadinessReason, WorkItem, WorkList } from "$lib/data/types";
 import { NO_MILESTONE, STATUSES, matches, shownReasons, type WorkFilters } from "./filters";
 
 /**

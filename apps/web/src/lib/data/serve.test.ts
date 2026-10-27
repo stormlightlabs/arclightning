@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { DataError, dataSource, latestRead, serveSource, setDataSource, type DataSource } from "./index";
+import { latestRead } from "./latest";
+import { serveSource } from "./serve";
+import { dataSource, setDataSource } from "./source";
+import { DataError, type DataSource } from "./types";
 
 const phase = (id: string, position: number) => ({
   id,

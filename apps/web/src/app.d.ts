@@ -1,4 +1,5 @@
-import type { ArtifactHost, ChangeWarning } from "$lib/data";
+import type { ArtifactHost } from "$lib/data/artifact";
+import type { ChangeWarning } from "$lib/data/types";
 
 declare global {
   namespace App {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { QueuedEdit } from "$lib/data";
+import type { QueuedEdit } from "$lib/data/types";
 import { describeEdit, editWaitsFor, syncedLabel } from "./edits";
 
 const edit = (op: string, target: string | null, input: Record<string, unknown> = {}): QueuedEdit => ({

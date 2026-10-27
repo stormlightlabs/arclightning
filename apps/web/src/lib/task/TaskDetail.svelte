@@ -1,5 +1,5 @@
 <script module lang="ts">
-  import type { ChangeWarning, TaskDetail } from "$lib/data";
+  import type { ChangeWarning, TaskDetail } from "$lib/data/types";
   import type { TaskAction } from "./actions";
 
   /** Props for the body of the Task view, once its task has loaded. */
@@ -43,11 +43,15 @@
     SelectMenu,
     StatusBadge,
   } from "@arclightning/ui";
-  import { useCommands, type Command } from "$lib/commands";
-  import { QUEUED, dataSource, type Task } from "$lib/data";
+  import { useCommands } from "$lib/commands/registry.svelte";
+  import type { Command } from "$lib/commands/menu";
+  import { QUEUED, type Task } from "$lib/data/types";
+  import { dataSource } from "$lib/data/source";
   import { failureNotice } from "$lib/notice";
-  import { editWaitsFor, syncStatus } from "$lib/sync";
-  import { PRIORITIES, taskHref } from "$lib/work";
+  import { editWaitsFor } from "$lib/sync/edits";
+  import { syncStatus } from "$lib/sync/status.svelte";
+  import { PRIORITIES } from "$lib/work/filters";
+  import { taskHref } from "$lib/work/links";
   import {
     ACTION_KEYS,
     ACTION_LABELS,

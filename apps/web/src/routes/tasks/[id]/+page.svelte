@@ -3,12 +3,15 @@
   import { untrack } from "svelte";
   import { afterNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
-  import { dataSource, latestRead, type ChangeWarning, type TaskDetail } from "$lib/data";
-  import { useCommands } from "$lib/commands";
+  import { dataSource } from "$lib/data/source";
+  import { latestRead } from "$lib/data/latest";
+  import type { ChangeWarning, TaskDetail } from "$lib/data/types";
+  import { useCommands } from "$lib/commands/registry.svelte";
   import { appUrl, appUrlHref } from "$lib/route";
-  import { formAction, taskKeyAction, type TaskAction } from "$lib/task";
+  import { formAction, type TaskAction } from "$lib/task/actions";
+  import { taskKeyAction } from "$lib/task/view";
   import TaskDetailView from "$lib/task/TaskDetail.svelte";
-  import { workHref } from "$lib/work";
+  import { workHref } from "$lib/work/links";
 
   let id = $derived(page.params.id ?? "");
   let detail = $state<TaskDetail | null>(null);

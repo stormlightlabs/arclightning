@@ -1,5 +1,5 @@
-import type { NewCapture, NewTask, TaskPriority, TaskSummary } from "$lib/data";
-import { PRIORITIES } from "$lib/work";
+import type { NewCapture, NewTask, TaskPriority, TaskSummary } from "$lib/data/types";
+import { PRIORITIES } from "$lib/work/filters";
 
 /** A token in the first line of quick capture text, and the field it sets. */
 export type CaptureToken =

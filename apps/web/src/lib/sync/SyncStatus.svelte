@@ -1,5 +1,5 @@
 <script module lang="ts">
-  import type { SyncStatus } from "$lib/data";
+  import type { SyncStatus } from "$lib/data/types";
 
   /** Props for the artifact's sync status. */
   export interface SyncStatusProps {

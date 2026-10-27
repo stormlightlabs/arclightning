@@ -1,4 +1,4 @@
-import type { Readiness, ReadinessReason, Task, TaskPriority, TaskStatus, WorkItem } from "$lib/data";
+import type { Readiness, ReadinessReason, Task, TaskPriority, TaskStatus, WorkItem } from "$lib/data/types";
 
 /** Task statuses in the order the Work list shows them. */
 export const STATUSES: readonly TaskStatus[] = ["in_progress", "pending", "parked", "completed", "cancelled"];

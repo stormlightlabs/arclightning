@@ -1,6 +1,8 @@
 import { formatStatus, type PropertyItem } from "@arclightning/ui";
-import type { Blocker, InheritedBlocker, ReadinessReason, Task, TaskDetail } from "$lib/data";
-import { inField, isClosed, taskHref, type WorkKey } from "$lib/work";
+import type { Blocker, InheritedBlocker, ReadinessReason, Task, TaskDetail } from "$lib/data/types";
+import { inField, type WorkKey } from "$lib/work/keys";
+import { isClosed } from "$lib/work/filters";
+import { taskHref } from "$lib/work/links";
 
 /** What a key does in the Task view. */
 export type TaskKeyAction = "back" | "properties";

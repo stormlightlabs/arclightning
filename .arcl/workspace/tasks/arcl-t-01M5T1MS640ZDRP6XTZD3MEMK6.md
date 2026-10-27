@@ -2,9 +2,10 @@
 id = "arcl-t-01M5T1MS640ZDRP6XTZD3MEMK6"
 phase = "arcl-ph-01M5NE5P5RE8Y5Y5Y84T36FMEE"
 title = "Remove the barrel files in apps/web"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 8
+evidence = "Delivered by #PR: the feature folders' index.ts files are gone, data/index.ts moved to data/source.ts, and every import names its defining module."
 +++
 
 Remove the barrel files in `apps/web` and import from the source modules
@@ -29,10 +30,10 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] No `index.ts` or `index.js` remains under `apps/web/src`
-- [ ] `packages/ui/src/lib/index.ts` is the only barrel left, as the
+- [x] No `index.ts` or `index.js` remains under `apps/web/src`
+- [x] `packages/ui/src/lib/index.ts` is the only barrel left, as the
       package entry
-- [ ] Every `$lib` import names a module that defines what it imports
+- [x] Every `$lib` import names a module that defines what it imports
 
 Verification:
 

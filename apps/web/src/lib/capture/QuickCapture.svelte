@@ -1,5 +1,5 @@
 <script module lang="ts">
-  import type { Capture, ChangeWarning, Task } from "$lib/data";
+  import type { Capture, ChangeWarning, Task } from "$lib/data/types";
 
   /** Props for the quick capture dialog. */
   export interface QuickCaptureProps {
@@ -15,9 +15,9 @@
 
 <script lang="ts">
   import { Button, Dialog, Feedback } from "@arclightning/ui";
-  import { dataSource } from "$lib/data";
+  import { dataSource } from "$lib/data/source";
   import { failureNotice } from "$lib/notice";
-  import { failureOf, type ActionFailure } from "$lib/task";
+  import { failureOf, type ActionFailure } from "$lib/task/actions";
   import { captureOf, describeToken, parseCapture, taskOf } from "./tokens";
 
   let { open = $bindable(false), mac = false, oncaptured, oncreated }: QuickCaptureProps = $props();

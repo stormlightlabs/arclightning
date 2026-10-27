@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Milestone } from "$lib/data";
+import type { Milestone } from "$lib/data/types";
 import { describeReason, glyphOf, groupWork, orderMilestones } from "./grouping";
 import { parseFilters } from "./filters";
 import { agents, blocked, closed, ready, sampleList, web } from "./fixtures";

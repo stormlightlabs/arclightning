@@ -7,7 +7,7 @@ import {
   type TaskEdit,
   type TaskPriority,
   type TaskStatus,
-} from "$lib/data";
+} from "$lib/data/types";
 
 /** A lifecycle change the Task view offers. */
 export type TaskAction = "start" | "complete" | "handoff" | "park" | "unpark";

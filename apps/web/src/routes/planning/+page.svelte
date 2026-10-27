@@ -3,8 +3,11 @@
   import { onMount, tick } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { goto } from "$app/navigation";
-  import { useCommands, type Command } from "$lib/commands";
-  import { dataSource, latestRead, type ChangeWarning, type Planning } from "$lib/data";
+  import { useCommands } from "$lib/commands/registry.svelte";
+  import type { Command } from "$lib/commands/menu";
+  import { dataSource } from "$lib/data/source";
+  import { latestRead } from "$lib/data/latest";
+  import type { ChangeWarning, Planning } from "$lib/data/types";
   import {
     PLANNING_KEYS,
     closedRecords,
@@ -14,10 +17,11 @@
     visibleRows,
     type MilestoneRow,
     type PlanningRow,
-  } from "$lib/planning";
+  } from "$lib/planning/view";
   import { failureNotice } from "$lib/notice";
-  import { failureOf, type ActionFailure } from "$lib/task";
-  import { moveSelection, taskHref, visibleSelection, workKeyAction } from "$lib/work";
+  import { failureOf, type ActionFailure } from "$lib/task/actions";
+  import { moveSelection, visibleSelection, workKeyAction } from "$lib/work/keys";
+  import { taskHref } from "$lib/work/links";
 
   /** A form the view shows, with the record it acts on. */
   type PlanningForm =

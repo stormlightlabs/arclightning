@@ -1,4 +1,4 @@
-import type { Planning, Readiness, Task, TreeNode, WorkItem } from "$lib/data";
+import type { Planning, Readiness, Task, TreeNode, WorkItem } from "$lib/data/types";
 
 /** A tree node of `kind` with `children`. */
 export function node(kind: string, id: string, status: string, children: TreeNode[] = []): TreeNode {

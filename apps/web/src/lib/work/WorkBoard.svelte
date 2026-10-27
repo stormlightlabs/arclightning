@@ -1,6 +1,6 @@
 <script module lang="ts">
-  import type { TaskStatus } from "$lib/data";
-  import type { TaskAction } from "$lib/task";
+  import type { TaskStatus } from "$lib/data/types";
+  import type { TaskAction } from "$lib/task/actions";
   import type { BoardCard, BoardColumn } from "./board";
 
   /** Props for the Work page's board of status columns. */

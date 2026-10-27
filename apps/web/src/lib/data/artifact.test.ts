@@ -7,20 +7,13 @@ import {
   type ArtifactHost,
   type ArtifactQuery,
   type ArtifactSnapshot,
-  digest,
-} from "./artifact";
-import {
-  DataError,
-  OPEN_IN_CLAUDE,
-  QUEUED,
   QUEUED_MESSAGE,
   artifactSource,
-  connectArtifact,
-  dataSource,
-  serveSource,
-  type DataSource,
-  type SyncStatus,
-} from "./index";
+  digest,
+} from "./artifact";
+import { serveSource } from "./serve";
+import { OPEN_IN_CLAUDE, connectArtifact, dataSource } from "./source";
+import { DataError, QUEUED, type DataSource, type SyncStatus } from "./types";
 
 type Body = Record<string, unknown>;
 

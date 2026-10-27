@@ -1,4 +1,4 @@
-import type { SyncStatus } from "$lib/data";
+import type { SyncStatus } from "$lib/data/types";
 
 /** The status the layout follows, shared so a view can read the queue too. */
 let current = $state<SyncStatus | null>(null);

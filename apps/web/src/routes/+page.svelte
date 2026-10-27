@@ -14,16 +14,11 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
-  import { useCommands, type Command } from "$lib/commands";
-  import {
-    dataSource,
-    latestRead,
-    type ChangeWarning,
-    type NewTask,
-    type TaskPriority,
-    type TaskStatus,
-    type WorkList,
-  } from "$lib/data";
+  import { useCommands } from "$lib/commands/registry.svelte";
+  import type { Command } from "$lib/commands/menu";
+  import { dataSource } from "$lib/data/source";
+  import { latestRead } from "$lib/data/latest";
+  import type { ChangeWarning, NewTask, TaskPriority, TaskStatus, WorkList } from "$lib/data/types";
   import { failureNotice } from "$lib/notice";
   import { appUrl, appUrlHref } from "$lib/route";
   import {
@@ -35,33 +30,31 @@
     runAction,
     type ActionFailure,
     type TaskAction,
-  } from "$lib/task";
+  } from "$lib/task/actions";
   import WorkBoard from "$lib/work/WorkBoard.svelte";
   import {
     NO_MILESTONE,
     PRIORITIES,
     STATUSES,
+    isFiltered,
+    parseFilters,
+    withKnownMilestone,
+    writeFilters,
+    type WorkFilters,
+  } from "$lib/work/filters";
+  import {
     boardColumns,
     boardOrder,
-    groupWork,
-    isFiltered,
-    moveSelection,
-    orderMilestones,
-    parseFilters,
     refusal,
     rememberView,
-    selectedOf,
-    taskHref,
     viewOf,
-    visibleSelection,
-    withKnownMilestone,
-    workKeyAction,
-    writeFilters,
     writeView,
     type BoardCard,
-    type WorkFilters,
     type WorkView,
-  } from "$lib/work";
+  } from "$lib/work/board";
+  import { groupWork, orderMilestones } from "$lib/work/grouping";
+  import { moveSelection, visibleSelection, workKeyAction } from "$lib/work/keys";
+  import { selectedOf, taskHref } from "$lib/work/links";
 
   type FilterName = keyof WorkFilters;
 
