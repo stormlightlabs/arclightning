@@ -110,8 +110,8 @@ describe("shownReasons", () => {
     shownReasons(item.task, item.readiness).map((reason) => reason.kind);
 
   for (const status of ["completed", "cancelled"] as const) {
-    it(`drops the status and closed phase reasons of a ${status} task`, () => {
-      expect(kinds(underCompletedPhase(closed("a", status, agents)))).toEqual(["direct_blocker"]);
+    it(`shows no reasons on a ${status} task`, () => {
+      expect(kinds(underCompletedPhase(closed("a", status, agents)))).toEqual([]);
     });
   }
 

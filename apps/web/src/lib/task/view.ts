@@ -136,7 +136,8 @@ export function showsReadiness(detail: TaskDetail): boolean {
 
 /**
  * The words for a task's readiness: ready, blocked, or not ready for another
- * reason. `null` for a closed task, which {@link showsReadiness} leaves out.
+ * reason. `null` for a closed task, whose Readiness property then shows
+ * "None", as an empty Parent does.
  */
 export function readinessLabel(detail: TaskDetail): string | null {
   if (!showsReadiness(detail)) return null;

@@ -77,13 +77,11 @@ export function isClosed(status: TaskStatus): boolean {
 
 /**
  * The reasons the web app shows for a task's readiness. Readiness asks
- * whether a task can start; a closed task is done, so its `status` and
- * `closed_container` reasons say nothing and are left out. An open task
- * keeps every reason.
+ * whether a task can start, so a closed task shows none. An open task keeps
+ * every reason.
  */
 export function shownReasons(task: Task, readiness: Readiness): ReadinessReason[] {
-  if (!isClosed(task.status)) return readiness.reasons;
-  return readiness.reasons.filter((reason) => reason.kind !== "status" && reason.kind !== "closed_container");
+  return isClosed(task.status) ? [] : readiness.reasons;
 }
 
 /** The readiness value `item` filters as, or `null` for a closed task, which no readiness filter matches. */

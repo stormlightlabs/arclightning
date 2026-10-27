@@ -51,9 +51,12 @@ describe("boardColumns", () => {
     });
   });
 
-  it("gives a closed card its status glyph and no status or closed phase reason", () => {
+  it("gives a closed card its status glyph and no reasons", () => {
     const list = sampleList();
-    list.items[0].readiness.reasons.push({ kind: "closed_container", message: "phase `ph-10` is `completed`" });
+    list.items[0].readiness.reasons.push(
+      { kind: "direct_blocker", message: "blocked by `t-2` (pending)", blocker: "t-2" },
+      { kind: "closed_container", message: "phase `ph-10` is `completed`" },
+    );
     const completed = boardColumns(list, none)[3].cards;
     expect(completed.find((card) => card.id === "t-1")).toMatchObject({ glyph: "done", reasons: [] });
   });

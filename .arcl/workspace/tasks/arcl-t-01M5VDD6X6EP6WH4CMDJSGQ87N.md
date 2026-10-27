@@ -5,7 +5,7 @@ title = "Leave closed records out of Not ready"
 status = "completed"
 priority = "normal"
 position = 12
-evidence = "Delivered by #70: the web app shows no readiness for a completed or cancelled task, and drops `status` and `closed_container` reasons from it."
+evidence = "Delivered by #70: the web app shows no readiness for a completed or cancelled task, and Work rows and cards list no readiness reasons for it."
 +++
 
 Stop showing "Not ready" on closed tasks. A completed task's readiness
