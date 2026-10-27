@@ -41,8 +41,9 @@ ID fields.
    most `limit` records and a `data.next_cursor` to pass as `cursor` while
    more remain.
 2. Start it. `arcl --json task start <id> --claim` [`task_start` with
-   `claim`] moves the task to in progress and records you as its assignee,
-   named by `ARCL_AGENT` or else the Git user name. From the CLI,
+   `claim`] moves the task to in progress and records you as its assignee.
+   The command names you by `ARCL_AGENT` or else the Git user name. The tool
+   has no default: pass your name in `claim`. From the CLI,
    `arcl --json next --start --claim` picks and starts the first ready task
    in one step, so another agent cannot take it in between; a null
    `data.task` means nothing can start. If it refuses with

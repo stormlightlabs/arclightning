@@ -7,7 +7,7 @@ use arcl_core::domain::{
     TaskStatus,
 };
 
-use super::{Result, WORKSPACE_FORMAT_VERSION, WorkspaceError};
+use super::{OLDEST_WORKSPACE_FORMAT_VERSION, Result, WORKSPACE_FORMAT_VERSION, WorkspaceError};
 
 const FRONT_MATTER_DELIMITER: &str = "+++";
 
@@ -113,9 +113,9 @@ impl WorkspaceManifest {
         Ok(manifest)
     }
 
-    /// Validate that this manifest uses the supported workspace format.
+    /// Validate that this manifest uses a workspace format this crate reads.
     pub fn validate(&self) -> Result<()> {
-        if self.format_version != WORKSPACE_FORMAT_VERSION {
+        if !(OLDEST_WORKSPACE_FORMAT_VERSION..=WORKSPACE_FORMAT_VERSION).contains(&self.format_version) {
             return Err(WorkspaceError::UnsupportedVersion {
                 found: self.format_version,
                 expected: WORKSPACE_FORMAT_VERSION,
@@ -593,7 +593,7 @@ impl TaskRecord {
             blocked_by,
             handoff: normalize_optional_markdown(front_matter.handoff),
             evidence: normalize_optional_markdown(front_matter.evidence),
-            assignee: normalize_assignee(front_matter.assignee)?,
+            assignee: normalize_assignee(front_matter.assignee, front_matter.status)?,
             links: normalize_references(front_matter.links),
             body,
         })
@@ -620,7 +620,7 @@ impl TaskRecord {
             blocked_by,
             handoff: normalize_optional_markdown(self.handoff.clone()),
             evidence: normalize_optional_markdown(self.evidence.clone()),
-            assignee: normalize_assignee(self.assignee.clone())?,
+            assignee: normalize_assignee(self.assignee.clone(), self.status)?,
             links,
         })
     }
@@ -758,14 +758,18 @@ fn validate_position(position: i64) -> Result<()> {
     if position < 0 { Err(WorkspaceError::InvalidRecordPosition { position }) } else { Ok(()) }
 }
 
-/// Trim a task's `assignee`, or refuse one that is empty or holds a control
-/// character.
-fn normalize_assignee(value: Option<String>) -> Result<Option<String>> {
-    value
-        .map(|value| {
-            arcl_core::domain::validate_assignee(&value).map_err(|_| WorkspaceError::InvalidRecordAssignee { value })
-        })
-        .transpose()
+/// Trim a task's `assignee`, or refuse one that is empty, holds a control
+/// character, or sits on a task that is not in progress. Parking, handing
+/// off, completing and cancelling release a claim, so only an in-progress
+/// task holds one.
+fn normalize_assignee(value: Option<String>, status: TaskStatus) -> Result<Option<String>> {
+    let Some(value) = value else { return Ok(None) };
+    if status != TaskStatus::InProgress {
+        return Err(WorkspaceError::AssigneeNotInProgress { status: status.as_str().to_owned() });
+    }
+    arcl_core::domain::validate_assignee(&value)
+        .map(Some)
+        .map_err(|_| WorkspaceError::InvalidRecordAssignee { value })
 }
 
 fn normalize_line_endings(value: &str) -> String {
@@ -812,13 +816,18 @@ mod tests {
     const NOTE_ID: &str = "arcl-n-01K0B2ZWTX7JX9PH7W5G1S6A9Q";
 
     #[test]
-    fn manifest_is_version_one_and_canonical() {
+    fn manifest_reads_versions_one_and_two_and_writes_two() {
         let manifest = WorkspaceManifest::parse("format-version = 1").expect("manifest");
         assert_eq!(manifest.render().expect("render"), "format-version = 1\n");
-        assert!(matches!(
-            WorkspaceManifest::parse("format-version = 2"),
-            Err(WorkspaceError::UnsupportedVersion { .. })
-        ));
+        let manifest = WorkspaceManifest::parse("format-version = 2").expect("manifest");
+        assert_eq!(manifest, WorkspaceManifest::default());
+        assert_eq!(manifest.render().expect("render"), "format-version = 2\n");
+        for version in [0, 3] {
+            assert!(matches!(
+                WorkspaceManifest::parse(&format!("format-version = {version}")),
+                Err(WorkspaceError::UnsupportedVersion { found, expected: 2 }) if found == version
+            ));
+        }
     }
 
     #[test]
@@ -868,7 +877,7 @@ mod tests {
                 parent_id: None,
                 plan_key: Some("build/task".to_owned()),
                 title: "Task".to_owned(),
-                status: TaskStatus::Pending,
+                status: TaskStatus::InProgress,
                 priority: TaskPriority::High,
                 position: 0,
                 blocked_by: vec![TaskId::parse(OTHER_TASK_ID).unwrap()],
@@ -919,5 +928,50 @@ mod tests {
         assert!(rendered.contains(&format!("blocked-by = [\"{TASK_ID}\", \"{OTHER_TASK_ID}\"]")));
         assert!(!rendered.contains("plan-key"));
         assert!(!rendered.contains("handoff"));
+    }
+
+    #[test]
+    fn only_an_in_progress_task_holds_an_assignee() {
+        let mut task = TaskRecord {
+            id: TaskId::parse(TASK_ID).unwrap(),
+            spec_id: None,
+            plan_id: None,
+            phase_id: None,
+            parent_id: None,
+            plan_key: None,
+            title: "Task".to_owned(),
+            status: TaskStatus::InProgress,
+            priority: TaskPriority::Normal,
+            position: 0,
+            blocked_by: vec![],
+            handoff: None,
+            evidence: None,
+            assignee: Some("codex".to_owned()),
+            links: vec![],
+            body: String::new(),
+        };
+        let path = WorkspaceRecord::Task(task.clone()).path();
+        let rendered = WorkspaceRecord::Task(task.clone()).render().expect("render");
+        assert!(rendered.contains("status = \"in_progress\""));
+        for status in [
+            TaskStatus::Pending,
+            TaskStatus::Parked,
+            TaskStatus::Completed,
+            TaskStatus::Cancelled,
+        ] {
+            let input = rendered.replace("\"in_progress\"", &format!("\"{}\"", status.as_str()));
+            assert!(
+                matches!(
+                    decode_record(&path, &input),
+                    Err(WorkspaceError::AssigneeNotInProgress { status: ref found }) if found == status.as_str()
+                ),
+                "{status:?}"
+            );
+            task.status = status;
+            assert!(matches!(
+                WorkspaceRecord::Task(task.clone()).render(),
+                Err(WorkspaceError::AssigneeNotInProgress { .. })
+            ));
+        }
     }
 }

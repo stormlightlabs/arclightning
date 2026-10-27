@@ -5721,6 +5721,10 @@ fn task_start_claim_sets_the_assignee_and_refuses_another_holder() {
         .output()
         .expect("show runs");
     assert!(String::from_utf8_lossy(&human.stdout).contains("Assignee: codex"));
+    let context = stdout_of(directory.path(), &["--color", "never", "context", &task]);
+    assert!(context.contains("\nAssignee: codex\n"), "{context}");
+    let context = stdout_of(directory.path(), &["--plain", "context", &task]);
+    assert!(context.contains("\nassignee\tcodex\n"), "{context}");
 
     let unclaimed = create_task(directory.path(), "Unclaimed", None);
     let shown = run_json(directory.path(), ["--json", "show", &unclaimed].as_ref());

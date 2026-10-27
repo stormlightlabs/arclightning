@@ -562,7 +562,18 @@ mod tests {
             "handoff",
         );
         assert_owned(&mut database, &id, "+++\n", "+++\nevidence = \"Done\"\n", "evidence");
+        database.start_planning_task(task_id(&id), false).expect("task starts");
         assert_owned(&mut database, &id, "+++\n", "+++\nassignee = \"codex\"\n", "assignee");
+        database
+            .claim_planning_task(task_id(&id), false, "codex")
+            .expect("task is claimed");
+        assert_owned(
+            &mut database,
+            &id,
+            "assignee = \"codex\"",
+            "assignee = \"claude\"",
+            "assignee",
+        );
     }
 
     #[test]

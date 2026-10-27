@@ -263,6 +263,12 @@ file under a configurable workspace directory. The target layout is:
     `-- releases/
 ```
 
+`manifest.toml` holds `format-version`. Version 2 adds the task `assignee`
+field. arcl writes version 2 and reads versions 1 and 2, so a sync rewrites a
+version 1 manifest. An arcl that only reads version 1 checks the manifest
+before any record and refuses a version 2 workspace with an unsupported
+format version error.
+
 Synchronization uses a three-state comparison: compare
 the last common files, current database projection, and current workspace. Arc
 Lightning imports or exports one-sided changes and stops on different changes

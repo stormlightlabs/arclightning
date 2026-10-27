@@ -23,8 +23,15 @@ pub use status::{GitChange, RecordStatus, RecordStatusKind, WorkspaceStatus, Wor
 pub use sync::{Side, SyncOutcome, WorkspaceSyncError, resolve_workspace, sync_workspace, workspace_relative};
 
 pub const CONFIG_FORMAT_VERSION: u32 = 1;
-/// The version of the on-disk workspace format implemented by this crate.
-pub const WORKSPACE_FORMAT_VERSION: u32 = 1;
+/// The version of the on-disk workspace format this crate writes.
+///
+/// Version 2 adds the task `assignee` field. Reading also accepts
+/// [`OLDEST_WORKSPACE_FORMAT_VERSION`] and later versions up to this one; an
+/// arcl that predates version 2 refuses a version 2 manifest before it reads
+/// any record.
+pub const WORKSPACE_FORMAT_VERSION: u32 = 2;
+/// The oldest workspace format version this crate still reads.
+pub const OLDEST_WORKSPACE_FORMAT_VERSION: u32 = 1;
 
 /// Workspace and configuration validation failures.
 #[derive(Debug, Error)]
@@ -65,6 +72,9 @@ pub enum WorkspaceError {
     /// A task `assignee` that is empty or holds a control character.
     #[error("workspace task assignee `{value}` must be a non-empty name without control characters")]
     InvalidRecordAssignee { value: String },
+    /// A task `assignee` on a task that is not in progress.
+    #[error("workspace task assignee is set on a `{status}` task; only an in-progress task holds a claim")]
+    AssigneeNotInProgress { status: String },
     #[error("workspace capture creation time cannot be empty")]
     EmptyRecordCreatedAt,
     #[error("workspace record relationship is invalid: {0}")]

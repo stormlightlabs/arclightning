@@ -179,7 +179,10 @@ The workspace contains `manifest.toml` and one Markdown file per record:
 - `notes/<note-id>.md`
 - `releases/<release-id>.md`
 
-The manifest contains `format-version = 1`. Front matter stores record metadata
+The manifest contains `format-version = 2`. Version 2 adds the task
+`assignee` field. arcl still reads a version 1 workspace and rewrites its
+manifest on the next sync; an older arcl refuses a version 2 workspace with an
+unsupported format version error. Front matter stores record metadata
 and explicit relationships. Descendants are not added to releases or links
 implicitly.
 

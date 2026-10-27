@@ -502,7 +502,9 @@ pub fn complete_planning_task(
 pub fn handoff_planning_task(
     connection: &mut Connection, project_id: ProjectId, id: TaskId, note: String,
 ) -> Result<PlanningTask> {
-    let tx = connection.transaction()?;
+    // Take the write lock before reading so a concurrent claim waits for
+    // this release instead of failing on a lock upgrade.
+    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let current = planning_task(&tx, id)?.ok_or_else(|| StorageError::PlanningTaskNotFound { id: id.to_string() })?;
     ensure_project_task(&current, project_id)?;
     validate_task_graph(&tx, project_id, &current, false)?;
@@ -524,13 +526,17 @@ pub fn handoff_planning_task(
 /// Apply `action` to task `id` in one transaction.
 ///
 /// `claim` names the assignee a start sets. Parking, completing and
-/// cancelling clear the assignee.
+/// cancelling clear the assignee. The transaction is immediate, so a
+/// concurrent writer waits up to the busy timeout rather than failing.
 #[allow(clippy::too_many_arguments)]
 fn transition(
     connection: &mut Connection, project_id: ProjectId, id: TaskId, action: TaskAction, open_subtasks: OpenSubtasks,
     force: bool, evidence: Option<String>, claim: Option<String>,
 ) -> Result<PlanningCompletion> {
-    let tx = connection.transaction()?;
+    // Take the write lock before reading, so two claims on one task run one
+    // after the other and the second sees the first's assignee. A deferred
+    // transaction would fail the second with SQLITE_BUSY on the lock upgrade.
+    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let completion = transition_in(&tx, project_id, id, action, open_subtasks, force, evidence, claim)?;
     tx.commit()?;
     Ok(completion)
@@ -2701,5 +2707,39 @@ mod tests {
                 .expect("start succeeds"),
             None
         );
+    }
+
+    #[test]
+    fn racing_claims_leave_one_holder_and_refuse_the_other() {
+        let directory = tempfile::tempdir().expect("directory creates");
+        let path = directory.path().join("arcl.db");
+        let mut database = Database::open(&path).expect("database opens");
+        let project = database.project().expect("project exists");
+        for round in 0..20 {
+            let work = task(&mut database, project.id, &format!("Work {round}"));
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let racers = ["codex", "claude"].map(|name| {
+                let (path, barrier) = (path.clone(), barrier.clone());
+                std::thread::spawn(move || {
+                    let mut database = Database::open(&path).expect("database opens");
+                    barrier.wait();
+                    database.claim_planning_task(work.id, false, name)
+                })
+            });
+            let results = racers.map(|racer| racer.join().expect("racer finishes"));
+            let winners = results
+                .iter()
+                .filter_map(|result| result.as_ref().ok())
+                .collect::<Vec<_>>();
+            assert_eq!(winners.len(), 1, "round {round}: {results:?}");
+            let loser = results
+                .iter()
+                .find_map(|result| result.as_ref().err())
+                .expect("one claim is refused");
+            assert!(
+                matches!(loser, StorageError::TaskClaimed { assignee, .. } if Some(assignee) == winners[0].assignee.as_ref()),
+                "round {round}: {loser:?}"
+            );
+        }
     }
 }
