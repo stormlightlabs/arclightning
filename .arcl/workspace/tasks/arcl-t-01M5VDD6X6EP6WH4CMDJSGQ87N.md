@@ -2,9 +2,10 @@
 id = "arcl-t-01M5VDD6X6EP6WH4CMDJSGQ87N"
 phase = "arcl-ph-01M5NE5P5RE8Y5Y5Y84T36FMEE"
 title = "Leave closed records out of Not ready"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 12
+evidence = "Delivered by #PR: the web app shows no readiness for a completed or cancelled task, and drops `status` and `closed_container` reasons from it."
 +++
 
 Stop showing "Not ready" on closed tasks. A completed task's readiness
@@ -28,10 +29,10 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] A completed or cancelled task's Task view has no readiness callout
-- [ ] No web view lists a closed ancestor as a reason on a closed task
-- [ ] Open tasks keep every reason, including `closed_container`
-- [ ] `arcl explain --json` output for a closed task is unchanged
+- [x] A completed or cancelled task's Task view has no readiness callout
+- [x] No web view lists a closed ancestor as a reason on a closed task
+- [x] Open tasks keep every reason, including `closed_container`
+- [x] `arcl explain --json` output for a closed task is unchanged
 
 Verification:
 

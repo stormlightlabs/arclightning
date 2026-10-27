@@ -78,4 +78,13 @@ describe("readinessOf", () => {
     expect(readinessOf(blocked("a", "b", null))).toBe("blocked");
     expect(readinessOf(closed("a", "parked", null))).toBe("waiting");
   });
+
+  it("gives a closed task no readiness, so Waiting leaves it out", () => {
+    const waiting = parseFilters(new URLSearchParams("readiness=waiting"));
+    for (const status of ["completed", "cancelled"] as const) {
+      expect(readinessOf(closed("a", status, null))).toBeNull();
+      expect(matches(closed("a", status, null), waiting)).toBe(false);
+    }
+    expect(matches(closed("a", "parked", null), waiting)).toBe(true);
+  });
 });

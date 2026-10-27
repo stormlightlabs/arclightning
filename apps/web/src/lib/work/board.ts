@@ -1,7 +1,7 @@
 import { formatStatus, type TaskGlyphKind } from "@arclightning/ui";
 import type { TaskStatus, WorkItem, WorkList } from "$lib/data";
 import type { TaskAction } from "$lib/task";
-import { matches, readinessOf, type ReadinessFilter, type WorkFilters } from "./filters";
+import { matches, readinessOf, shownReasons, type ReadinessFilter, type WorkFilters } from "./filters";
 import { describeReason, glyphOf, orderMilestones, orderTasks } from "./grouping";
 
 /** The Work page's layouts: a list grouped by milestone, or a board of status columns. */
@@ -34,7 +34,8 @@ export interface BoardCard {
   title: string;
   status: TaskStatus;
   priority: WorkItem["task"]["priority"];
-  readiness: ReadinessFilter;
+  /** `null` for a closed task. */
+  readiness: ReadinessFilter | null;
   /** The glyph the list shows for the task: its status once started or closed, else its readiness. */
   glyph: TaskGlyphKind;
   /** Why the task is not ready, with record IDs replaced by titles. */
@@ -68,7 +69,7 @@ export function boardColumns(list: WorkList, filters: WorkFilters): BoardColumn[
         priority: item.task.priority,
         readiness: readinessOf(item),
         glyph: glyphOf(item),
-        reasons: item.readiness.reasons.map((reason) => describeReason(reason, titles)),
+        reasons: shownReasons(item.task, item.readiness).map((reason) => describeReason(reason, titles)),
       })),
   }));
 }

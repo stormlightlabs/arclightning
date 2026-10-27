@@ -1,6 +1,6 @@
 import { formatStatus, type TaskGlyphKind, type TaskGroup, type TaskRowItem } from "@arclightning/ui";
 import type { Milestone, ReadinessReason, WorkItem, WorkList } from "$lib/data";
-import { NO_MILESTONE, STATUSES, matches, type WorkFilters } from "./filters";
+import { NO_MILESTONE, STATUSES, matches, shownReasons, type WorkFilters } from "./filters";
 
 /**
  * Group the tasks that pass `filters` by milestone, then by status.
@@ -122,7 +122,7 @@ function toRow(item: WorkItem, titles: Map<string, string>): TaskRowItem {
     priority: item.task.priority,
     glyph: glyphOf(item),
     ready: item.readiness.ready,
-    reasons: item.readiness.reasons.map((reason) => describeReason(reason, titles)),
+    reasons: shownReasons(item.task, item.readiness).map((reason) => describeReason(reason, titles)),
   };
 }
 

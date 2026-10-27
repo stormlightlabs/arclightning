@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { blockedDetail, bareDetail, doneBlockersDetail } from "./fixtures";
-import { blockersOf, inheritedGroups, propertiesOf, reasonSegments, taskKeyAction, titlesOf } from "./view";
+import { shownReasons } from "$lib/work";
+import {
+  blockersOf,
+  inheritedGroups,
+  propertiesOf,
+  readinessLabel,
+  reasonSegments,
+  showsReadiness,
+  taskKeyAction,
+  titlesOf,
+} from "./view";
 
 const key = (key: string, fields: Partial<Parameters<typeof taskKeyAction>[0]> = {}) => ({
   key,
@@ -99,6 +109,43 @@ describe("propertiesOf", () => {
   it("leaves absent records empty", () => {
     const values = Object.fromEntries(propertiesOf(bareDetail()).map((property) => [property.label, property.value]));
     expect(values).toMatchObject({ Readiness: "Ready", Parent: null, Spec: null, Plan: null, Phase: null });
+  });
+});
+
+describe("readiness under a completed phase", () => {
+  /** {@link blockedDetail}, whose phase is completed, closed with `status` as `arcl explain` reports it. */
+  function closedDetail(status: "completed" | "cancelled") {
+    const detail = blockedDetail();
+    detail.task.status = status;
+    detail.readiness.reasons.unshift({ kind: "status", message: `task status is \`${status}\``, task: detail.task.id });
+    return detail;
+  }
+
+  const readiness = (detail: ReturnType<typeof blockedDetail>) =>
+    propertiesOf(detail).find((property) => property.label === "Readiness")?.value;
+
+  for (const status of ["completed", "cancelled"] as const) {
+    it(`shows no readiness for a ${status} task`, () => {
+      const detail = closedDetail(status);
+      expect(showsReadiness(detail)).toBe(false);
+      expect(readinessLabel(detail)).toBeNull();
+      expect(readiness(detail)).toBeNull();
+      expect(shownReasons(detail.task, detail.readiness).map((reason) => reason.kind)).toEqual([
+        "direct_blocker",
+        "inherited_blocker",
+      ]);
+    });
+  }
+
+  it("keeps every reason on an open task, including the closed phase", () => {
+    const detail = blockedDetail();
+    expect(showsReadiness(detail)).toBe(true);
+    expect(readiness(detail)).toBe("Blocked");
+    expect(shownReasons(detail.task, detail.readiness).map((reason) => reason.kind)).toEqual([
+      "direct_blocker",
+      "inherited_blocker",
+      "closed_container",
+    ]);
   });
 });
 

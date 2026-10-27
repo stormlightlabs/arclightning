@@ -62,7 +62,15 @@
     type ActionFailure,
     type TaskDraft,
   } from "./actions";
-  import { blockersOf, copyLabel, propertiesOf, reasonSegments, titlesOf, type DoneBlocker } from "./view";
+  import {
+    blockersOf,
+    copyLabel,
+    propertiesOf,
+    reasonSegments,
+    showsReadiness,
+    titlesOf,
+    type DoneBlocker,
+  } from "./view";
 
   let {
     detail,
@@ -454,25 +462,27 @@
       {/if}
     </header>
 
-    <section class="readiness" data-ready={detail.readiness.ready} aria-label="Readiness">
-      <p>
-        <strong>{detail.readiness.ready ? "Ready to start" : "Not ready"}</strong>
-        {#if reasons.length}<span class="muted">· {reasonCount}</span>{/if}
-      </p>
-      {#if reasons.length}
-        <ul>
-          {#each reasons as reason}
-            <li data-kind={reason.kind}>
-              {#each reasonSegments(reason, titles) as segment, part (part)}
-                {#if "href" in segment}<a href={segment.href} title={segment.id}>{segment.label}</a
-                  >{:else}{segment.text}{/if}
-              {/each}
-              <code class="kind">{reason.kind}</code>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    </section>
+    {#if showsReadiness(detail)}
+      <section class="readiness" data-ready={detail.readiness.ready} aria-label="Readiness">
+        <p>
+          <strong>{detail.readiness.ready ? "Ready to start" : "Not ready"}</strong>
+          {#if reasons.length}<span class="muted">· {reasonCount}</span>{/if}
+        </p>
+        {#if reasons.length}
+          <ul>
+            {#each reasons as reason}
+              <li data-kind={reason.kind}>
+                {#each reasonSegments(reason, titles) as segment, part (part)}
+                  {#if "href" in segment}<a href={segment.href} title={segment.id}>{segment.label}</a
+                    >{:else}{segment.text}{/if}
+                {/each}
+                <code class="kind">{reason.kind}</code>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+    {/if}
 
     {#if file !== null}
       <form class="edit" aria-labelledby="task-file" onsubmit={saveFile}>

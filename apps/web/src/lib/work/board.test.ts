@@ -53,6 +53,13 @@ describe("boardColumns", () => {
     });
   });
 
+  it("gives a closed card no readiness and no status or closed phase reason", () => {
+    const list = sampleList();
+    list.items[0].readiness.reasons.push({ kind: "closed_container", message: "phase `ph-10` is `completed`" });
+    const completed = boardColumns(list, none)[3].cards;
+    expect(completed.find((card) => card.id === "t-1")).toMatchObject({ readiness: null, glyph: "done", reasons: [] });
+  });
+
   it("follows the filters and keeps every column", () => {
     const columns = boardColumns(sampleList(), { ...none, readiness: ["ready"], milestone: ["ph-5"] });
     expect(columns.map((column) => column.cards.map((card) => card.id))).toEqual([

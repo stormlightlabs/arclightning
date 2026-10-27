@@ -1,6 +1,6 @@
 import { formatStatus, type PropertyItem } from "@arclightning/ui";
 import type { Blocker, InheritedBlocker, ReadinessReason, Task, TaskDetail } from "$lib/data";
-import { inField, taskHref, type WorkKey } from "$lib/work";
+import { inField, isClosed, taskHref, type WorkKey } from "$lib/work";
 
 /** What a key does in the Task view. */
 export type TaskKeyAction = "back" | "properties";
@@ -126,8 +126,20 @@ export function blockersOf(detail: TaskDetail): Blockers {
   return { direct: detail.blockers.filter((blocker) => !blocker.completed), inherited: inheritedGroups(detail), done };
 }
 
-/** The words for a task's readiness: ready, blocked, or not ready for another reason. */
-export function readinessLabel(detail: TaskDetail): string {
+/**
+ * Whether the Task view shows the task's readiness. Readiness asks whether a
+ * task can start, so a completed or cancelled task shows none.
+ */
+export function showsReadiness(detail: TaskDetail): boolean {
+  return !isClosed(detail.task.status);
+}
+
+/**
+ * The words for a task's readiness: ready, blocked, or not ready for another
+ * reason. `null` for a closed task, which {@link showsReadiness} leaves out.
+ */
+export function readinessLabel(detail: TaskDetail): string | null {
+  if (!showsReadiness(detail)) return null;
   if (detail.readiness.ready) return "Ready";
   return detail.readiness.blocked ? "Blocked" : "Not ready";
 }
