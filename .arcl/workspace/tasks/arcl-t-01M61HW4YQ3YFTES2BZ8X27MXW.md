@@ -20,12 +20,14 @@ Scope:
 - a mapping from each result to the current envelope, with the same
   `format_version`
 - the read code in `arcl-serve` that the queries replace, removed
+- `arcl web export`, which uses the same reads, moved onto the queries
 - mutations stay as they are
 
 Acceptance criteria:
 
 - [ ] Every `/api` read returns the same bytes as before for a fixture project
 - [ ] The web app's browser tests pass unchanged
+- [ ] `arcl web export` writes the same documents for a fixture project
 - [ ] The `Reads` trait is gone or answers only through the schema
 
 Verification:

@@ -24,14 +24,14 @@ existing read models, answers `arcl query`, `/graphql` and every `GET /api`
 read. Each REST read is a named query mapped into the envelope it returns
 today. Writes stay REST and call the commands' code.
 
-- Local only. The server binds `127.0.0.1` and checks `Host` and the token on
-  every request.
+- Local only. The server binds `127.0.0.1` and checks `Host` and the token,
+  as it does today.
 - `/graphql` takes POST. The schema has no mutations, so POST there is a read
   and needs no `Origin`.
 - `arcl serve --api` serves `/graphql` and `/api` without the page.
   Scripts get the token from `ARCL_SERVE_TOKEN` or the `--json` startup line.
-- Writes need a matching `Origin` only when one is sent. The token header
-  already blocks other pages.
+- With `--api`, writes need a matching `Origin` only when one is sent. The
+  token header already blocks other pages. The page mode keeps requiring it.
 - REST envelopes keep their `format_version` rules. A field added to the
   schema can appear in an envelope; renaming or removing one changes the
   version.

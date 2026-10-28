@@ -12,7 +12,9 @@ in one request, as GitHub and Linear do. Taken from beans' `beans graphql`.
 
 Add a read-only GraphQL schema over records: tasks, specs, plans, phases,
 captures, notes and releases, with their relations, readiness, blockers,
-gates and notes. `arcl query '<graphql>'` runs a query against the local
+gates and notes. It also covers what the `/api` reads return today: a
+record's workspace source and revision, a task's context packet, the tree
+and the work view. `arcl query '<graphql>'` runs a query against the local
 database with no server. Mutations stay with the existing commands.
 
 This task builds the schema and `arcl query`. Serving it is "Serve GraphQL
@@ -29,9 +31,13 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] `arcl query` returns only the requested fields as JSON
+- [ ] `arcl query` prints the GraphQL response (`data`, and `errors` when
+  there are any) with only the requested fields
+- [ ] Each `/api` read's data, including source, context, tree and work, can
+  be queried
 - [ ] Readiness, blockers and gates are queryable on tasks
-- [ ] Queries over the limit are refused with a clear error and exit code 3
+- [ ] A query over the limit is refused with a GraphQL error whose
+  `extensions.code` names the limit, and exit code 3
 - [ ] `arcl query --schema` prints SDL that matches a checked-in copy
 
 Verification:

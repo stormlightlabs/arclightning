@@ -19,12 +19,14 @@ Scope:
   mutation thread and the `Origin` check
 - introspection on, and the same depth and complexity limit as `arcl query`
 - the 1 MiB body limit and body deadline that mutations use
+- a 405 for other methods on `/graphql` with `Allow: POST`
 
 Acceptance criteria:
 
 - [ ] `/graphql` answers a query with the same data as `arcl query`
 - [ ] A request without the token or with a bad `Host` is refused as `/api` refuses it
-- [ ] A query over the limit gets the same error as `arcl query`
+- [ ] A query over the limit gets status 200 and the same GraphQL `errors`
+  body that `arcl query` prints
 - [ ] The manual and the server's request table list `/graphql`
 
 Verification:
