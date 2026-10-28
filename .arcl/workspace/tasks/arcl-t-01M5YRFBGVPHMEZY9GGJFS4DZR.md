@@ -4,7 +4,7 @@ phase = "arcl-ph-01M5YRFB35TZ51QW4AG1A8MS5B"
 title = "Write agent setup with arcl setup"
 status = "pending"
 priority = "normal"
-position = 6
+position = 7
 blocked-by = ["arcl-t-01M5YRFB8NYG5KXXNBF3TSH9ZQ"]
 +++
 

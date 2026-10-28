@@ -4,7 +4,7 @@ phase = "arcl-ph-01M5YRFB35TZ51QW4AG1A8MS5B"
 title = "Query records with GraphQL"
 status = "pending"
 priority = "normal"
-position = 8
+position = 9
 +++
 
 Let agents and the web app ask for exactly the records and fields they need

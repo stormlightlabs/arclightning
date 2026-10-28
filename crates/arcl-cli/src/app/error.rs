@@ -103,8 +103,10 @@ impl InitError {
 pub(super) enum CommandError {
     #[error(transparent)]
     Vcs(#[from] VcsError),
-    #[error("Arc Lightning is not initialized in project directory `{root}`; run `arcl init` first")]
-    NotInitialized { root: PathBuf },
+    /// No project or no database. `workspace` is the workspace directory when
+    /// the project has one that the next command after `arcl init` imports.
+    #[error("{}", not_initialized_message(root, workspace.as_deref()))]
+    NotInitialized { root: PathBuf, workspace: Option<PathBuf> },
     #[error("could not read project configuration `{path}`: {source}")]
     ReadConfig { path: PathBuf, source: io::Error },
     #[error("could not determine the current directory: {source}")]

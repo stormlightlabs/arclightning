@@ -23,7 +23,10 @@ use serde::Serialize;
 use tokio_util::sync::CancellationToken;
 
 use arcl_repo::vcs::{GixVcs, Vcs, VcsError};
-use arcl_repo::workspace::{ProjectConfig, WorkspaceSyncError, resolve_workspace_root, sync_workspace};
+use arcl_repo::workspace::{
+    ProjectConfig, WorkspaceSyncError, importable_workspace, not_initialized_message, resolve_workspace_root,
+    sync_workspace,
+};
 use arcl_store::prelude::*;
 
 use crate::error::ToolError;
@@ -132,11 +135,12 @@ pub fn run<T>(
     start: &Path, access: Access, lock_wait: Duration, cancelled: &CancellationToken,
     operation: impl FnOnce(&mut Database) -> Result<T, ToolError>,
 ) -> Result<(T, Vec<Warning>), ToolError> {
-    let root = nearest_project_root(start).ok_or_else(|| not_initialized(start))?;
+    let root = nearest_project_root(start).ok_or_else(|| not_initialized(start, None))?;
     let config = read_config(&root)?;
     let database_path = root.join(ARCL_DIRECTORY).join(DATABASE_FILE);
     if !database_path.is_file() {
-        return Err(not_initialized(&root));
+        let workspace = importable_workspace(&root, &config);
+        return Err(not_initialized(&root, workspace.as_deref()));
     }
 
     let mut warnings = Vec::new();
@@ -188,14 +192,9 @@ fn nearest_project_root(start: &Path) -> Option<PathBuf> {
         .map(Path::to_owned)
 }
 
-fn not_initialized(root: &Path) -> ToolError {
-    ToolError::new(
-        3,
-        format!(
-            "Arc Lightning is not initialized in project directory `{}`; run `arcl init` first",
-            root.display()
-        ),
-    )
+/// The error for a project without a database, with the CLI's message.
+fn not_initialized(root: &Path, workspace: Option<&Path>) -> ToolError {
+    ToolError::new(3, not_initialized_message(root, workspace))
 }
 
 fn read_config(root: &Path) -> Result<ProjectConfig, ToolError> {

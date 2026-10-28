@@ -387,6 +387,27 @@ async fn writes_sync_the_workspace() {
 }
 
 #[tokio::test]
+async fn a_missing_database_beside_a_workspace_says_init_imports_it() {
+    let project = project(true);
+    let server = ArclServer::new(project.path().to_owned());
+    create_task(&server, "Kept", &[]).await;
+    fs::remove_file(project.path().join(".arcl/arcl.db")).expect("database is removed");
+
+    let error = server
+        .ready(Parameters::from(ReadyInput::default()), CancellationToken::new())
+        .await
+        .err()
+        .expect("no database");
+    assert_eq!((error.code(), error.exit_code()), ("invalid_request", 3));
+    assert!(
+        error
+            .to_string()
+            .contains("run `arcl init`, and the next command imports the workspace in"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
 async fn bad_arguments_fail_with_the_failure_envelope() {
     let project = project(false);
     let server = ArclServer::new(project.path().to_owned());

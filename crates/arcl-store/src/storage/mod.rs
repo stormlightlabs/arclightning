@@ -115,6 +115,10 @@ pub enum StorageError {
     /// [`validate_task_note_text`]: arcl_core::domain::validate_task_note_text
     #[error(transparent)]
     InvalidTaskNoteText(DomainError),
+    /// A blocker list that names one task twice. The list comes from the
+    /// request, not from stored data.
+    #[error(transparent)]
+    RepeatedBlocker(DomainError),
     /// A short ID argument names no record, more than one, or is not a
     /// short ID. No match exits 5; the rest exit 3.
     #[error(transparent)]
@@ -166,6 +170,7 @@ impl StorageError {
             | Self::InvalidPlanInput(_)
             | Self::InvalidClaimName { .. }
             | Self::InvalidTaskNoteText(_)
+            | Self::RepeatedBlocker(_)
             | Self::InvalidGate(_)
             | Self::GateOnClosedTask { .. }
             | Self::NewerDatabase { .. }
@@ -752,8 +757,17 @@ impl Database {
 
     /// Add a dependency between connected-model tasks.
     pub fn add_planning_dependency(&mut self, task_id: TaskId, blocker_id: TaskId) -> Result<TaskDependency> {
+        let mut added = self.add_planning_dependencies(task_id, &[blocker_id])?;
+        Ok(added.remove(0))
+    }
+
+    /// Add the dependencies of `task_id` on each of `blocker_ids` in one
+    /// transaction, so a refused edge leaves none of them added.
+    pub fn add_planning_dependencies(
+        &mut self, task_id: TaskId, blocker_ids: &[TaskId],
+    ) -> Result<Vec<TaskDependency>> {
         let project = self.project()?;
-        connected::add_planning_dependency(&mut self.connection, project.id, task_id, blocker_id)
+        connected::add_planning_dependencies(&mut self.connection, project.id, task_id, blocker_ids)
     }
 
     /// Remove a connected-model dependency.

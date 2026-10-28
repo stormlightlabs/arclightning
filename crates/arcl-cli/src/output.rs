@@ -1065,17 +1065,33 @@ impl Renderer {
     pub fn render_dependency(
         &self, mutation: DependencyMutation, dependency: &TaskDependency,
     ) -> Result<Option<String>, OutputError> {
+        self.render_dependencies(mutation, std::slice::from_ref(dependency))
+    }
+
+    /// Render dependency changes on one task, one human line each. JSON keeps
+    /// the first in `dependency` and lists all of them in `dependencies`.
+    /// `dependencies` must not be empty.
+    pub fn render_dependencies(
+        &self, mutation: DependencyMutation, dependencies: &[TaskDependency],
+    ) -> Result<Option<String>, OutputError> {
+        let Some(first) = dependencies.first() else { return Ok(None) };
         let message = match self.mode {
-            OutputMode::Human => format!(
-                "{} dependency `{}` blocked by `{}`",
-                mutation.verb(),
-                dependency.task_id,
-                dependency.blocker_id
-            ),
-            OutputMode::Plain => dependency.task_id.to_string(),
+            OutputMode::Human => dependencies
+                .iter()
+                .map(|dependency| {
+                    format!(
+                        "{} dependency `{}` blocked by `{}`",
+                        mutation.verb(),
+                        dependency.task_id,
+                        dependency.blocker_id
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            OutputMode::Plain => first.task_id.to_string(),
             OutputMode::Json => serde_json::to_string(&Envelope {
                 format_version: FORMAT_VERSION,
-                data: DependencyMutationData { action: mutation.as_str(), dependency },
+                data: DependencyMutationData { action: mutation.as_str(), dependency: first, dependencies },
             })?,
             OutputMode::Quiet => return Ok(None),
         };
@@ -1335,6 +1351,7 @@ struct ReleaseMutationData<'a> {
 struct DependencyMutationData<'a> {
     action: &'static str,
     dependency: &'a TaskDependency,
+    dependencies: &'a [TaskDependency],
 }
 
 /// One skill file in a [`SkillReport`].

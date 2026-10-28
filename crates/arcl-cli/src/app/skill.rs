@@ -48,7 +48,11 @@ pub(super) fn exec_skill(command: SkillCommand, renderer: &Renderer) -> anyhow::
             let Some(root) = nearest_project_root(&start)
                 .map_err(|(path, source)| ApplicationError::from_command(CommandError::ReadConfig { path, source }))?
             else {
-                return Err(ApplicationError::from_command(CommandError::NotInitialized { root: start }).into());
+                return Err(ApplicationError::from_command(CommandError::NotInitialized {
+                    root: start,
+                    workspace: None,
+                })
+                .into());
             };
             let report = install_skill(&root, check).map_err(ApplicationError::from_command)?;
             let drifted = report

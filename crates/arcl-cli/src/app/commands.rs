@@ -615,15 +615,19 @@ pub(super) fn run_task(command: TaskCommand, renderer: &Renderer) -> Result<Opti
 
 pub(super) fn exec_dependency(command: DependencyCommand, renderer: &Renderer) -> anyhow::Result<()> {
     let message = match command {
-        DependencyCommand::Add { task_id, blocker_id } => {
+        DependencyCommand::Add { task_id, blocker_ids } => {
             let task_id = parse_task_id(&task_id).map_err(ApplicationError::from_command)?;
-            let blocker_id = parse_task_id(&blocker_id).map_err(ApplicationError::from_command)?;
+            let blocker_ids = blocker_ids
+                .iter()
+                .map(|blocker| parse_task_id(blocker))
+                .collect::<CResult<Vec<_>>>()
+                .map_err(ApplicationError::from_command)?;
             let mut database = open_database().map_err(ApplicationError::from_command)?;
-            let dependency = database
-                .add_planning_dependency(task_id, blocker_id)
+            let dependencies = database
+                .add_planning_dependencies(task_id, &blocker_ids)
                 .map_err(ApplicationError::from_command)?;
             renderer
-                .render_dependency(crate::output::DependencyMutation::Added, &dependency)
+                .render_dependencies(crate::output::DependencyMutation::Added, &dependencies)
                 .map_err(|error| {
                     ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() })
                 })?

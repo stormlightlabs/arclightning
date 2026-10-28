@@ -207,11 +207,14 @@ pub(super) fn parse_plan_document(input: &str) -> CResult<arcl_core::plan::PlanD
 }
 
 pub(super) fn open_database() -> CResult<Database> {
-    let (root, _) = project_root_config()?;
+    let (root, config) = project_root_config()?;
     let database_path = root.join(ARCL_DIRECTORY).join(DATABASE_FILE);
     match file_present(fs::metadata(&database_path)) {
         Ok(true) => {}
-        Ok(false) => return Err(CommandError::NotInitialized { root }),
+        Ok(false) => {
+            let workspace = importable_workspace(&root, &config);
+            return Err(CommandError::NotInitialized { root, workspace });
+        }
         Err(source) => return Err(CommandError::ProbeDatabase { path: database_path, source }),
     }
     Database::open(&database_path).map_err(|source| CommandError::OpenDatabase { path: database_path, source })
@@ -222,7 +225,7 @@ pub(super) fn project_root_config() -> CResult<(PathBuf, ProjectConfig)> {
     let Some(root) =
         nearest_project_root(&start).map_err(|(path, source)| CommandError::ReadConfig { path, source })?
     else {
-        return Err(CommandError::NotInitialized { root: start });
+        return Err(CommandError::NotInitialized { root: start, workspace: None });
     };
     let config_path = root.join(ARCL_DIRECTORY).join(CONFIG_FILE);
     let input = fs::read_to_string(&config_path)

@@ -723,6 +723,7 @@ pub fn create_planning_task_with_dependencies(
         create.position,
     )
     .map_err(StorageError::InvalidPlanningTask)?;
+    ensure_blockers_listed_once(blockers)?;
     let tx = connection.transaction()?;
     validate_task_ancestry(&tx, &task)?;
     insert_task(&tx, &task)?;
@@ -893,32 +894,41 @@ pub fn planning_dependencies(connection: &Connection, project_id: ProjectId) -> 
     .collect()
 }
 
-/// Add a dependency between connected-model tasks.
-pub fn add_planning_dependency(
-    connection: &mut Connection, project_id: ProjectId, task_id: TaskId, blocker_id: TaskId,
-) -> Result<TaskDependency> {
-    let dependency = TaskDependency::new(task_id, blocker_id).map_err(StorageError::InvalidPlanningDependency)?;
+/// Add the dependencies of `task_id` on each of `blocker_ids` in one
+/// transaction. A refused edge, such as a duplicate or one that closes a
+/// cycle, leaves none of them added.
+pub fn add_planning_dependencies(
+    connection: &mut Connection, project_id: ProjectId, task_id: TaskId, blocker_ids: &[TaskId],
+) -> Result<Vec<TaskDependency>> {
+    let dependencies = blocker_ids
+        .iter()
+        .map(|blocker_id| TaskDependency::new(task_id, *blocker_id).map_err(StorageError::InvalidPlanningDependency))
+        .collect::<Result<Vec<_>>>()?;
+    ensure_blockers_listed_once(blocker_ids)?;
     ensure_project(connection, project_id)?;
     let tx = connection.transaction()?;
     ensure_task(&tx, project_id, task_id)?;
-    ensure_task(&tx, project_id, blocker_id)?;
-    let duplicate: bool = tx.query_row(
-        "SELECT EXISTS (SELECT 1 FROM planning_task_dependencies WHERE project_id = ?1 AND task_id = ?2 AND blocker_id = ?3)",
-        params![project_id.to_string(), task_id.to_string(), blocker_id.to_string()],
-        |row| row.get(0),
-    )?;
-    if duplicate {
-        return Err(StorageError::InvalidPlanningDependency(
-            DomainError::DuplicateDependency { task: task_id.to_string(), blocker: blocker_id.to_string() },
-        ));
+    for dependency in &dependencies {
+        let blocker_id = dependency.blocker_id;
+        ensure_task(&tx, project_id, blocker_id)?;
+        let duplicate: bool = tx.query_row(
+            "SELECT EXISTS (SELECT 1 FROM planning_task_dependencies WHERE project_id = ?1 AND task_id = ?2 AND blocker_id = ?3)",
+            params![project_id.to_string(), task_id.to_string(), blocker_id.to_string()],
+            |row| row.get(0),
+        )?;
+        if duplicate {
+            return Err(StorageError::InvalidPlanningDependency(
+                DomainError::DuplicateDependency { task: task_id.to_string(), blocker: blocker_id.to_string() },
+            ));
+        }
+        tx.execute(
+            "INSERT INTO planning_task_dependencies (project_id, task_id, blocker_id) VALUES (?1, ?2, ?3)",
+            params![project_id.to_string(), task_id.to_string(), blocker_id.to_string()],
+        )?;
     }
-    tx.execute(
-        "INSERT INTO planning_task_dependencies (project_id, task_id, blocker_id) VALUES (?1, ?2, ?3)",
-        params![project_id.to_string(), task_id.to_string(), blocker_id.to_string()],
-    )?;
-    ensure_blocker_edges_valid(&tx, project_id, &[dependency], &[])?;
+    ensure_blocker_edges_valid(&tx, project_id, &dependencies, &[])?;
     tx.commit()?;
-    Ok(dependency)
+    Ok(dependencies)
 }
 
 /// Remove a connected-model dependency. A stored self-dependency can be
@@ -1460,6 +1470,18 @@ fn ensure_phase(c: &Connection, p: ProjectId, id: PhaseId) -> Result<()> {
         StorageError::PhaseNotFound { id: id.to_string() },
     )
 }
+/// Refuse a blocker list that names one task twice, which would otherwise
+/// fail on the table's unique key or read as an edge that already exists.
+fn ensure_blockers_listed_once(blockers: &[TaskId]) -> Result<()> {
+    let mut seen = HashSet::with_capacity(blockers.len());
+    match blockers.iter().find(|blocker| !seen.insert(**blocker)) {
+        Some(blocker) => Err(StorageError::RepeatedBlocker(DomainError::RepeatedBlocker {
+            blocker: blocker.to_string(),
+        })),
+        None => Ok(()),
+    }
+}
+
 /// Refuse the first blocker rule violation a write causes.
 ///
 /// The write must already be applied in `c`, so the validator sees the whole

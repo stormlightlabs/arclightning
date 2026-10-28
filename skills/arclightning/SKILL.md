@@ -10,6 +10,9 @@ CLI with `--json`, and read fields from the envelope rather than from terminal
 text. `arcl` decides readiness and which transitions are allowed. Ask it
 instead of working that out yourself.
 
+A fresh clone or worktree has no database. Run `arcl init` there; the next
+command imports the committed workspace.
+
 When the `arcl-mcp` server is connected, call its tools instead of the
 commands. Each step below names the tool in brackets. A tool returns the same
 envelope as its command, as structured content. Its input schema lists the
@@ -107,6 +110,14 @@ When you find work outside the task, capture it instead of doing it:
 
 ```sh
 arcl --json capture create "<title>" --body "<what and why>"
+```
+
+When the new work must wait for other tasks, create it with one
+`--blocked-by <id>` per blocker, or add blockers to an existing task:
+
+```sh
+arcl --json task create "<title>" --blocked-by <id> --blocked-by <id>
+arcl --json dependency add <task-id> --blocked-by <id>,<id>
 ```
 
 The tool is `capture_create`. The server also has `capture_promote`, `show`,

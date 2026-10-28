@@ -536,8 +536,9 @@ pub enum TaskCommand {
         /// The display position within its container or parent.
         #[arg(long, default_value_t = 0, value_name = "N")]
         position: i64,
-        /// Add direct blocker relationships after creating the task.
-        #[arg(long = "blocked-by", value_name = "ID", num_args = 1..)]
+        /// Make the task wait for this task. Repeat the flag or separate IDs
+        /// with commas to add several.
+        #[arg(long = "blocked-by", value_name = "ID", value_delimiter = ',')]
         blocked_by: Vec<String>,
         #[command(flatten)]
         body: MarkdownArgs,
@@ -677,13 +678,14 @@ pub enum TaskCommand {
 /// Task dependency commands.
 #[derive(Clone, Debug, Subcommand)]
 pub enum DependencyCommand {
-    /// Make one task wait for another task to complete.
+    /// Make one task wait for other tasks to complete.
     Add {
         /// The task that is blocked.
         task_id: String,
-        /// The task that blocks it.
-        #[arg(long = "blocked-by", value_name = "ID")]
-        blocker_id: String,
+        /// A task that blocks it. Repeat the flag or separate IDs with commas
+        /// to add several.
+        #[arg(long = "blocked-by", value_name = "ID", value_delimiter = ',', required = true)]
+        blocker_ids: Vec<String>,
     },
     /// Remove one task blocking relationship.
     Remove {
