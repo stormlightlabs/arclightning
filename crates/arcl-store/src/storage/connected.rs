@@ -1475,7 +1475,7 @@ fn ensure_phase(c: &Connection, p: ProjectId, id: PhaseId) -> Result<()> {
 fn ensure_blockers_listed_once(blockers: &[TaskId]) -> Result<()> {
     let mut seen = HashSet::with_capacity(blockers.len());
     match blockers.iter().find(|blocker| !seen.insert(**blocker)) {
-        Some(blocker) => Err(StorageError::InvalidPlanningDependency(DomainError::RepeatedBlocker {
+        Some(blocker) => Err(StorageError::RepeatedBlocker(DomainError::RepeatedBlocker {
             blocker: blocker.to_string(),
         })),
         None => Ok(()),

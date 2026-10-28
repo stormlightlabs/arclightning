@@ -189,8 +189,8 @@ is `0`; negative positions are invalid. Terminal commands accept
 
 Task creation accepts `--parent <ID>`, `--priority <critical|high|normal|low>`
 (default `normal`), `--position <N>` (default `0`), and `--blocked-by <ID>`.
-`--blocked-by` takes one task ID; repeat it or separate IDs with commas to add
-several blockers, as `dependency add` does. Task updates accept
+`--blocked-by` takes one ID per flag; repeat the flag or separate IDs with
+commas to add several blockers, as `dependency add` does. Task updates accept
 `--milestone <ID>`, `--parent <ID>`, or `--no-parent`. `--parent` and
 `--no-parent` are mutually exclusive.
 

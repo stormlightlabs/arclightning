@@ -21,9 +21,9 @@ arcl next --plain
 arcl explain <task-id>
 ```
 
-`--blocked-by` takes one task ID. In `dependency add` and `task create`, repeat
-it or separate IDs with commas to add several blockers in one write; if one is
-refused, none are added. `dependency remove` takes one.
+`--blocked-by` takes one ID per flag. In `dependency add` and `task create`,
+repeat the flag or separate IDs with commas to add several blockers in one
+write; if one is refused, none are added. `dependency remove` takes one.
 
 `dependency add`, `task create --blocked-by`, and `plan apply` refuse a blocker
 edge that closes a cycle or joins a task to its own ancestor or descendant.

@@ -744,6 +744,15 @@ fn a_missing_database_beside_a_workspace_says_init_imports_it() {
     );
     assert!(stderr.contains(".arcl/workspace`"), "{stderr}");
 
+    let output = arcl_in(directory.path())
+        .args(["--json", "ready"])
+        .output()
+        .expect("ready runs");
+    assert_eq!(output.status.code(), Some(3));
+    let stderr: Value = serde_json::from_slice(&output.stderr).expect("stderr is one JSON value");
+    let message = stderr["error"]["message"].as_str().expect("error message");
+    assert_eq!(message.matches("has no database").count(), 1, "{message}");
+
     run_json(directory.path(), ["--json", "init"].as_ref());
     let tasks = run_json(directory.path(), ["--json", "task", "list"].as_ref());
     assert_eq!(tasks["data"]["tasks"][0]["title"], "Kept");
@@ -835,6 +844,7 @@ fn blocked_by_takes_one_id_per_flag_in_task_create_and_dependency_add() {
             stderr.contains(&format!("blocker `{a}` is listed more than once")),
             "{stderr}"
         );
+        assert!(!stderr.contains("stored"), "a typed list is not stored data: {stderr}");
     }
 
     let missing = arcl_in(path)

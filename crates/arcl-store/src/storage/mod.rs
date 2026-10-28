@@ -115,6 +115,10 @@ pub enum StorageError {
     /// [`validate_task_note_text`]: arcl_core::domain::validate_task_note_text
     #[error(transparent)]
     InvalidTaskNoteText(DomainError),
+    /// A blocker list that names one task twice. The list comes from the
+    /// request, not from stored data.
+    #[error(transparent)]
+    RepeatedBlocker(DomainError),
     /// A short ID argument names no record, more than one, or is not a
     /// short ID. No match exits 5; the rest exit 3.
     #[error(transparent)]
@@ -166,6 +170,7 @@ impl StorageError {
             | Self::InvalidPlanInput(_)
             | Self::InvalidClaimName { .. }
             | Self::InvalidTaskNoteText(_)
+            | Self::RepeatedBlocker(_)
             | Self::InvalidGate(_)
             | Self::GateOnClosedTask { .. }
             | Self::NewerDatabase { .. }
