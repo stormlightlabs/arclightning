@@ -224,6 +224,35 @@ pub fn resolve_workspace_root(worktree_root: &Path, relative: &Path) -> Result<P
     Ok(resolved)
 }
 
+/// The workspace directory of a project without a database, when `config`
+/// enables one and its `manifest.toml` exists. Running `arcl init` there
+/// lets the next command import it.
+pub fn importable_workspace(worktree_root: &Path, config: &ProjectConfig) -> Option<PathBuf> {
+    if !config.workspace.enabled {
+        return None;
+    }
+    let workspace_root = resolve_workspace_root(worktree_root, &config.workspace.path).ok()?;
+    workspace_root.join("manifest.toml").is_file().then_some(workspace_root)
+}
+
+/// The message for a project without a database, shared by the CLI and the
+/// MCP server. With `workspace`, from [`importable_workspace`], it says the
+/// command after `arcl init` imports it.
+pub fn not_initialized_message(root: &Path, workspace: Option<&Path>) -> String {
+    match workspace {
+        Some(workspace) => format!(
+            "Arc Lightning has no database in project directory `{}`; run `arcl init`, and the next command imports \
+             the workspace in `{}`",
+            root.display(),
+            workspace.display()
+        ),
+        None => format!(
+            "Arc Lightning is not initialized in project directory `{}`; run `arcl init` first",
+            root.display()
+        ),
+    }
+}
+
 /// Return whether `content` holds a line that looks like a Git merge conflict
 /// marker: seven or more `<` or `>` followed by a space or the end of the line.
 ///

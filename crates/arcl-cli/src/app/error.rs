@@ -262,22 +262,3 @@ impl CommandError {
         }
     }
 }
-
-/// The [`CommandError::NotInitialized`] message. With a workspace it says that
-/// running `arcl init` lets the next command import it, as in a fresh clone
-/// or worktree.
-fn not_initialized_message(root: &Path, workspace: Option<&Path>) -> String {
-    match workspace {
-        Some(workspace) => format!(
-            "Arc Lightning has no database in project directory `{}`; run `arcl init`, and the next command imports the workspace in `{}`",
-            root.display(),
-            workspace.display()
-        ),
-        None => {
-            format!(
-                "Arc Lightning is not initialized in project directory `{}`; run `arcl init` first",
-                root.display()
-            )
-        }
-    }
-}

@@ -23,7 +23,10 @@ use serde::Serialize;
 use tokio_util::sync::CancellationToken;
 
 use arcl_repo::vcs::{GixVcs, Vcs, VcsError};
-use arcl_repo::workspace::{ProjectConfig, WorkspaceSyncError, resolve_workspace_root, sync_workspace};
+use arcl_repo::workspace::{
+    ProjectConfig, WorkspaceSyncError, importable_workspace, not_initialized_message, resolve_workspace_root,
+    sync_workspace,
+};
 use arcl_store::prelude::*;
 
 use crate::error::ToolError;
@@ -136,10 +139,7 @@ pub fn run<T>(
     let config = read_config(&root)?;
     let database_path = root.join(ARCL_DIRECTORY).join(DATABASE_FILE);
     if !database_path.is_file() {
-        let workspace = workspace_root(&root, &config)
-            .ok()
-            .flatten()
-            .filter(|workspace| workspace.join("manifest.toml").is_file());
+        let workspace = importable_workspace(&root, &config);
         return Err(not_initialized(&root, workspace.as_deref()));
     }
 
@@ -192,24 +192,9 @@ fn nearest_project_root(start: &Path) -> Option<PathBuf> {
         .map(Path::to_owned)
 }
 
-/// The error for a project without a database. With `workspace`, it says that
-/// running `arcl init` lets the next command import it, as in a fresh clone
-/// or worktree.
+/// The error for a project without a database, with the CLI's message.
 fn not_initialized(root: &Path, workspace: Option<&Path>) -> ToolError {
-    let message = match workspace {
-        Some(workspace) => format!(
-            "Arc Lightning has no database in project directory `{}`; run `arcl init`, and the next command imports the workspace in `{}`",
-            root.display(),
-            workspace.display()
-        ),
-        None => {
-            format!(
-                "Arc Lightning is not initialized in project directory `{}`; run `arcl init` first",
-                root.display()
-            )
-        }
-    };
-    ToolError::new(3, message)
+    ToolError::new(3, not_initialized_message(root, workspace))
 }
 
 fn read_config(root: &Path) -> Result<ProjectConfig, ToolError> {

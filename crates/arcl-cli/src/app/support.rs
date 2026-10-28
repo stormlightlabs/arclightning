@@ -261,16 +261,6 @@ pub(super) fn nearest_project_root(start: &Path) -> Result<Option<PathBuf>, (Pat
     Ok(None)
 }
 
-/// The workspace directory of a project without a database, when the config
-/// enables one and its `manifest.toml` exists.
-fn importable_workspace(root: &Path, config: &ProjectConfig) -> Option<PathBuf> {
-    if !config.workspace.enabled {
-        return None;
-    }
-    let workspace_root = resolve_workspace_root(root, &config.workspace.path).ok()?;
-    workspace_root.join("manifest.toml").is_file().then_some(workspace_root)
-}
-
 /// Whether the path `metadata` was read from is a file. Only a missing path,
 /// or one under a non-directory, counts as absent; any other error, such as
 /// a permission error, is returned.

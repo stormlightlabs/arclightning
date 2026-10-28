@@ -58,6 +58,9 @@ pub enum DomainError {
     },
     #[error("task `{task}` is already blocked by `{blocker}`")]
     DuplicateDependency { task: String, blocker: String },
+    /// One write names the same blocker more than once.
+    #[error("blocker `{blocker}` is listed more than once")]
+    RepeatedBlocker { blocker: String },
     #[error("task subtree rooted at `{task}` contains tasks from different milestones")]
     SubtreeDifferentMilestones { task: String },
     #[error("cannot {action} {entity} while it is {from}")]

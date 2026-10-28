@@ -1,7 +1,7 @@
 +++
 id = "arcl-c-01M5P0JB8RFBZ6KK26C2W7M44J"
 title = "Refuse duplicate blockers in task create"
-status = "captured"
+status = "discarded"
 created-at = "2026-10-24T03:51:43.128Z"
 +++
 

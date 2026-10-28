@@ -819,9 +819,23 @@ fn blocked_by_takes_one_id_per_flag_in_task_create_and_dependency_add() {
     assert!(String::from_utf8_lossy(&refused.stderr).contains("already blocked by"));
     assert_eq!(
         blockers(&commas),
-        sorted(vec![a, b]),
+        sorted(vec![a.clone(), b]),
         "a refused edge adds none of them"
     );
+
+    let repeated = format!("{a},{a}");
+    for args in [
+        ["dependency", "add", c.as_str(), "--blocked-by", repeated.as_str()],
+        ["task", "create", "Repeated", "--blocked-by", repeated.as_str()],
+    ] {
+        let output = arcl_in(path).args(args).output().expect("command runs");
+        assert_eq!(output.status.code(), Some(3), "{args:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(&format!("blocker `{a}` is listed more than once")),
+            "{stderr}"
+        );
+    }
 
     let missing = arcl_in(path)
         .args(["dependency", "add", &c])

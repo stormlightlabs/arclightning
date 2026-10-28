@@ -723,6 +723,7 @@ pub fn create_planning_task_with_dependencies(
         create.position,
     )
     .map_err(StorageError::InvalidPlanningTask)?;
+    ensure_blockers_listed_once(blockers)?;
     let tx = connection.transaction()?;
     validate_task_ancestry(&tx, &task)?;
     insert_task(&tx, &task)?;
@@ -903,6 +904,7 @@ pub fn add_planning_dependencies(
         .iter()
         .map(|blocker_id| TaskDependency::new(task_id, *blocker_id).map_err(StorageError::InvalidPlanningDependency))
         .collect::<Result<Vec<_>>>()?;
+    ensure_blockers_listed_once(blocker_ids)?;
     ensure_project(connection, project_id)?;
     let tx = connection.transaction()?;
     ensure_task(&tx, project_id, task_id)?;
@@ -1468,6 +1470,18 @@ fn ensure_phase(c: &Connection, p: ProjectId, id: PhaseId) -> Result<()> {
         StorageError::PhaseNotFound { id: id.to_string() },
     )
 }
+/// Refuse a blocker list that names one task twice, which would otherwise
+/// fail on the table's unique key or read as an edge that already exists.
+fn ensure_blockers_listed_once(blockers: &[TaskId]) -> Result<()> {
+    let mut seen = HashSet::with_capacity(blockers.len());
+    match blockers.iter().find(|blocker| !seen.insert(**blocker)) {
+        Some(blocker) => Err(StorageError::InvalidPlanningDependency(DomainError::RepeatedBlocker {
+            blocker: blocker.to_string(),
+        })),
+        None => Ok(()),
+    }
+}
+
 /// Refuse the first blocker rule violation a write causes.
 ///
 /// The write must already be applied in `c`, so the validator sees the whole
