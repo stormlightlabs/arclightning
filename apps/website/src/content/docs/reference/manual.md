@@ -66,6 +66,10 @@ The command creates `.arcl/config.toml`, `.arcl/arcl.db`, and a scoped
 `.arcl/.gitignore`. It rejects directories outside Git worktrees and bare
 repositories. Re-running initialization preserves existing project state.
 
+A fresh clone or worktree has the committed config and workspace but no
+database. Other commands fail there with exit code `3` and say to run
+`arcl init`; the command after it imports the workspace.
+
 ### `arcl skill install`
 
 Install the Arc Lightning agent skill into the project.
@@ -184,7 +188,9 @@ is `0`; negative positions are invalid. Terminal commands accept
 | `arcl task cancel <id>`                     | Cancel non-terminal work.                               |
 
 Task creation accepts `--parent <ID>`, `--priority <critical|high|normal|low>`
-(default `normal`), and `--position <N>` (default `0`). Task updates accept
+(default `normal`), `--position <N>` (default `0`), and `--blocked-by <ID>`.
+`--blocked-by` takes one task ID; repeat it or separate IDs with commas to add
+several blockers, as `dependency add` does. Task updates accept
 `--milestone <ID>`, `--parent <ID>`, or `--no-parent`. `--parent` and
 `--no-parent` are mutually exclusive.
 

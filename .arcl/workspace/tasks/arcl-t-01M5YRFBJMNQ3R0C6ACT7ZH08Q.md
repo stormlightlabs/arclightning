@@ -4,7 +4,7 @@ phase = "arcl-ph-01M5YRFB35TZ51QW4AG1A8MS5B"
 title = "Render a roadmap with arcl roadmap"
 status = "pending"
 priority = "normal"
-position = 7
+position = 8
 +++
 
 Render specs, plans, milestones and releases as one Markdown page, for a

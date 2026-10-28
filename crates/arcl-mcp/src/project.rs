@@ -132,11 +132,15 @@ pub fn run<T>(
     start: &Path, access: Access, lock_wait: Duration, cancelled: &CancellationToken,
     operation: impl FnOnce(&mut Database) -> Result<T, ToolError>,
 ) -> Result<(T, Vec<Warning>), ToolError> {
-    let root = nearest_project_root(start).ok_or_else(|| not_initialized(start))?;
+    let root = nearest_project_root(start).ok_or_else(|| not_initialized(start, None))?;
     let config = read_config(&root)?;
     let database_path = root.join(ARCL_DIRECTORY).join(DATABASE_FILE);
     if !database_path.is_file() {
-        return Err(not_initialized(&root));
+        let workspace = workspace_root(&root, &config)
+            .ok()
+            .flatten()
+            .filter(|workspace| workspace.join("manifest.toml").is_file());
+        return Err(not_initialized(&root, workspace.as_deref()));
     }
 
     let mut warnings = Vec::new();
@@ -188,14 +192,24 @@ fn nearest_project_root(start: &Path) -> Option<PathBuf> {
         .map(Path::to_owned)
 }
 
-fn not_initialized(root: &Path) -> ToolError {
-    ToolError::new(
-        3,
-        format!(
-            "Arc Lightning is not initialized in project directory `{}`; run `arcl init` first",
-            root.display()
+/// The error for a project without a database. With `workspace`, it says that
+/// running `arcl init` lets the next command import it, as in a fresh clone
+/// or worktree.
+fn not_initialized(root: &Path, workspace: Option<&Path>) -> ToolError {
+    let message = match workspace {
+        Some(workspace) => format!(
+            "Arc Lightning has no database in project directory `{}`; run `arcl init`, and the next command imports the workspace in `{}`",
+            root.display(),
+            workspace.display()
         ),
-    )
+        None => {
+            format!(
+                "Arc Lightning is not initialized in project directory `{}`; run `arcl init` first",
+                root.display()
+            )
+        }
+    };
+    ToolError::new(3, message)
 }
 
 fn read_config(root: &Path) -> Result<ProjectConfig, ToolError> {

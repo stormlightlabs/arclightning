@@ -752,8 +752,17 @@ impl Database {
 
     /// Add a dependency between connected-model tasks.
     pub fn add_planning_dependency(&mut self, task_id: TaskId, blocker_id: TaskId) -> Result<TaskDependency> {
+        let mut added = self.add_planning_dependencies(task_id, &[blocker_id])?;
+        Ok(added.remove(0))
+    }
+
+    /// Add the dependencies of `task_id` on each of `blocker_ids` in one
+    /// transaction, so a refused edge leaves none of them added.
+    pub fn add_planning_dependencies(
+        &mut self, task_id: TaskId, blocker_ids: &[TaskId],
+    ) -> Result<Vec<TaskDependency>> {
         let project = self.project()?;
-        connected::add_planning_dependency(&mut self.connection, project.id, task_id, blocker_id)
+        connected::add_planning_dependencies(&mut self.connection, project.id, task_id, blocker_ids)
     }
 
     /// Remove a connected-model dependency.

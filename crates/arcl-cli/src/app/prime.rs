@@ -22,9 +22,9 @@ const LOOP_END: &str = "<!-- arcl-prime:end -->";
 pub(super) fn read_prime(renderer: &Renderer) -> anyhow::Result<Option<String>> {
     let database = match open_database() {
         Ok(database) => database,
-        Err(CommandError::NotInitialized { root }) => {
+        Err(CommandError::NotInitialized { root, workspace }) => {
             let display = root.display().to_string();
-            let message = CommandError::NotInitialized { root }.to_string();
+            let message = CommandError::NotInitialized { root, workspace }.to_string();
             let setup = PrimeSetup { initialized: false, root: display, message };
             return Ok(renderer.render_prime_not_initialized(&setup)?);
         }

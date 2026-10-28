@@ -2,7 +2,7 @@
 id = "arcl-ph-01M5NE5P5RE8Y5Y5Y84T36FMEE"
 plan = "arcl-pl-01M5NE5P0CWMJNP2A7B0ZQW6XC"
 title = "Milestone 7: Local web app"
-status = "open"
+status = "completed"
 position = 7
 +++
 

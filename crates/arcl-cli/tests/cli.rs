@@ -716,7 +716,7 @@ fn workspace_status_reports_a_record_only_the_database_has() {
 #[test]
 fn a_missing_database_reports_not_initialized_once() {
     let directory = tempdir().expect("temporary directory can be created");
-    run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
+    run_json(directory.path(), ["--json", "init"].as_ref());
     fs::remove_file(directory.path().join(".arcl/arcl.db")).expect("database is removed");
 
     for args in [["--json", "list"].as_ref(), ["--json", "note", "create", "x"].as_ref()] {
@@ -725,6 +725,109 @@ fn a_missing_database_reports_not_initialized_once() {
         let stderr: Value = serde_json::from_slice(&output.stderr).expect("stderr is one JSON value");
         assert!(stderr.to_string().contains("not initialized"), "stderr: {stderr}");
     }
+}
+
+#[test]
+fn a_missing_database_beside_a_workspace_says_init_imports_it() {
+    let directory = tempdir().expect("temporary directory can be created");
+    run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
+    run_json(directory.path(), ["--json", "task", "create", "Kept"].as_ref());
+    fs::remove_file(directory.path().join(".arcl/arcl.db")).expect("database is removed");
+
+    let output = arcl_in(directory.path()).args(["ready"]).output().expect("ready runs");
+    assert_eq!(output.status.code(), Some(3));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("has no database"), "{stderr}");
+    assert!(
+        stderr.contains("run `arcl init`, and the next command imports the workspace in"),
+        "{stderr}"
+    );
+    assert!(stderr.contains(".arcl/workspace`"), "{stderr}");
+
+    run_json(directory.path(), ["--json", "init"].as_ref());
+    let tasks = run_json(directory.path(), ["--json", "task", "list"].as_ref());
+    assert_eq!(tasks["data"]["tasks"][0]["title"], "Kept");
+}
+
+#[test]
+fn blocked_by_takes_one_id_per_flag_in_task_create_and_dependency_add() {
+    let directory = initialized_directory();
+    let path = directory.path();
+    let id = |title: &str| {
+        run_json(path, ["--json", "task", "create", title].as_ref())["data"]["task"]["id"]
+            .as_str()
+            .expect("task ID")
+            .to_owned()
+    };
+    let (a, b, c) = (id("A"), id("B"), id("C"));
+    let blockers = |task: &str| {
+        let mut ids = run_json(path, ["--json", "dependency", "list"].as_ref())["data"]["dependencies"]
+            .as_array()
+            .expect("dependencies")
+            .iter()
+            .filter(|edge| edge["task_id"] == task)
+            .map(|edge| edge["blocker_id"].as_str().expect("blocker ID").to_owned())
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids
+    };
+    let sorted = |mut ids: Vec<String>| {
+        ids.sort();
+        ids
+    };
+
+    let titled = run_json(
+        path,
+        ["--json", "task", "create", "--blocked-by", &a, "Title after"].as_ref(),
+    );
+    assert_eq!(titled["data"]["task"]["title"], "Title after");
+    let titled = titled["data"]["task"]["id"].as_str().expect("task ID").to_owned();
+    assert_eq!(blockers(&titled), vec![a.clone()]);
+
+    let joined = format!("{a},{b}");
+    let commas = run_json(
+        path,
+        ["--json", "task", "create", "Commas", "--blocked-by", &joined].as_ref(),
+    );
+    let commas = commas["data"]["task"]["id"].as_str().expect("task ID").to_owned();
+    assert_eq!(blockers(&commas), sorted(vec![a.clone(), b.clone()]));
+
+    let added = run_json(
+        path,
+        [
+            "--json",
+            "dependency",
+            "add",
+            &c,
+            "--blocked-by",
+            &a,
+            "--blocked-by",
+            &b,
+        ]
+        .as_ref(),
+    );
+    assert_eq!(added["data"]["dependencies"].as_array().expect("dependencies").len(), 2);
+    assert_eq!(added["data"]["dependency"]["blocker_id"], a.as_str());
+    assert_eq!(blockers(&c), sorted(vec![a.clone(), b.clone()]));
+
+    let joined = format!("{titled},{a}");
+    let refused = arcl_in(path)
+        .args(["dependency", "add", &commas, "--blocked-by", &joined])
+        .output()
+        .expect("dependency add runs");
+    assert_eq!(refused.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("already blocked by"));
+    assert_eq!(
+        blockers(&commas),
+        sorted(vec![a, b]),
+        "a refused edge adds none of them"
+    );
+
+    let missing = arcl_in(path)
+        .args(["dependency", "add", &c])
+        .output()
+        .expect("dependency add runs");
+    assert_eq!(missing.status.code(), Some(2));
 }
 
 #[test]

@@ -4,7 +4,7 @@ phase = "arcl-ph-01M5YRFB35TZ51QW4AG1A8MS5B"
 title = "Link captures to the task they came from"
 status = "pending"
 priority = "normal"
-position = 5
+position = 6
 blocked-by = ["arcl-t-01M5YRFB4XC9E438GSNCV444XZ"]
 +++
 
