@@ -115,5 +115,25 @@ for `arcl capture promote`, `arcl show`, `arcl spec create`,
 `arcl plan create`, `arcl task create`, `arcl task update` and
 `arcl note create`.
 
+## Wait on a pull request, run or date
+
+When a task cannot start until a pull request merges, a CI run passes or a
+date arrives, gate it instead of parking it or waiting:
+
+```sh
+arcl --json gate add <id> --pr https://HOST/OWNER/REPO/pull/NUMBER
+arcl --json gate add <id> --run https://HOST/OWNER/REPO/actions/runs/RUN_ID
+arcl --json gate add <id> --until YYYY-MM-DD
+```
+
+The tool is `gate_add`, with `kind` and `target`. An open gate keeps the task
+out of `ready`, and `explain` lists it as an `open_gate` reason. Gates never
+resolve on their own: `arcl --json gate check` [`gate_check`] marks met
+gates. Date gates compare with today's UTC date. Pull request and run gates
+need the GitHub CLI, `gh`; without it they stay open and `data.gh_missing` is
+true. A `failed` outcome means the pull request closed unmerged or the run
+failed: remove the gate with `arcl gate remove <gate-id>` or replace it.
+`arcl --json gate list [<id>]` [`gate_list`] shows gates.
+
 Run `arcl <command> --help` for every flag, and `arcl check` to validate the
 project.

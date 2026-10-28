@@ -28,13 +28,14 @@ pub use sync::{Side, SyncOutcome, WorkspaceSyncError, resolve_workspace, sync_wo
 pub const CONFIG_FORMAT_VERSION: u32 = 1;
 /// The newest on-disk workspace format version this crate reads and writes.
 ///
-/// Version 2 adds the task `assignee` field and version 3 the task `notes`
-/// array; see [`ASSIGNEE_FORMAT_VERSION`] and [`TASK_NOTES_FORMAT_VERSION`]
-/// for when a projection writes each. Reading also accepts
-/// [`OLDEST_WORKSPACE_FORMAT_VERSION`] and later versions up to this one; an
-/// arcl that predates a version refuses its manifest before it reads any
-/// record.
-pub const WORKSPACE_FORMAT_VERSION: u32 = 3;
+/// Version 2 adds the task `assignee` field, version 3 the task `notes`
+/// array and version 4 the task `gates` array; see
+/// [`ASSIGNEE_FORMAT_VERSION`], [`TASK_NOTES_FORMAT_VERSION`] and
+/// [`GATES_FORMAT_VERSION`] for when a projection writes each. Reading also
+/// accepts [`OLDEST_WORKSPACE_FORMAT_VERSION`] and later versions up to this
+/// one; an arcl that predates a version refuses its manifest before it reads
+/// any record.
+pub const WORKSPACE_FORMAT_VERSION: u32 = 4;
 /// The oldest workspace format version this crate still reads.
 pub const OLDEST_WORKSPACE_FORMAT_VERSION: u32 = 1;
 /// The workspace format version a task `assignee` needs.
@@ -50,6 +51,12 @@ pub const ASSIGNEE_FORMAT_VERSION: u32 = 2;
 /// same rule as [`ASSIGNEE_FORMAT_VERSION`]: it never lowers the version a
 /// workspace already has.
 pub const TASK_NOTES_FORMAT_VERSION: u32 = 3;
+/// The workspace format version task `gates` need.
+///
+/// A projection writes this version once a task carries a gate, open or
+/// met, under the same rule as [`ASSIGNEE_FORMAT_VERSION`]: it never lowers
+/// the version a workspace already has.
+pub const GATES_FORMAT_VERSION: u32 = 4;
 
 /// Workspace and configuration validation failures.
 #[derive(Debug, Error)]
@@ -117,6 +124,10 @@ pub enum WorkspaceError {
     InvalidRecordNoteCreatedAt { value: String },
     #[error("workspace capture creation time cannot be empty")]
     EmptyRecordCreatedAt,
+    /// A task gate with an invalid target, an empty `created-at`, or a
+    /// `met-at` that does not match its status.
+    #[error("workspace task gate `{id}` is invalid: {reason}")]
+    InvalidRecordGate { id: String, reason: String },
     #[error("workspace record relationship is invalid: {0}")]
     InvalidRecordRelationship(String),
 }

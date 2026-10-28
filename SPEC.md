@@ -152,10 +152,12 @@ Tasks retain:
 - an optional assignee, set by a claim when the task starts and cleared when
   it is parked, handed off, completed, or cancelled
 - timestamped notes, each with an optional kind
+- gates: a pull request, CI run or date the task waits on
 
 Readiness is calculated for actionable leaf tasks. A task is ready when it is
-pending, its applicable ancestors and containers permit work, and every blocker
-on the task and on its ancestor tasks is complete. Notes never affect readiness.
+pending, its applicable ancestors and containers permit work, every blocker
+on the task and on its ancestor tasks is complete, and the task has no open
+gate. Notes never affect readiness.
 
 Blocking relationships connect two tasks in the same project and never form a
 cycle. A task cannot block, or be blocked by, its own ancestor or descendant.
@@ -192,6 +194,30 @@ removes the note, as with any workspace edit. A task in any status, completed
 included, keeps its notes and takes new ones.
 `show` and the Task view list every note, newest first. Notes are separate
 from handoff and evidence, and never affect readiness.
+
+A gate is a blocker that is not a task. `arcl gate add <task> --pr <url>`,
+`--run <url>` or `--until <date>` adds an open gate with an `arcl-g-` ID. A
+pull request target is `https://<host>/<owner>/<repo>/pull/<number>`, a run
+target `https://<host>/<owner>/<repo>/actions/runs/<id>`, and a date
+`YYYY-MM-DD`; other targets, and gates on completed or cancelled tasks, are
+refused. An open gate keeps its own task from being ready, with an
+`open_gate` readiness reason that carries the gate's ID, kind and target, and
+counts as blocked. A gate on a parent task does not hold its children back.
+Only `arcl gate check` marks a gate met, so readiness reads no clock and no
+network. A date gate is met from the start of its date in UTC. A pull request
+gate is met once `gh pr view` reports it merged, and a run gate once `gh run
+view` reports it completed with `success`. A closed pull request or a failed
+run leaves the gate open and is reported as failed. Without `gh` on `PATH`,
+pull request and run gates stay open and the check says so. A `gh` call is
+killed, with the processes it started, after 30 seconds or after
+`ARCL_GH_TIMEOUT_MS` milliseconds when that is set, and reported as an error.
+A gate on a completed or cancelled task is skipped without being checked.
+One gate's error is reported
+with that gate and never fails the check. The check reads the open gates, asks
+about them without holding the sync lock or a database transaction, then
+marks the met ones in one transaction that reads each gate again. A met gate
+stays met; `arcl gate remove` deletes a gate in either state. `arcl show`
+shows a gate by its ID.
 
 ### Note
 
@@ -262,12 +288,12 @@ text.
 `arcl context` is the focused task handoff for command-line agents. It
 includes the task, relevant ancestors, spec and plan context, direct blockers,
 latest handoff, and relevant evidence without returning the whole project. It
-includes the 10 most recent notes, newest first, and the count of older notes
-it leaves out.
+includes the 10 most recent notes, newest first, the count of older notes
+it leaves out, and every gate on the task.
 
 `arcl prime` is the session primer for hooks. It prints the skill's working
-loop, open work with handoffs, and the first ready tasks, within 40 lines and
-4 KiB, and points to `arcl context` for the rest.
+loop, open work with handoffs and open gate counts, and the first ready tasks,
+within 40 lines and 4 KiB, and points to `arcl context` for the rest.
 
 ### Repository-native workspace
 
@@ -290,15 +316,17 @@ file under a configurable workspace directory. The target layout is:
 ```
 
 `manifest.toml` holds `format-version`. Version 2 adds the task `assignee`
-field, and version 3 the task `notes` array of tables, oldest first, each
-with `created-at`, an optional `kind`, and `text`. arcl reads versions 1 to 3.
-It writes version 3 when a task file carries a note, version 2 when one
-carries an `assignee`, and otherwise keeps the version the workspace already
-has. A new workspace starts at version 1, so a workspace without claims or
-notes stays there. A workspace never moves back to an older version on its
-own. An arcl that reads only older versions checks the manifest before any
-record and refuses a newer workspace with an unsupported format version
-error.
+field, version 3 the task `notes` array of tables, oldest first, each
+with `created-at`, an optional `kind`, and `text`, and version 4 the task
+`gates` array of tables, oldest first, each with `id`, `kind`, `target`,
+`status`, `created-at` and, once met, `met-at`. arcl reads versions 1 to 4.
+It writes version 4 when a task file carries a gate, version 3 when one
+carries a note, version 2 when one carries an `assignee`, and otherwise keeps
+the version the workspace already has. A new workspace starts at version 1,
+so a workspace without claims, notes or gates stays there. A workspace never
+moves back to an older version on its own. An arcl that reads only older
+versions checks the manifest before any record and refuses a newer workspace
+with an unsupported format version error.
 
 Synchronization uses a three-state comparison: compare
 the last common files, current database projection, and current workspace. Arc

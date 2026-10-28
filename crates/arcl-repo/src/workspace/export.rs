@@ -11,9 +11,9 @@ use arcl_core::domain::{CapturePromotionTarget, LinkedRecordKind};
 use arcl_store::{ConnectedGraph, WorkspaceBaseFile};
 
 use super::{
-    ASSIGNEE_FORMAT_VERSION, CaptureRecord, NoteRecord, OLDEST_WORKSPACE_FORMAT_VERSION, PhaseRecord, PlanRecord,
-    ReleaseRecord, SpecRecord, TASK_NOTES_FORMAT_VERSION, TaskNoteRecord, TaskRecord, WorkspaceManifest,
-    WorkspaceRecord, WorkspaceReference, encode_manifest, encode_record,
+    ASSIGNEE_FORMAT_VERSION, CaptureRecord, GATES_FORMAT_VERSION, NoteRecord, OLDEST_WORKSPACE_FORMAT_VERSION,
+    PhaseRecord, PlanRecord, ReleaseRecord, SpecRecord, TASK_NOTES_FORMAT_VERSION, TaskGateRecord, TaskNoteRecord,
+    TaskRecord, WorkspaceManifest, WorkspaceRecord, WorkspaceReference, encode_manifest, encode_record,
 };
 
 const MANIFEST: &str = "manifest.toml";
@@ -51,11 +51,14 @@ pub struct WorkspaceFile {
 }
 
 /// Return the workspace format version `graph` needs:
+/// [`GATES_FORMAT_VERSION`] when a task carries a gate,
 /// [`TASK_NOTES_FORMAT_VERSION`] when a task carries a note,
 /// [`ASSIGNEE_FORMAT_VERSION`] when a task carries an assignee, and
 /// [`OLDEST_WORKSPACE_FORMAT_VERSION`] otherwise.
 pub fn required_format_version(graph: &ConnectedGraph) -> u32 {
-    if !graph.task_notes.is_empty() {
+    if !graph.gates.is_empty() {
+        GATES_FORMAT_VERSION
+    } else if !graph.task_notes.is_empty() {
         TASK_NOTES_FORMAT_VERSION
     } else if graph.tasks.iter().any(|task| task.assignee.is_some()) {
         ASSIGNEE_FORMAT_VERSION
@@ -78,7 +81,7 @@ pub fn project_graph(graph: &ConnectedGraph) -> Result<Vec<WorkspaceFile>, Works
 ///
 /// `floor` is the version the workspace already has, so a projection never
 /// lowers it: a workspace stays at version 2 once a claim has moved it there,
-/// and at version 3 once a note has.
+/// at version 3 once a note has, and at version 4 once a gate has.
 pub fn project_graph_at(graph: &ConnectedGraph, floor: u32) -> Result<Vec<WorkspaceFile>, WorkspaceExportError> {
     let manifest = WorkspaceManifest { format_version: required_format_version(graph).max(floor) };
     let mut files = Vec::new();
@@ -199,6 +202,19 @@ pub fn project_graph_at(graph: &ConnectedGraph, floor: u32) -> Result<Vec<Worksp
                         created_at: note.created_at.clone(),
                         kind: note.kind,
                         text: note.text.clone(),
+                    })
+                    .collect(),
+                gates: graph
+                    .gates
+                    .iter()
+                    .filter(|gate| gate.task_id == task.id)
+                    .map(|gate| TaskGateRecord {
+                        id: gate.id,
+                        kind: gate.kind,
+                        target: gate.target.clone(),
+                        status: gate.status,
+                        created_at: gate.created_at.clone(),
+                        met_at: gate.met_at.clone(),
                     })
                     .collect(),
                 body: task.body.clone(),

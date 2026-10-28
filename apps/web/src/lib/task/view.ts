@@ -1,5 +1,5 @@
 import { formatStatus, type PropertyItem } from "@arclightning/ui";
-import type { Blocker, InheritedBlocker, ReadinessReason, Task, TaskDetail } from "$lib/data/types";
+import type { Blocker, GateKind, InheritedBlocker, ReadinessReason, Task, TaskDetail } from "$lib/data/types";
 import { inField, type WorkKey } from "$lib/work/keys";
 import { isClosed } from "$lib/work/filters";
 import { taskHref } from "$lib/work/links";
@@ -85,6 +85,11 @@ export function noteTime(createdAt: string): string {
     return createdAt;
   }
   return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+}
+
+/** The label the Task view gives a gate's kind. */
+export function gateKindLabel(kind: GateKind): string {
+  return kind === "pr" ? "Pull request" : kind === "run" ? "CI run" : "Date";
 }
 
 /** The title of every record `detail` names, by ID. */

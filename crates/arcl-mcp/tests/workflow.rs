@@ -23,7 +23,7 @@ use arcl_repo::workspace::{ProjectConfig, WorkspaceManifest, encode_manifest};
 use arcl_store::prelude::*;
 
 /// The tools that change no records. Every other tool writes.
-const READ_TOOLS: &[&str] = &["context", "explain", "list", "ready", "show"];
+const READ_TOOLS: &[&str] = &["context", "explain", "gate_list", "list", "ready", "show"];
 
 /// How long the server has to answer a request or to exit before the test
 /// fails instead of hanging.

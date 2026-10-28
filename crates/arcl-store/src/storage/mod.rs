@@ -12,7 +12,7 @@ use thiserror::Error;
 use arcl_core::domain::*;
 
 /// The newest SQLite schema version understood by the application.
-pub const CURRENT_VERSION: i32 = 6;
+pub const CURRENT_VERSION: i32 = 7;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -119,6 +119,15 @@ pub enum StorageError {
     /// short ID. No match exits 5; the rest exit 3.
     #[error(transparent)]
     ShortId(#[from] ShortIdError),
+    /// A gate with an invalid kind, target or status.
+    #[error("gate is invalid: {0}")]
+    InvalidGate(DomainError),
+    /// No gate has the ID.
+    #[error("gate `{id}` was not found")]
+    GateNotFound { id: String },
+    /// A gate added to a completed or cancelled task.
+    #[error("cannot add a gate to task `{id}` while it is `{status}`")]
+    GateOnClosedTask { id: String, status: String },
 }
 
 impl StorageError {
@@ -138,7 +147,8 @@ impl StorageError {
             | Self::ReleaseMembershipNotFound { .. }
             | Self::NoteLinkNotFound { .. }
             | Self::RecordLinkNotFound { .. }
-            | Self::PlanningDependencyNotFound { .. } => 5,
+            | Self::PlanningDependencyNotFound { .. }
+            | Self::GateNotFound { .. } => 5,
             Self::InvalidProject(_)
             | Self::InvalidCapture(_)
             | Self::InvalidSpec(_)
@@ -156,6 +166,8 @@ impl StorageError {
             | Self::InvalidPlanInput(_)
             | Self::InvalidClaimName { .. }
             | Self::InvalidTaskNoteText(_)
+            | Self::InvalidGate(_)
+            | Self::GateOnClosedTask { .. }
             | Self::NewerDatabase { .. }
             | Self::MigrationGap { .. } => 3,
             Self::ShortId(error) => {
@@ -262,6 +274,7 @@ impl Database {
              DELETE FROM capture_promotions;
              DELETE FROM planning_task_dependencies;
              DELETE FROM task_notes;
+             DELETE FROM task_gates;
              UPDATE planning_tasks SET parent_id = NULL;
              DELETE FROM planning_tasks;
              DELETE FROM phases;
@@ -393,6 +406,22 @@ impl Database {
             )?;
             *position += 1;
         }
+        for gate in &graph.gates {
+            transaction.execute(
+                "INSERT INTO task_gates (id, project_id, task_id, kind, target, status, created_at, met_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                rusqlite::params![
+                    gate.id.to_string(),
+                    graph.project.id.to_string(),
+                    gate.task_id.to_string(),
+                    gate.kind.as_str(),
+                    gate.target,
+                    gate.status.as_str(),
+                    gate.created_at,
+                    gate.met_at
+                ],
+            )?;
+        }
         for note in &graph.notes {
             transaction.execute(
                 "INSERT INTO notes (id, project_id, title, body) VALUES (?1, ?2, ?3, ?4)",
@@ -480,13 +509,14 @@ impl Database {
     }
 
     /// Read the full ID and title of every capture, release, spec, plan,
-    /// phase, task and note.
+    /// phase, task, note and gate. A gate's title is its kind and target.
     pub fn record_refs(&self) -> Result<Vec<RecordRef>> {
         let mut statement = self.connection.prepare(
             "SELECT id, title FROM captures UNION ALL SELECT id, title FROM releases \
              UNION ALL SELECT id, title FROM specs UNION ALL SELECT id, title FROM plans \
              UNION ALL SELECT id, title FROM phases UNION ALL SELECT id, title FROM planning_tasks \
-             UNION ALL SELECT id, title FROM notes ORDER BY id",
+             UNION ALL SELECT id, title FROM notes \
+             UNION ALL SELECT id, kind || ' gate ' || target FROM task_gates ORDER BY id",
         )?;
         let rows = statement.query_map([], |row| Ok(RecordRef { id: row.get(0)?, title: row.get(1)? }))?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -819,6 +849,51 @@ impl Database {
     /// Read the notes on a task, oldest first.
     pub fn task_notes(&self, id: TaskId) -> Result<Vec<TaskNote>> {
         connected::notes_for_task(&self.connection, id)
+    }
+
+    /// Add an open gate to a task; see [`connected::add_gate`].
+    pub fn add_gate(&mut self, task_id: TaskId, kind: GateKind, target: &str) -> Result<Gate> {
+        let project = self.project()?;
+        connected::add_gate(&mut self.connection, project.id, task_id, kind, target)
+    }
+
+    /// Remove a gate, open or met, and return it as it was.
+    pub fn remove_gate(&mut self, id: GateId) -> Result<Gate> {
+        let project = self.project()?;
+        connected::remove_gate(&mut self.connection, project.id, id)
+    }
+
+    /// Mark a gate met; see [`connected::meet_gate`].
+    pub fn meet_gate(&mut self, id: GateId) -> Result<Gate> {
+        let project = self.project()?;
+        connected::meet_gate(&mut self.connection, project.id, id)
+    }
+
+    /// Mark gates met in one transaction, re-reading each first; see
+    /// [`connected::meet_gates`].
+    pub fn meet_gates(&mut self, ids: &[GateId]) -> Result<Vec<Option<Gate>>> {
+        let project = self.project()?;
+        connected::meet_gates(&mut self.connection, project.id, ids)
+    }
+
+    /// Read gate `id`, or fail with [`StorageError::GateNotFound`] when it is
+    /// missing or in another project.
+    pub fn gate(&self, id: GateId) -> Result<Gate> {
+        let project = self.project()?;
+        connected::project_gate(&self.connection, project.id, id)
+    }
+
+    /// Read the gates on one task, oldest first, or on every task, grouped
+    /// by task in task ID order. A task that does not exist is refused.
+    pub fn gates(&self, task_id: Option<TaskId>) -> Result<Vec<Gate>> {
+        match task_id {
+            Some(id) => {
+                connected::planning_task(&self.connection, id)?
+                    .ok_or_else(|| StorageError::PlanningTaskNotFound { id: id.to_string() })?;
+                connected::gates_for_task(&self.connection, id)
+            }
+            None => connected::gates(&self.connection, self.project()?.id),
+        }
     }
 
     /// Read all Markdown notes.

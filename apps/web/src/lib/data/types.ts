@@ -44,6 +44,24 @@ export type TaskNote = {
   text: string;
 };
 
+/** What a gate waits for: a pull request to merge, a run to succeed or a date to arrive. */
+export type GateKind = "pr" | "run" | "date";
+
+/** A condition outside arcl a task waits on, as `arcl gate list --json` returns it. */
+export type Gate = {
+  id: string;
+  task_id: string;
+  kind: GateKind;
+  /** The pull request or run URL, or the date as `YYYY-MM-DD`. */
+  target: string;
+  /** An open gate keeps its task from being ready; `arcl gate check` marks it met. */
+  status: "open" | "met";
+  /** When the gate was added, as an RFC 3339 UTC timestamp. */
+  created_at: string;
+  /** When the gate was found met. Absent while it is open. */
+  met_at?: string;
+};
+
 /** A milestone: a phase of a plan. */
 export type Milestone = {
   id: string;
@@ -73,6 +91,8 @@ export type ReadinessReason = {
   container?: string;
   /** The task IDs that form a dependency cycle. */
   path?: string[];
+  /** For an `open_gate` reason, the gate. */
+  gate?: Gate;
 };
 
 /** Whether a task can start, as `arcl explain --json` reports it. */
@@ -131,6 +151,8 @@ export type TaskDetail = {
   phase: Milestone | null;
   /** The task's notes, newest first. Absent from data an arcl without notes wrote. */
   notes?: TaskNote[];
+  /** The task's gates, oldest first. Absent from data an arcl without gates wrote. */
+  gates?: Gate[];
 };
 
 /** The options of `arcl task create`. `priority` defaults to `normal`. */

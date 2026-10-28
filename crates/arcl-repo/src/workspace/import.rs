@@ -616,6 +616,35 @@ pub(super) fn validate_candidate(
         .collect::<Vec<_>>();
     // A stable sort keeps each task's notes in the order the file lists them.
     task_notes.sort_by_key(|note| note.task_id);
+    let mut gates = Vec::new();
+    for (path, record) in &records {
+        let WorkspaceRecord::Task(task) = record else { continue };
+        for gate in &task.gates {
+            if let Some(first) = ids.insert(gate.id.to_string(), path.clone()) {
+                return Err(field_error(
+                    path.clone(),
+                    "gates",
+                    format!(
+                        "gate ID `{}` is duplicated; first declared in `{}`",
+                        gate.id,
+                        first.display()
+                    ),
+                ));
+            }
+            gates.push(Gate {
+                id: gate.id,
+                task_id: task.id,
+                kind: gate.kind,
+                target: gate.target.clone(),
+                status: gate.status,
+                created_at: gate.created_at.clone(),
+                met_at: gate.met_at.clone(),
+            });
+        }
+    }
+    // A stable sort keeps each task's gates in the order the file lists them,
+    // which is the order the database inserts and reads them back.
+    gates.sort_by_key(|gate| gate.task_id);
 
     let graph = ConnectedGraph {
         project,
@@ -627,6 +656,7 @@ pub(super) fn validate_candidate(
         tasks,
         dependencies,
         task_notes,
+        gates,
         notes,
         releases,
         release_memberships: memberships,

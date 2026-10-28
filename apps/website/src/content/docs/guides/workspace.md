@@ -179,11 +179,12 @@ The workspace contains `manifest.toml` and one Markdown file per record:
 - `notes/<note-id>.md`
 - `releases/<release-id>.md`
 
-The manifest contains `format-version`, 1, 2 or 3. Version 2 adds the task
-`assignee` field, and version 3 the task `notes`. A sync writes version 3 once
-a task file carries a note, version 2 once one carries an `assignee`, and
-otherwise keeps the version the manifest has. A new workspace starts at
-version 1, so a workspace without claims or notes stays there. Releasing every
+The manifest contains `format-version`, 1 to 4. Version 2 adds the task
+`assignee` field, version 3 the task `notes` and version 4 the task `gates`. A
+sync writes version 4 once a task file carries a gate, version 3 once one
+carries a note, version 2 once one carries an `assignee`, and otherwise keeps
+the version the manifest has. A new workspace starts at version 1, so a
+workspace without claims, notes or gates stays there. Releasing every
 claim leaves it at 2. An arcl that reads only older versions refuses a newer
 workspace with an unsupported format version error.
 
@@ -199,7 +200,22 @@ text = "Store notes in their own table"
 
 `kind` is optional. Import validates each note's text as `arcl task note`
 does. `created-at` must be an RFC 3339 timestamp; import stores it in UTC to
-the millisecond, the form `arcl task note` writes. Front matter stores record metadata
+the millisecond, the form `arcl task note` writes.
+
+Gates follow the notes, oldest first. `met-at` is present exactly when the
+gate is met:
+
+```toml
+[[gates]]
+id = "arcl-g-01M5Z5P10G85D2836X9EYGQYF6"
+kind = "pr"
+target = "https://github.com/o/r/pull/7"
+status = "met"
+created-at = "2026-10-27T10:00:00.000Z"
+met-at = "2026-10-28T09:00:00.000Z"
+```
+
+Import checks each target as `arcl gate add` does. Front matter stores record metadata
 and explicit relationships. Descendants are not added to releases or links
 implicitly.
 

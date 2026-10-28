@@ -3,8 +3,8 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use arcl_core::domain::{
-    CaptureId, CaptureStatus, ContainerStatus, NoteId, PhaseId, PlanId, ReleaseId, SpecId, TaskId, TaskNoteKind,
-    TaskPriority, TaskStatus,
+    CaptureId, CaptureStatus, ContainerStatus, GateId, GateKind, GateStatus, NoteId, PhaseId, PlanId, ReleaseId,
+    SpecId, TaskId, TaskNoteKind, TaskPriority, TaskStatus,
 };
 
 use super::{OLDEST_WORKSPACE_FORMAT_VERSION, Result, WORKSPACE_FORMAT_VERSION, WorkspaceError};
@@ -99,6 +99,25 @@ pub struct TaskNoteRecord {
     pub kind: Option<TaskNoteKind>,
     /// The plain-text note, which may span lines.
     pub text: String,
+}
+
+/// One gate in a task file's `gates` array, which keeps gates oldest first.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct TaskGateRecord {
+    /// The gate's ID, `arcl-g-…`.
+    pub id: GateId,
+    /// What the gate waits for.
+    pub kind: GateKind,
+    /// The pull request or run URL, or the date as `YYYY-MM-DD`.
+    pub target: String,
+    /// Whether the gate is still open.
+    pub status: GateStatus,
+    /// When the gate was added, as an RFC 3339 UTC timestamp.
+    pub created_at: String,
+    /// When the gate was found met. Present exactly when it is met.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub met_at: Option<String>,
 }
 
 /// The workspace manifest's stable format metadata.
@@ -230,6 +249,8 @@ pub struct TaskRecord {
     pub links: Vec<WorkspaceReference>,
     /// Notes on the task, oldest first.
     pub notes: Vec<TaskNoteRecord>,
+    /// Gates on the task, oldest first.
+    pub gates: Vec<TaskGateRecord>,
     pub body: String,
 }
 
@@ -442,6 +463,8 @@ struct TaskFrontMatter {
     links: Vec<WorkspaceReference>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     notes: Vec<TaskNoteRecord>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    gates: Vec<TaskGateRecord>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -619,6 +642,7 @@ impl TaskRecord {
             assignee: normalize_assignee(front_matter.assignee, front_matter.status)?,
             links: normalize_references(front_matter.links),
             notes: normalize_task_notes(front_matter.notes)?,
+            gates: normalize_task_gates(front_matter.gates)?,
             body,
         })
     }
@@ -647,6 +671,7 @@ impl TaskRecord {
             assignee: normalize_assignee(self.assignee.clone(), self.status)?,
             links,
             notes: normalize_task_notes(self.notes.clone())?,
+            gates: normalize_task_gates(self.gates.clone())?,
         })
     }
 }
@@ -935,6 +960,41 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
     (year, month, day)
 }
 
+/// Check each task gate's target as [`validate_gate_target`] does, keeping
+/// the normalized target, write `created-at` and `met-at` in UTC to the
+/// millisecond as task notes do, and refuse a timestamp that is not RFC 3339
+/// or a `met-at` that is missing on a met gate or present on an open one.
+/// The order is kept.
+///
+/// [`validate_gate_target`]: arcl_core::domain::validate_gate_target
+fn normalize_task_gates(gates: Vec<TaskGateRecord>) -> Result<Vec<TaskGateRecord>> {
+    gates
+        .into_iter()
+        .map(|gate| {
+            let invalid = |reason: String| WorkspaceError::InvalidRecordGate { id: gate.id.to_string(), reason };
+            let target = arcl_core::domain::validate_gate_target(gate.kind, &gate.target)
+                .map_err(|error| invalid(error.to_string()))?;
+            let timestamp = |field: &str, value: &str| {
+                parse_rfc3339_millis(value.trim())
+                    .and_then(format_utc_millis)
+                    .ok_or_else(|| invalid(format!("`{field}` must be an RFC 3339 timestamp, not `{value}`")))
+            };
+            let created_at = timestamp("created-at", &gate.created_at)?;
+            let met_at = gate
+                .met_at
+                .as_deref()
+                .map(|value| timestamp("met-at", value))
+                .transpose()?;
+            if (gate.status == GateStatus::Met) != met_at.is_some() {
+                return Err(invalid(
+                    "`met-at` must be set on a met gate and only on a met gate".to_owned(),
+                ));
+            }
+            Ok(TaskGateRecord { target, created_at, met_at, ..gate })
+        })
+        .collect()
+}
+
 fn normalize_line_endings(value: &str) -> String {
     value.replace("\r\n", "\n").replace('\r', "\n")
 }
@@ -977,6 +1037,8 @@ mod tests {
     const TASK_ID: &str = "arcl-t-01K0B31M6VGK4YH8VKT4C0D2DR";
     const OTHER_TASK_ID: &str = "arcl-t-01K0B31M6VGK4YH8VKT4C0D2DS";
     const NOTE_ID: &str = "arcl-n-01K0B2ZWTX7JX9PH7W5G1S6A9Q";
+    const GATE_ID: &str = "arcl-g-01K0B2ZWTX7JX9PH7W5G1S6A9R";
+    const OTHER_GATE_ID: &str = "arcl-g-01K0B2ZWTX7JX9PH7W5G1S6A9S";
 
     #[test]
     fn manifest_reads_and_renders_versions_one_to_three() {
@@ -984,7 +1046,7 @@ mod tests {
             WorkspaceManifest::default().format_version,
             OLDEST_WORKSPACE_FORMAT_VERSION
         );
-        for version in 1..=3 {
+        for version in 1..=4 {
             let manifest = WorkspaceManifest::parse(&format!("format-version = {version}")).expect("manifest");
             assert_eq!(
                 manifest.render().expect("render"),
@@ -994,11 +1056,11 @@ mod tests {
                 )
             );
         }
-        assert_eq!(WORKSPACE_FORMAT_VERSION, 3);
-        for version in [0, 4] {
+        assert_eq!(WORKSPACE_FORMAT_VERSION, 4);
+        for version in [0, 5] {
             assert!(matches!(
                 WorkspaceManifest::parse(&format!("format-version = {version}")),
-                Err(WorkspaceError::UnsupportedVersion { found, expected: 3 }) if found == version
+                Err(WorkspaceError::UnsupportedVersion { found, expected: 4 }) if found == version
             ));
         }
     }
@@ -1070,6 +1132,24 @@ mod tests {
                         text: "line one\n+++ two\nline \"three\"".to_owned(),
                     },
                 ],
+                gates: vec![
+                    TaskGateRecord {
+                        id: GateId::parse(GATE_ID).unwrap(),
+                        kind: GateKind::Pr,
+                        target: "https://github.com/o/r/pull/7".to_owned(),
+                        status: GateStatus::Met,
+                        created_at: "2026-10-27T10:00:00.000Z".to_owned(),
+                        met_at: Some("2026-10-28T10:00:00.000Z".to_owned()),
+                    },
+                    TaskGateRecord {
+                        id: GateId::parse(OTHER_GATE_ID).unwrap(),
+                        kind: GateKind::Date,
+                        target: "2026-11-01".to_owned(),
+                        status: GateStatus::Open,
+                        created_at: "2026-10-27T10:05:00.000Z".to_owned(),
+                        met_at: None,
+                    },
+                ],
                 body: "Task body".to_owned(),
             }),
             WorkspaceRecord::Note(NoteRecord {
@@ -1108,6 +1188,7 @@ mod tests {
             assignee: None,
             links: vec![],
             notes: vec![],
+            gates: vec![],
             body: String::new(),
         });
         let rendered = record.render().expect("render");
@@ -1135,6 +1216,7 @@ mod tests {
             assignee: Some("codex".to_owned()),
             links: vec![],
             notes: vec![],
+            gates: vec![],
             body: String::new(),
         };
         let path = WorkspaceRecord::Task(task.clone()).path();
@@ -1185,6 +1267,7 @@ mod tests {
                 kind: Some(TaskNoteKind::Result),
                 text: "Done".to_owned(),
             }],
+            gates: vec![],
             body: String::new(),
         });
         let path = record.path();
@@ -1274,6 +1357,69 @@ mod tests {
         assert!(matches!(
             decode_record(&path, &input.replace("2026-10-27T15:30:00.25+05:30", "yesterday")),
             Err(WorkspaceError::InvalidRecordNoteCreatedAt { .. })
+        ));
+    }
+
+    #[test]
+    fn task_gates_render_as_an_array_of_tables_and_refuse_invalid_fields() {
+        let record = WorkspaceRecord::Task(TaskRecord {
+            id: TaskId::parse(TASK_ID).unwrap(),
+            spec_id: None,
+            plan_id: None,
+            phase_id: None,
+            parent_id: None,
+            plan_key: None,
+            title: "Task".to_owned(),
+            status: TaskStatus::Pending,
+            priority: TaskPriority::Normal,
+            position: 0,
+            blocked_by: vec![],
+            handoff: None,
+            evidence: None,
+            assignee: None,
+            links: vec![],
+            notes: vec![],
+            gates: vec![TaskGateRecord {
+                id: GateId::parse(GATE_ID).unwrap(),
+                kind: GateKind::Run,
+                target: "https://github.com/o/r/actions/runs/9".to_owned(),
+                status: GateStatus::Open,
+                created_at: "2026-10-27T10:00:00.000Z".to_owned(),
+                met_at: None,
+            }],
+            body: String::new(),
+        });
+        let path = record.path();
+        let rendered = record.render().expect("render");
+        assert!(
+            rendered.contains(&format!(
+                "[[gates]]\nid = \"{GATE_ID}\"\nkind = \"run\"\ntarget = \"https://github.com/o/r/actions/runs/9\"\n\
+                 status = \"open\"\ncreated-at = \"2026-10-27T10:00:00.000Z\"\n"
+            )),
+            "{rendered}"
+        );
+        let padded = rendered.replace("runs/9\"", "runs/9/\"");
+        assert_eq!(decode_record(&path, &padded).expect("decode"), record);
+        for (from, to) in [
+            ("actions/runs/9", "pull/9"),
+            ("2026-10-27T10:00:00.000Z", " "),
+            ("status = \"open\"", "status = \"met\""),
+            (
+                "status = \"open\"",
+                "status = \"open\"\nmet-at = \"2026-10-28T00:00:00.000Z\"",
+            ),
+        ] {
+            assert!(
+                matches!(
+                    decode_record(&path, &rendered.replace(from, to)),
+                    Err(WorkspaceError::InvalidRecordGate { .. })
+                ),
+                "{to}"
+            );
+        }
+        assert!(matches!(
+            decode_record(&path, &rendered.replace("\"run\"", "\"issue\"")),
+            Err(WorkspaceError::FrontMatterParse(_))
         ));
     }
 }

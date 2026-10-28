@@ -158,6 +158,12 @@ pub(super) fn show_record(database: &Database, id: &str, renderer: &Renderer) ->
             .render_shown("release", ids.short(id), &record.title, &record)
             .map_err(|error| CommandError::InvalidFilter { message: error.to_string() });
     }
+    if id.starts_with(GateId::PREFIX) {
+        let record = database.gate(parse_id::<GateId>(id)?)?;
+        return renderer
+            .render_shown_gate(&record, &ids)
+            .map_err(|error| CommandError::InvalidFilter { message: error.to_string() });
+    }
     Err(CommandError::InvalidFilter { message: format!("unknown record ID `{id}`") })
 }
 

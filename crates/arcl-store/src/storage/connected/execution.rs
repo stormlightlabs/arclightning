@@ -4,11 +4,13 @@ use rusqlite::{Connection, TransactionBehavior, params};
 use serde::Serialize;
 
 use super::{
-    Result, StorageError, notes_for_task, phases, planning_dependencies, planning_task, planning_tasks, specs,
+    Result, StorageError, gates, gates_for_task, notes_for_task, phases, planning_dependencies, planning_task,
+    planning_tasks, specs,
 };
 use arcl_core::domain::{
-    ContainerStatus, DomainError, EdgeViolation, Phase, PhaseId, Plan, PlanId, PlanningTask, ProjectId, Spec, SpecId,
-    TaskAction, TaskDependency, TaskId, TaskNote, TaskPriority, TaskStatus, validate_assignee, validate_blocker_edges,
+    ContainerStatus, DomainError, EdgeViolation, Gate, GateStatus, Phase, PhaseId, Plan, PlanId, PlanningTask,
+    ProjectId, Spec, SpecId, TaskAction, TaskDependency, TaskId, TaskNote, TaskPriority, TaskStatus, validate_assignee,
+    validate_blocker_edges,
 };
 
 /// The most task notes [`context`] includes, newest first. The packet counts
@@ -55,6 +57,9 @@ pub enum ReadinessReasonKind {
     /// One of the task's blocker edges breaks the blocking rules. Names the
     /// cycle path, or the edge's task and blocker with the parent chain.
     InvalidEdge,
+    /// The task has a gate that `arcl gate check` has not found met. Names
+    /// the gate, with its kind and target.
+    OpenGate,
 }
 
 /// Optional filters for connected-model ready work.
@@ -79,7 +84,7 @@ pub struct PlanningReadiness {
     /// Whether the task is an actionable pending leaf with satisfied blockers.
     pub ready: bool,
     /// Whether at least one blocker of the task or of an ancestor task is
-    /// unfinished or missing.
+    /// unfinished or missing, or the task has an open gate.
     pub blocked: bool,
     /// Every condition that prevents readiness, in a stable order.
     pub reasons: Vec<ReadinessReason>,
@@ -122,11 +127,23 @@ pub struct ReadinessReason {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "schema", schemars(default))]
     pub path: Vec<TaskId>,
+    /// For an `open_gate`, the gate: its ID, kind and target.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gate: Option<Gate>,
 }
 
 impl ReadinessReason {
     fn new(kind: ReadinessReasonKind, message: String) -> Self {
-        Self { kind, message, task: None, ancestor: None, blocker: None, container: None, path: Vec::new() }
+        Self {
+            kind,
+            message,
+            task: None,
+            ancestor: None,
+            blocker: None,
+            container: None,
+            path: Vec::new(),
+            gate: None,
+        }
     }
 }
 
@@ -182,6 +199,8 @@ pub struct PlanningTaskView {
     pub phase: Option<Phase>,
     /// Every note on the task, newest first.
     pub notes: Vec<TaskNote>,
+    /// Every gate on the task, open or met, oldest first.
+    pub gates: Vec<Gate>,
 }
 
 /// The focused context packet for a connected-model task.
@@ -214,6 +233,8 @@ pub struct PlanningContext {
     pub notes: Vec<TaskNote>,
     /// How many older notes the packet leaves out; `arcl show` lists them.
     pub omitted_notes: usize,
+    /// Every gate on the task, open or met, oldest first.
+    pub gates: Vec<Gate>,
 }
 
 /// One task in the work list: the task, its readiness and its effective
@@ -273,6 +294,8 @@ struct PlanningData {
     /// For each task, the indexes into `violations` of those that involve one
     /// of its own blocker edges, in violation order.
     violations_by_task: HashMap<TaskId, Vec<usize>>,
+    /// For each task with an open gate, those gates, oldest first.
+    open_gates: HashMap<TaskId, Vec<Gate>>,
 }
 
 /// Compute ready leaf tasks without requiring a plan, phase, or milestone.
@@ -335,6 +358,7 @@ pub fn planning_task_view(connection: &Connection, id: TaskId) -> Result<Plannin
     let readiness = readiness(&data, &task, &ancestry_ids)?;
     let mut notes = notes_for_task(connection, id)?;
     notes.reverse();
+    let gates = gates_for_task(connection, id)?;
 
     Ok(PlanningTaskView {
         task,
@@ -348,6 +372,7 @@ pub fn planning_task_view(connection: &Connection, id: TaskId) -> Result<Plannin
         plan: ancestry_ids.plan_id.and_then(|value| data.plans.get(&value).cloned()),
         phase: ancestry_ids.phase_id.and_then(|value| data.phases.get(&value).cloned()),
         notes,
+        gates,
     })
 }
 
@@ -398,6 +423,7 @@ pub fn context(connection: &Connection, id: TaskId) -> Result<PlanningContext> {
         completion_evidence,
         notes,
         omitted_notes,
+        gates: view.gates,
     })
 }
 
@@ -854,9 +880,16 @@ fn load_data(connection: &Connection, project_id: ProjectId) -> Result<PlanningD
             violations_by_task.entry(*holder).or_default().push(index);
         }
     }
+    let mut open_gates: HashMap<TaskId, Vec<Gate>> = HashMap::new();
+    for gate in gates(connection, project_id)? {
+        if gate.status == GateStatus::Open {
+            open_gates.entry(gate.task_id).or_default().push(gate);
+        }
+    }
     Ok(PlanningData {
         tasks,
         children,
+        open_gates,
         specs: specs(connection, project_id)?
             .into_iter()
             .map(|spec| (spec.id, spec))
@@ -1105,6 +1138,16 @@ fn readiness_counting_children(
                 reasons.push(reason);
             }
         }
+    }
+    for gate in data.open_gates.get(&task.id).into_iter().flatten() {
+        blocked = true;
+        reasons.push(ReadinessReason {
+            gate: Some(gate.clone()),
+            ..ReadinessReason::new(
+                ReadinessReasonKind::OpenGate,
+                format!("gate `{}` waits {}", gate.id, gate.condition()),
+            )
+        });
     }
     reasons.extend(invalid_edge_reasons(data, task.id));
     Ok(PlanningReadiness { ready: reasons.is_empty(), blocked, reasons })

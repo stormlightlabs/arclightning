@@ -153,7 +153,7 @@ pub fn record_source(graph: &ConnectedGraph, id: &str) -> Result<Option<RecordSo
 ///
 /// | Kind    | Refused fields                         | Commands                                   |
 /// | ------- | -------------------------------------- | ------------------------------------------ |
-/// | task    | `status`, `handoff`, `evidence`, `assignee`, `notes` | `arcl task start`, `park`, `unpark`, `handoff`, `complete`, `cancel`, `note` |
+/// | task    | `status`, `handoff`, `evidence`, `assignee`, `notes`, `gates` | `arcl task start`, `park`, `unpark`, `handoff`, `complete`, `cancel`, `note`, `arcl gate` |
 /// | capture | `status`, `promoted-to`                | `arcl capture promote`, `discard`          |
 /// | spec    | `status`, `source-capture`             | `arcl spec complete`, `cancel`, `arcl capture promote` |
 /// | plan    | `status`                               | `arcl plan complete`, `cancel`             |
@@ -238,6 +238,12 @@ fn command_owned_change(before: &WorkspaceRecord, after: &WorkspaceRecord) -> Op
                 before.notes != after.notes,
                 "notes",
                 "notes are added only by `arcl task note`; to change or remove one, edit the task file and run `arcl workspace sync`",
+            ),
+            (
+                before.gates != after.gates,
+                "gates",
+                "gates are added and removed only by `arcl gate add` and `arcl gate remove`, and met only by \
+                 `arcl gate check`; to change one by hand, edit the task file and run `arcl workspace sync`",
             ),
         ],
         (Capture(before), Capture(after)) => vec![
@@ -552,6 +558,37 @@ mod tests {
             "status = \"pending\"",
             "status = \"completed\"",
             "status",
+        );
+    }
+
+    #[test]
+    fn a_task_gate_addition_change_or_removal_is_refused() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let id = task(&mut database, "First");
+        assert_owned(
+            &mut database,
+            &id,
+            "\n+++",
+            "\n[[gates]]\nid = \"arcl-g-01K0B2ZWTX7JX9PH7W5G1S6A9R\"\nkind = \"date\"\ntarget = \"2026-11-01\"\n\
+             status = \"open\"\ncreated-at = \"2026-10-27T10:00:00.000Z\"\n+++",
+            "gates",
+        );
+        database
+            .add_gate(task_id(&id), arcl_core::domain::GateKind::Date, "2026-11-01")
+            .expect("gate adds");
+        assert_owned(
+            &mut database,
+            &id,
+            "target = \"2026-11-01\"",
+            "target = \"2026-11-02\"",
+            "gates",
+        );
+        assert_owned(
+            &mut database,
+            &id,
+            "status = \"open\"",
+            "status = \"met\"\nmet-at = \"2026-10-28T00:00:00.000Z\"",
+            "gates",
         );
     }
 

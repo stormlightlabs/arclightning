@@ -144,6 +144,7 @@ define_id!(SpecId, "spec", "arcl-s-");
 define_id!(PlanId, "plan", "arcl-pl-");
 define_id!(PhaseId, "phase", "arcl-ph-");
 define_id!(NoteId, "note", "arcl-n-");
+define_id!(GateId, "gate", "arcl-g-");
 
 #[cfg(test)]
 mod tests {

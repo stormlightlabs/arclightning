@@ -42,7 +42,7 @@ Task views and context packets carry `data.readiness`:
 | Field     | Type    | Meaning                                                                                              |
 | --------- | ------- | ---------------------------------------------------------------------------------------------------- |
 | `ready`   | boolean | `reasons` is empty, and the `ready` command lists the task.                                          |
-| `blocked` | boolean | A blocker of the task or of an ancestor is unfinished or missing.                                    |
+| `blocked` | boolean | A blocker of the task or of an ancestor is unfinished or missing, or the task has an open gate.      |
 | `reasons` | array   | Every condition that keeps the task from being ready, in an order that does not change between runs. |
 
 Each reason has a `kind`, the `message` that human and plain output print, and
@@ -60,12 +60,15 @@ does not use.
 | `cancelled_blocker` | A blocker was cancelled. Remove or replace the dependency.                  | `blocker`, and `ancestor` when inherited |
 | `missing_blocker`   | A blocker task does not exist.                                              | `blocker`, and `ancestor` when inherited |
 | `invalid_edge`      | A blocker edge forms a cycle or joins a task to its ancestor or descendant. | `task`, `blocker`, `path`                |
+| `open_gate`         | The task has a gate that `arcl gate check` has not found met.               | `gate`                                   |
 
 `task`, `ancestor`, and `blocker` are task IDs. `container` is a spec, plan, or
 phase ID. For an `invalid_edge` cycle, `path` lists the cycle with its first
 task repeated at the end, and `task` to `blocker` is the edge to remove. For an
 edge that joins a task to its ancestor, `task` and `blocker` are that edge and
 `path` is the parent chain from the descendant up to the ancestor.
+`gate` is the gate itself, an object with `id`, `task_id`, `kind`, `target`,
+`status` and `created_at`.
 
 ## Chain from completed work
 
@@ -201,6 +204,9 @@ changes nothing. Once its operation starts, a write runs to the end.
 | `task_start`      | `task start`      | `1`                           |
 | `task_handoff`    | `task handoff`    | `1`                           |
 | `task_note`       | `task note`       | `1`                           |
+| `gate_add`        | `gate add`        | `1`                           |
+| `gate_list`       | `gate list`       | `1`                           |
+| `gate_check`      | `gate check`      | `1`                           |
 | `task_unpark`     | `task unpark`     | `1`                           |
 | `task_complete`   | `task complete`   | `2`                           |
 

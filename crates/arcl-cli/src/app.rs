@@ -37,8 +37,8 @@ mod web;
 mod workspace;
 
 use commands::{
-    apply_plan_document, claim_name, exec_dependency, exec_note, exec_plan, exec_release, exec_spec, exec_task,
-    run_capture, run_plan, run_spec, run_task,
+    apply_plan_document, claim_name, exec_dependency, exec_gate, exec_note, exec_plan, exec_release, exec_spec,
+    exec_task, run_capture, run_plan, run_spec, run_task,
 };
 pub use error::ApplicationError;
 use error::{CResult, CommandError};
@@ -52,7 +52,9 @@ use support::{RecordScope, open_database, write_output};
 use web::exec_web;
 use workspace::exec_workspace;
 
-use auto_sync::{Access, auto_sync, command_access, export_after_write, refuse_write, synced_write, workspace_roots};
+use auto_sync::{
+    Access, auto_sync, command_access, export_after_write, refuse_write, synced, synced_write, workspace_roots,
+};
 
 /// One warning for stderr. `code` names its kind under `--json`.
 struct Warning {
@@ -183,6 +185,7 @@ fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Wa
         Some(Command::Plan { command }) => exec_plan(command, renderer),
         Some(Command::Task { command }) => exec_task(command, renderer),
         Some(Command::Dependency { command }) => exec_dependency(command, renderer),
+        Some(Command::Gate { command }) => exec_gate(command, renderer, warnings),
         Some(Command::Note { command }) => exec_note(command, renderer),
         Some(Command::Skill { command }) => exec_skill(command, renderer),
         Some(Command::Show { id }) => write_output(read_show(&id, renderer)?),

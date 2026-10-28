@@ -24,6 +24,9 @@ const TOOLS: &[(&str, u64)] = &[
     ("capture_promote", 1),
     ("context", 2),
     ("explain", 2),
+    ("gate_add", 1),
+    ("gate_check", 1),
+    ("gate_list", 1),
     ("list", 1),
     ("note_create", 1),
     ("plan_create", 1),
@@ -549,6 +552,46 @@ async fn outputs_match_their_output_schemas() {
         .expect("explain")
         .0;
     check("explain", to_json(&explain));
+    let gated = server
+        .gate_add(
+            Parameters::from(GateAddInput {
+                task_id: second.clone(),
+                kind: GateKind::Date,
+                target: "2000-01-01".to_owned(),
+            }),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("gate add")
+        .0;
+    check("gate_add", to_json(&gated));
+    let gated_explain = server
+        .explain(
+            Parameters::from(TaskInput { task_id: second.clone() }),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("explain")
+        .0;
+    check("explain", to_json(&gated_explain));
+    let gates = server
+        .gate_list(
+            Parameters::from(GateScopeInput { task_id: None }),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("gate list")
+        .0;
+    check("gate_list", to_json(&gates));
+    let checked = server
+        .gate_check(
+            Parameters::from(GateScopeInput { task_id: Some(second.clone()) }),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("gate check")
+        .0;
+    check("gate_check", to_json(&checked));
     let started = server
         .task_start(
             Parameters::from(TaskStartInput { task_id: first.clone(), claim: None }),
@@ -1051,4 +1094,90 @@ async fn task_note_appends_notes_that_context_lists_newest_first() {
         ["No kind", "Saw a race"]
     );
     assert_eq!(context.data.omitted_notes, 0);
+}
+
+#[tokio::test]
+async fn gates_hold_a_task_back_until_gate_check_meets_them() {
+    let project = project(false);
+    let server = ArclServer::new(project.path().to_owned());
+    let task = create_task(&server, "Gated", &[]).await;
+    let add = |kind: GateKind, target: &str| {
+        server.gate_add(
+            Parameters::from(GateAddInput { task_id: task.clone(), kind, target: target.to_owned() }),
+            CancellationToken::new(),
+        )
+    };
+
+    let past = add(GateKind::Date, "2000-01-01").await.expect("gate add").0;
+    assert_eq!(past.data.action, "added");
+    assert_eq!(past.data.gate.status, GateStatus::Open);
+    add(GateKind::Date, "2999-12-31").await.expect("gate add");
+    let refused = add(GateKind::Pr, "https://example.com/not-a-pr")
+        .await
+        .err()
+        .expect("a bad URL is refused");
+    assert_eq!((refused.code(), refused.exit_code()), ("invalid_request", 3));
+
+    let explain = server
+        .explain(
+            Parameters::from(TaskInput { task_id: task.clone() }),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("explain")
+        .0;
+    let reasons = to_json(&explain.data.readiness.reasons);
+    assert_eq!(reasons[0]["kind"], json!("open_gate"));
+    assert_eq!(reasons[0]["gate"]["id"], json!(past.data.gate.id.to_string()));
+    assert_eq!(reasons[0]["gate"]["kind"], json!("date"));
+    assert_eq!(reasons[0]["gate"]["target"], json!("2000-01-01"));
+
+    let checked = server
+        .gate_check(
+            Parameters::from(GateScopeInput { task_id: Some(task.clone()) }),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("gate check")
+        .0;
+    let outcomes = to_json(&checked.data.checks)
+        .as_array()
+        .expect("checks")
+        .iter()
+        .map(|check| check["outcome"].as_str().unwrap_or_default().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(outcomes, ["met", "waiting"]);
+    assert!(!checked.data.gh_missing);
+
+    let gate_id = past.data.gate.id.to_string();
+    for id in [gate_id.clone(), gate_id[gate_id.len() - 6..].to_owned()] {
+        let shown = server
+            .show(Parameters::from(RecordInput { id }), CancellationToken::new())
+            .await
+            .expect("show gate")
+            .0;
+        assert_eq!(shown.format_version, 1);
+        let shown = to_json(&shown.data);
+        assert_eq!(shown["action"], json!("shown"));
+        assert_eq!(shown["gate"]["id"], json!(gate_id));
+        assert_eq!(shown["gate"]["task_id"], json!(task));
+        assert_eq!(shown["gate"]["kind"], json!("date"));
+        assert_eq!(shown["gate"]["target"], json!("2000-01-01"));
+        assert_eq!(shown["gate"]["status"], json!("met"));
+        assert!(shown["gate"]["created_at"].is_string(), "{shown}");
+        assert!(shown["gate"]["met_at"].is_string(), "{shown}");
+    }
+
+    let listed = server
+        .gate_list(
+            Parameters::from(GateScopeInput { task_id: Some(task.clone()) }),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("gate list")
+        .0;
+    assert_eq!(
+        listed.data.gates.iter().map(|gate| gate.status).collect::<Vec<_>>(),
+        [GateStatus::Met, GateStatus::Open]
+    );
 }
