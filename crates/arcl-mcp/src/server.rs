@@ -484,8 +484,8 @@ impl ArclServer {
         description = "Check the open gates on one task, or on every task, and mark the met ones, like \
         `arcl gate check`. Date gates compare with today's UTC date. Pull request and run gates ask the GitHub \
         CLI, `gh`; without it they are `skipped` and `gh_missing` is true. One gate's error is reported as its \
-        `error` outcome and never fails the call; a `gh` call that runs past 30 seconds is killed and is an \
-        `error`. Gates on completed or cancelled tasks are `skipped` without being checked.",
+        `error` outcome and never fails the call; a `gh` call that runs past 30 seconds, or \
+        `ARCL_GH_TIMEOUT_MS` milliseconds when set, is killed with the processes it started and is an `error`. Gates on completed or cancelled tasks are `skipped` without being checked.",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = true),
         meta = version_meta(FORMAT_VERSION)
     )]

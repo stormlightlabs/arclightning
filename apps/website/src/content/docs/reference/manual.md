@@ -277,6 +277,8 @@ without merging, or a run that finished without succeeding), `error` (`gh`
 failed, ran past 30 seconds, or printed something unreadable) or `skipped`.
 Only `met` changes the gate. A gate on a completed or cancelled task is
 `skipped` with `task is completed` or `task is cancelled`, and is not checked.
+`ARCL_GH_TIMEOUT_MS` sets the `gh` limit in milliseconds; `0` or a value that
+is not a number keeps 30 seconds.
 When `gh` is not on `PATH`, pull request and run gates are `skipped` and the
 check reports `gh not found; PR/run gates left open`. One gate's error never
 fails the check, which exits `0` unless the database fails. The check holds the

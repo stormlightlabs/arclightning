@@ -37,6 +37,10 @@ pub const GH_TIMEOUT_ENV: &str = "ARCL_GH_TIMEOUT_MS";
 /// How often a running `gh` call is polled for its exit.
 const GH_POLL: Duration = Duration::from_millis(10);
 
+/// How long `gh`'s output may stay open once `gh` has exited and its
+/// process group is killed.
+const GH_DRAIN: Duration = Duration::from_secs(1);
+
 /// What one gate check found.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -325,31 +329,42 @@ fn run_outcome(output: &str) -> Result<Probe, String> {
 
 /// Run `gh` with `args` and return its standard output. Standard input is
 /// closed and prompts are off, so `gh` never waits on the terminal. A call
-/// still running after `timeout`, or whose output stays open past it, is
-/// killed and fails with `timed out after <timeout>`.
+/// still running after `timeout` fails with `timed out after <timeout>`.
+///
+/// `gh` runs as the leader of its own process group on unix. Once it exits
+/// or times out, the whole group is killed, so a `git` or credential helper
+/// it started cannot outlive it or hold its output open. The result is
+/// judged from `gh`'s own exit status and output.
 fn run_gh(args: &[&str], timeout: Duration) -> Result<String, ProbeError> {
     let deadline = Instant::now() + timeout;
-    let mut child = Command::new(GH_PROGRAM)
+    let mut command = Command::new(GH_PROGRAM);
+    command
         .args(args)
         .env("GH_PROMPT_DISABLED", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| match error.kind() {
-            io::ErrorKind::NotFound => ProbeError::Missing,
-            _ => ProbeError::Failed(format!("could not run gh: {error}")),
-        })?;
-    let timed_out = || ProbeError::Failed(format!("timed out after {timeout:?}"));
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    let mut child = command.spawn().map_err(|error| match error.kind() {
+        io::ErrorKind::NotFound => ProbeError::Missing,
+        _ => ProbeError::Failed(format!("could not run gh: {error}")),
+    })?;
     // Each pipe drains on its own thread, so a full pipe never stalls `gh`.
-    // A process `gh` started may keep a pipe open after `gh` is killed; the
-    // thread then ends when that process does, and nothing waits on it.
     let stdout = drain(child.stdout.take());
     let stderr = drain(child.stderr.take());
-    let status = wait_until(&mut child, deadline).ok_or_else(timed_out)?;
-    let remaining = || deadline.saturating_duration_since(Instant::now());
-    let stdout = stdout.recv_timeout(remaining()).map_err(|_| timed_out())?;
-    let stderr = stderr.recv_timeout(remaining()).map_err(|_| timed_out())?;
+    let status = wait_until(&mut child, deadline);
+    kill_tree(&child);
+    if status.is_none() {
+        let _ = child.kill();
+    }
+    // Reaps `gh` after a timeout; a no-op once `try_wait` has seen it exit.
+    let _ = child.wait();
+    let Some(status) = status else {
+        return Err(ProbeError::Failed(format!("timed out after {timeout:?}")));
+    };
+    let stdout = stdout.recv_timeout(GH_DRAIN);
+    let stderr = stderr.recv_timeout(GH_DRAIN).unwrap_or_default();
     if !status.success() {
         let stderr = String::from_utf8_lossy(&stderr);
         let reason = stderr
@@ -359,27 +374,51 @@ fn run_gh(args: &[&str], timeout: Duration) -> Result<String, ProbeError> {
             .unwrap_or("no error output");
         return Err(ProbeError::Failed(format!("gh failed ({status}): {reason}")));
     }
+    let stdout = stdout.map_err(|_| ProbeError::Failed("gh output stayed open after gh exited".to_owned()))?;
     String::from_utf8(stdout).map_err(|_| ProbeError::Failed("gh output is not UTF-8".to_owned()))
 }
 
-/// Wait for `child` to exit until `deadline`, and kill it once the deadline
-/// passes. Returns its exit status, or `None` when it was killed or could
-/// not be waited on.
+/// Wait for `child` to exit until `deadline`. Returns its exit status, or
+/// `None` when the deadline passed first or it could not be waited on. The
+/// caller kills a child still running.
 fn wait_until(child: &mut Child, deadline: Instant) -> Option<ExitStatus> {
     loop {
         match child.try_wait() {
             Ok(Some(status)) => return Some(status),
             Ok(None) if Instant::now() < deadline => thread::sleep(GH_POLL),
-            Ok(None) | Err(_) => {
-                // The child may have exited since `try_wait`; either way it
-                // is reaped here.
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
+            Ok(None) | Err(_) => return None,
         }
     }
 }
+
+/// Kill the process group `child` leads, which `run_gh` gives it on unix.
+/// This runs `kill` rather than calling `killpg`, which would need `unsafe`.
+/// Linux keeps a group's ID from being reused while any member is alive.
+#[cfg(unix)]
+fn kill_tree(child: &Child) {
+    let _ = Command::new("kill")
+        // `--` ends `kill`'s options, so it reads `-<pgid>` as a process group.
+        .args(["-KILL", "--", &format!("-{}", child.id())])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+/// Kill `child` and the processes it started with `taskkill /T`. Windows
+/// finds them by parent ID, so this reaches them only while `child` runs.
+#[cfg(windows)]
+fn kill_tree(child: &Child) {
+    let _ = Command::new("taskkill")
+        .args(["/T", "/F", "/PID", &child.id().to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+#[cfg(not(any(unix, windows)))]
+fn kill_tree(_child: &Child) {}
 
 /// Read `pipe` to its end on a new thread, and send what it held. A missing
 /// pipe sends nothing at once.

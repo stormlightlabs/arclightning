@@ -209,8 +209,10 @@ gate is met once `gh pr view` reports it merged, and a run gate once `gh run
 view` reports it completed with `success`. A closed pull request or a failed
 run leaves the gate open and is reported as failed. Without `gh` on `PATH`,
 pull request and run gates stay open and the check says so. A `gh` call is
-killed after 30 seconds and reported as an error. A gate on a completed or
-cancelled task is skipped without being checked. One gate's error is reported
+killed, with the processes it started, after 30 seconds or after
+`ARCL_GH_TIMEOUT_MS` milliseconds when that is set, and reported as an error.
+A gate on a completed or cancelled task is skipped without being checked.
+One gate's error is reported
 with that gate and never fails the check. The check reads the open gates, asks
 about them without holding the sync lock or a database transaction, then
 marks the met ones in one transaction that reads each gate again. A met gate

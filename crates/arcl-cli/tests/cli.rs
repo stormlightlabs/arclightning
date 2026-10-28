@@ -7070,20 +7070,11 @@ fn show_resolves_a_gate_by_full_or_short_id() {
 #[cfg(unix)]
 #[test]
 fn a_gh_call_past_its_timeout_is_killed_and_reported_as_an_error() {
-    use std::os::unix::fs::PermissionsExt;
     use std::time::{Duration, Instant};
 
     let directory = initialized_directory();
     let dir = directory.path();
-    let bin = tempdir().expect("temporary directory can be created");
-    let gh = bin.path().join("gh");
-    fs::write(&gh, "#!/bin/sh\nexec sleep 30\n").expect("fake gh writes");
-    fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).expect("fake gh is executable");
-    let path = std::env::join_paths(
-        std::iter::once(bin.path().to_owned())
-            .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())),
-    )
-    .expect("PATH joins");
+    let (_bin, path) = fake_gh_path("#!/bin/sh\nexec sleep 30\n");
     let task = create_task(dir, "Gated", None);
     let pr = add_gate(dir, &task, "--pr", "https://github.com/o/r/pull/1");
     let date = add_gate(dir, &task, "--until", "2000-01-01");
@@ -7100,6 +7091,114 @@ fn a_gh_call_past_its_timeout_is_killed_and_reported_as_an_error() {
     let report = json(&output.stdout);
     assert_eq!(outcomes(&report), [(pr, "error".to_owned()), (date, "met".to_owned())]);
     assert_eq!(report["data"]["checks"][0]["detail"], "timed out after 300ms");
+}
+
+/// A `PATH` whose first directory holds a `gh` running `script`. Returns the
+/// directory, which also holds files the script writes, and the `PATH`.
+#[cfg(unix)]
+fn fake_gh_path(script: &str) -> (TempDir, std::ffi::OsString) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bin = tempdir().expect("temporary directory can be created");
+    let gh = bin.path().join("gh");
+    fs::write(&gh, script).expect("fake gh writes");
+    fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).expect("fake gh is executable");
+    let path = std::env::join_paths(
+        std::iter::once(bin.path().to_owned())
+            .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())),
+    )
+    .expect("PATH joins");
+    (bin, path)
+}
+
+/// Whether the process whose ID is in `pid_file` is still running, waiting
+/// up to two seconds for it to end. A zombie counts as ended.
+#[cfg(unix)]
+fn still_running(pid_file: &Path) -> bool {
+    use std::time::{Duration, Instant};
+
+    let pid = fs::read_to_string(pid_file).expect("PID file reads").trim().to_owned();
+    let running = || match fs::read_to_string(format!("/proc/{pid}/stat")) {
+        Ok(stat) => stat
+            .rsplit(')')
+            .next()
+            .is_some_and(|rest| !rest.trim_start().starts_with('Z')),
+        Err(_) if Path::new("/proc/self").exists() => false,
+        Err(_) => std::process::Command::new("kill")
+            .args(["-0", &pid])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success()),
+    };
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while running() {
+        if Instant::now() > deadline {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    false
+}
+
+#[cfg(unix)]
+#[test]
+fn a_timed_out_gh_call_kills_the_processes_gh_started() {
+    use std::time::{Duration, Instant};
+
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let (bin, path) = fake_gh_path("#!/bin/sh\nsleep 30 &\necho $! > \"$(dirname \"$0\")/child\"\nwait\n");
+    let task = create_task(dir, "Gated", None);
+    let pr = add_gate(dir, &task, "--pr", "https://github.com/o/r/pull/1");
+
+    let started = Instant::now();
+    let output = arcl_in(dir)
+        .env("PATH", &path)
+        .env("ARCL_GH_TIMEOUT_MS", "300")
+        .args(["--json", "gate", "check"])
+        .output()
+        .expect("gate check runs");
+    assert!(started.elapsed() < Duration::from_secs(20), "gh was not killed");
+    assert_success(&output);
+    let report = json(&output.stdout);
+    assert_eq!(outcomes(&report), [(pr, "error".to_owned())]);
+    assert_eq!(report["data"]["checks"][0]["detail"], "timed out after 300ms");
+    assert!(!still_running(&bin.path().join("child")), "gh's child outlived it");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_gh_call_that_answers_is_judged_while_its_child_holds_the_output() {
+    use std::time::{Duration, Instant};
+
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let (bin, path) = fake_gh_path(concat!(
+        "#!/bin/sh\n",
+        "echo '{\"state\":\"MERGED\",\"mergedAt\":\"2026-10-27T10:00:00Z\"}'\n",
+        "sleep 30 &\n",
+        "echo $! > \"$(dirname \"$0\")/child\"\n",
+        "exit 0\n",
+    ));
+    let task = create_task(dir, "Gated", None);
+    let pr = add_gate(dir, &task, "--pr", "https://github.com/o/r/pull/1");
+
+    let started = Instant::now();
+    let output = arcl_in(dir)
+        .env("PATH", &path)
+        .env("ARCL_GH_TIMEOUT_MS", "10000")
+        .args(["--json", "gate", "check"])
+        .output()
+        .expect("gate check runs");
+    assert!(
+        started.elapsed() < Duration::from_secs(8),
+        "gate check waited on gh's child"
+    );
+    assert_success(&output);
+    let report = json(&output.stdout);
+    assert_eq!(outcomes(&report), [(pr, "met".to_owned())]);
+    assert_eq!(report["data"]["checks"][0]["detail"], "merged");
+    assert!(!still_running(&bin.path().join("child")), "gh's child outlived it");
 }
 
 #[test]
