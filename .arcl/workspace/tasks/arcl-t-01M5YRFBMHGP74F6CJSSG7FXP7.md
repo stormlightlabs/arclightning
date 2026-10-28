@@ -11,27 +11,30 @@ Let agents and the web app ask for exactly the records and fields they need
 in one request, as GitHub and Linear do. Taken from beans' `beans graphql`.
 
 Add a read-only GraphQL schema over records: tasks, specs, plans, phases,
-captures, notes and releases, with their relations, readiness and blockers.
-`arcl query '<graphql>'` runs a query against the local database with no
-server, and `arcl serve` exposes the same schema at `/graphql` behind its
-token. Mutations stay with the existing commands for now.
+captures, notes and releases, with their relations, readiness, blockers,
+gates and notes. `arcl query '<graphql>'` runs a query against the local
+database with no server. Mutations stay with the existing commands.
+
+This task builds the schema and `arcl query`. Serving it is "Serve GraphQL
+at /graphql in arcl serve", and the REST reads move onto it in "Build the
+REST reads on GraphQL".
 
 Scope:
 
-- the schema in a shared crate, built on the existing read models
+- the schema in a shared crate, built on the existing read models, with
+  `async-graphql`
 - `arcl query` with a query string or `--file`, and `--variables`
-- `/graphql` in `arcl serve`, with introspection
 - the schema printed by `arcl query --schema`, and documented
-- a depth or cost limit
+- a depth and complexity limit
 
 Acceptance criteria:
 
 - [ ] `arcl query` returns only the requested fields as JSON
-- [ ] `/graphql` answers the same query with the same result
-- [ ] Readiness and blockers are queryable on tasks
-- [ ] Queries over the limit are refused with a clear error
+- [ ] Readiness, blockers and gates are queryable on tasks
+- [ ] Queries over the limit are refused with a clear error and exit code 3
+- [ ] `arcl query --schema` prints SDL that matches a checked-in copy
 
 Verification:
 
-- tests that run queries against a fixture project through both paths
+- tests that run queries against a fixture project
 - `just check`

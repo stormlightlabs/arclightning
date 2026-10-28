@@ -4,7 +4,7 @@ phase = "arcl-ph-01M5YRFB35TZ51QW4AG1A8MS5B"
 title = "Refuse databases written by a newer arcl"
 status = "pending"
 priority = "normal"
-position = 11
+position = 14
 +++
 
 Stop with a clear message when the database or workspace was written by a

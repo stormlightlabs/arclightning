@@ -2,9 +2,10 @@
 id = "arcl-t-01M60C3V1V1MM3YHDSWXSY6X3A"
 phase = "arcl-ph-01M5YRFB35TZ51QW4AG1A8MS5B"
 title = "Make --blocked-by repeatable and point a fresh worktree at arcl init"
-status = "in_progress"
+status = "completed"
 priority = "normal"
 position = 5
+evidence = "Merged in #79 (885f8ee)."
 +++
 
 `arcl task create --blocked-by` takes several values per flag, so a title after it is read as a blocker ID. `arcl dependency add --blocked-by` takes one. Make both take one ID per flag, repeatable, with comma-separated IDs also accepted.
