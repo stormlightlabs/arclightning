@@ -102,7 +102,10 @@ impl Reader {
             let Some(total) = nodes.checked_add(count).filter(|total| *total <= MAX_NODES) else {
                 return false;
             };
-            match self.nodes.compare_exchange_weak(nodes, total, Ordering::Relaxed, Ordering::Relaxed) {
+            match self
+                .nodes
+                .compare_exchange_weak(nodes, total, Ordering::Relaxed, Ordering::Relaxed)
+            {
                 Ok(_) => return true,
                 Err(current) => nodes = current,
             }
