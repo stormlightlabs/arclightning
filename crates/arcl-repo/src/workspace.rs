@@ -15,7 +15,9 @@ pub mod status;
 pub mod sync;
 
 pub use codec::*;
-pub use edit::{RecordEdit, RecordEditError, RecordSource, edit_record, record_source, source_revision};
+pub use edit::{
+    RecordEdit, RecordEditError, RecordSource, edit_record, record_source, record_sources, source_revision,
+};
 pub use export::{
     WorkspaceExportError, WorkspaceFile, export_graph, export_graph_with_base, project_graph, project_graph_at,
     required_format_version,

@@ -5948,6 +5948,31 @@ fn list_filters_tasks_by_assignee() {
 }
 
 #[test]
+fn list_reports_an_unknown_kind_before_other_filter_errors() {
+    let directory = initialized_directory();
+    for extra in [
+        &["--priority", "someday"][..],
+        &["--status", "waiting"][..],
+        &["--spec", "arcl-x-1"][..],
+        &["--parent", "nope"][..],
+    ] {
+        let output = arcl_in(directory.path())
+            .args(["list", "--kind", "widget"])
+            .args(extra)
+            .output()
+            .expect("list runs");
+        assert_eq!(output.status.code(), Some(3), "{extra:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("unknown kind `widget`"), "{extra:?}: {stderr}");
+    }
+    let output = arcl_in(directory.path())
+        .args(["list", "--kind", "task", "--status", "waiting", "--spec", "arcl-x-1"])
+        .output()
+        .expect("list runs");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unknown status `waiting`"));
+}
+
+#[test]
 fn a_new_workspace_starts_at_version_one_until_a_claim() {
     let directory = tempdir().expect("temporary directory can be created");
     run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
@@ -7746,4 +7771,109 @@ fn workspace_import_refuses_a_capture_whose_source_task_is_missing() {
     assert_success(&listed);
     let captures = json(&listed.stdout);
     assert_eq!(captures["data"]["captures"].as_array().map(Vec::len), Some(0));
+}
+
+#[test]
+fn query_prints_the_graphql_response_with_the_selected_fields() {
+    let directory = initialized_directory();
+    let path = directory.path();
+    let blocker = run_json(path, ["--json", "task", "create", "Blocker"].as_ref())["data"]["task"]["id"]
+        .as_str()
+        .expect("task ID")
+        .to_owned();
+    let task = run_json(
+        path,
+        ["--json", "task", "create", "Blocked", "--blocked-by", &blocker].as_ref(),
+    )["data"]["task"]["id"]
+        .as_str()
+        .expect("task ID")
+        .to_owned();
+    let short = &task[task.len() - 6..];
+
+    let query = format!(r#"{{ task(id: "{short}") {{ title readiness {{ ready }} blockers {{ task {{ id }} }} }} }}"#);
+    let response = run_json(path, ["query", &query].as_ref());
+    assert_eq!(
+        response,
+        serde_json::json!({ "data": { "task": {
+            "title": "Blocked",
+            "readiness": { "ready": false },
+            "blockers": [{ "task": { "id": blocker } }],
+        } } })
+    );
+
+    let output = arcl_in(path)
+        .args([
+            "query",
+            "--file",
+            "-",
+            "--variables",
+            &format!(r#"{{"id":"{task}"}}"#),
+            "--operation",
+            "Title",
+        ])
+        .write_stdin("query Title($id: ID!) { task(id: $id) { title } } query Work { work { phases { id } } }")
+        .output()
+        .expect("arcl query runs");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        json(&output.stdout),
+        serde_json::json!({ "data": { "task": { "title": "Blocked" } } })
+    );
+}
+
+#[test]
+fn query_with_errors_prints_them_and_exits_3() {
+    let directory = initialized_directory();
+    let path = directory.path();
+    let deep = format!("{{ tree {{ {}id{} }} }}", "children { ".repeat(20), " }".repeat(20));
+    let output = arcl_in(path).args(["query", &deep]).output().expect("arcl query runs");
+    assert_eq!(output.status.code(), Some(3));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("the query returned 1 GraphQL error; see `errors` on stdout"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("invalid project or record"), "{stderr}");
+    let response = json(&output.stdout);
+    assert_eq!(response["data"], Value::Null);
+    assert_eq!(response["errors"][0]["extensions"]["code"], "QUERY_TOO_DEEP");
+
+    let output = arcl_in(path)
+        .args(["query", r#"{ task(id: "arcl-t-00000000000000000000000000") { id } }"#])
+        .output()
+        .expect("arcl query runs");
+    assert_eq!(output.status.code(), Some(3));
+    assert_eq!(json(&output.stdout)["errors"][0]["extensions"]["code"], "NOT_FOUND");
+
+    let output = arcl_in(path)
+        .args(["query", "{ work { phases { id } } }", "--variables", "[1]"])
+        .output()
+        .expect("arcl query runs");
+    assert_eq!(output.status.code(), Some(3));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("`--variables` must be a JSON object"));
+}
+
+#[test]
+fn query_schema_prints_the_checked_in_sdl() {
+    let directory = tempdir().expect("temporary directory can be created");
+    let output = arcl_in(directory.path())
+        .args(["query", "--schema"])
+        .output()
+        .expect("arcl query runs");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let checked_in = include_str!("../../arcl-graphql/schema.graphql");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim_end(),
+        checked_in.trim_end(),
+        "crates/arcl-graphql/schema.graphql is out of date; regenerate it with `arcl query --schema`"
+    );
 }

@@ -151,6 +151,25 @@ pub enum Command {
         #[arg(long, value_name = "NAME", num_args = 0..=1, requires = "start")]
         claim: Option<Option<String>>,
     },
+    /// Run a read-only GraphQL query against the records and print the
+    /// response as JSON.
+    Query {
+        /// The GraphQL document.
+        #[arg(conflicts_with = "file", required_unless_present_any = ["file", "schema"])]
+        document: Option<String>,
+        /// Read the document from this file, or `-` for standard input.
+        #[arg(long, value_name = "PATH")]
+        file: Option<PathBuf>,
+        /// The query's variables, as a JSON object.
+        #[arg(long, value_name = "JSON")]
+        variables: Option<String>,
+        /// The operation to run when the document holds more than one.
+        #[arg(long, value_name = "NAME")]
+        operation: Option<String>,
+        /// Print the schema in SDL instead.
+        #[arg(long, conflicts_with_all = ["document", "file", "variables", "operation"])]
+        schema: bool,
+    },
     /// Serve the web app on 127.0.0.1 until interrupted.
     Serve {
         /// Listen on this port instead of an ephemeral one.

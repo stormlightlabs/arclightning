@@ -2,7 +2,7 @@
 id = "arcl-t-01M5YRFBMHGP74F6CJSSG7FXP7"
 phase = "arcl-ph-01M5YRFB35TZ51QW4AG1A8MS5B"
 title = "Query records with GraphQL"
-status = "pending"
+status = "in_progress"
 priority = "normal"
 position = 9
 +++

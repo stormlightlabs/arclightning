@@ -1,5 +1,6 @@
+use super::support::*;
 use super::*;
-use super::{query::task_ancestry, support::*};
+use arcl_store::task_ancestry;
 
 pub(super) enum CaptureResult {
     Mutation { action: &'static str, capture: Capture },
@@ -368,7 +369,9 @@ pub(super) fn run_plan(command: PlanCommand, renderer: &Renderer) -> Result<Opti
                 .tasks
                 .iter()
                 .map(|task| {
-                    task_ancestry(&graph, task.id).map(|(_, plan_id, _)| (plan_id == Some(id)).then(|| task.clone()))
+                    task_ancestry(&graph, task.id)
+                        .map(|(_, plan_id, _)| (plan_id == Some(id)).then(|| task.clone()))
+                        .map_err(CommandError::from)
                 })
                 .collect::<CResult<Vec<_>>>()
                 .map_err(ApplicationError::from_command)?

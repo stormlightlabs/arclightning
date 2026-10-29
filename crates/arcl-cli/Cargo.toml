@@ -14,6 +14,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 arcl-core = { path = "../arcl-core" }
+arcl-graphql = { path = "../arcl-graphql" }
 arcl-repo = { path = "../arcl-repo" }
 arcl-serve = { path = "../arcl-serve" }
 arcl-store = { path = "../arcl-store" }

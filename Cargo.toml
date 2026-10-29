@@ -6,6 +6,7 @@ members = [
     "crates/arcl-cli",
     "crates/arcl-mcp",
     "crates/arcl-serve",
+    "crates/arcl-graphql",
 ]
 resolver = "3"
 
@@ -18,6 +19,7 @@ license = "Apache-2.0"
 
 [workspace.dependencies]
 anyhow = "1.0"
+async-graphql = { version = "=7.2.1", default-features = false }
 clap = { version = "4.6", features = ["derive"] }
 gix = { version = "0.85", default-features = false, features = ["status", "sha1"] }
 owo-colors = { version = "4.3", features = ["supports-colors"] }

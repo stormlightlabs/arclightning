@@ -16,8 +16,8 @@ pub mod prelude {
         CONTEXT_NOTE_LIMIT, CURRENT_VERSION, CapturePromotionInput, CapturePromotionRecord, CapturePromotionResult,
         CaptureTaskPromotion, CaptureUpdate, CheckReport, ConnectedGraph, DEFAULT_PROJECT_ID, DataVersion, Database,
         NoteUpdate, OpenSubtasks, PhaseUpdate, PlanApplyResult, PlanChange, PlanDependencyDiff, PlanDiff, PlanDiffItem,
-        PlanUpdate, PlanningBlockerView, PlanningCompletion, PlanningContext, PlanningReadiness, PlanningReadyFilter,
-        PlanningTaskCreate, PlanningTaskUpdate, PlanningTaskView, ReadinessReason, ReadinessReasonKind, SpecUpdate,
-        StorageError, WorkspaceBaseFile,
+        PlanUpdate, PlanningBlockerView, PlanningCompletion, PlanningContext, PlanningData, PlanningReadiness,
+        PlanningReadyFilter, PlanningTaskCreate, PlanningTaskUpdate, PlanningTaskView, PlanningWork, ReadinessReason,
+        ReadinessReasonKind, RecordFilter, RecordTreeNode, SpecUpdate, StorageError, TreeStatus, WorkspaceBaseFile,
     };
 }

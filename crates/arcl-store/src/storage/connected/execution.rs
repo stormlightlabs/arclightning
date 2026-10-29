@@ -241,6 +241,39 @@ pub struct PlanningContext {
     pub gates: Vec<Gate>,
 }
 
+impl PlanningContext {
+    /// The context packet `arcl context` prints, built from the task's view.
+    pub fn from_view(view: PlanningTaskView) -> Self {
+        let mut seen = HashSet::new();
+        let completion_evidence = view
+            .blockers
+            .iter()
+            .chain(&view.inherited_blockers)
+            .filter(|blocker| blocker.completed && !blocker.evidence.is_empty())
+            .filter(|blocker| seen.insert(blocker.task.id))
+            .cloned()
+            .collect();
+        let mut notes = view.notes;
+        let omitted_notes = notes.len().saturating_sub(CONTEXT_NOTE_LIMIT);
+        notes.truncate(CONTEXT_NOTE_LIMIT);
+        Self {
+            task: view.task,
+            ancestors: view.ancestors,
+            spec: view.spec,
+            plan: view.plan,
+            phase: view.phase,
+            blockers: view.blockers,
+            inherited_blockers: view.inherited_blockers,
+            dependents: view.dependents,
+            readiness: view.readiness,
+            completion_evidence,
+            notes,
+            omitted_notes,
+            gates: view.gates,
+        }
+    }
+}
+
 /// One task in the work list: the task, its readiness and its effective
 /// phase.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -277,14 +310,9 @@ pub struct PlanningCompletion {
     pub unblocked: Vec<PlanningTask>,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-struct Ancestry {
-    spec_id: Option<SpecId>,
-    plan_id: Option<PlanId>,
-    phase_id: Option<PhaseId>,
-}
-
-struct PlanningData {
+/// A project's planning records and blocker edges, loaded once to build many
+/// task views with [`planning_task_view_in`].
+pub struct PlanningData {
     tasks: HashMap<TaskId, PlanningTask>,
     /// For each task with child tasks, the IDs of those children, in no
     /// particular order. A task missing here is a leaf.
@@ -300,6 +328,13 @@ struct PlanningData {
     violations_by_task: HashMap<TaskId, Vec<usize>>,
     /// For each task with an open gate, those gates, oldest first.
     open_gates: HashMap<TaskId, Vec<Gate>>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct Ancestry {
+    spec_id: Option<SpecId>,
+    plan_id: Option<PlanId>,
+    phase_id: Option<PhaseId>,
 }
 
 /// Compute ready leaf tasks without requiring a plan, phase, or milestone.
@@ -346,40 +381,21 @@ pub fn planning_task_view(connection: &Connection, id: TaskId) -> Result<Plannin
     let task =
         planning_task(connection, id)?.ok_or_else(|| StorageError::PlanningTaskNotFound { id: id.to_string() })?;
     let data = load_data(connection, task.project_id)?;
-    let ancestry_ids = effective_ancestry(&data, id, &mut HashSet::new())?;
-    let ancestors = parent_chain(&data, id)?;
-    let blockers = blocker_views(&data, id, None)?;
-    let mut inherited_blockers = Vec::new();
-    for ancestor in ancestors.iter().rev() {
-        inherited_blockers.extend(
-            blocker_views(&data, ancestor.id, Some(ancestor.id))?
-                .into_iter()
-                .filter(|view| view.task.id != id),
-        );
-    }
-    let dependents = dependent_tasks(&data, id);
-    let children = child_tasks(&data, id);
-    let readiness = readiness(&data, &task, &ancestry_ids)?;
-    let mut notes = notes_for_task(connection, id)?;
-    notes.reverse();
-    let gates = gates_for_task(connection, id)?;
-    let source_task_id = super::promoted_source_task(connection, &id.to_string())?;
+    task_view(connection, &data, task)
+}
 
-    Ok(PlanningTaskView {
-        task,
-        readiness,
-        blockers,
-        inherited_blockers,
-        dependents,
-        children,
-        ancestors,
-        spec: ancestry_ids.spec_id.and_then(|value| data.specs.get(&value).cloned()),
-        plan: ancestry_ids.plan_id.and_then(|value| data.plans.get(&value).cloned()),
-        phase: ancestry_ids.phase_id.and_then(|value| data.phases.get(&value).cloned()),
-        notes,
-        gates,
-        source_task_id,
-    })
+/// Load the project's planning records once, for [`planning_task_view_in`].
+pub fn planning_data(connection: &Connection, project_id: ProjectId) -> Result<PlanningData> {
+    load_data(connection, project_id)
+}
+
+/// Build the same view as [`planning_task_view`] from planning records
+/// already loaded with [`planning_data`]. The task's notes, gates and source
+/// task are still read from `connection`.
+pub fn planning_task_view_in(connection: &Connection, data: &PlanningData, id: TaskId) -> Result<PlanningTaskView> {
+    let task =
+        planning_task(connection, id)?.ok_or_else(|| StorageError::PlanningTaskNotFound { id: id.to_string() })?;
+    task_view(connection, data, task)
 }
 
 /// Read every task with its readiness and effective phase, and every phase,
@@ -403,34 +419,7 @@ pub fn planning_work(connection: &Connection, project_id: ProjectId) -> Result<P
 
 /// Build the bounded task context packet used by agents and execution adapters.
 pub fn context(connection: &Connection, id: TaskId) -> Result<PlanningContext> {
-    let view = planning_task_view(connection, id)?;
-    let mut seen = HashSet::new();
-    let completion_evidence = view
-        .blockers
-        .iter()
-        .chain(&view.inherited_blockers)
-        .filter(|blocker| blocker.completed && !blocker.evidence.is_empty())
-        .filter(|blocker| seen.insert(blocker.task.id))
-        .cloned()
-        .collect();
-    let mut notes = view.notes;
-    let omitted_notes = notes.len().saturating_sub(CONTEXT_NOTE_LIMIT);
-    notes.truncate(CONTEXT_NOTE_LIMIT);
-    Ok(PlanningContext {
-        task: view.task,
-        ancestors: view.ancestors,
-        spec: view.spec,
-        plan: view.plan,
-        phase: view.phase,
-        blockers: view.blockers,
-        inherited_blockers: view.inherited_blockers,
-        dependents: view.dependents,
-        readiness: view.readiness,
-        completion_evidence,
-        notes,
-        omitted_notes,
-        gates: view.gates,
-    })
+    Ok(PlanningContext::from_view(planning_task_view(connection, id)?))
 }
 
 /// Apply one connected-model task lifecycle action atomically.
@@ -859,6 +848,44 @@ fn index_children(tasks: &HashMap<TaskId, PlanningTask>) -> HashMap<TaskId, Vec<
         }
     }
     children
+}
+
+fn task_view(connection: &Connection, data: &PlanningData, task: PlanningTask) -> Result<PlanningTaskView> {
+    let id = task.id;
+    let ancestry_ids = effective_ancestry(data, id, &mut HashSet::new())?;
+    let ancestors = parent_chain(data, id)?;
+    let blockers = blocker_views(data, id, None)?;
+    let mut inherited_blockers = Vec::new();
+    for ancestor in ancestors.iter().rev() {
+        inherited_blockers.extend(
+            blocker_views(data, ancestor.id, Some(ancestor.id))?
+                .into_iter()
+                .filter(|view| view.task.id != id),
+        );
+    }
+    let dependents = dependent_tasks(data, id);
+    let children = child_tasks(data, id);
+    let readiness = readiness(data, &task, &ancestry_ids)?;
+    let mut notes = notes_for_task(connection, id)?;
+    notes.reverse();
+    let gates = gates_for_task(connection, id)?;
+    let source_task_id = super::promoted_source_task(connection, &id.to_string())?;
+
+    Ok(PlanningTaskView {
+        task,
+        readiness,
+        blockers,
+        inherited_blockers,
+        dependents,
+        children,
+        ancestors,
+        spec: ancestry_ids.spec_id.and_then(|value| data.specs.get(&value).cloned()),
+        plan: ancestry_ids.plan_id.and_then(|value| data.plans.get(&value).cloned()),
+        phase: ancestry_ids.phase_id.and_then(|value| data.phases.get(&value).cloned()),
+        notes,
+        gates,
+        source_task_id,
+    })
 }
 
 fn load_data(connection: &Connection, project_id: ProjectId) -> Result<PlanningData> {
