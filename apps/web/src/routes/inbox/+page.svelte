@@ -412,6 +412,9 @@
             Capture{#if detail !== null && created(detail)}{` · ${created(detail)}`}{/if} ·
             <CopyId id={selectedCapture.id} />
           </p>
+          {#if detail?.source_task_id}
+            <p class="meta">From task <a href={taskHref(detail.source_task_id)}>{detail.source_task_id}</a></p>
+          {/if}
           <h2>{detail?.title ?? selectedCapture.title}</h2>
           {#if detailFailure !== null}
             <Feedback tone="danger" title="Could not load this capture" message={detailFailure}>
@@ -493,7 +496,8 @@
     background: var(--arcl-success-surface);
     font-size: var(--arcl-type-sm);
   }
-  .notice a {
+  .notice a,
+  .meta a {
     color: var(--arcl-link);
   }
   /* The list and the selected capture sit side by side when the Inbox is wide enough, and stack when it is not. */

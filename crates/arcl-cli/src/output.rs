@@ -313,8 +313,22 @@ impl Renderer {
     }
 
     /// Render one connected-model mutation and include the affected record in JSON mode.
-    pub fn render_capture(&self, action: &str, capture: &Capture) -> Result<Option<String>, OutputError> {
-        self.render_named_mutation(action, "capture", &capture.id.to_string(), &capture.title, capture)
+    /// Human output adds a `From:` line naming the capture's source task by
+    /// its short ID in `ids`.
+    pub fn render_capture(
+        &self, action: &str, capture: &Capture, ids: &ShortIds,
+    ) -> Result<Option<String>, OutputError> {
+        let source = capture
+            .source_task_id
+            .map(|id| SourceTask { id, ids, beside_record: false });
+        self.render_sourced(
+            action,
+            "capture",
+            &capture.id.to_string(),
+            &capture.title,
+            capture,
+            source,
+        )
     }
 
     /// Render captures in their stable creation order.
@@ -987,16 +1001,52 @@ impl Renderer {
         self.render_named_mutation("shown", kind, id, title, record)
     }
 
+    /// Render a record a show command found, as [`Self::render_shown`] does,
+    /// with the task it came from. Human output adds a `From:` line, plain
+    /// output a `from` line, and JSON output `source_task_id` as
+    /// [`SourceTask`] says.
+    pub fn render_shown_from<T: Serialize>(
+        &self, kind: &str, id: &str, title: &str, record: &T, source: Option<SourceTask<'_>>,
+    ) -> Result<Option<String>, OutputError> {
+        self.render_sourced("shown", kind, id, title, record, source)
+    }
+
     fn render_named_mutation<T: Serialize>(
         &self, action: &str, kind: &str, id: &str, title: &str, record: &T,
     ) -> Result<Option<String>, OutputError> {
+        self.render_sourced(action, kind, id, title, record, None)
+    }
+
+    /// Render one record with the task it came from, when `source` holds one.
+    fn render_sourced<T: Serialize>(
+        &self, action: &str, kind: &str, id: &str, title: &str, record: &T, source: Option<SourceTask<'_>>,
+    ) -> Result<Option<String>, OutputError> {
         let message = match self.mode {
-            OutputMode::Human => format!("{} {} `{id}`: {title}", human_action(action), kind),
-            OutputMode::Plain => id.to_owned(),
+            OutputMode::Human => {
+                let line = format!("{} {} `{id}`: {title}", human_action(action), kind);
+                match source {
+                    Some(source) => {
+                        format!("{line}\nFrom: task `{}`", source.ids.short(&source.id.to_string()))
+                    }
+                    None => line,
+                }
+            }
+            // Only a show adds the `from` line, so a create still prints
+            // the bare ID that scripts capture.
+            OutputMode::Plain => match source.filter(|_| action == "shown") {
+                Some(source) => format!("{id}\nfrom\t{}", source.id),
+                None => id.to_owned(),
+            },
             OutputMode::Json => {
                 let mut data = serde_json::Map::new();
                 data.insert("action".to_owned(), serde_json::Value::String(action.to_owned()));
                 data.insert(kind.to_owned(), serde_json::to_value(record)?);
+                if let Some(source) = source.filter(|source| source.beside_record) {
+                    data.insert(
+                        "source_task_id".to_owned(),
+                        serde_json::Value::String(source.id.to_string()),
+                    );
+                }
                 serde_json::to_string(&Envelope {
                     format_version: FORMAT_VERSION,
                     data: serde_json::Value::Object(data),
@@ -1303,6 +1353,18 @@ impl Renderer {
                 .to_string(),
         }
     }
+}
+
+/// The task a rendered record came from.
+#[derive(Clone, Copy, Debug)]
+pub struct SourceTask<'a> {
+    /// The source task.
+    pub id: TaskId,
+    /// The short IDs human output shows `id` with.
+    pub ids: &'a ShortIds,
+    /// Whether JSON output adds `source_task_id` beside the record, for a
+    /// record that does not carry the field itself.
+    pub beside_record: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -2096,6 +2158,9 @@ impl PlanningTaskViewOutput for PlanningTaskView {
         if let Some(assignee) = &self.task.assignee {
             lines.push(format!("Assignee: {assignee}"));
         }
+        if let Some(source) = self.source_task_id {
+            lines.push(format!("From: task `{}`", ids.short(&source.to_string())));
+        }
         lines.extend([
             format!(
                 "Blockers: {}",
@@ -2184,6 +2249,9 @@ impl PlanningTaskViewOutput for PlanningTaskView {
         ];
         if let Some(assignee) = &self.task.assignee {
             lines.push(format!("assignee\t{}", plain_escape(assignee)));
+        }
+        if let Some(source) = self.source_task_id {
+            lines.push(format!("from\t{source}"));
         }
         lines.extend(self.inherited_blockers.iter().filter_map(|blocker| {
             blocker

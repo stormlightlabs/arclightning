@@ -230,6 +230,9 @@ pub struct CaptureCreateInput {
     /// Markdown: what and why.
     #[serde(default)]
     pub body: String,
+    /// The task this capture came from, `arcl-t-…`, usually the task in
+    /// progress.
+    pub from: Option<String>,
 }
 
 /// A capture to promote, and the record it becomes.

@@ -154,7 +154,7 @@ pub fn record_source(graph: &ConnectedGraph, id: &str) -> Result<Option<RecordSo
 /// | Kind    | Refused fields                         | Commands                                   |
 /// | ------- | -------------------------------------- | ------------------------------------------ |
 /// | task    | `status`, `handoff`, `evidence`, `assignee`, `notes`, `gates` | `arcl task start`, `park`, `unpark`, `handoff`, `complete`, `cancel`, `note`, `arcl gate` |
-/// | capture | `status`, `promoted-to`                | `arcl capture promote`, `discard`          |
+/// | capture | `status`, `promoted-to`, `source-task` | `arcl capture promote`, `discard`, `arcl capture create` |
 /// | spec    | `status`, `source-capture`             | `arcl spec complete`, `cancel`, `arcl capture promote` |
 /// | plan    | `status`                               | `arcl plan complete`, `cancel`             |
 /// | phase   | `status`                               | `arcl plan phase complete`, `cancel`       |
@@ -256,6 +256,11 @@ fn command_owned_change(before: &WorkspaceRecord, after: &WorkspaceRecord) -> Op
                 before.promoted_to != after.promoted_to,
                 "promoted-to",
                 "a promotion is set only by `arcl capture promote`",
+            ),
+            (
+                before.source_task_id != after.source_task_id,
+                "source-task",
+                "a capture's source task is set only by `arcl capture create --from`",
             ),
         ],
         (Spec(before), Spec(after)) => vec![
@@ -699,6 +704,33 @@ mod tests {
             "status = \"open\"",
             "status",
         );
+    }
+
+    #[test]
+    fn a_capture_source_task_addition_change_or_removal_is_refused() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let first = task(&mut database, "First");
+        let second = task(&mut database, "Second");
+        let sourced = database
+            .create_capture_from("Sourced".to_owned(), String::new(), Some(task_id(&first)))
+            .expect("capture creates")
+            .id
+            .to_string();
+        let plain = database
+            .create_capture("Plain".to_owned(), String::new())
+            .expect("capture creates")
+            .id
+            .to_string();
+        let line = format!("source-task = \"{first}\"\n");
+        assert_owned(
+            &mut database,
+            &sourced,
+            &line,
+            &format!("source-task = \"{second}\"\n"),
+            "source-task",
+        );
+        assert_owned(&mut database, &sourced, &line, "", "source-task");
+        assert_owned(&mut database, &plain, "+++\n", &format!("+++\n{line}"), "source-task");
     }
 
     #[test]

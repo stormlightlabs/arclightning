@@ -212,6 +212,8 @@ export type Capture = {
   body: string;
   status: CaptureStatus;
   created_at: string;
+  /** The task the capture came from, as `capture create --from` records it. */
+  source_task_id?: string | null;
 };
 
 /** The options of `arcl capture create`. */

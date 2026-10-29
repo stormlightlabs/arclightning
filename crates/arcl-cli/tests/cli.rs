@@ -7444,3 +7444,306 @@ fn prime_counts_the_open_gates_of_open_work() {
     let primer = run_json(dir, ["--json", "prime"].as_ref());
     assert_eq!(primer["data"]["open"]["tasks"][0]["open_gates"], 2);
 }
+
+/// Run `capture create <title>` with `extra` arguments and `ARCL_AGENT` set
+/// to `agent`, or unset.
+fn capture_output(directory: &Path, title: &str, extra: &[&str], agent: Option<&str>) -> std::process::Output {
+    let mut command = arcl_in(directory);
+    command.args(["--json", "capture", "create", title]).args(extra);
+    match agent {
+        Some(agent) => command.env("ARCL_AGENT", agent),
+        None => command.env_remove("ARCL_AGENT"),
+    };
+    command.output().expect("capture create runs")
+}
+
+/// The source task a `capture create` JSON result names, or `None`.
+fn capture_source(output: &std::process::Output) -> Option<String> {
+    assert_success(output);
+    json(&output.stdout)["data"]["capture"]["source_task_id"]
+        .as_str()
+        .map(str::to_owned)
+}
+
+#[test]
+fn capture_create_from_records_and_shows_the_source_task() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let task = create_task(dir, "Working", None);
+
+    let created = capture_output(dir, "Found", &["--from", &task], None);
+    assert_eq!(capture_source(&created), Some(task.clone()));
+    let capture = id(&created.stdout, "capture");
+    let unsourced = capture_output(dir, "Plain", &[], None);
+    assert_eq!(capture_source(&unsourced), None);
+    let unsourced = json(&unsourced.stdout);
+    assert!(
+        unsourced["data"]["capture"].get("source_task_id").is_none(),
+        "{unsourced}"
+    );
+
+    let shown = run_json(dir, ["--json", "capture", "show", &capture].as_ref());
+    assert_eq!(shown["data"]["capture"]["source_task_id"], task);
+    let shown = run_json(dir, ["--json", "show", &capture].as_ref());
+    assert_eq!(shown["data"]["capture"]["source_task_id"], task);
+    let human = arcl_in(dir)
+        .args(["--color", "never", "show", &capture])
+        .output()
+        .expect("show runs");
+    assert_success(&human);
+    let human = String::from_utf8(human.stdout).expect("UTF-8");
+    let short = &task[task.len() - 4..];
+    assert!(human.contains(&format!("\nFrom: task `{short}`")), "{human}");
+
+    let created = arcl_in(dir)
+        .args(["--color", "never", "capture", "create", "Human", "--from", &task])
+        .output()
+        .expect("capture create runs");
+    assert_success(&created);
+    let created = String::from_utf8(created.stdout).expect("UTF-8");
+    assert!(created.contains(&format!("\nFrom: task `{short}`")), "{created}");
+    let plain = arcl_in(dir)
+        .args(["--plain", "capture", "show", &capture])
+        .output()
+        .expect("capture show runs");
+    assert_success(&plain);
+    assert_eq!(
+        String::from_utf8(plain.stdout).expect("UTF-8"),
+        format!("{capture}\nfrom\t{task}\n")
+    );
+    let plain_create = arcl_in(dir)
+        .args(["--plain", "capture", "create", "Bare", "--from", &task])
+        .output()
+        .expect("capture create runs");
+    assert_success(&plain_create);
+    assert!(!String::from_utf8(plain_create.stdout).expect("UTF-8").contains("from"));
+
+    let short_from = capture_output(dir, "Short", &["--from", short], None);
+    assert_eq!(capture_source(&short_from), Some(task.clone()));
+
+    let unknown = capture_output(dir, "Lost", &["--from", "arcl-t-01K0B31M6VGK4YH8VKT4C0D2DR"], None);
+    assert_eq!(unknown.status.code(), Some(5));
+    let not_task = capture_output(dir, "Wrong", &["--from", &capture], None);
+    assert_eq!(not_task.status.code(), Some(3));
+    let captures = run_json(dir, ["--json", "capture", "list"].as_ref());
+    assert_eq!(captures["data"]["captures"].as_array().map(Vec::len), Some(5));
+}
+
+#[test]
+fn capture_create_defaults_to_the_one_task_arcl_agent_claimed() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let first = create_task(dir, "First", None);
+    let second = create_task(dir, "Second", None);
+
+    let none = capture_output(dir, "No claim", &[], Some("agent-7"));
+    assert_eq!(capture_source(&none), None);
+
+    assert_success(&claim_output(dir, &first, Some("agent-7"), None));
+    let one = capture_output(dir, "One claim", &[], Some("agent-7"));
+    assert_eq!(capture_source(&one), Some(first.clone()));
+    let unset = capture_output(dir, "No agent", &[], None);
+    assert_eq!(capture_source(&unset), None);
+    let other = capture_output(dir, "Other agent", &[], Some("agent-8"));
+    assert_eq!(capture_source(&other), None);
+
+    assert_success(&claim_output(dir, &second, Some("agent-7"), None));
+    let two = capture_output(dir, "Two claims", &[], Some("agent-7"));
+    assert_eq!(capture_source(&two), None);
+    let warnings = json(&two.stderr);
+    assert_eq!(warnings["warnings"][0]["code"], "capture_source", "{warnings}");
+    let message = warnings["warnings"][0]["message"].as_str().expect("warning message");
+    assert!(
+        message.contains(&first) && message.contains(&second) && message.contains("--from"),
+        "{message}"
+    );
+    let human = arcl_in(dir)
+        .args(["capture", "create", "Two claims, human"])
+        .env("ARCL_AGENT", "agent-7")
+        .output()
+        .expect("capture create runs");
+    assert_success(&human);
+    let stderr = String::from_utf8(human.stderr).expect("UTF-8");
+    assert!(
+        stderr.starts_with("warning: `agent-7` has 2 tasks in progress"),
+        "{stderr}"
+    );
+    let chosen = capture_output(dir, "Chosen", &["--from", &second], Some("agent-7"));
+    assert_eq!(capture_source(&chosen), Some(second));
+    assert!(chosen.stderr.is_empty(), "{}", String::from_utf8_lossy(&chosen.stderr));
+}
+
+#[test]
+fn promotion_keeps_the_source_task_on_the_new_record() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let task = create_task(dir, "Working", None);
+
+    let capture = id(
+        &capture_output(dir, "Found", &["--from", &task], None).stdout,
+        "capture",
+    );
+    let promoted = run_json(dir, ["--json", "capture", "promote", &capture, "--to", "task"].as_ref());
+    assert_eq!(promoted["data"]["capture"]["source_task_id"], task);
+    let new_task = promoted["data"]["task"]["id"].as_str().expect("task ID").to_owned();
+    let shown = run_json(dir, ["--json", "show", &new_task].as_ref());
+    assert_eq!(shown["data"]["source_task_id"], task);
+    let human = arcl_in(dir)
+        .args(["--color", "never", "show", &new_task])
+        .output()
+        .expect("show runs");
+    assert_success(&human);
+    let human = String::from_utf8(human.stdout).expect("UTF-8");
+    assert!(
+        human.contains(&format!("\nFrom: task `{}`\n", &task[task.len() - 4..])),
+        "{human}"
+    );
+    let plain = arcl_in(dir)
+        .args(["--plain", "show", &new_task])
+        .output()
+        .expect("show runs");
+    assert_success(&plain);
+    let plain = String::from_utf8(plain.stdout).expect("UTF-8");
+    assert!(plain.contains(&format!("\nfrom\t{task}\n")), "{plain}");
+    let unsourced = run_json(dir, ["--json", "show", &task].as_ref());
+    assert!(unsourced["data"].get("source_task_id").is_none(), "{unsourced}");
+
+    let note_capture = id(&capture_output(dir, "Note", &["--from", &task], None).stdout, "capture");
+    let promoted = run_json(
+        dir,
+        ["--json", "capture", "promote", &note_capture, "--to", "note"].as_ref(),
+    );
+    let note = promoted["data"]["note"]["id"].as_str().expect("note ID").to_owned();
+    let shown = run_json(dir, ["--json", "show", &note].as_ref());
+    assert_eq!(shown["data"]["source_task_id"], task);
+
+    let plain_capture = id(&capture_output(dir, "Plain", &[], None).stdout, "capture");
+    let promoted = run_json(
+        dir,
+        ["--json", "capture", "promote", &plain_capture, "--to", "spec"].as_ref(),
+    );
+    let spec = promoted["data"]["spec"]["id"].as_str().expect("spec ID").to_owned();
+    let shown = run_json(dir, ["--json", "show", &spec].as_ref());
+    assert!(shown["data"].get("source_task_id").is_none(), "{shown}");
+}
+
+#[test]
+fn capture_sources_round_trip_through_workspace_files_at_format_five() {
+    let source = tempdir().expect("temporary directory can be created");
+    let dir = source.path();
+    run_json(dir, ["--json", "init", "--workspace"].as_ref());
+    let task = create_task(dir, "Working", None);
+    let manifest = dir.join(".arcl/workspace/manifest.toml");
+    assert_eq!(
+        fs::read_to_string(&manifest).expect("manifest reads"),
+        "format-version = 1\n"
+    );
+
+    let capture = id(
+        &capture_output(dir, "Found", &["--from", &task], None).stdout,
+        "capture",
+    );
+    assert_eq!(
+        fs::read_to_string(&manifest).expect("manifest reads"),
+        "format-version = 5\n"
+    );
+    let capture_path = format!(".arcl/workspace/captures/{capture}.md");
+    let file = fs::read_to_string(dir.join(&capture_path)).expect("capture file reads");
+    assert!(file.contains(&format!("source-task = \"{task}\"\n")), "{file}");
+
+    let target = tempdir().expect("temporary directory can be created");
+    run_json(target.path(), ["--json", "init", "--workspace"].as_ref());
+    let task_path = format!(".arcl/workspace/tasks/{task}.md");
+    for file in [
+        ".arcl/workspace/manifest.toml",
+        task_path.as_str(),
+        capture_path.as_str(),
+    ] {
+        fs::copy(dir.join(file), target.path().join(file)).expect("workspace file copies");
+    }
+    assert_success(
+        &arcl_in(target.path())
+            .args(["workspace", "import"])
+            .output()
+            .expect("import runs"),
+    );
+    let shown = run_json(target.path(), ["--json", "capture", "show", &capture].as_ref());
+    assert_eq!(shown["data"]["capture"]["source_task_id"], task);
+}
+
+#[test]
+fn spec_and_note_show_name_the_promoted_source_task() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let task = create_task(dir, "Working", None);
+    let short = &task[task.len() - 4..];
+
+    for kind in ["spec", "note"] {
+        let capture = id(
+            &capture_output(dir, "Found", &["--from", &task], None).stdout,
+            "capture",
+        );
+        let promoted = run_json(dir, ["--json", "capture", "promote", &capture, "--to", kind].as_ref());
+        let record = promoted["data"][kind]["id"].as_str().expect("record ID").to_owned();
+
+        let shown = run_json(dir, ["--json", kind, "show", &record].as_ref());
+        assert_eq!(shown["data"]["source_task_id"], task, "{shown}");
+        assert_eq!(shown["data"][kind]["id"], record, "{shown}");
+        let human = arcl_in(dir)
+            .args(["--color", "never", kind, "show", &record])
+            .output()
+            .expect("show runs");
+        assert_success(&human);
+        let human = String::from_utf8(human.stdout).expect("UTF-8");
+        assert!(human.contains(&format!("\nFrom: task `{short}`")), "{human}");
+        let plain = arcl_in(dir)
+            .args(["--plain", kind, "show", &record])
+            .output()
+            .expect("show runs");
+        assert_success(&plain);
+        assert_eq!(
+            String::from_utf8(plain.stdout).expect("UTF-8"),
+            format!("{record}\nfrom\t{task}\n")
+        );
+    }
+
+    let plain = id(&capture_output(dir, "Plain", &[], None).stdout, "capture");
+    let promoted = run_json(dir, ["--json", "capture", "promote", &plain, "--to", "note"].as_ref());
+    let note = promoted["data"]["note"]["id"].as_str().expect("note ID").to_owned();
+    let shown = run_json(dir, ["--json", "note", "show", &note].as_ref());
+    assert!(shown["data"].get("source_task_id").is_none(), "{shown}");
+}
+
+#[test]
+fn workspace_import_refuses_a_capture_whose_source_task_is_missing() {
+    let source = tempdir().expect("temporary directory can be created");
+    let dir = source.path();
+    run_json(dir, ["--json", "init", "--workspace"].as_ref());
+    let task = create_task(dir, "Working", None);
+    let capture = id(
+        &capture_output(dir, "Found", &["--from", &task], None).stdout,
+        "capture",
+    );
+
+    let target = tempdir().expect("temporary directory can be created");
+    run_json(target.path(), ["--json", "init", "--workspace"].as_ref());
+    let capture_path = format!(".arcl/workspace/captures/{capture}.md");
+    for file in [".arcl/workspace/manifest.toml", capture_path.as_str()] {
+        fs::copy(dir.join(file), target.path().join(file)).expect("workspace file copies");
+    }
+    let message = refused_message(target.path(), ["--json", "workspace", "import"].as_ref());
+    assert!(
+        message.ends_with(&format!(
+            "workspace file `captures/{capture}.md`: relationship `source-task`: task `{task}` does not exist"
+        )),
+        "message: {message}"
+    );
+    // The refused file stays in the workspace, so reads warn about it.
+    let listed = arcl_in(target.path())
+        .args(["--json", "capture", "list"])
+        .output()
+        .expect("capture list runs");
+    assert_success(&listed);
+    let captures = json(&listed.stdout);
+    assert_eq!(captures["data"]["captures"].as_array().map(Vec::len), Some(0));
+}

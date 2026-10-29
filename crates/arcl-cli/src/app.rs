@@ -37,8 +37,8 @@ mod web;
 mod workspace;
 
 use commands::{
-    apply_plan_document, claim_name, exec_dependency, exec_gate, exec_note, exec_plan, exec_release, exec_spec,
-    exec_task, run_capture, run_plan, run_spec, run_task,
+    apply_plan_document, claim_name, default_capture_source, exec_dependency, exec_gate, exec_note, exec_plan,
+    exec_release, exec_spec, exec_task, run_capture, run_plan, run_spec, run_task,
 };
 pub use error::ApplicationError;
 use error::{CResult, CommandError};
@@ -66,6 +66,12 @@ impl Warning {
     /// A sync or export that did not run, while the command went on.
     fn workspace_sync(message: String) -> Self {
         Self { code: "workspace_sync", message }
+    }
+
+    /// A `capture create` without `--from` whose `ARCL_AGENT` holds several
+    /// in-progress claims, so the capture has no source.
+    fn capture_source(message: String) -> Self {
+        Self { code: "capture_source", message }
     }
 
     /// A blocker rule violation a workspace import loaded because it did not
@@ -179,7 +185,10 @@ fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Wa
             let initialization = initialize(&start, workspace).map_err(ApplicationError::from_init)?;
             write_output(renderer.render_init(&initialization.root, initialization.workspace_enabled)?)
         }
-        Some(Command::Capture { command }) => write_output(run_capture(command, renderer)?),
+        Some(Command::Capture { command }) => {
+            let command = default_capture_source(command, warnings).map_err(ApplicationError::from_command)?;
+            write_output(run_capture(command, renderer)?)
+        }
         Some(Command::Release { command }) => exec_release(command, renderer),
         Some(Command::Spec { command }) => exec_spec(command, renderer),
         Some(Command::Plan { command }) => exec_plan(command, renderer),

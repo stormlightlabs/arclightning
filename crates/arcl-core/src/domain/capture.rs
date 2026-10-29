@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{CaptureId, DomainError, ProjectId, validate_title};
+use super::{CaptureId, DomainError, ProjectId, TaskId, validate_title};
 
 /// The lifecycle of an inbox capture.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -73,12 +73,25 @@ pub struct Capture {
     pub status: CaptureStatus,
     /// RFC 3339 creation timestamp supplied by SQLite.
     pub created_at: String,
+    /// The task being worked on when this capture was filed, if any. It
+    /// stays after promotion, so the promoted record reaches it through the
+    /// capture's promotion link. JSON leaves it out when there is none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_task_id: Option<TaskId>,
 }
 
 impl Capture {
     /// Create a captured inbox record.
     pub fn new(project_id: ProjectId, title: String, body: String, created_at: String) -> Result<Self, DomainError> {
         validate_title(&title)?;
-        Ok(Self { id: CaptureId::new(), project_id, title, body, status: CaptureStatus::Captured, created_at })
+        Ok(Self {
+            id: CaptureId::new(),
+            project_id,
+            title,
+            body,
+            status: CaptureStatus::Captured,
+            created_at,
+            source_task_id: None,
+        })
     }
 }

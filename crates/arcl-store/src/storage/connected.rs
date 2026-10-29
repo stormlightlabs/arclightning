@@ -255,7 +255,7 @@ pub fn graph(connection: &Connection) -> Result<ConnectedGraph> {
 
 pub fn captures(connection: &Connection, project_id: ProjectId) -> Result<Vec<Capture>> {
     let mut statement = connection.prepare(
-        "SELECT id, project_id, title, body, status, created_at FROM captures
+        "SELECT id, project_id, title, body, status, created_at, source_task_id FROM captures
          WHERE project_id = ?1 ORDER BY created_at, id",
     )?;
     let rows = statement.query_map([project_id.to_string()], raw_capture)?;
@@ -265,7 +265,7 @@ pub fn captures(connection: &Connection, project_id: ProjectId) -> Result<Vec<Ca
 pub fn capture(connection: &Connection, id: CaptureId) -> Result<Option<Capture>> {
     let raw = connection
         .query_row(
-            "SELECT id, project_id, title, body, status, created_at FROM captures WHERE id = ?1",
+            "SELECT id, project_id, title, body, status, created_at, source_task_id FROM captures WHERE id = ?1",
             [id.to_string()],
             raw_capture,
         )
@@ -273,26 +273,56 @@ pub fn capture(connection: &Connection, id: CaptureId) -> Result<Option<Capture>
     raw.map(decode_capture).transpose()
 }
 
+/// Store a capture, filed from `source_task_id` when given. The source task
+/// must exist.
 pub fn create_capture(
-    connection: &mut Connection, project_id: ProjectId, title: String, body: String,
+    connection: &mut Connection, project_id: ProjectId, title: String, body: String, source_task_id: Option<TaskId>,
 ) -> Result<Capture> {
     ensure_project(connection, project_id)?;
     let tx = connection.transaction()?;
+    if let Some(task_id) = source_task_id
+        && planning_task(&tx, task_id)?.is_none()
+    {
+        return Err(StorageError::PlanningTaskNotFound { id: task_id.to_string() });
+    }
     let created_at: String = tx.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| row.get(0))?;
-    let capture = Capture::new(project_id, title, body, created_at).map_err(StorageError::InvalidCapture)?;
+    let mut capture = Capture::new(project_id, title, body, created_at).map_err(StorageError::InvalidCapture)?;
+    capture.source_task_id = source_task_id;
     tx.execute(
-        "INSERT INTO captures (id, project_id, title, body, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO captures (id, project_id, title, body, status, created_at, source_task_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             capture.id.to_string(),
             capture.project_id.to_string(),
             capture.title,
             capture.body,
             capture.status.as_str(),
-            capture.created_at
+            capture.created_at,
+            capture.source_task_id.map(|id| id.to_string())
         ],
     )?;
     tx.commit()?;
     Ok(capture)
+}
+
+/// Read the source task of the capture promoted to `record_id`, so a
+/// promoted record shows the task its capture was filed from.
+pub fn promoted_source_task(connection: &Connection, record_id: &str) -> Result<Option<TaskId>> {
+    let source: Option<String> = connection
+        .query_row(
+            "SELECT captures.source_task_id FROM capture_promotions
+             JOIN captures ON captures.id = capture_promotions.capture_id
+             WHERE capture_promotions.target_id = ?1",
+            [record_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+    source
+        .map(|value| TaskId::parse(&value))
+        .transpose()
+        .map_err(DomainError::from)
+        .map_err(StorageError::InvalidCapture)
 }
 
 /// Read capture promotion provenance as explicit typed relationships.
@@ -1206,7 +1236,9 @@ pub fn note_links(connection: &Connection, project_id: ProjectId) -> Result<Vec<
     .collect()
 }
 
-fn raw_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<(String, String, String, String, String, String)> {
+type RawCapture = (String, String, String, String, String, String, Option<String>);
+
+fn raw_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawCapture> {
     Ok((
         row.get(0)?,
         row.get(1)?,
@@ -1214,10 +1246,11 @@ fn raw_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<(String, String, Str
         row.get(3)?,
         row.get(4)?,
         row.get(5)?,
+        row.get(6)?,
     ))
 }
-fn decode_capture(raw: (String, String, String, String, String, String)) -> Result<Capture> {
-    let (id, project, title, body, status, created_at) = raw;
+fn decode_capture(raw: RawCapture) -> Result<Capture> {
+    let (id, project, title, body, status, created_at, source_task) = raw;
     let id = CaptureId::parse(&id)
         .map_err(DomainError::from)
         .map_err(StorageError::InvalidCapture)?;
@@ -1225,9 +1258,15 @@ fn decode_capture(raw: (String, String, String, String, String, String)) -> Resu
         .map_err(DomainError::from)
         .map_err(StorageError::InvalidCapture)?;
     let status = CaptureStatus::parse(&status).map_err(StorageError::InvalidCapture)?;
+    let source_task_id = source_task
+        .map(|value| TaskId::parse(&value))
+        .transpose()
+        .map_err(DomainError::from)
+        .map_err(StorageError::InvalidCapture)?;
     let mut value = Capture::new(project_id, title, body, created_at).map_err(StorageError::InvalidCapture)?;
     value.id = id;
     value.status = status;
+    value.source_task_id = source_task_id;
     Ok(value)
 }
 type RawSpec = (String, String, String, String, String, String, Option<String>);
