@@ -1363,3 +1363,127 @@ fn serve_returns_at_once_on_a_second_signal() {
     assert!(done.recv_timeout(Duration::from_secs(1)).expect("run returns"));
     assert!(started.elapsed() < SHUTDOWN_GRACE / 2, "{:?}", started.elapsed());
 }
+
+/// Reads that echo, except that `tree` waits for a release, and that count
+/// the trees that started and the GraphQL queries that ran.
+struct HeldReads {
+    release: Mutex<mpsc::Receiver<()>>,
+    trees: AtomicUsize,
+    queries: AtomicUsize,
+}
+
+impl Reads for HeldReads {
+    fn list(&self, query: &[(String, String)]) -> Reply {
+        Echo.list(query)
+    }
+    fn show(&self, id: &str) -> Reply {
+        Echo.show(id)
+    }
+    fn source(&self, id: &str) -> Reply {
+        Echo.source(id)
+    }
+    fn ready(&self, query: &[(String, String)]) -> Reply {
+        Echo.ready(query)
+    }
+    fn explain(&self, task_id: &str) -> Reply {
+        Echo.explain(task_id)
+    }
+    fn context(&self, task_id: &str) -> Reply {
+        Echo.context(task_id)
+    }
+    fn tree(&self) -> Reply {
+        self.trees.fetch_add(1, Ordering::SeqCst);
+        let _ = self.release.lock().expect("the release lock").recv();
+        Echo.tree()
+    }
+    fn work(&self) -> Reply {
+        Echo.work()
+    }
+    fn graphql(&self, request: GraphqlRequest) -> Reply {
+        self.queries.fetch_add(1, Ordering::SeqCst);
+        Echo.graphql(request)
+    }
+}
+
+/// Serve [`HeldReads`] until `signal` stops it, start a `GET /api/tree` that
+/// holds the read thread, and return the port, the token, the reads, the
+/// release for the tree, the held tree's connection, and a channel that
+/// reports when the server returns.
+fn serve_held_reads(
+    signal: impl FnMut() -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> + Send + 'static,
+) -> (
+    u16,
+    String,
+    Arc<HeldReads>,
+    mpsc::Sender<()>,
+    TcpStream,
+    mpsc::Receiver<bool>,
+) {
+    let server = Server::bind(None).expect("a server");
+    let (port, token) = (server.port(), server.gate.token.clone());
+    let (release, released) = mpsc::channel();
+    let held =
+        Arc::new(HeldReads { release: Mutex::new(released), trees: AtomicUsize::new(0), queries: AtomicUsize::new(0) });
+    let (finished, done) = mpsc::channel();
+    let reads = Arc::clone(&held);
+    thread::spawn(move || {
+        let result = server.run_until(&*reads, &Echo, signal);
+        let _ = finished.send(result.is_ok());
+    });
+    let head = format!("GET /api/tree HTTP/1.1\r\n{TOKEN_HEADER}: {token}\r\nConnection: close");
+    let running = send(port, &head, "\r\n");
+    let started = Instant::now();
+    while held.trees.load(Ordering::SeqCst) == 0 {
+        assert!(started.elapsed() < Duration::from_secs(2), "the tree never started");
+        thread::sleep(Duration::from_millis(10));
+    }
+    (port, token, held, release, running, done)
+}
+
+/// Send a `POST /graphql` and leave the connection open.
+fn send_graphql(port: u16, token: &str) -> TcpStream {
+    let body = r#"{"query": "{ work { phases { id } } }"}"#;
+    let head = format!(
+        "POST /graphql HTTP/1.1\r\n{TOKEN_HEADER}: {token}\r\nContent-Length: {}\r\nConnection: close",
+        body.len()
+    );
+    send(port, &head, &format!("\r\n{body}"))
+}
+
+#[test]
+fn serve_skips_queued_reads_whose_client_has_gone() {
+    let (stop, signal) = signal();
+    let (port, token, held, release, running, done) = serve_held_reads(signal);
+    let abandoned = (0..3).map(|_| send_graphql(port, &token)).collect::<Vec<_>>();
+    thread::sleep(Duration::from_millis(200));
+    for stream in abandoned {
+        stream.shutdown(Shutdown::Both).expect("a shutdown");
+    }
+    thread::sleep(Duration::from_millis(200));
+    let kept = send_graphql(port, &token);
+    thread::sleep(Duration::from_millis(100));
+    release.send(()).expect("a release");
+    assert!(response(running).starts_with("HTTP/1.1 200"));
+    let answered = response(kept);
+    assert!(answered.starts_with("HTTP/1.1 200"), "{answered}");
+    assert_eq!(held.queries.load(Ordering::SeqCst), 1);
+    stop.notify_one();
+    assert!(done.recv_timeout(Duration::from_secs(2)).expect("run returns"));
+}
+
+#[test]
+fn serve_answers_queued_reads_503_on_shutdown_without_running_them() {
+    let (stop, signal) = signal();
+    let (port, token, held, release, running, done) = serve_held_reads(signal);
+    let queued = send_graphql(port, &token);
+    thread::sleep(Duration::from_millis(200));
+    stop.notify_one();
+    thread::sleep(Duration::from_millis(100));
+    release.send(()).expect("a release");
+    assert!(response(running).starts_with("HTTP/1.1 200"));
+    let dropped = response(queued);
+    assert!(dropped.starts_with("HTTP/1.1 503"), "{dropped}");
+    assert!(dropped.contains("server_stopping"), "{dropped}");
+    assert_eq!(held.queries.load(Ordering::SeqCst), 0);
+    assert!(done.recv_timeout(Duration::from_secs(2)).expect("run returns"));
+}

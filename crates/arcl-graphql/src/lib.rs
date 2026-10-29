@@ -22,6 +22,11 @@ mod types;
 pub use async_graphql::{Request, Response, Variables};
 pub use query::QueryRoot;
 
+/// The longest query document, in bytes, that a query may send. A longer
+/// one is refused with the error code [`QUERY_TOO_LARGE`] before it is
+/// parsed, since the time parsing and validation take grows with it.
+pub const MAX_QUERY_BYTES: usize = 64 * 1024;
+
 /// How deep a query may nest fields, counting `{ tree { id } }` as 2. A
 /// deeper query is refused with the error code [`QUERY_TOO_DEEP`].
 pub const MAX_DEPTH: usize = 16;
@@ -36,6 +41,10 @@ pub const MAX_NODES: usize = 10_000;
 /// The most fields a query may select, counting each field once. A larger
 /// query is refused with the error code [`QUERY_TOO_COMPLEX`].
 pub const MAX_COMPLEXITY: usize = 1000;
+
+/// The `extensions.code` of a query document longer than
+/// [`MAX_QUERY_BYTES`].
+pub const QUERY_TOO_LARGE: &str = "QUERY_TOO_LARGE";
 
 /// The `extensions.code` of a query nested deeper than [`MAX_DEPTH`].
 pub const QUERY_TOO_DEEP: &str = "QUERY_TOO_DEEP";
@@ -204,10 +213,22 @@ pub fn sdl() -> String {
 
 /// Run `request` against `database` on the calling thread. A refused or
 /// failed query comes back as a response with `errors`; a limit refusal
-/// carries [`QUERY_TOO_DEEP`] or [`QUERY_TOO_COMPLEX`] as its
-/// `extensions.code`. A query that resolves more than [`MAX_NODES`] objects
+/// carries [`QUERY_TOO_LARGE`], [`QUERY_TOO_DEEP`] or [`QUERY_TOO_COMPLEX`]
+/// as its `extensions.code`. A document over [`MAX_QUERY_BYTES`] is refused
+/// without being parsed. A query that resolves more than [`MAX_NODES`] objects
 /// comes back with `null` data and the single error [`RESULT_TOO_LARGE`].
 pub fn execute(database: Database, request: Request) -> Response {
+    if request.query.len() > MAX_QUERY_BYTES {
+        let mut error = ServerError::new(
+            format!("the query is longer than {MAX_QUERY_BYTES} bytes; send a shorter query"),
+            None,
+        );
+        error
+            .extensions
+            .get_or_insert_with(Default::default)
+            .set("code", QUERY_TOO_LARGE);
+        return Response::from_errors(vec![error]);
+    }
     let reader = Arc::new(Reader::new(database));
     let mut response = block_on(schema().execute(request.data(Arc::clone(&reader))));
     #[cfg(test)]

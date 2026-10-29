@@ -77,14 +77,17 @@ impl Server {
     }
 
     /// Serve requests until Ctrl-C, then let open connections finish for up
-    /// to [`SHUTDOWN_GRACE`] and return. A second Ctrl-C returns at once.
+    /// to [`SHUTDOWN_GRACE`] and return. A second Ctrl-C ends the grace
+    /// period, and this returns once the read or mutation already running
+    /// finishes.
     ///
     /// Connections are served on a tokio runtime on its own thread. Reads run
     /// on this thread and admitted mutations on a mutation thread, each one at
-    /// a time in the order their requests are ready. After Ctrl-C, mutations
+    /// a time in the order their requests are ready. A read whose client has
+    /// gone is dropped without running. After Ctrl-C, reads and mutations
     /// that have not started are answered 503 without running; one already
-    /// running finishes before this returns, so its write and export stay
-    /// together.
+    /// running finishes before this returns, so a mutation's write and export
+    /// stay together.
     pub fn run(self, reads: &dyn Reads, mutations: &(dyn Mutations + Sync)) -> Result<(), ServeError> {
         self.run_until(reads, mutations, || async {
             // Without a Ctrl-C handler, the default one ends the process.
@@ -115,6 +118,7 @@ impl Server {
             reads: reads_queue,
             writes: writes_queue,
         });
+        let reads_stopping = Arc::clone(&stopping);
         thread::scope(|scope| {
             scope.spawn(move || {
                 for Job { work: (write, body), reply } in write_jobs {
@@ -131,7 +135,18 @@ impl Server {
             // when this thread ends, which ends both job loops.
             let serving = scope.spawn(move || runtime.block_on(accept(listener, shared, limits, signal)));
             for Job { work: (route, body), reply } in read_jobs {
-                let _ = reply.send(guarded(|| dispatch(route, &body, reads)));
+                // A client that closed its connection no longer waits for
+                // the answer, so its read, such as a slow GraphQL query,
+                // does not hold up the reads queued behind it.
+                if reply.is_closed() {
+                    continue;
+                }
+                let answer = if reads_stopping.load(Ordering::SeqCst) {
+                    Answer::json(Reply::stopping())
+                } else {
+                    guarded(|| dispatch(route, &body, reads))
+                };
+                let _ = reply.send(answer);
             }
             serving.join().unwrap_or_else(|panic| panic::resume_unwind(panic))
         })
@@ -143,7 +158,8 @@ impl Server {
 struct Shared {
     gate: Gate,
     body_deadline: Duration,
-    /// Set when the server starts shutting down; mutations no longer run.
+    /// Set when the server starts shutting down; reads and mutations that
+    /// have not started no longer run.
     stopping: Arc<AtomicBool>,
     reads: mpsc::Sender<Job<(Route, Vec<u8>)>>,
     writes: mpsc::Sender<Job<(Write, Vec<u8>)>>,

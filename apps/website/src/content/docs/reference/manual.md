@@ -484,6 +484,10 @@ stdout holds the GraphQL response: `data`, and `errors` when there are any.
 A response with errors exits `3`. Each error from a resolver has an
 `extensions.code` of `NOT_FOUND`, `INVALID_REQUEST`, `CONFLICT` or `INTERNAL`.
 
+A query document may be at most 64 KiB. A longer one is refused before it is
+parsed: `data` is `null` and the error's `extensions.code` is
+`QUERY_TOO_LARGE`.
+
 A query may nest fields at most 16 deep, counting `{ tree { id } }` as 2, and
 select at most 1000 fields, counting each field once. A query over either limit
 runs nothing: `data` is `null` and the error's `extensions.code` is
@@ -510,9 +514,11 @@ those on other `127.0.0.1` ports, from sending one. Responses carry no CORS
 headers. The page's Content-Security-Policy runs only the app's own script and
 loads images only from the server or `data:` URLs, so Markdown cannot pull
 images from other hosts. The server runs until Ctrl-C, then gives open
-requests up to 5 seconds to finish and exits. A change that has not started
-by Ctrl-C gets status 503 and does not run; one already running finishes. A
-second Ctrl-C exits at once.
+requests up to 5 seconds to finish and exits. A read or change that has not
+started by Ctrl-C gets status 503 and does not run; one already running
+finishes. A second Ctrl-C ends the wait for open requests, and the server exits
+once the read or change already running finishes. A read whose client
+disconnects before it starts does not run.
 
 The server closes a connection that takes more than 5 seconds to send a request
 head or idles that long between requests. It also closes one whose client reads

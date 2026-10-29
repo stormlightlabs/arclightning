@@ -34,10 +34,13 @@
 //! [`Reads`] and [`Mutations`] stay synchronous. Reads, GraphQL queries
 //! included, run one at a time on the thread that called [`Server::run`],
 //! and mutations one at a time on their own thread, so a mutation that waits
-//! for a lock never holds up reads and page loads. Ctrl-C stops accepting connections, lets open ones finish
-//! for up to [`SHUTDOWN_GRACE`], and returns; a second Ctrl-C returns at
-//! once. After Ctrl-C, mutations that have not started get 503 without
-//! running, and one already running finishes before the server returns.
+//! for a lock never holds up reads and page loads. A read whose client
+//! closed its connection while it waited in line is dropped without running.
+//! Ctrl-C stops accepting connections, lets open ones finish for up to
+//! [`SHUTDOWN_GRACE`], and returns; a second Ctrl-C ends the grace period.
+//! After Ctrl-C, reads and mutations that have not started get 503 without
+//! running, and the read or mutation already running finishes before the
+//! server returns.
 //!
 //! The page's Content-Security-Policy runs only the app's own inline script,
 //! by hash, and lets it load images and fonts from itself or `data:` URLs and
@@ -93,7 +96,9 @@
 //! `POST /graphql` takes `{"query", "variables", "operationName"}` (see
 //! [`GraphqlRequest`]) and answers status 200 with the GraphQL response
 //! `arcl query` prints for the same query: `data`, and `errors` when there
-//! are any, a query over a limit included. A body that is not such an object,
+//! are any, a query over a limit included. `arcl query` refuses a query
+//! document over 64 KiB with the code `QUERY_TOO_LARGE` before parsing it,
+//! so `/graphql` does too. A body that is not such an object,
 //! or whose `variables` is not an object, gets `invalid_request` with status
 //! 400, as a malformed mutation body does.
 //!
