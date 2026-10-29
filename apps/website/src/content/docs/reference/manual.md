@@ -468,7 +468,9 @@ The root fields are `record`, `capture`, `release`, `spec`, `plan`, `phase`,
 `task`, `note` and `gate`, each by full or short ID; `records`, with the
 filters `arcl list` takes; `ready`, with the filters `arcl ready` takes;
 `tree`, from an optional `root`, with `all`; `work`; `context(task:)`; and
-`source(id:)`, a record's workspace file and its `revision`. A task's
+`source(id:)`, a record's workspace file and its `revision`. Like
+`arcl show`, `record` also takes a gate ID, so it returns a union: select
+fields with `... on Record { title }` or `... on Gate { target }`. A task's
 `readiness`, `blockers`, `inheritedBlockers`, `gates` and `notes` come from
 the same view as `arcl explain`. IDs in responses are full IDs, and every
 record also has `shortId`. Statuses, kinds and priorities are the strings

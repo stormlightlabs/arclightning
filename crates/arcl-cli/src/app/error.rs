@@ -49,6 +49,17 @@ impl ApplicationError {
         Self { message, exit_code, lock_busy: false }
     }
 
+    /// A GraphQL response with `count` errors, which stdout already holds.
+    /// It exits 3, as an invalid request does.
+    pub(super) fn query_errors(count: usize) -> Self {
+        let errors = if count == 1 { "error" } else { "errors" };
+        Self {
+            message: format!("the query returned {count} GraphQL {errors}; see `errors` on stdout"),
+            exit_code: 3,
+            lock_busy: false,
+        }
+    }
+
     pub(super) fn from_command<E>(error: E) -> Self
     where
         E: Into<CommandError>,
@@ -161,9 +172,6 @@ pub(super) enum CommandError {
     ReadQuery { path: PathBuf, source: io::Error },
     #[error("invalid query input: {message}")]
     InvalidQuery { message: String },
-    /// A GraphQL response with errors, which stdout already holds.
-    #[error("the query returned {count} GraphQL error(s); stdout holds the response")]
-    QueryErrors { count: usize },
     #[error("`--claim` has no name; pass one, set `ARCL_AGENT`, or set Git's `user.name`")]
     NoClaimName,
     #[error("database or graph integrity check failed: {message}")]
@@ -260,7 +268,6 @@ impl CommandError {
             | Self::InvalidStdin
             | Self::InvalidFilter { .. }
             | Self::InvalidQuery { .. }
-            | Self::QueryErrors { .. }
             | Self::NoClaimName
             | Self::Integrity { .. }
             | Self::StdinIsTerminal

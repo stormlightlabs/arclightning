@@ -88,22 +88,30 @@ pub(super) fn show_record(database: &Database, id: &str, renderer: &Renderer) ->
 }
 
 /// `arcl list`: the records `args` filters, with full IDs.
+///
+/// Filters are checked in a fixed order: the kind, then priorities, then
+/// what the kind allows and the statuses, then the record IDs.
 pub(super) fn list_connected(database: &Database, args: ListArgs) -> CResult<Vec<ConnectedSummary>> {
-    let filter = RecordFilter {
+    RecordFilter { kind: args.kind.clone(), ..RecordFilter::default() }
+        .validate()
+        .map_err(filter_error)?;
+    let mut filter = RecordFilter {
         priorities: args
             .priority
             .iter()
             .map(|value| TaskPriority::parse(value))
             .collect::<Result<Vec<_>, _>>()?,
-        release_id: parse_optional_id::<ReleaseId>(args.release)?,
-        spec_id: parse_optional_id::<SpecId>(args.spec)?,
-        plan_id: parse_optional_id::<PlanId>(args.plan)?,
-        phase_id: parse_optional_id::<PhaseId>(args.phase)?,
-        parent_id: parse_optional_id::<TaskId>(args.parent)?,
         assignee: args.assignee.map(|name| name.trim().to_owned()),
         kind: args.kind,
         statuses: args.status,
+        ..RecordFilter::default()
     };
+    filter.validate().map_err(filter_error)?;
+    filter.release_id = parse_optional_id::<ReleaseId>(args.release)?;
+    filter.spec_id = parse_optional_id::<SpecId>(args.spec)?;
+    filter.plan_id = parse_optional_id::<PlanId>(args.plan)?;
+    filter.phase_id = parse_optional_id::<PhaseId>(args.phase)?;
+    filter.parent_id = parse_optional_id::<TaskId>(args.parent)?;
     let records = database.list_records(&filter).map_err(filter_error)?;
     Ok(records
         .into_iter()

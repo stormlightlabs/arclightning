@@ -2,6 +2,7 @@
 //! runs. Resolvers read through [`Database`] and the same read models as
 //! `arcl show`, `list`, `ready`, `explain`, `context` and `tree`.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::pin;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -11,7 +12,7 @@ use std::thread::{self, Thread};
 use async_graphql::{EmptyMutation, EmptySubscription, ErrorExtensions, Schema, ServerError};
 
 use arcl_core::prelude::*;
-use arcl_repo::workspace::{RecordSource, record_source};
+use arcl_repo::workspace::{RecordSource, record_sources};
 use arcl_store::prelude::*;
 
 mod query;
@@ -38,12 +39,14 @@ pub const QUERY_TOO_COMPLEX: &str = "QUERY_TOO_COMPLEX";
 /// The schema type: queries only.
 pub type ArclSchema = Schema<QueryRoot, EmptyMutation, EmptySubscription>;
 
-/// The database a query reads, with the graph and short IDs it reads at most
-/// once per query.
+/// The database a query reads, with the graph, short IDs, workspace files and
+/// planning records it reads at most once per query.
 struct Reader {
     database: Mutex<Database>,
     graph: OnceLock<ConnectedGraph>,
     short_ids: OnceLock<ShortIds>,
+    sources: OnceLock<HashMap<String, RecordSource>>,
+    planning: OnceLock<PlanningData>,
 }
 
 impl Reader {
@@ -85,7 +88,35 @@ impl Reader {
 
     /// The workspace file of the record `id`, or `None` when there is none.
     fn source(&self, id: &str) -> async_graphql::Result<Option<RecordSource>> {
-        record_source(self.graph()?, id).map_err(|error| coded(error.to_string(), "INTERNAL"))
+        Ok(self.sources()?.get(id).cloned())
+    }
+
+    /// Every record's workspace file, by ID, rendered on first use.
+    fn sources(&self) -> async_graphql::Result<&HashMap<String, RecordSource>> {
+        if let Some(sources) = self.sources.get() {
+            return Ok(sources);
+        }
+        #[cfg(test)]
+        tests::count_load(tests::Load::Sources);
+        let sources = record_sources(self.graph()?).map_err(|error| coded(error.to_string(), "INTERNAL"))?;
+        Ok(self.sources.get_or_init(|| sources))
+    }
+
+    /// The `arcl explain` view of the task `id`.
+    fn task_view(&self, id: TaskId) -> async_graphql::Result<PlanningTaskView> {
+        let planning = self.planning()?;
+        self.read(|database| database.planning_task_view_in(planning, id))
+    }
+
+    /// The project's planning records, loaded on first use.
+    fn planning(&self) -> async_graphql::Result<&PlanningData> {
+        if let Some(planning) = self.planning.get() {
+            return Ok(planning);
+        }
+        #[cfg(test)]
+        tests::count_load(tests::Load::Planning);
+        let planning = self.read(Database::planning_data)?;
+        Ok(self.planning.get_or_init(|| planning))
     }
 }
 
@@ -107,7 +138,13 @@ pub fn sdl() -> String {
 /// carries [`QUERY_TOO_DEEP`] or [`QUERY_TOO_COMPLEX`] as its
 /// `extensions.code`.
 pub fn execute(database: Database, request: Request) -> Response {
-    let reader = Reader { database: Mutex::new(database), graph: OnceLock::new(), short_ids: OnceLock::new() };
+    let reader = Reader {
+        database: Mutex::new(database),
+        graph: OnceLock::new(),
+        short_ids: OnceLock::new(),
+        sources: OnceLock::new(),
+        planning: OnceLock::new(),
+    };
     let mut response = block_on(schema().execute(request.data(reader)));
     for error in &mut response.errors {
         code_limit_error(error);

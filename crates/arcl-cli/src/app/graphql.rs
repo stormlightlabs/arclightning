@@ -27,7 +27,7 @@ pub(super) fn exec_query(input: QueryInput) -> anyhow::Result<()> {
     if response.errors.is_empty() {
         Ok(())
     } else {
-        Err(ApplicationError::from_command(CommandError::QueryErrors { count: response.errors.len() }).into())
+        Err(ApplicationError::query_errors(response.errors.len()).into())
     }
 }
 

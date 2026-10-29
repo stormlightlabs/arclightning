@@ -1,10 +1,37 @@
+use std::cell::Cell;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use super::*;
+use arcl_repo::workspace::record_source;
 use arcl_store::{RecordFilter, list_records};
+
+/// A read a [`Reader`] makes at most once per query.
+#[derive(Clone, Copy)]
+pub(crate) enum Load {
+    /// Rendering every record's workspace file.
+    Sources,
+    /// Loading the planning records task views read.
+    Planning,
+}
+
+thread_local! {
+    /// How many times this thread made each [`Load`]. A query runs on the
+    /// thread that calls [`execute`].
+    static LOADS: Cell<[usize; 2]> = const { Cell::new([0, 0]) };
+}
+
+/// Count one `load` on this thread.
+pub(crate) fn count_load(load: Load) {
+    LOADS.with(|loads| {
+        let mut counts = loads.get();
+        counts[load as usize] += 1;
+        loads.set(counts);
+    });
+}
 
 /// The records of the fixture project.
 struct Fixture {
@@ -128,10 +155,136 @@ fn ids_resolve_from_short_ids() {
     let fixture = Fixture::new();
     let full = fixture.task.id.to_string();
     let short = full[full.len() - 6..].to_owned();
-    let data = fixture.data(&format!(r#"{{ record(id: "{short}") {{ id kind shortId }} }}"#));
+    let data = fixture.data(&format!(
+        r#"{{ record(id: "{short}") {{ ... on Record {{ id kind shortId }} }} }}"#
+    ));
     assert_eq!(data["record"]["id"], json!(full));
     assert_eq!(data["record"]["kind"], json!("task"));
     assert!(full.ends_with(data["record"]["shortId"].as_str().expect("short ID")));
+}
+
+#[test]
+fn record_takes_a_gate_id_as_arcl_show_does() {
+    let fixture = Fixture::new();
+    let full = fixture.gate.id.to_string();
+    let short = fixture
+        .database
+        .short_ids()
+        .expect("short IDs read")
+        .short(&full)
+        .to_owned();
+    for id in [&full, &short] {
+        let data = fixture.data(&format!(
+            r#"{{ record(id: "{id}") {{ __typename ... on Gate {{ id kind target task {{ id }} }} ... on Record {{ title }} }} }}"#
+        ));
+        assert_eq!(
+            data["record"],
+            json!({
+                "__typename": "Gate",
+                "id": full,
+                "kind": "date",
+                "target": "2099-01-01",
+                "task": { "id": fixture.task.id.to_string() },
+            })
+        );
+    }
+}
+
+#[test]
+fn a_query_renders_the_workspace_and_loads_the_planning_records_once() {
+    let mut fixture = Fixture::new();
+    let project_id = fixture.database.project().expect("project reads").id;
+    let mut previous = fixture.task.id;
+    for index in 0..150 {
+        let task = fixture
+            .database
+            .create_planning_task(PlanningTaskCreate {
+                project_id,
+                spec_id: None,
+                plan_id: None,
+                phase_id: Some(fixture.phase.id),
+                parent_id: None,
+                title: format!("Task {index}"),
+                body: String::new(),
+                priority: TaskPriority::Normal,
+                position: index + 3,
+            })
+            .expect("task creates");
+        fixture
+            .database
+            .add_planning_dependency(task.id, previous)
+            .expect("dependency adds");
+        previous = task.id;
+        fixture
+            .database
+            .create_capture(format!("Capture {index}"), String::new())
+            .expect("capture creates");
+    }
+    let query = r#"{
+        records { id source { revision } }
+        tasks: records(kind: "task") {
+            ... on Task { readiness { ready } blockers { task { id } } dependents { id } context { omittedNotes } }
+        }
+    }"#;
+    LOADS.with(|loads| loads.set([0, 0]));
+    let started = Instant::now();
+    let data = fixture.data(query);
+    let elapsed = started.elapsed();
+    assert_eq!(LOADS.with(Cell::get), [1, 1]);
+    assert_eq!(data["records"].as_array().expect("records").len(), 308);
+    assert_eq!(data["tasks"].as_array().expect("tasks").len(), 152);
+    // Before the reads were shared, this query took about 2 s in a debug build.
+    assert!(elapsed < Duration::from_secs(2), "the query took {elapsed:?}");
+
+    let task = fixture.task.id.to_string();
+    let view = fixture
+        .database
+        .planning_task_view(fixture.task.id)
+        .expect("view reads");
+    let context = fixture
+        .database
+        .planning_context(fixture.task.id)
+        .expect("context reads");
+    let source = record_source(&fixture.database.connected_graph().expect("graph reads"), &task)
+        .expect("source reads")
+        .expect("source exists");
+    let data = fixture.data(&format!(
+        r#"{{ task(id: "{task}") {{
+            source {{ revision content }}
+            readiness {{ reasons {{ message }} }}
+            dependents {{ id }}
+            context {{ readiness {{ ready }} completionEvidence {{ task {{ id }} }} notes {{ text }} }}
+        }} }}"#
+    ));
+    let task = &data["task"];
+    assert_eq!(
+        task["source"],
+        json!({ "revision": source.revision, "content": source.content })
+    );
+    let messages = task["readiness"]["reasons"]
+        .as_array()
+        .expect("reasons")
+        .iter()
+        .map(|reason| reason["message"].as_str().expect("message").to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(messages, view.readiness.messages());
+    let dependents = view
+        .dependents
+        .iter()
+        .map(|task| json!({ "id": task.id.to_string() }))
+        .collect::<Vec<_>>();
+    assert_eq!(task["dependents"], json!(dependents));
+    assert_eq!(task["context"]["readiness"]["ready"], json!(context.readiness.ready));
+    assert_eq!(
+        task["context"]["notes"],
+        json!(
+            context
+                .notes
+                .iter()
+                .map(|note| json!({ "text": note.text }))
+                .collect::<Vec<_>>()
+        )
+    );
 }
 
 #[test]

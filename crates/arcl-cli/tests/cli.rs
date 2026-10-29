@@ -5948,6 +5948,31 @@ fn list_filters_tasks_by_assignee() {
 }
 
 #[test]
+fn list_reports_an_unknown_kind_before_other_filter_errors() {
+    let directory = initialized_directory();
+    for extra in [
+        &["--priority", "someday"][..],
+        &["--status", "waiting"][..],
+        &["--spec", "arcl-x-1"][..],
+        &["--parent", "nope"][..],
+    ] {
+        let output = arcl_in(directory.path())
+            .args(["list", "--kind", "widget"])
+            .args(extra)
+            .output()
+            .expect("list runs");
+        assert_eq!(output.status.code(), Some(3), "{extra:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("unknown kind `widget`"), "{extra:?}: {stderr}");
+    }
+    let output = arcl_in(directory.path())
+        .args(["list", "--kind", "task", "--status", "waiting", "--spec", "arcl-x-1"])
+        .output()
+        .expect("list runs");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unknown status `waiting`"));
+}
+
+#[test]
 fn a_new_workspace_starts_at_version_one_until_a_claim() {
     let directory = tempdir().expect("temporary directory can be created");
     run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
@@ -7807,6 +7832,12 @@ fn query_with_errors_prints_them_and_exits_3() {
     let deep = format!("{{ tree {{ {}id{} }} }}", "children { ".repeat(20), " }".repeat(20));
     let output = arcl_in(path).args(["query", &deep]).output().expect("arcl query runs");
     assert_eq!(output.status.code(), Some(3));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("the query returned 1 GraphQL error; see `errors` on stdout"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("invalid project or record"), "{stderr}");
     let response = json(&output.stdout);
     assert_eq!(response["data"], Value::Null);
     assert_eq!(response["errors"][0]["extensions"]["code"], "QUERY_TOO_DEEP");

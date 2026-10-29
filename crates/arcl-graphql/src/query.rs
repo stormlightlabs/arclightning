@@ -3,8 +3,8 @@
 use async_graphql::{Context, ID, Object};
 
 use super::types::{
-    CaptureNode, ContextNode, GateNode, NoteNode, PhaseNode, PlanNode, RecordNode, ReleaseNode, SourceNode, SpecNode,
-    TaskNode, TreeNode, WorkNode, reader,
+    CaptureNode, ContextNode, GateNode, NoteNode, PhaseNode, PlanNode, RecordNode, RecordOrGate, ReleaseNode,
+    SourceNode, SpecNode, TaskNode, TreeNode, WorkNode, reader,
 };
 use super::{Reader, coded};
 use arcl_core::prelude::*;
@@ -15,12 +15,19 @@ pub struct QueryRoot;
 
 #[Object(name = "Query")]
 impl QueryRoot {
-    /// The record `id` names, as `arcl show` reads it.
-    async fn record(&self, ctx: &Context<'_>, id: ID) -> async_graphql::Result<Option<RecordNode>> {
+    /// The record or gate `id` names, as `arcl show` reads it. Select fields
+    /// with `... on Record` and `... on Gate`.
+    async fn record(&self, ctx: &Context<'_>, id: ID) -> async_graphql::Result<Option<RecordOrGate>> {
         let reader = reader(ctx);
         let id = reader.resolve(&id, None)?;
+        if id.starts_with(GateId::PREFIX) {
+            let gate = reader.parse::<GateId>(&id)?;
+            return Ok(Some(RecordOrGate::Gate(GateNode(
+                reader.read(|database| database.gate(gate))?,
+            ))));
+        }
         RecordNode::find(reader.graph()?, &id)
-            .map(Some)
+            .map(|record| Some(record.into()))
             .ok_or_else(|| not_found(&id))
     }
 
@@ -167,9 +174,7 @@ impl QueryRoot {
     async fn context(&self, ctx: &Context<'_>, task: ID) -> async_graphql::Result<Option<ContextNode>> {
         let reader = reader(ctx);
         let id = reader.parse::<TaskId>(&task)?;
-        Ok(Some(ContextNode(
-            reader.read(|database| database.planning_context(id))?,
-        )))
+        Ok(Some(ContextNode(PlanningContext::from_view(reader.task_view(id)?))))
     }
 
     /// The workspace file of the record `id` names, with its revision.

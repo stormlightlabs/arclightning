@@ -8,7 +8,7 @@
 //! file it was edited from, and it must leave alone the fields that only a
 //! command changes; see [`edit_record`].
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
@@ -143,6 +143,25 @@ pub fn source_revision(content: &[u8]) -> String {
 pub fn record_source(graph: &ConnectedGraph, id: &str) -> Result<Option<RecordSource>, RecordEditError> {
     let files = project_graph(graph)?;
     Ok(find(&files, id).and_then(|file| RecordSource::from_file(id, file)))
+}
+
+/// Return the canonical file of every record in `graph`, by record ID, from
+/// one rendering of the workspace. Each entry equals what [`record_source`]
+/// returns for that ID.
+pub fn record_sources(graph: &ConnectedGraph) -> Result<HashMap<String, RecordSource>, RecordEditError> {
+    let files = project_graph(graph)?;
+    let mut seen = HashSet::new();
+    let mut sources = HashMap::new();
+    // The first file with an ID answers for it, as `find` does.
+    for file in &files {
+        let Some(id) = record_file_id(file) else { continue };
+        if seen.insert(id)
+            && let Some(source) = RecordSource::from_file(id, file)
+        {
+            sources.insert(id.to_owned(), source);
+        }
+    }
+    Ok(sources)
 }
 
 /// Replace the record `id` with `content`, a complete record file, when the
@@ -300,9 +319,16 @@ fn command_owned_change(before: &WorkspaceRecord, after: &WorkspaceRecord) -> Op
 
 /// The record file whose name is `id`, leaving out `manifest.toml`.
 fn find<'a>(files: &'a [WorkspaceFile], id: &str) -> Option<&'a WorkspaceFile> {
-    files.iter().find(|file| {
-        file.path.parent() != Some(Path::new("")) && file.path.file_stem().and_then(|stem| stem.to_str()) == Some(id)
-    })
+    files.iter().find(|file| record_file_id(file) == Some(id))
+}
+
+/// The record ID a workspace file holds: its file stem, for a file in a
+/// record directory.
+fn record_file_id(file: &WorkspaceFile) -> Option<&str> {
+    if file.path.parent() == Some(Path::new("")) {
+        return None;
+    }
+    file.path.file_stem().and_then(|stem| stem.to_str())
 }
 
 #[cfg(test)]

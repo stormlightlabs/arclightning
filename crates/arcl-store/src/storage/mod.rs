@@ -822,6 +822,19 @@ impl Database {
         connected::planning_task_view(&self.connection, id)
     }
 
+    /// Load the project's planning records once, to build many task views
+    /// with [`Database::planning_task_view_in`].
+    pub fn planning_data(&self) -> Result<PlanningData> {
+        let project = self.project()?;
+        connected::planning_data(&self.connection, project.id)
+    }
+
+    /// Build the view [`Database::planning_task_view`] builds, from planning
+    /// records `data` already holds.
+    pub fn planning_task_view_in(&self, data: &PlanningData, id: TaskId) -> Result<PlanningTaskView> {
+        connected::planning_task_view_in(&self.connection, data, id)
+    }
+
     /// Read every connected-model task with its readiness and effective
     /// phase, and every phase, in one pass.
     pub fn planning_work(&self) -> Result<PlanningWork> {

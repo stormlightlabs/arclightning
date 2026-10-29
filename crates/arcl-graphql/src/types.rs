@@ -3,7 +3,7 @@
 
 use std::sync::OnceLock;
 
-use async_graphql::{Context, ID, Interface, Object, SimpleObject};
+use async_graphql::{Context, ID, Interface, Object, SimpleObject, Union};
 
 use super::Reader;
 use arcl_core::prelude::*;
@@ -108,6 +108,36 @@ impl RecordNode {
             .iter()
             .filter_map(|summary| Self::find(graph, &summary.id))
             .collect())
+    }
+}
+
+/// A record or a gate, which `arcl show` shows by ID alike. A gate is not a
+/// `Record`: it has no title or workspace file, and its `kind` is the
+/// gate kind, such as `pr`.
+#[derive(Union)]
+#[graphql(name = "RecordOrGate")]
+pub enum RecordOrGate {
+    Capture(CaptureNode),
+    Release(ReleaseNode),
+    Spec(SpecNode),
+    Plan(PlanNode),
+    Phase(PhaseNode),
+    Task(TaskNode),
+    Note(NoteNode),
+    Gate(GateNode),
+}
+
+impl From<RecordNode> for RecordOrGate {
+    fn from(record: RecordNode) -> Self {
+        match record {
+            RecordNode::Capture(node) => Self::Capture(node),
+            RecordNode::Release(node) => Self::Release(node),
+            RecordNode::Spec(node) => Self::Spec(node),
+            RecordNode::Plan(node) => Self::Plan(node),
+            RecordNode::Phase(node) => Self::Phase(node),
+            RecordNode::Task(node) => Self::Task(node),
+            RecordNode::Note(node) => Self::Note(node),
+        }
     }
 }
 
@@ -385,7 +415,7 @@ impl TaskNode {
         if let Some(view) = self.view.get() {
             return Ok(view);
         }
-        let view = reader(ctx).read(|database| database.planning_task_view(self.task.id))?;
+        let view = reader(ctx).task_view(self.task.id)?;
         Ok(self.view.get_or_init(|| Box::new(view)))
     }
 }
@@ -492,8 +522,7 @@ impl TaskNode {
     }
     /// The task's context packet, as `arcl context` prints it.
     async fn context(&self, ctx: &Context<'_>) -> async_graphql::Result<ContextNode> {
-        let context = reader(ctx).read(|database| database.planning_context(self.task.id))?;
-        Ok(ContextNode(context))
+        Ok(ContextNode(PlanningContext::from_view(self.view(ctx)?.clone())))
     }
 }
 

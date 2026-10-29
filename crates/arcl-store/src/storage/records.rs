@@ -60,8 +60,8 @@ impl RecordFilter {
 
     /// Refuse an unknown kind or status, a status the kind does not have, and
     /// a task-only filter on another kind, with
-    /// [`StorageError::InvalidFilter`].
-    fn validate(&self) -> Result<()> {
+    /// [`StorageError::InvalidFilter`]. [`list_records`] runs it first.
+    pub fn validate(&self) -> Result<()> {
         let invalid = |message: String| Err(StorageError::InvalidFilter { message });
         if let Some(kind) = &self.kind
             && !RECORD_KINDS.contains(&kind.as_str())

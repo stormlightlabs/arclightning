@@ -144,9 +144,10 @@ type Plan implements Record {
 
 type Query {
 	"""
-	The record `id` names, as `arcl show` reads it.
+	The record or gate `id` names, as `arcl show` reads it. Select fields
+	with `... on Record` and `... on Gate`.
 	"""
-	record(id: ID!): Record
+	record(id: ID!): RecordOrGate
 	"""
 	The capture `id` names.
 	"""
@@ -346,6 +347,13 @@ interface Record {
 	"""
 	source: Source
 }
+
+"""
+A record or a gate, which `arcl show` shows by ID alike. A gate is not a
+`Record`: it has no title or workspace file, and its `kind` is the
+gate kind, such as `pr`.
+"""
+union RecordOrGate = Capture | Release | Spec | Plan | Phase | Task | Note | Gate
 
 type Release implements Record {
 	id: ID!
