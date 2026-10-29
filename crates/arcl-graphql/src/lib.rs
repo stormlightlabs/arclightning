@@ -84,14 +84,7 @@ impl Reader {
     /// call fails, every later call fails too, so the rest of the query
     /// stops at its next object.
     fn admit(&self, count: usize) -> async_graphql::Result<()> {
-        let admitted = !self.refused.load(Ordering::Relaxed)
-            && self
-                .nodes
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |nodes| {
-                    nodes.checked_add(count).filter(|total| *total <= MAX_NODES)
-                })
-                .is_ok();
-        if admitted {
+        if !self.refused.load(Ordering::Relaxed) && self.add_nodes(count) {
             return Ok(());
         }
         self.refused.store(true, Ordering::Relaxed);
@@ -99,6 +92,21 @@ impl Reader {
             format!("the query resolves more than {MAX_NODES} objects; select fewer nested lists"),
             RESULT_TOO_LARGE,
         ))
+    }
+
+    /// Add `count` to the resolved objects unless the total would pass
+    /// [`MAX_NODES`]. Returns whether it was added.
+    fn add_nodes(&self, count: usize) -> bool {
+        let mut nodes = self.nodes.load(Ordering::Relaxed);
+        loop {
+            let Some(total) = nodes.checked_add(count).filter(|total| *total <= MAX_NODES) else {
+                return false;
+            };
+            match self.nodes.compare_exchange_weak(nodes, total, Ordering::Relaxed, Ordering::Relaxed) {
+                Ok(_) => return true,
+                Err(current) => nodes = current,
+            }
+        }
     }
 
     /// Run `read` against the database.
