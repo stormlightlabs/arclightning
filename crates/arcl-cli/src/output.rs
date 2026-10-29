@@ -21,10 +21,7 @@ use arcl_store::{
     CheckReport, PlanApplyResult, PlanDiff, PlanningCompletion, PlanningContext, PlanningTaskView, PlanningWork,
 };
 
-/// The record kinds human `arcl tree` output groups under a heading at the
-/// top level, with each heading, in the order the sections print. They follow
-/// the specs and the tasks outside any spec.
-pub const TREE_SECTIONS: [(&str, &str); 3] = [("capture", "Inbox"), ("note", "Notes"), ("release", "Releases")];
+pub use arcl_store::{TREE_SECTIONS, TreeStatus, tree_section};
 
 /// The most tasks each `arcl prime` list shows. The rest are counted in
 /// [`PrimeList::more`].
@@ -159,21 +156,6 @@ impl SkillFileStatus {
             Self::Changed => "changed",
         }
     }
-}
-
-/// The status a tree node's mark is computed from: the record's stored
-/// status, with readiness for tasks and started work for containers.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TreeStatus {
-    /// A task, and whether it is ready to start.
-    Task { status: TaskStatus, ready: bool },
-    /// A spec, plan or phase, and whether a task under it is in progress or
-    /// completed. A release always carries `started: false`.
-    Container { status: ContainerStatus, started: bool },
-    /// A capture.
-    Capture(CaptureStatus),
-    /// A note, which has no stored status.
-    Note,
 }
 
 /// The mark at the start of each human `arcl tree` line.
@@ -1873,12 +1855,6 @@ struct ReadyPlanningData<'a> {
 #[derive(Debug, Serialize)]
 struct NextPlanningData<'a> {
     task: Option<&'a PlanningTask>,
-}
-
-/// The place of a top-level record `kind` in [`TREE_SECTIONS`], or `None`
-/// for the specs and tasks that print before every section.
-pub fn tree_section(kind: &str) -> Option<usize> {
-    TREE_SECTIONS.iter().position(|(section, _)| *section == kind)
 }
 
 /// Renders tree nodes for human output in `view.style`. Nodes outside

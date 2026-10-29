@@ -10,8 +10,8 @@ use arcl_core::domain::*;
 use arcl_repo::vcs::{GixVcs, Vcs, VcsError};
 use arcl_repo::workspace::*;
 use arcl_store::{
-    CaptureTaskPromotion, CaptureUpdate, ConnectedGraph, Database, NoteUpdate, PhaseUpdate, PlanUpdate,
-    PlanningReadyFilter, PlanningTaskCreate, PlanningTaskUpdate, SpecUpdate, StorageError,
+    CaptureTaskPromotion, CaptureUpdate, Database, NoteUpdate, PhaseUpdate, PlanUpdate, PlanningReadyFilter,
+    PlanningTaskCreate, PlanningTaskUpdate, RecordFilter, RecordTreeNode, SpecUpdate, StorageError,
 };
 
 use crate::{cli::*, output::*};
@@ -26,6 +26,7 @@ const WORKSPACE_DIRECTORIES: &[&str] = &["captures", "releases", "specs", "plans
 mod auto_sync;
 mod commands;
 mod error;
+mod graphql;
 mod init;
 mod prime;
 mod query;
@@ -42,6 +43,7 @@ use commands::{
 };
 pub use error::ApplicationError;
 use error::{CResult, CommandError};
+use graphql::{QueryInput, exec_query};
 use init::initialize;
 use prime::{PRIME_LOCK_WAIT, read_prime};
 use query::resolve_ready_filter;
@@ -245,6 +247,9 @@ fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Wa
                 .into_iter()
                 .next();
             write_output(renderer.render_next_planning_task(task.as_ref())?)
+        }
+        Some(Command::Query { document, file, variables, operation, schema }) => {
+            exec_query(QueryInput { document, file, variables, operation, schema })
         }
         Some(Command::Serve { port }) => exec_serve(port, renderer),
         Some(Command::Web { command }) => exec_web(command, renderer),

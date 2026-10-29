@@ -157,6 +157,13 @@ pub(super) enum CommandError {
     InvalidStdin,
     #[error("invalid list filter: {message}")]
     InvalidFilter { message: String },
+    #[error("query file `{path}` could not be read: {source}")]
+    ReadQuery { path: PathBuf, source: io::Error },
+    #[error("invalid query input: {message}")]
+    InvalidQuery { message: String },
+    /// A GraphQL response with errors, which stdout already holds.
+    #[error("the query returned {count} GraphQL error(s); stdout holds the response")]
+    QueryErrors { count: usize },
     #[error("`--claim` has no name; pass one, set `ARCL_AGENT`, or set Git's `user.name`")]
     NoClaimName,
     #[error("database or graph integrity check failed: {message}")]
@@ -234,6 +241,7 @@ impl CommandError {
             Self::ExportSync(error) => error.exit_code(),
             Self::ReadConfig { .. }
             | Self::ReadMarkdown { .. }
+            | Self::ReadQuery { .. }
             | Self::ReadStdin { .. }
             | Self::OpenDatabase { source: StorageError::Sqlite(_), .. }
             | Self::ProbeDatabase { .. }
@@ -251,6 +259,8 @@ impl CommandError {
             Self::InvalidMarkdown { .. }
             | Self::InvalidStdin
             | Self::InvalidFilter { .. }
+            | Self::InvalidQuery { .. }
+            | Self::QueryErrors { .. }
             | Self::NoClaimName
             | Self::Integrity { .. }
             | Self::StdinIsTerminal

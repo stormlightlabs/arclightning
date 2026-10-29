@@ -446,6 +446,46 @@ check.
 
 See [Inspecting Work](/guides/inspect-work/) for the query workflow and context contents.
 
+## GraphQL queries
+
+`arcl query` runs a read-only GraphQL query against the project's records and
+prints the response as JSON. It needs no server. Writes stay with the other
+commands.
+
+| Command                                                              | Purpose                                    |
+| -------------------------------------------------------------------- | ------------------------------------------ |
+| `arcl query '<document>' [--variables <JSON>] [--operation <NAME>]`  | Run a query given on the command line.     |
+| `arcl query --file <PATH> [--variables <JSON>] [--operation <NAME>]` | Run a query from a file, or `-` for stdin. |
+| `arcl query --schema`                                                | Print the schema in SDL.                   |
+
+```sh
+arcl query '{ task(id: "FXP7") { title status readiness { ready reasons { kind message } } blockers { task { id title } completed } gates { kind target status } } }'
+arcl query '{ records(kind: "task", status: ["pending"], priority: ["high"]) { id title ... on Task { phase { title } } } }'
+arcl query --file query.graphql --variables '{"id": "FXP7"}' --operation Task
+```
+
+The root fields are `record`, `capture`, `release`, `spec`, `plan`, `phase`,
+`task`, `note` and `gate`, each by full or short ID; `records`, with the
+filters `arcl list` takes; `ready`, with the filters `arcl ready` takes;
+`tree`, from an optional `root`, with `all`; `work`; `context(task:)`; and
+`source(id:)`, a record's workspace file and its `revision`. A task's
+`readiness`, `blockers`, `inheritedBlockers`, `gates` and `notes` come from
+the same view as `arcl explain`. IDs in responses are full IDs, and every
+record also has `shortId`. Statuses, kinds and priorities are the strings
+`--json` output uses, such as `in_progress`.
+
+The schema is checked in at
+[`crates/arcl-graphql/schema.graphql`](https://github.com/stormlightlabs/arclightning/blob/main/crates/arcl-graphql/schema.graphql).
+
+stdout holds the GraphQL response: `data`, and `errors` when there are any.
+A response with errors exits `3`. Each error from a resolver has an
+`extensions.code` of `NOT_FOUND`, `INVALID_REQUEST`, `CONFLICT` or `INTERNAL`.
+
+A query may nest fields at most 16 deep, counting `{ tree { id } }` as 2, and
+select at most 1000 fields, counting each field once. A query over either limit
+runs nothing: `data` is `null` and the error's `extensions.code` is
+`QUERY_TOO_DEEP` or `QUERY_TOO_COMPLEX`.
+
 ## Web app
 
 `arcl serve` serves the web app and its endpoints on `127.0.0.1`, on an

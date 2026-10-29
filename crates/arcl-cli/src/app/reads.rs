@@ -67,17 +67,7 @@ pub(super) fn read_tree(root: Option<&str>, options: TreeArgs, renderer: &Render
         .transpose()
         .map_err(ApplicationError::from_command)?;
     let database = open_database().map_err(ApplicationError::from_command)?;
-    let graph = database.connected_graph().map_err(ApplicationError::from_command)?;
-    let ready = database
-        .ready_planning_tasks()
-        .map_err(ApplicationError::from_command)?
-        .into_iter()
-        .map(|task| task.id)
-        .collect();
-    let mut nodes = connected_tree(&graph, &ready, root.as_deref(), options).map_err(ApplicationError::from_command)?;
-    if root.is_some() {
-        add_inherited_blockers(&database, &mut nodes).map_err(ApplicationError::from_command)?;
-    }
+    let mut nodes = connected_tree(&database, root.as_deref(), options).map_err(ApplicationError::from_command)?;
     let ids = display_ids(&database, renderer).map_err(ApplicationError::from_command)?;
     shorten_tree(&mut nodes, &ids);
     let view = TreeView {
@@ -88,25 +78,6 @@ pub(super) fn read_tree(root: Option<&str>, options: TreeArgs, renderer: &Render
         style: options.style,
     };
     Ok(renderer.render_connected_tree(&nodes, view)?)
-}
-
-/// Adds the open blockers a rooted tree's task inherits from its ancestors,
-/// nearest ancestor first, after its own. No ancestor line is drawn above the
-/// root to name them. Other roots, and finished tasks, are left as they are.
-fn add_inherited_blockers(database: &Database, nodes: &mut [ConnectedTreeNode]) -> CResult<()> {
-    let [root] = nodes else { return Ok(()) };
-    let finished = [TaskStatus::Completed, TaskStatus::Cancelled].map(TaskStatus::as_str);
-    if root.kind != "task" || finished.contains(&root.status.as_str()) {
-        return Ok(());
-    }
-    let view = database.planning_task_view(parse_task_id(&root.id)?)?;
-    for blocker in view.inherited_blockers.iter().filter(|blocker| !blocker.completed) {
-        let id = blocker.task.id.to_string();
-        if !root.blocked_by.contains(&id) {
-            root.blocked_by.push(id);
-        }
-    }
-    Ok(())
 }
 
 /// Replace each node's ID, and each blocker ID, with its short ID.

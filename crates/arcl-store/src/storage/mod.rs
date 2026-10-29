@@ -1,8 +1,10 @@
 mod connected;
 mod migrations;
+mod records;
 mod releases;
 
 pub use connected::*;
+pub use records::*;
 
 use std::{collections::HashMap, path::Path, time::Duration};
 
@@ -132,6 +134,10 @@ pub enum StorageError {
     /// A gate added to a completed or cancelled task.
     #[error("cannot add a gate to task `{id}` while it is `{status}`")]
     GateOnClosedTask { id: String, status: String },
+    /// A list filter with an unknown kind or status, or one that does not
+    /// apply to the kind it names. The filter comes from the request.
+    #[error("invalid list filter: {message}")]
+    InvalidFilter { message: String },
 }
 
 impl StorageError {
@@ -173,6 +179,7 @@ impl StorageError {
             | Self::RepeatedBlocker(_)
             | Self::InvalidGate(_)
             | Self::GateOnClosedTask { .. }
+            | Self::InvalidFilter { .. }
             | Self::NewerDatabase { .. }
             | Self::MigrationGap { .. } => 3,
             Self::ShortId(error) => {
@@ -820,6 +827,37 @@ impl Database {
     pub fn planning_work(&self) -> Result<PlanningWork> {
         let project = self.project()?;
         connected::planning_work(&self.connection, project.id)
+    }
+
+    /// The records `filter` matches, as [`list_records`] reads them.
+    pub fn list_records(&self, filter: &RecordFilter) -> Result<Vec<RecordSummary>> {
+        list_records(&self.connected_graph()?, filter)
+    }
+
+    /// The record tree, from the record `root` names, a full ID, or of every
+    /// record, as [`record_tree`] builds it. A rooted tree's unfinished root
+    /// task also lists the open blockers it inherits from its ancestors,
+    /// nearest ancestor first, after its own.
+    pub fn record_tree(&self, root: Option<&str>, all: bool) -> Result<Vec<RecordTreeNode>> {
+        let graph = self.connected_graph()?;
+        let ready = self.ready_planning_tasks()?.into_iter().map(|task| task.id).collect();
+        let mut nodes = record_tree(&graph, &ready, root, all)?;
+        if let (Some(_), [root]) = (root, nodes.as_mut_slice())
+            && let TreeStatus::Task {
+                status: TaskStatus::Pending | TaskStatus::InProgress | TaskStatus::Parked, ..
+            } = root.tree_status
+        {
+            let id = TaskId::parse(&root.id)
+                .map_err(|error| StorageError::InvalidPlanningTask(DomainError::InvalidId(error)))?;
+            let view = self.planning_task_view(id)?;
+            for blocker in view.inherited_blockers.iter().filter(|blocker| !blocker.completed) {
+                let id = blocker.task.id.to_string();
+                if !root.blocked_by.contains(&id) {
+                    root.blocked_by.push(id);
+                }
+            }
+        }
+        Ok(nodes)
     }
 
     /// Build the focused context packet for a connected-model task.

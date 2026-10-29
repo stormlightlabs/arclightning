@@ -65,9 +65,13 @@ pub(super) fn command_access(command: Option<&Command>) -> Access {
     match command {
         // `serve` runs until interrupted, so it must not hold the sync lock.
         None
-        | Some(Command::Init { .. } | Command::Workspace { .. } | Command::Serve { .. } | Command::Skill { .. }) => {
-            Access::Untracked
-        }
+        | Some(
+            Command::Init { .. }
+            | Command::Workspace { .. }
+            | Command::Serve { .. }
+            | Command::Skill { .. }
+            | Command::Query { schema: true, .. },
+        ) => Access::Untracked,
         Some(
             Command::Show { .. }
             | Command::List { .. }
@@ -77,7 +81,8 @@ pub(super) fn command_access(command: Option<&Command>) -> Access {
             | Command::Prime
             | Command::Check
             | Command::Ready { .. }
-            | Command::Next { start: false, .. },
+            | Command::Next { start: false, .. }
+            | Command::Query { schema: false, .. },
         ) => Access::Read,
         Some(Command::Next { start: true, .. }) => Access::Write,
         Some(Command::Capture { command }) => {

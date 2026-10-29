@@ -1,0 +1,663 @@
+type Blocker {
+	"""
+	The blocking task.
+	"""
+	task: Task!
+	"""
+	Whether the blocker has completed.
+	"""
+	completed: Boolean!
+	"""
+	The blocker's completion evidence, in Markdown.
+	"""
+	evidence: String!
+	"""
+	The ancestor task that holds the dependency, for an inherited blocker.
+	"""
+	ancestor: Task
+}
+
+type Capture implements Record {
+	id: ID!
+	shortId: String!
+	kind: String!
+	title: String!
+	status: String!
+	source: Source
+	"""
+	The Markdown body.
+	"""
+	body: String!
+	"""
+	When the capture was filed, in RFC 3339.
+	"""
+	createdAt: String!
+	"""
+	The task the capture was filed from.
+	"""
+	sourceTask: Task
+	"""
+	The spec, task or note the capture was promoted to.
+	"""
+	promotedTo: Record
+}
+
+type Gate {
+	id: ID!
+	shortId: String!
+	"""
+	`pr`, `ci` or another gate kind.
+	"""
+	kind: String!
+	"""
+	What the gate waits on, such as a pull request URL.
+	"""
+	target: String!
+	"""
+	`open` or `met`.
+	"""
+	status: String!
+	"""
+	When the gate was added, in RFC 3339.
+	"""
+	createdAt: String!
+	"""
+	When the gate was met, in RFC 3339.
+	"""
+	metAt: String
+	"""
+	The task the gate is on.
+	"""
+	task: Task
+}
+
+type Note implements Record {
+	id: ID!
+	shortId: String!
+	kind: String!
+	title: String!
+	status: String!
+	source: Source
+	"""
+	The Markdown body.
+	"""
+	body: String!
+	"""
+	The task the capture promoted to this note was filed from.
+	"""
+	sourceTask: Task
+}
+
+type Phase implements Record {
+	id: ID!
+	shortId: String!
+	kind: String!
+	title: String!
+	status: String!
+	source: Source
+	"""
+	The Markdown body.
+	"""
+	body: String!
+	"""
+	The phase's order within its plan.
+	"""
+	position: Int!
+	"""
+	The key a structured plan document gave the phase.
+	"""
+	planKey: String
+	"""
+	The plan the phase belongs to.
+	"""
+	plan: Plan
+	"""
+	Every task under the phase, as `arcl list --kind task --phase` lists them.
+	"""
+	tasks: [Task!]!
+}
+
+type Plan implements Record {
+	id: ID!
+	shortId: String!
+	kind: String!
+	title: String!
+	status: String!
+	source: Source
+	"""
+	The Markdown body.
+	"""
+	body: String!
+	"""
+	The spec the plan belongs to.
+	"""
+	spec: Spec
+	"""
+	The plan's phases, in position order.
+	"""
+	phases: [Phase!]!
+	"""
+	Every task under the plan, as `arcl list --kind task --plan` lists them.
+	"""
+	tasks: [Task!]!
+}
+
+type Query {
+	"""
+	The record `id` names, as `arcl show` reads it.
+	"""
+	record(id: ID!): Record
+	"""
+	The capture `id` names.
+	"""
+	capture(id: ID!): Capture
+	"""
+	The release `id` names.
+	"""
+	release(id: ID!): Release
+	"""
+	The spec `id` names.
+	"""
+	spec(id: ID!): Spec
+	"""
+	The plan `id` names.
+	"""
+	plan(id: ID!): Plan
+	"""
+	The phase `id` names.
+	"""
+	phase(id: ID!): Phase
+	"""
+	The task `id` names, as `arcl explain` reads it.
+	"""
+	task(id: ID!): Task
+	"""
+	The note `id` names.
+	"""
+	note(id: ID!): Note
+	"""
+	The gate `id` names.
+	"""
+	gate(id: ID!): Gate
+	"""
+	The records the filters match, as `arcl list` lists them: by kind,
+	then ID. Every set filter must match.
+	"""
+	records(
+		"""
+		`capture`, `release`, `spec`, `plan`, `phase`, `task` or `note`.
+		"""
+		kind: String,
+		"""
+		Stored statuses, such as `pending`.
+		"""
+		status: [String!]! = [],
+		"""
+		Task priorities, such as `high`.
+		"""
+		priority: [String!]! = [],
+		"""
+		Records in this release.
+		"""
+		release: ID,
+		"""
+		Plans and tasks under this spec.
+		"""
+		spec: ID,
+		"""
+		Phases and tasks under this plan.
+		"""
+		plan: ID,
+		"""
+		Tasks under this phase.
+		"""
+		phase: ID,
+		"""
+		Direct subtasks of this task.
+		"""
+		parent: ID,
+		"""
+		Tasks claimed by this name.
+		"""
+		assignee: String
+	): [Record!]!
+	"""
+	The tasks ready to start, as `arcl ready` lists them: by priority,
+	then position, then ID. Every set filter must match.
+	"""
+	ready(
+		"""
+		Task priorities, such as `high`.
+		"""
+		priority: [String!]! = [],
+		"""
+		Tasks under this spec.
+		"""
+		spec: ID,
+		"""
+		Tasks under this plan.
+		"""
+		plan: ID,
+		"""
+		Tasks under this phase.
+		"""
+		phase: ID,
+		"""
+		Direct subtasks of this task.
+		"""
+		parent: ID
+	): [Task!]!
+	"""
+	The record tree, as `arcl tree` builds it: from the record `root`
+	names, or of every record.
+	"""
+	tree(		root: ID,
+		"""
+		Include promoted and discarded captures.
+		"""
+		all: Boolean! = false
+	): [TreeNode!]!
+	"""
+	Every task with its readiness and effective phase, and every phase,
+	as the web app's Work list reads them.
+	"""
+	work: Work!
+	"""
+	The context packet of the task `task` names, as `arcl context` prints it.
+	"""
+	context(task: ID!): TaskContext
+	"""
+	The workspace file of the record `id` names, with its revision.
+	"""
+	source(id: ID!): Source
+}
+
+type Readiness {
+	"""
+	Whether the task can start now.
+	"""
+	ready: Boolean!
+	"""
+	Whether a blocker holds the task.
+	"""
+	blocked: Boolean!
+	"""
+	Why the task is not ready, one reason each.
+	"""
+	reasons: [ReadinessReason!]!
+}
+
+type ReadinessReason {
+	"""
+	The reason kind in snake_case, such as `direct_blocker`.
+	"""
+	kind: String!
+	"""
+	The reason as `arcl explain` words it.
+	"""
+	message: String!
+	"""
+	The task the reason is about.
+	"""
+	task: ID
+	"""
+	The ancestor task that holds the reason.
+	"""
+	ancestor: ID
+	"""
+	The blocking task.
+	"""
+	blocker: ID
+	"""
+	The closed spec, plan or phase.
+	"""
+	container: ID
+	"""
+	The tasks along an invalid blocker edge.
+	"""
+	path: [ID!]!
+	"""
+	The open gate.
+	"""
+	gate: Gate
+}
+
+"""
+Any record a project holds. Every record has an ID, a kind, a title and a
+status; a note's status is `available`.
+"""
+interface Record {
+	"""
+	The full record ID.
+	"""
+	id: ID!
+	"""
+	The shortest unique ID suffix, as human output shows it.
+	"""
+	shortId: String!
+	"""
+	`capture`, `release`, `spec`, `plan`, `phase`, `task` or `note`.
+	"""
+	kind: String!
+	title: String!
+	status: String!
+	"""
+	The record's workspace file.
+	"""
+	source: Source
+}
+
+type Release implements Record {
+	id: ID!
+	shortId: String!
+	kind: String!
+	title: String!
+	status: String!
+	source: Source
+	"""
+	The Markdown description.
+	"""
+	description: String!
+	"""
+	The specs, plans, tasks and notes in the release, as
+	`arcl list --release` lists them.
+	"""
+	members: [Record!]!
+}
+
+"""
+A record's workspace file, for the web app's raw editor.
+"""
+type Source {
+	"""
+	The record ID.
+	"""
+	id: ID!
+	"""
+	The record kind.
+	"""
+	kind: String!
+	"""
+	The path relative to the workspace root, such as `tasks/<id>.md`.
+	"""
+	path: String!
+	"""
+	TOML front matter between `+++` lines, then the Markdown body.
+	"""
+	content: String!
+	"""
+	The SHA-256 of the content, in lowercase hex. An edit names the
+	revision it started from.
+	"""
+	revision: String!
+}
+
+type Spec implements Record {
+	id: ID!
+	shortId: String!
+	kind: String!
+	title: String!
+	status: String!
+	source: Source
+	"""
+	The Markdown body.
+	"""
+	body: String!
+	"""
+	The Markdown acceptance criteria.
+	"""
+	acceptanceCriteria: String!
+	"""
+	The capture promoted to this spec.
+	"""
+	sourceCapture: Capture
+	"""
+	The task the capture promoted to this spec was filed from.
+	"""
+	sourceTask: Task
+	"""
+	The spec's plans, in ID order.
+	"""
+	plans: [Plan!]!
+	"""
+	Every task under the spec, as `arcl list --kind task --spec` lists them.
+	"""
+	tasks: [Task!]!
+}
+
+type Task implements Record {
+	id: ID!
+	shortId: String!
+	kind: String!
+	title: String!
+	status: String!
+	source: Source
+	"""
+	The Markdown body.
+	"""
+	body: String!
+	"""
+	`urgent`, `high`, `normal` or `low`.
+	"""
+	priority: String!
+	"""
+	The task's order among its siblings.
+	"""
+	position: Int!
+	"""
+	The key a structured plan document gave the task.
+	"""
+	planKey: String
+	"""
+	The latest handoff, in Markdown.
+	"""
+	handoff: String!
+	"""
+	The completion evidence, in Markdown.
+	"""
+	evidence: String!
+	"""
+	The name that claimed the task.
+	"""
+	assignee: String
+	"""
+	The parent task.
+	"""
+	parent: Task
+	"""
+	Parent tasks from the oldest ancestor to the immediate parent.
+	"""
+	ancestors: [Task!]!
+	"""
+	Direct subtasks.
+	"""
+	children: [Task!]!
+	"""
+	The effective spec: the task's own, or the one it sits under.
+	"""
+	spec: Spec
+	"""
+	The effective plan.
+	"""
+	plan: Plan
+	"""
+	The effective phase.
+	"""
+	phase: Phase
+	"""
+	Whether the task is ready, and why not, as `arcl explain` reports it.
+	"""
+	readiness: Readiness!
+	"""
+	Direct blockers, with their evidence.
+	"""
+	blockers: [Blocker!]!
+	"""
+	Blockers held by ancestor tasks, nearest ancestor first.
+	"""
+	inheritedBlockers: [Blocker!]!
+	"""
+	Tasks that the task blocks directly.
+	"""
+	dependents: [Task!]!
+	"""
+	Every note on the task, newest first.
+	"""
+	notes: [TaskNote!]!
+	"""
+	Every gate on the task, open or met, oldest first.
+	"""
+	gates: [Gate!]!
+	"""
+	The task the capture promoted to this task was filed from.
+	"""
+	sourceTask: Task
+	"""
+	The task's context packet, as `arcl context` prints it.
+	"""
+	context: TaskContext!
+}
+
+type TaskContext {
+	"""
+	The task.
+	"""
+	task: Task!
+	"""
+	Parent tasks from the oldest ancestor to the immediate parent.
+	"""
+	ancestors: [Task!]!
+	"""
+	The effective spec.
+	"""
+	spec: Spec
+	"""
+	The effective plan.
+	"""
+	plan: Plan
+	"""
+	The effective phase.
+	"""
+	phase: Phase
+	"""
+	Direct blockers and their evidence.
+	"""
+	blockers: [Blocker!]!
+	"""
+	Blockers held by ancestor tasks, nearest ancestor first.
+	"""
+	inheritedBlockers: [Blocker!]!
+	"""
+	Tasks that the task blocks directly.
+	"""
+	dependents: [Task!]!
+	"""
+	The task's readiness.
+	"""
+	readiness: Readiness!
+	"""
+	Completed blockers that supplied evidence, one per blocker task.
+	"""
+	completionEvidence: [Blocker!]!
+	"""
+	The most recent notes, newest first.
+	"""
+	notes: [TaskNote!]!
+	"""
+	How many older notes the packet leaves out.
+	"""
+	omittedNotes: Int!
+	"""
+	Every gate on the task, open or met, oldest first.
+	"""
+	gates: [Gate!]!
+}
+
+type TaskNote {
+	"""
+	When the note was added, in RFC 3339.
+	"""
+	createdAt: String!
+	"""
+	The note's kind, such as `decision`, if it has one.
+	"""
+	kind: String
+	"""
+	The note text.
+	"""
+	text: String!
+}
+
+type TreeNode {
+	"""
+	The full record ID.
+	"""
+	id: ID!
+	"""
+	The record kind.
+	"""
+	kind: String!
+	"""
+	The record title.
+	"""
+	title: String!
+	"""
+	The stored status; a note's is `available`.
+	"""
+	status: String!
+	"""
+	For a pending task, whether it is ready.
+	"""
+	ready: Boolean!
+	"""
+	The unfinished tasks that block this task directly. A rooted tree's
+	root task also lists those it inherits.
+	"""
+	blockedBy: [ID!]!
+	"""
+	Child records.
+	"""
+	children: [TreeNode!]!
+	"""
+	The record itself.
+	"""
+	record: Record
+}
+
+type Work {
+	"""
+	Every task, ordered by position, then ID.
+	"""
+	tasks: [WorkItem!]!
+	"""
+	Every phase, ordered by plan, then position, then ID.
+	"""
+	phases: [Phase!]!
+}
+
+type WorkItem {
+	"""
+	The task.
+	"""
+	task: Task!
+	"""
+	The task's readiness.
+	"""
+	readiness: Readiness!
+	"""
+	The task's effective phase: its own, or its nearest ancestor's.
+	"""
+	phaseId: ID
+}
+
+"""
+Directs the executor to include this field or fragment only when the `if` argument is true.
+"""
+directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+"""
+Directs the executor to skip this field or fragment when the `if` argument is true.
+"""
+directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+schema {
+	query: Query
+}
