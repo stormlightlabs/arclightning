@@ -2,9 +2,9 @@
 //!
 //! [`Server`] binds `127.0.0.1`, checks every request, serves the web app
 //! page embedded from `apps/web/build/index.html` for any path outside
-//! `/api`, routes the read endpoints to a [`Reads`] implementation and the
-//! mutations to a [`Mutations`] implementation. Both answer with the
-//! CLI's JSON envelopes.
+//! `/api` and `/graphql`, routes the read endpoints and GraphQL queries to a
+//! [`Reads`] implementation and the mutations to a [`Mutations`]
+//! implementation. Both answer with the CLI's JSON output.
 //!
 //! Every request needs a `Host` header naming the server and the per-run
 //! token in the [`TOKEN_HEADER`] header. The one exception is the first page
@@ -12,31 +12,35 @@
 //! printed URL; the server accepts a query token once, and never on an API
 //! path. A mutation also needs an `Origin` header naming the server. Reads
 //! take GET and mutations take POST; any other method is refused, so GET never
-//! changes state. Responses carry no CORS headers.
+//! changes state. `/graphql` takes POST only, and needs no `Origin`, since
+//! the schema has no mutations. Responses carry no CORS headers.
 //!
 //! The server runs axum on hyper and a single-threaded tokio runtime. It
 //! checks a request's head before it reads any of the body, and reads a body
-//! only for a mutation that passed every check. A request that declares a
-//! body over 1 MiB gets 413 before any check, and its body is never read. A
-//! mutation's body that does not arrive within [`BODY_DEADLINE`] gets 408,
+//! only for a mutation or GraphQL query that passed every check. A request
+//! that declares a body over 1 MiB gets 413 before any check, and its body is
+//! never read. A body that does not arrive within [`BODY_DEADLINE`] gets 408,
 //! and one that runs over 1 MiB gets 413. A connection that does not send a
 //! request head within [`HEADER_DEADLINE`] is closed, idle keep-alive
 //! connections included. So is one whose client reads its replies slower
 //! than [`MIN_WRITE_RATE`] once [`WRITE_DEADLINE`] of slack is spent; no
 //! single wait for the client passes [`WRITE_DEADLINE`]. A refusal before the
 //! token is accepted (a bad `Host` or token, a bad request target, or 413),
-//! and a refusal that leaves a mutation's body unread (408 or 413), carries
+//! and a refusal that leaves a body unread (408 or 413), carries
 //! `Connection: close` and closes the connection. At most
 //! [`MAX_CONNECTIONS`] are open at once; past that, new connections wait to
 //! be accepted.
 //!
-//! [`Reads`] and [`Mutations`] stay synchronous. Reads run one at a time on
-//! the thread that called [`Server::run`], and mutations one at a time on
-//! their own thread, so a mutation that waits for a lock never holds up reads
-//! and page loads. Ctrl-C stops accepting connections, lets open ones finish
-//! for up to [`SHUTDOWN_GRACE`], and returns; a second Ctrl-C returns at
-//! once. After Ctrl-C, mutations that have not started get 503 without
-//! running, and one already running finishes before the server returns.
+//! [`Reads`] and [`Mutations`] stay synchronous. Reads, GraphQL queries
+//! included, run one at a time on the thread that called [`Server::run`],
+//! and mutations one at a time on their own thread, so a mutation that waits
+//! for a lock never holds up reads and page loads. A read whose client
+//! closed its connection while it waited in line is dropped without running.
+//! Ctrl-C stops accepting connections, lets open ones finish for up to
+//! [`SHUTDOWN_GRACE`], and returns; a second Ctrl-C ends the grace period.
+//! After Ctrl-C, reads and mutations that have not started get 503 without
+//! running, and the read or mutation already running finishes before the
+//! server returns.
 //!
 //! The page's Content-Security-Policy runs only the app's own inline script,
 //! by hash, and lets it load images and fonts from itself or `data:` URLs and
@@ -66,6 +70,7 @@
 //! | `POST /api/plans`                | `arcl plan create`       |
 //! | `POST /api/plans/{id}/apply`     | `arcl plan apply`        |
 //! | `POST /api/records/{id}/edit`    | none; see below          |
+//! | `POST /graphql`                  | `arcl query`             |
 //!
 //! `/api/records` and `/api/ready` take the CLI's filter flags as query
 //! parameters, such as `?kind=task&status=pending&status=parked`.
@@ -87,6 +92,15 @@
 //! file. It refuses a change to a field only a command changes, such as a
 //! task's `status`, as `arcl_repo::workspace::edit_record` lists. The record's
 //! ID is the only path the client names.
+//!
+//! `POST /graphql` takes `{"query", "variables", "operationName"}` (see
+//! [`GraphqlRequest`]) and answers status 200 with the GraphQL response
+//! `arcl query` prints for the same query: `data`, and `errors` when there
+//! are any, a query over a limit included. `arcl query` refuses a query
+//! document over 64 KiB with the code `QUERY_TOO_LARGE` before parsing it,
+//! so `/graphql` does too. A body that is not such an object,
+//! or whose `variables` is not an object, gets `invalid_request` with status
+//! 400, as a malformed mutation body does.
 //!
 //! A mutation takes a JSON object of the command's options, such as
 //! `{"evidence": "Delivered by #41."}`; see [`NewTask`], [`TaskEdit`],
@@ -118,5 +132,5 @@ pub use mutations::{
     CapturePromotion, Completion, Handoff, Mutations, NewCapture, NewPlan, NewSpec, NewTask, PlanInput,
     RecordSourceEdit, TaskEdit, TaskStart, apply, operations,
 };
-pub use routes::Reads;
+pub use routes::{GraphqlRequest, Reads};
 pub use server::{ServeError, Server};

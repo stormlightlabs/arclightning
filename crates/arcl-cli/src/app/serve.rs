@@ -1,8 +1,10 @@
 //! `arcl serve`: the web app and its endpoints over the CLI's commands.
 //!
 //! Each read opens the database and runs the same read as the CLI, with no
-//! workspace sync. A read never changes records, though opening the database
-//! can run its migrations. Each mutation runs the same `arcl task` or
+//! workspace sync. `POST /graphql` is a read too: it runs the same query as
+//! `arcl query`, with the same response and limits, but without the
+//! workspace sync `arcl query` runs first. A read never changes records,
+//! though opening the database can run its migrations. Each mutation runs the same `arcl task` or
 //! `arcl capture`, `arcl spec` or `arcl plan` command as the CLI, with the
 //! same sync around it: it takes the sync lock, syncs, changes the record and
 //! syncs again to export it. The server holds the lock only during a
@@ -15,10 +17,11 @@
 //! `code` and `message` the CLI prints to stderr under `--json`.
 
 use arcl_serve::{
-    CapturePromotion, Completion, Handoff, Mutations, NewCapture, NewPlan, NewSpec, NewTask, PlanInput, Reads,
-    RecordSourceEdit, Reply, Server, TaskEdit, TaskStart,
+    CapturePromotion, Completion, GraphqlRequest, Handoff, Mutations, NewCapture, NewPlan, NewSpec, NewTask, PlanInput,
+    Reads, RecordSourceEdit, Reply, Server, TaskEdit, TaskStart,
 };
 
+use super::graphql::run_query;
 use super::reads::*;
 use super::support::{RecordScope, parse_plan_document, parse_plan_id};
 use super::*;
@@ -129,6 +132,17 @@ impl Reads for ServeApp {
 
     fn work(&self) -> Reply {
         reply(read_work(&self.renderer))
+    }
+
+    fn graphql(&self, input: GraphqlRequest) -> Reply {
+        let mut request = arcl_graphql::Request::new(input.query);
+        if let Some(variables) = input.variables {
+            request = request.variables(arcl_graphql::Variables::from_json(variables));
+        }
+        if let Some(operation) = input.operation_name {
+            request = request.operation_name(operation);
+        }
+        reply(run_query(request).map(|(response, _)| Some(response)))
     }
 }
 

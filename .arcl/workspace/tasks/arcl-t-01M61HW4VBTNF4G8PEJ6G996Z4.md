@@ -2,7 +2,7 @@
 id = "arcl-t-01M61HW4VBTNF4G8PEJ6G996Z4"
 phase = "arcl-ph-01M5YRFB35TZ51QW4AG1A8MS5B"
 title = "Serve GraphQL at /graphql in arcl serve"
-status = "pending"
+status = "in_progress"
 priority = "normal"
 position = 10
 blocked-by = ["arcl-t-01M5YRFBMHGP74F6CJSSG7FXP7"]

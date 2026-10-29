@@ -83,7 +83,7 @@ impl Reply {
         &self.body
     }
 
-    /// A mutation whose body did not arrive within [`BODY_DEADLINE`](crate::BODY_DEADLINE).
+    /// A request whose body did not arrive within [`BODY_DEADLINE`](crate::BODY_DEADLINE).
     pub(crate) fn timed_out() -> Self {
         Self::refusal(408, "request_timeout", "the request body did not arrive in time")
     }
