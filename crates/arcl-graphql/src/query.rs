@@ -4,7 +4,7 @@ use async_graphql::{Context, ID, Object};
 
 use super::types::{
     CaptureNode, ContextNode, GateNode, NoteNode, PhaseNode, PlanNode, RecordNode, RecordOrGate, ReleaseNode,
-    SourceNode, SpecNode, TaskNode, TreeNode, WorkNode, reader,
+    SourceNode, SpecNode, TaskNode, TreeNode, WorkNode, many, one, reader,
 };
 use super::{Reader, coded};
 use arcl_core::prelude::*;
@@ -22,13 +22,11 @@ impl QueryRoot {
         let id = reader.resolve(&id, None)?;
         if id.starts_with(GateId::PREFIX) {
             let gate = reader.parse::<GateId>(&id)?;
-            return Ok(Some(RecordOrGate::Gate(GateNode(
-                reader.read(|database| database.gate(gate))?,
-            ))));
+            let gate = RecordOrGate::Gate(GateNode(reader.read(|database| database.gate(gate))?));
+            return one(ctx, Some(gate));
         }
-        RecordNode::find(reader.graph()?, &id)
-            .map(|record| Some(record.into()))
-            .ok_or_else(|| not_found(&id))
+        let record = RecordNode::find(reader.graph()?, &id).ok_or_else(|| not_found(&id))?;
+        one(ctx, Some(record.into()))
     }
 
     /// The capture `id` names.
@@ -98,7 +96,7 @@ impl QueryRoot {
     async fn gate(&self, ctx: &Context<'_>, id: ID) -> async_graphql::Result<Option<GateNode>> {
         let reader = reader(ctx);
         let id = reader.parse::<GateId>(&id)?;
-        Ok(Some(GateNode(reader.read(|database| database.gate(id))?)))
+        one(ctx, Some(GateNode(reader.read(|database| database.gate(id))?)))
     }
 
     /// The records the filters match, as `arcl list` lists them: by kind,
@@ -149,7 +147,7 @@ impl QueryRoot {
             parent_id: optional(reader, parent)?,
         };
         let tasks = reader.read(|database| database.ready_planning_tasks_filtered(&filter))?;
-        Ok(tasks.into_iter().map(TaskNode::new).collect())
+        many(ctx, tasks.into_iter().map(TaskNode::new).collect())
     }
 
     /// The record tree, as `arcl tree` builds it: from the record `root`
@@ -161,36 +159,40 @@ impl QueryRoot {
         let reader = reader(ctx);
         let root = root.map(|root| reader.resolve(&root, None)).transpose()?;
         let nodes = reader.read(|database| database.record_tree(root.as_deref(), all))?;
-        Ok(nodes.into_iter().map(TreeNode).collect())
+        many(ctx, nodes.into_iter().map(TreeNode).collect())
     }
 
     /// Every task with its readiness and effective phase, and every phase,
     /// as the web app's Work list reads them.
     async fn work(&self, ctx: &Context<'_>) -> async_graphql::Result<WorkNode> {
-        Ok(WorkNode(reader(ctx).read(Database::planning_work)?))
+        let reader = reader(ctx);
+        reader.admit(1)?;
+        Ok(WorkNode(reader.read(Database::planning_work)?))
     }
 
     /// The context packet of the task `task` names, as `arcl context` prints it.
     async fn context(&self, ctx: &Context<'_>, task: ID) -> async_graphql::Result<Option<ContextNode>> {
         let reader = reader(ctx);
         let id = reader.parse::<TaskId>(&task)?;
-        Ok(Some(ContextNode(PlanningContext::from_view(reader.task_view(id)?))))
+        let view = (*reader.task_view(id)?).clone();
+        one(ctx, Some(ContextNode(PlanningContext::from_view(view))))
     }
 
     /// The workspace file of the record `id` names, with its revision.
     async fn source(&self, ctx: &Context<'_>, id: ID) -> async_graphql::Result<Option<SourceNode>> {
         let reader = reader(ctx);
         let id = reader.resolve(&id, None)?;
-        reader
-            .source(&id)?
-            .map(|source| Some(SourceNode::from(source)))
-            .ok_or_else(|| not_found(&id))
+        let source = reader.source(&id)?.ok_or_else(|| not_found(&id))?;
+        one(ctx, Some(SourceNode::from(source)))
     }
 }
 
 /// The record with the full ID `id`, or a not-found error.
 fn typed(ctx: &Context<'_>, id: &str) -> async_graphql::Result<RecordNode> {
-    RecordNode::find(reader(ctx).graph()?, id).ok_or_else(|| not_found(id))
+    let reader = reader(ctx);
+    let record = RecordNode::find(reader.graph()?, id).ok_or_else(|| not_found(id))?;
+    reader.admit(1)?;
+    Ok(record)
 }
 
 fn not_found(id: &str) -> async_graphql::Error {

@@ -488,6 +488,12 @@ select at most 1000 fields, counting each field once. A query over either limit
 runs nothing: `data` is `null` and the error's `extensions.code` is
 `QUERY_TOO_DEEP` or `QUERY_TOO_COMPLEX`.
 
+A query may also resolve at most 10,000 objects, counting each record, task,
+gate, note, tree node and other object in the response once. Nested lists
+multiply: `plan { tasks { plan { tasks { id } } } }` resolves the square of
+the plan's task count. A query that passes the limit stops there: `data` is
+`null` and the one error's `extensions.code` is `RESULT_TOO_LARGE`.
+
 ## Web app
 
 `arcl serve` serves the web app and its endpoints on `127.0.0.1`, on an

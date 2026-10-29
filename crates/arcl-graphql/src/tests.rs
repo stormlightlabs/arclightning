@@ -1,6 +1,5 @@
 use std::cell::Cell;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -16,12 +15,21 @@ pub(crate) enum Load {
     Sources,
     /// Loading the planning records task views read.
     Planning,
+    /// Building one task's `arcl explain` view.
+    View,
 }
 
 thread_local! {
     /// How many times this thread made each [`Load`]. A query runs on the
     /// thread that calls [`execute`].
-    static LOADS: Cell<[usize; 2]> = const { Cell::new([0, 0]) };
+    static LOADS: Cell<[usize; 3]> = const { Cell::new([0, 0, 0]) };
+    /// How many objects the last query on this thread resolved.
+    static NODES: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Record that the query this thread just ran resolved `nodes` objects.
+pub(crate) fn count_nodes(nodes: usize) {
+    NODES.with(|count| count.set(nodes));
 }
 
 /// Count one `load` on this thread.
@@ -223,18 +231,22 @@ fn a_query_renders_the_workspace_and_loads_the_planning_records_once() {
     let query = r#"{
         records { id source { revision } }
         tasks: records(kind: "task") {
-            ... on Task { readiness { ready } blockers { task { id } } dependents { id } context { omittedNotes } }
+            ... on Task {
+                readiness { ready }
+                blockers { task { id readiness { ready } } }
+                dependents { id }
+                context { omittedNotes }
+            }
         }
     }"#;
-    LOADS.with(|loads| loads.set([0, 0]));
-    let started = Instant::now();
+    LOADS.with(|loads| loads.set([0, 0, 0]));
     let data = fixture.data(query);
-    let elapsed = started.elapsed();
-    assert_eq!(LOADS.with(Cell::get), [1, 1]);
+    // One workspace render, one planning load and one view per task, though
+    // most tasks are read twice: as a record and as another's blocker.
+    assert_eq!(LOADS.with(Cell::get), [1, 1, 152]);
     assert_eq!(data["records"].as_array().expect("records").len(), 308);
     assert_eq!(data["tasks"].as_array().expect("tasks").len(), 152);
-    // Before the reads were shared, this query took about 2 s in a debug build.
-    assert!(elapsed < Duration::from_secs(2), "the query took {elapsed:?}");
+    assert!(NODES.with(Cell::get) < MAX_NODES / 4);
 
     let task = fixture.task.id.to_string();
     let view = fixture
@@ -461,6 +473,65 @@ fn a_query_over_a_limit_is_refused_with_its_code() {
     let complex = fixture.run(&format!("{{ {fields} }}"));
     assert_eq!(complex["data"], Value::Null);
     assert_eq!(code(&complex), QUERY_TOO_COMPLEX);
+}
+
+#[test]
+fn a_query_nested_past_the_parser_limit_is_refused_as_too_deep() {
+    let fixture = Fixture::new();
+    let deep = fixture.run(&nested_tree(40));
+    assert_eq!(deep["data"], Value::Null);
+    assert_eq!(code(&deep), QUERY_TOO_DEEP);
+}
+
+#[test]
+fn a_query_that_resolves_too_many_objects_stops_at_the_limit() {
+    let mut fixture = Fixture::new();
+    let project_id = fixture.database.project().expect("project reads").id;
+    for index in 0..8 {
+        fixture
+            .database
+            .create_planning_task(PlanningTaskCreate {
+                project_id,
+                spec_id: None,
+                plan_id: None,
+                phase_id: Some(fixture.phase.id),
+                parent_id: None,
+                title: format!("Task {index}"),
+                body: String::new(),
+                priority: TaskPriority::Normal,
+                position: index + 3,
+            })
+            .expect("task creates");
+    }
+    let plan = fixture.phase.plan_id;
+    // Each `plan { tasks }` level multiplies the result by the plan's 10
+    // tasks: 4 levels resolve 22,221 objects in 10 fields.
+    let fan_out = |levels: usize| {
+        format!(
+            r#"{{ plan(id: "{plan}") {{ {}id{} }} }}"#,
+            "tasks { plan { ".repeat(levels),
+            " } }".repeat(levels)
+        )
+    };
+
+    LOADS.with(|loads| loads.set([0, 0, 0]));
+    let refused = fixture.run(&fan_out(4));
+    assert_eq!(refused["data"], Value::Null);
+    assert_eq!(code(&refused), RESULT_TOO_LARGE);
+    assert_eq!(refused["errors"].as_array().expect("errors").len(), 1);
+    let nodes = NODES.with(Cell::get);
+    assert!(
+        nodes <= MAX_NODES && nodes > MAX_NODES - 10,
+        "the query stopped at {nodes} objects"
+    );
+    // The 10 tasks repeat thousands of times, but each view is built once.
+    assert_eq!(LOADS.with(Cell::get)[2], 10);
+
+    let data = fixture.data(&fan_out(2));
+    let tasks = data["plan"]["tasks"].as_array().expect("tasks");
+    assert_eq!(tasks.len(), 10);
+    assert_eq!(tasks[0]["plan"]["tasks"].as_array().expect("tasks").len(), 10);
+    assert_eq!(NODES.with(Cell::get), 1 + 10 + 10 + 100 + 100);
 }
 
 #[test]

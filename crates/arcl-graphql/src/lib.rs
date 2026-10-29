@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::pin;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::task::{Context as PollContext, Poll, Wake, Waker};
 use std::thread::{self, Thread};
@@ -25,6 +26,13 @@ pub use query::QueryRoot;
 /// deeper query is refused with the error code [`QUERY_TOO_DEEP`].
 pub const MAX_DEPTH: usize = 16;
 
+/// The most objects a query may resolve, counting each record, task, gate,
+/// note, tree node and other object in the response once. A query that
+/// resolves more fails with the error code [`RESULT_TOO_LARGE`]. The field
+/// limits do not bound this: `plan { tasks { plan { tasks { id } } } }`
+/// selects 5 fields and resolves the square of the plan's task count.
+pub const MAX_NODES: usize = 10_000;
+
 /// The most fields a query may select, counting each field once. A larger
 /// query is refused with the error code [`QUERY_TOO_COMPLEX`].
 pub const MAX_COMPLEXITY: usize = 1000;
@@ -36,20 +44,63 @@ pub const QUERY_TOO_DEEP: &str = "QUERY_TOO_DEEP";
 /// [`MAX_COMPLEXITY`] fields.
 pub const QUERY_TOO_COMPLEX: &str = "QUERY_TOO_COMPLEX";
 
+/// The `extensions.code` of a query that resolves more than [`MAX_NODES`]
+/// objects.
+pub const RESULT_TOO_LARGE: &str = "RESULT_TOO_LARGE";
+
 /// The schema type: queries only.
 pub type ArclSchema = Schema<QueryRoot, EmptyMutation, EmptySubscription>;
 
-/// The database a query reads, with the graph, short IDs, workspace files and
-/// planning records it reads at most once per query.
+/// The database a query reads, with the graph, short IDs, workspace files,
+/// planning records and task views it reads at most once per query, and the
+/// count of objects the query has resolved.
 struct Reader {
     database: Mutex<Database>,
     graph: OnceLock<ConnectedGraph>,
     short_ids: OnceLock<ShortIds>,
     sources: OnceLock<HashMap<String, RecordSource>>,
     planning: OnceLock<PlanningData>,
+    views: Mutex<HashMap<TaskId, Arc<PlanningTaskView>>>,
+    nodes: AtomicUsize,
+    refused: AtomicBool,
 }
 
 impl Reader {
+    fn new(database: Database) -> Self {
+        Self {
+            database: Mutex::new(database),
+            graph: OnceLock::new(),
+            short_ids: OnceLock::new(),
+            sources: OnceLock::new(),
+            planning: OnceLock::new(),
+            views: Mutex::new(HashMap::new()),
+            nodes: AtomicUsize::new(0),
+            refused: AtomicBool::new(false),
+        }
+    }
+
+    /// Count `count` more resolved objects, or fail with
+    /// [`RESULT_TOO_LARGE`] when that would pass [`MAX_NODES`]. Once one
+    /// call fails, every later call fails too, so the rest of the query
+    /// stops at its next object.
+    fn admit(&self, count: usize) -> async_graphql::Result<()> {
+        let admitted = !self.refused.load(Ordering::Relaxed)
+            && self
+                .nodes
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |nodes| {
+                    nodes.checked_add(count).filter(|total| *total <= MAX_NODES)
+                })
+                .is_ok();
+        if admitted {
+            return Ok(());
+        }
+        self.refused.store(true, Ordering::Relaxed);
+        Err(coded(
+            format!("the query resolves more than {MAX_NODES} objects; select fewer nested lists"),
+            RESULT_TOO_LARGE,
+        ))
+    }
+
     /// Run `read` against the database.
     fn read<T>(&self, read: impl FnOnce(&Database) -> Result<T, StorageError>) -> async_graphql::Result<T> {
         let database = self.database.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -102,10 +153,17 @@ impl Reader {
         Ok(self.sources.get_or_init(|| sources))
     }
 
-    /// The `arcl explain` view of the task `id`.
-    fn task_view(&self, id: TaskId) -> async_graphql::Result<PlanningTaskView> {
+    /// The `arcl explain` view of the task `id`, built once per query.
+    fn task_view(&self, id: TaskId) -> async_graphql::Result<Arc<PlanningTaskView>> {
+        let views = || self.views.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(view) = views().get(&id) {
+            return Ok(Arc::clone(view));
+        }
         let planning = self.planning()?;
-        self.read(|database| database.planning_task_view_in(planning, id))
+        #[cfg(test)]
+        tests::count_load(tests::Load::View);
+        let view = Arc::new(self.read(|database| database.planning_task_view_in(planning, id))?);
+        Ok(Arc::clone(views().entry(id).or_insert(view)))
     }
 
     /// The project's planning records, loaded on first use.
@@ -136,31 +194,44 @@ pub fn sdl() -> String {
 /// Run `request` against `database` on the calling thread. A refused or
 /// failed query comes back as a response with `errors`; a limit refusal
 /// carries [`QUERY_TOO_DEEP`] or [`QUERY_TOO_COMPLEX`] as its
-/// `extensions.code`.
+/// `extensions.code`. A query that resolves more than [`MAX_NODES`] objects
+/// comes back with `null` data and the single error [`RESULT_TOO_LARGE`].
 pub fn execute(database: Database, request: Request) -> Response {
-    let reader = Reader {
-        database: Mutex::new(database),
-        graph: OnceLock::new(),
-        short_ids: OnceLock::new(),
-        sources: OnceLock::new(),
-        planning: OnceLock::new(),
-    };
-    let mut response = block_on(schema().execute(request.data(reader)));
+    let reader = Arc::new(Reader::new(database));
+    let mut response = block_on(schema().execute(request.data(Arc::clone(&reader))));
+    #[cfg(test)]
+    tests::count_nodes(reader.nodes.load(Ordering::Relaxed));
     for error in &mut response.errors {
         code_limit_error(error);
+    }
+    if reader.refused.load(Ordering::Relaxed) {
+        response.data = async_graphql::Value::Null;
+        response.errors.retain(|error| has_code(error, RESULT_TOO_LARGE));
+        response.errors.truncate(1);
     }
     response
 }
 
-/// Give a limit refusal its `extensions.code`. async-graphql reports both
-/// limits without one.
+/// Give a limit refusal its `extensions.code`. async-graphql reports the
+/// depth and complexity limits, and its own recursion limit of 32, which a
+/// query past [`MAX_DEPTH`] can reach first, without one.
 fn code_limit_error(error: &mut ServerError) {
     let code = match error.message.as_str() {
         "Query is nested too deep." => QUERY_TOO_DEEP,
+        message if message.starts_with("The recursion depth of the query cannot be greater than") => QUERY_TOO_DEEP,
         "Query is too complex." => QUERY_TOO_COMPLEX,
         _ => return,
     };
     error.extensions.get_or_insert_with(Default::default).set("code", code);
+}
+
+/// Whether `error` carries `code` as its `extensions.code`.
+fn has_code(error: &ServerError, code: &str) -> bool {
+    error
+        .extensions
+        .as_ref()
+        .and_then(|extensions| extensions.get("code"))
+        .is_some_and(|value| *value == async_graphql::Value::String(code.to_owned()))
 }
 
 /// A storage failure as a GraphQL error, coded by its exit category:

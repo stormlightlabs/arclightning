@@ -1,7 +1,7 @@
 //! The schema's object types. Each wraps a stored record or read model;
 //! statuses and kinds are the snake_case strings JSON output uses.
 
-use std::sync::OnceLock;
+use std::sync::Arc;
 
 use async_graphql::{Context, ID, Interface, Object, SimpleObject, Union};
 
@@ -104,10 +104,12 @@ impl RecordNode {
     pub(crate) fn list(reader: &Reader, filter: &RecordFilter) -> async_graphql::Result<Vec<Self>> {
         let graph = reader.graph()?;
         let summaries = list_records(graph, filter).map_err(super::storage_error)?;
-        Ok(summaries
+        let records = summaries
             .iter()
             .filter_map(|summary| Self::find(graph, &summary.id))
-            .collect())
+            .collect::<Vec<_>>();
+        reader.admit(records.len())?;
+        Ok(records)
     }
 }
 
@@ -188,7 +190,7 @@ impl CaptureNode {
                 CapturePromotionTarget::Task(id) => id.to_string(),
                 CapturePromotionTarget::Note(id) => id.to_string(),
             });
-        Ok(target.and_then(|id| RecordNode::find(graph, &id)))
+        one(ctx, target.and_then(|id| RecordNode::find(graph, &id)))
     }
 }
 
@@ -264,12 +266,13 @@ impl SpecNode {
     /// The capture promoted to this spec.
     async fn source_capture(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<CaptureNode>> {
         let graph = reader(ctx).graph()?;
-        Ok(self
+        let capture = self
             .0
             .source_capture_id
             .and_then(|id| graph.captures.iter().find(|capture| capture.id == id))
             .cloned()
-            .map(CaptureNode))
+            .map(CaptureNode);
+        one(ctx, capture)
     }
     /// The task the capture promoted to this spec was filed from.
     async fn source_task(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<TaskNode>> {
@@ -278,13 +281,14 @@ impl SpecNode {
     /// The spec's plans, in ID order.
     async fn plans(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<PlanNode>> {
         let graph = reader(ctx).graph()?;
-        Ok(graph
+        let plans = graph
             .plans
             .iter()
             .filter(|plan| plan.spec_id == self.0.id)
             .cloned()
             .map(PlanNode)
-            .collect())
+            .collect();
+        many(ctx, plans)
     }
     /// Every task under the spec, as `arcl list --kind task --spec` lists them.
     async fn tasks(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<TaskNode>> {
@@ -322,12 +326,13 @@ impl PlanNode {
     /// The spec the plan belongs to.
     async fn spec(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<SpecNode>> {
         let graph = reader(ctx).graph()?;
-        Ok(graph
+        let spec = graph
             .specs
             .iter()
             .find(|spec| spec.id == self.0.spec_id)
             .cloned()
-            .map(SpecNode))
+            .map(SpecNode);
+        one(ctx, spec)
     }
     /// The plan's phases, in position order.
     async fn phases(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<PhaseNode>> {
@@ -339,7 +344,7 @@ impl PlanNode {
             .cloned()
             .collect::<Vec<_>>();
         phases.sort_by(|left, right| left.position.cmp(&right.position).then_with(|| left.id.cmp(&right.id)));
-        Ok(phases.into_iter().map(PhaseNode).collect())
+        many(ctx, phases.into_iter().map(PhaseNode).collect())
     }
     /// Every task under the plan, as `arcl list --kind task --plan` lists them.
     async fn tasks(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<TaskNode>> {
@@ -385,12 +390,13 @@ impl PhaseNode {
     /// The plan the phase belongs to.
     async fn plan(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<PlanNode>> {
         let graph = reader(ctx).graph()?;
-        Ok(graph
+        let plan = graph
             .plans
             .iter()
             .find(|plan| plan.id == self.0.plan_id)
             .cloned()
-            .map(PlanNode))
+            .map(PlanNode);
+        one(ctx, plan)
     }
     /// Every task under the phase, as `arcl list --kind task --phase` lists them.
     async fn tasks(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<TaskNode>> {
@@ -402,21 +408,17 @@ impl PhaseNode {
 /// `arcl explain` shows.
 pub struct TaskNode {
     task: PlanningTask,
-    view: OnceLock<Box<PlanningTaskView>>,
 }
 
 impl TaskNode {
     pub(crate) fn new(task: PlanningTask) -> Self {
-        Self { task, view: OnceLock::new() }
+        Self { task }
     }
 
-    /// The task's `arcl explain` view, read on first use.
-    fn view(&self, ctx: &Context<'_>) -> async_graphql::Result<&PlanningTaskView> {
-        if let Some(view) = self.view.get() {
-            return Ok(view);
-        }
-        let view = reader(ctx).task_view(self.task.id)?;
-        Ok(self.view.get_or_init(|| Box::new(view)))
+    /// The task's `arcl explain` view, which the reader builds once per
+    /// query for each task.
+    fn view(&self, ctx: &Context<'_>) -> async_graphql::Result<Arc<PlanningTaskView>> {
+        reader(ctx).task_view(self.task.id)
     }
 }
 
@@ -474,47 +476,48 @@ impl TaskNode {
     }
     /// Parent tasks from the oldest ancestor to the immediate parent.
     async fn ancestors(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<TaskNode>> {
-        Ok(task_nodes(&self.view(ctx)?.ancestors))
+        task_nodes(ctx, &self.view(ctx)?.ancestors)
     }
     /// Direct subtasks.
     async fn children(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<TaskNode>> {
-        Ok(task_nodes(&self.view(ctx)?.children))
+        task_nodes(ctx, &self.view(ctx)?.children)
     }
     /// The effective spec: the task's own, or the one it sits under.
     async fn spec(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<SpecNode>> {
-        Ok(self.view(ctx)?.spec.clone().map(SpecNode))
+        one(ctx, self.view(ctx)?.spec.clone().map(SpecNode))
     }
     /// The effective plan.
     async fn plan(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<PlanNode>> {
-        Ok(self.view(ctx)?.plan.clone().map(PlanNode))
+        one(ctx, self.view(ctx)?.plan.clone().map(PlanNode))
     }
     /// The effective phase.
     async fn phase(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<PhaseNode>> {
-        Ok(self.view(ctx)?.phase.clone().map(PhaseNode))
+        one(ctx, self.view(ctx)?.phase.clone().map(PhaseNode))
     }
     /// Whether the task is ready, and why not, as `arcl explain` reports it.
     async fn readiness(&self, ctx: &Context<'_>) -> async_graphql::Result<ReadinessNode> {
+        reader(ctx).admit(1)?;
         Ok(ReadinessNode(self.view(ctx)?.readiness.clone()))
     }
     /// Direct blockers, with their evidence.
     async fn blockers(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<BlockerNode>> {
-        Ok(blocker_nodes(&self.view(ctx)?.blockers))
+        blocker_nodes(ctx, &self.view(ctx)?.blockers)
     }
     /// Blockers held by ancestor tasks, nearest ancestor first.
     async fn inherited_blockers(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<BlockerNode>> {
-        Ok(blocker_nodes(&self.view(ctx)?.inherited_blockers))
+        blocker_nodes(ctx, &self.view(ctx)?.inherited_blockers)
     }
     /// Tasks that the task blocks directly.
     async fn dependents(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<TaskNode>> {
-        Ok(task_nodes(&self.view(ctx)?.dependents))
+        task_nodes(ctx, &self.view(ctx)?.dependents)
     }
     /// Every note on the task, newest first.
     async fn notes(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<TaskNoteNode>> {
-        Ok(self.view(ctx)?.notes.iter().cloned().map(TaskNoteNode).collect())
+        many(ctx, self.view(ctx)?.notes.iter().cloned().map(TaskNoteNode).collect())
     }
     /// Every gate on the task, open or met, oldest first.
     async fn gates(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<GateNode>> {
-        Ok(self.view(ctx)?.gates.iter().cloned().map(GateNode).collect())
+        many(ctx, self.view(ctx)?.gates.iter().cloned().map(GateNode).collect())
     }
     /// The task the capture promoted to this task was filed from.
     async fn source_task(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<TaskNode>> {
@@ -522,7 +525,8 @@ impl TaskNode {
     }
     /// The task's context packet, as `arcl context` prints it.
     async fn context(&self, ctx: &Context<'_>) -> async_graphql::Result<ContextNode> {
-        Ok(ContextNode(PlanningContext::from_view(self.view(ctx)?.clone())))
+        reader(ctx).admit(1)?;
+        Ok(ContextNode(PlanningContext::from_view((*self.view(ctx)?).clone())))
     }
 }
 
@@ -629,8 +633,8 @@ impl ReadinessNode {
         self.0.blocked
     }
     /// Why the task is not ready, one reason each.
-    async fn reasons(&self) -> Vec<ReasonNode> {
-        self.0.reasons.iter().cloned().map(ReasonNode).collect()
+    async fn reasons(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<ReasonNode>> {
+        many(ctx, self.0.reasons.iter().cloned().map(ReasonNode).collect())
     }
 }
 
@@ -671,8 +675,8 @@ impl ReasonNode {
         self.0.path.iter().map(|id| ID(id.to_string())).collect()
     }
     /// The open gate.
-    async fn gate(&self) -> Option<GateNode> {
-        self.0.gate.clone().map(GateNode)
+    async fn gate(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<GateNode>> {
+        one(ctx, self.0.gate.clone().map(GateNode))
     }
 }
 
@@ -682,8 +686,9 @@ pub struct BlockerNode(pub PlanningBlockerView);
 #[Object(name = "Blocker")]
 impl BlockerNode {
     /// The blocking task.
-    async fn task(&self) -> TaskNode {
-        TaskNode::new(self.0.task.clone())
+    async fn task(&self, ctx: &Context<'_>) -> async_graphql::Result<TaskNode> {
+        reader(ctx).admit(1)?;
+        Ok(TaskNode::new(self.0.task.clone()))
     }
     /// Whether the blocker has completed.
     async fn completed(&self) -> bool {
@@ -705,56 +710,58 @@ pub struct ContextNode(pub PlanningContext);
 #[Object(name = "TaskContext")]
 impl ContextNode {
     /// The task.
-    async fn task(&self) -> TaskNode {
-        TaskNode::new(self.0.task.clone())
+    async fn task(&self, ctx: &Context<'_>) -> async_graphql::Result<TaskNode> {
+        reader(ctx).admit(1)?;
+        Ok(TaskNode::new(self.0.task.clone()))
     }
     /// Parent tasks from the oldest ancestor to the immediate parent.
-    async fn ancestors(&self) -> Vec<TaskNode> {
-        task_nodes(&self.0.ancestors)
+    async fn ancestors(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<TaskNode>> {
+        task_nodes(ctx, &self.0.ancestors)
     }
     /// The effective spec.
-    async fn spec(&self) -> Option<SpecNode> {
-        self.0.spec.clone().map(SpecNode)
+    async fn spec(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<SpecNode>> {
+        one(ctx, self.0.spec.clone().map(SpecNode))
     }
     /// The effective plan.
-    async fn plan(&self) -> Option<PlanNode> {
-        self.0.plan.clone().map(PlanNode)
+    async fn plan(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<PlanNode>> {
+        one(ctx, self.0.plan.clone().map(PlanNode))
     }
     /// The effective phase.
-    async fn phase(&self) -> Option<PhaseNode> {
-        self.0.phase.clone().map(PhaseNode)
+    async fn phase(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<PhaseNode>> {
+        one(ctx, self.0.phase.clone().map(PhaseNode))
     }
     /// Direct blockers and their evidence.
-    async fn blockers(&self) -> Vec<BlockerNode> {
-        blocker_nodes(&self.0.blockers)
+    async fn blockers(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<BlockerNode>> {
+        blocker_nodes(ctx, &self.0.blockers)
     }
     /// Blockers held by ancestor tasks, nearest ancestor first.
-    async fn inherited_blockers(&self) -> Vec<BlockerNode> {
-        blocker_nodes(&self.0.inherited_blockers)
+    async fn inherited_blockers(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<BlockerNode>> {
+        blocker_nodes(ctx, &self.0.inherited_blockers)
     }
     /// Tasks that the task blocks directly.
-    async fn dependents(&self) -> Vec<TaskNode> {
-        task_nodes(&self.0.dependents)
+    async fn dependents(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<TaskNode>> {
+        task_nodes(ctx, &self.0.dependents)
     }
     /// The task's readiness.
-    async fn readiness(&self) -> ReadinessNode {
-        ReadinessNode(self.0.readiness.clone())
+    async fn readiness(&self, ctx: &Context<'_>) -> async_graphql::Result<ReadinessNode> {
+        reader(ctx).admit(1)?;
+        Ok(ReadinessNode(self.0.readiness.clone()))
     }
     /// Completed blockers that supplied evidence, one per blocker task.
-    async fn completion_evidence(&self) -> Vec<BlockerNode> {
-        blocker_nodes(&self.0.completion_evidence)
+    async fn completion_evidence(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<BlockerNode>> {
+        blocker_nodes(ctx, &self.0.completion_evidence)
     }
     /// The most recent notes, newest first.
-    async fn notes(&self) -> Vec<TaskNoteNode> {
-        self.0.notes.iter().cloned().map(TaskNoteNode).collect()
+    async fn notes(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<TaskNoteNode>> {
+        many(ctx, self.0.notes.iter().cloned().map(TaskNoteNode).collect())
     }
     /// How many older notes the packet leaves out.
     async fn omitted_notes(&self) -> usize {
         self.0.omitted_notes
     }
     /// Every gate on the task, open or met, oldest first.
-    async fn gates(&self) -> Vec<GateNode> {
-        self.0.gates.iter().cloned().map(GateNode).collect()
+    async fn gates(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<GateNode>> {
+        many(ctx, self.0.gates.iter().cloned().map(GateNode).collect())
     }
 }
 
@@ -765,12 +772,12 @@ pub struct WorkNode(pub PlanningWork);
 #[Object(name = "Work")]
 impl WorkNode {
     /// Every task, ordered by position, then ID.
-    async fn tasks(&self) -> Vec<WorkItemNode> {
-        self.0.tasks.iter().cloned().map(WorkItemNode).collect()
+    async fn tasks(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<WorkItemNode>> {
+        many(ctx, self.0.tasks.iter().cloned().map(WorkItemNode).collect())
     }
     /// Every phase, ordered by plan, then position, then ID.
-    async fn phases(&self) -> Vec<PhaseNode> {
-        self.0.phases.iter().cloned().map(PhaseNode).collect()
+    async fn phases(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<PhaseNode>> {
+        many(ctx, self.0.phases.iter().cloned().map(PhaseNode).collect())
     }
 }
 
@@ -780,12 +787,14 @@ pub struct WorkItemNode(pub PlanningWorkItem);
 #[Object(name = "WorkItem")]
 impl WorkItemNode {
     /// The task.
-    async fn task(&self) -> TaskNode {
-        TaskNode::new(self.0.task.clone())
+    async fn task(&self, ctx: &Context<'_>) -> async_graphql::Result<TaskNode> {
+        reader(ctx).admit(1)?;
+        Ok(TaskNode::new(self.0.task.clone()))
     }
     /// The task's readiness.
-    async fn readiness(&self) -> ReadinessNode {
-        ReadinessNode(self.0.readiness.clone())
+    async fn readiness(&self, ctx: &Context<'_>) -> async_graphql::Result<ReadinessNode> {
+        reader(ctx).admit(1)?;
+        Ok(ReadinessNode(self.0.readiness.clone()))
     }
     /// The task's effective phase: its own, or its nearest ancestor's.
     async fn phase_id(&self) -> Option<ID> {
@@ -824,12 +833,12 @@ impl TreeNode {
         self.0.blocked_by.iter().cloned().map(ID).collect()
     }
     /// Child records.
-    async fn children(&self) -> Vec<TreeNode> {
-        self.0.children.iter().cloned().map(TreeNode).collect()
+    async fn children(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<TreeNode>> {
+        many(ctx, self.0.children.iter().cloned().map(TreeNode).collect())
     }
     /// The record itself.
     async fn record(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<RecordNode>> {
-        Ok(RecordNode::find(reader(ctx).graph()?, &self.0.id))
+        one(ctx, RecordNode::find(reader(ctx).graph()?, &self.0.id))
     }
 }
 
@@ -864,7 +873,19 @@ impl From<RecordSource> for SourceNode {
 
 /// The reader the query runs against.
 pub(crate) fn reader<'a>(ctx: &Context<'a>) -> &'a Reader {
-    ctx.data_unchecked::<Reader>()
+    ctx.data_unchecked::<Arc<Reader>>()
+}
+
+/// Count the objects in `nodes` against the query's [`super::MAX_NODES`].
+pub(crate) fn many<T>(ctx: &Context<'_>, nodes: Vec<T>) -> async_graphql::Result<Vec<T>> {
+    reader(ctx).admit(nodes.len())?;
+    Ok(nodes)
+}
+
+/// Count `node`, if there is one, against the query's [`super::MAX_NODES`].
+pub(crate) fn one<T>(ctx: &Context<'_>, node: Option<T>) -> async_graphql::Result<Option<T>> {
+    reader(ctx).admit(usize::from(node.is_some()))?;
+    Ok(node)
 }
 
 /// A filter for every task.
@@ -888,18 +909,19 @@ fn short_id(ctx: &Context<'_>, id: &str) -> async_graphql::Result<String> {
 }
 
 fn source(ctx: &Context<'_>, id: &str) -> async_graphql::Result<Option<SourceNode>> {
-    Ok(reader(ctx).source(id)?.map(SourceNode::from))
+    one(ctx, reader(ctx).source(id)?.map(SourceNode::from))
 }
 
 fn task_by_id(ctx: &Context<'_>, id: Option<TaskId>) -> async_graphql::Result<Option<TaskNode>> {
     let Some(id) = id else { return Ok(None) };
     let graph = reader(ctx).graph()?;
-    Ok(graph
+    let task = graph
         .tasks
         .iter()
         .find(|task| task.id == id)
         .cloned()
-        .map(TaskNode::new))
+        .map(TaskNode::new);
+    one(ctx, task)
 }
 
 fn promoted_source_task(ctx: &Context<'_>, id: &str) -> async_graphql::Result<Option<TaskNode>> {
@@ -907,10 +929,10 @@ fn promoted_source_task(ctx: &Context<'_>, id: &str) -> async_graphql::Result<Op
     task_by_id(ctx, source)
 }
 
-fn task_nodes(tasks: &[PlanningTask]) -> Vec<TaskNode> {
-    tasks.iter().cloned().map(TaskNode::new).collect()
+fn task_nodes(ctx: &Context<'_>, tasks: &[PlanningTask]) -> async_graphql::Result<Vec<TaskNode>> {
+    many(ctx, tasks.iter().cloned().map(TaskNode::new).collect())
 }
 
-fn blocker_nodes(blockers: &[PlanningBlockerView]) -> Vec<BlockerNode> {
-    blockers.iter().cloned().map(BlockerNode).collect()
+fn blocker_nodes(ctx: &Context<'_>, blockers: &[PlanningBlockerView]) -> async_graphql::Result<Vec<BlockerNode>> {
+    many(ctx, blockers.iter().cloned().map(BlockerNode).collect())
 }
