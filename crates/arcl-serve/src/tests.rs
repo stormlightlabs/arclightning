@@ -825,6 +825,34 @@ fn serve_reads_a_graphql_body_under_the_mutation_limits() {
 }
 
 #[test]
+fn serve_refuses_a_graphql_post_before_reading_its_body() {
+    // The body deadline outlasts the read timeout, so a refusal that waited
+    // for the body would fail the read instead of returning a 401 or 403.
+    let (port, token) = serve(BODY_DEADLINE);
+    let mut tokenless = send(
+        port,
+        "POST /graphql HTTP/1.1\r\nContent-Length: 100000",
+        "\r\n{\"query\":",
+    );
+    let refused = response_head(&mut tokenless);
+    assert!(refused.starts_with("http/1.1 401"), "{refused}");
+    assert!(refused.contains("connection: close"), "{refused}");
+
+    let mut wrong_host = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).expect("a connection");
+    wrong_host
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .expect("a read timeout");
+    write!(
+        wrong_host,
+        "POST /graphql HTTP/1.1\r\nHost: evil.example:{port}\r\n{TOKEN_HEADER}: {token}\r\nContent-Length: 100000\r\n\r\n{{\"query\":"
+    )
+    .expect("a write");
+    let refused = response_head(&mut wrong_host);
+    assert!(refused.starts_with("http/1.1 403"), "{refused}");
+    assert!(refused.contains("connection: close"), "{refused}");
+}
+
+#[test]
 fn serve_falls_back_to_the_app_page() {
     let answer = answered(&gate(), &get("/planning/anything", Some(TOKEN)));
     assert_eq!(answer.status, 200);

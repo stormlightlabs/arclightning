@@ -1,9 +1,10 @@
 //! `arcl serve`: the web app and its endpoints over the CLI's commands.
 //!
 //! Each read opens the database and runs the same read as the CLI, with no
-//! workspace sync. `POST /graphql` runs as `arcl query` does and is a read
-//! too. A read never changes records, though opening the database
-//! can run its migrations. Each mutation runs the same `arcl task` or
+//! workspace sync. `POST /graphql` is a read too: it runs the same query as
+//! `arcl query`, with the same response and limits, but without the
+//! workspace sync `arcl query` runs first. A read never changes records,
+//! though opening the database can run its migrations. Each mutation runs the same `arcl task` or
 //! `arcl capture`, `arcl spec` or `arcl plan` command as the CLI, with the
 //! same sync around it: it takes the sync lock, syncs, changes the record and
 //! syncs again to export it. The server holds the lock only during a

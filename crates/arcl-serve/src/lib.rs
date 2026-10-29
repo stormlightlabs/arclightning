@@ -32,10 +32,9 @@
 //! be accepted.
 //!
 //! [`Reads`] and [`Mutations`] stay synchronous. Reads, GraphQL queries
-//! included, run one at a time on
-//! the thread that called [`Server::run`], and mutations one at a time on
-//! their own thread, so a mutation that waits for a lock never holds up reads
-//! and page loads. Ctrl-C stops accepting connections, lets open ones finish
+//! included, run one at a time on the thread that called [`Server::run`],
+//! and mutations one at a time on their own thread, so a mutation that waits
+//! for a lock never holds up reads and page loads. Ctrl-C stops accepting connections, lets open ones finish
 //! for up to [`SHUTDOWN_GRACE`], and returns; a second Ctrl-C returns at
 //! once. After Ctrl-C, mutations that have not started get 503 without
 //! running, and one already running finishes before the server returns.

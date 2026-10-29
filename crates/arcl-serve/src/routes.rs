@@ -108,8 +108,9 @@ pub trait Reads {
     /// Every task with its readiness and effective phase, and every phase,
     /// for the Work list.
     fn work(&self) -> Reply;
-    /// Run `request` as `arcl query` runs it, answering status 200 with the
-    /// GraphQL response `arcl query` prints, `errors` included.
+    /// Run `request` as `arcl query` runs it, without its workspace sync, and
+    /// answer status 200 with the GraphQL response `arcl query` prints,
+    /// `errors` included.
     fn graphql(&self, request: GraphqlRequest) -> Reply;
 }
 

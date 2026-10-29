@@ -560,9 +560,11 @@ task has none, and every phase. Its envelope is
 
 `POST /graphql` takes `{"query", "variables", "operationName"}`, as GraphQL
 clients send it, and answers status 200 with the response `arcl query` prints
-for the same query, with the same limits. `errors` and limit refusals come
-back in that body too. A body that is not JSON, has no `query` string, or has
-a `variables` that is not an object gets `invalid_request` with status 400.
+for the same query, with the same limits. Like the other `arcl serve` reads, it
+skips the workspace sync `arcl query` runs first. `errors` and limit refusals
+come back in that body too. A body that is not JSON, has no `query` string,
+has a `variables` that is not an object, or has an `operationName` that is not
+a string gets `invalid_request` with status 400.
 
 A POST takes a JSON object of the command's options, named like its flags
 with `_` for `-`:
