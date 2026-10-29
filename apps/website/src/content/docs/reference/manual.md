@@ -449,8 +449,9 @@ See [Inspecting Work](/guides/inspect-work/) for the query workflow and context 
 ## GraphQL queries
 
 `arcl query` runs a read-only GraphQL query against the project's records and
-prints the response as JSON. It needs no server. Writes stay with the other
-commands.
+prints the response as JSON. It needs no server, and `arcl serve` answers the
+same queries at `POST /graphql` (see [Web app](#web-app)). Writes stay with the
+other commands.
 
 | Command                                                              | Purpose                                    |
 | -------------------------------------------------------------------- | ------------------------------------------ |
@@ -502,8 +503,9 @@ carries a per-run token for the first page load. The app moves the token out
 of the URL and sends it in the `X-Arcl-Token` header on every later request.
 The server refuses a request without the token or with a `Host` header that
 does not name the server. Reads take GET and changes take POST; the server
-refuses any other method, so a GET never changes records. A change also needs
-an `Origin` header naming the server, which stops other pages, including
+refuses any other method, so a GET never changes records. `/graphql` takes
+POST only and needs no `Origin`, since a query changes nothing. A change also
+needs an `Origin` header naming the server, which stops other pages, including
 those on other `127.0.0.1` ports, from sending one. Responses carry no CORS
 headers. The page's Content-Security-Policy runs only the app's own script and
 loads images only from the server or `data:` URLs, so Markdown cannot pull
@@ -546,6 +548,7 @@ closes after the reply. It keeps at most
 | `POST /api/plans`                 | `arcl plan create`       |
 | `POST /api/plans/<id>/apply`      | `arcl plan apply`        |
 | `POST /api/records/<id>/edit`     | none (see below)         |
+| `POST /graphql`                   | `arcl query`             |
 
 `/api/records` and `/api/ready` take the command's flags as query parameters,
 such as `?kind=task&status=pending&status=parked`. `/api/tree` takes none and
@@ -554,6 +557,12 @@ returns the Work list in one request: every task with the readiness
 `arcl explain` reports and its phase ID, inherited from an ancestor where the
 task has none, and every phase. Its envelope is
 `{"format_version": 2, "data": {"tasks": [{"task", "readiness", "phase_id"}], "phases": [...]}}`.
+
+`POST /graphql` takes `{"query", "variables", "operationName"}`, as GraphQL
+clients send it, and answers status 200 with the response `arcl query` prints
+for the same query, with the same limits. `errors` and limit refusals come
+back in that body too. A body that is not JSON, has no `query` string, or has
+a `variables` that is not an object gets `invalid_request` with status 400.
 
 A POST takes a JSON object of the command's options, named like its flags
 with `_` for `-`:

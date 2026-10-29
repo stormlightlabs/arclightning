@@ -46,8 +46,8 @@ impl Gate {
             return Ok(route);
         }
         if let Err(reply) = Self::permit(incoming, &route) {
-            let allow =
-                (reply.status() == 405).then_some(if matches!(route, Route::Write(_)) { "POST" } else { "GET" });
+            let posts = matches!(route, Route::Write(_) | Route::Graphql);
+            let allow = (reply.status() == 405).then_some(if posts { "POST" } else { "GET" });
             return Err(Answer { allow, ..Answer::json(reply) });
         }
         Ok(route)
@@ -98,15 +98,13 @@ impl Gate {
     }
 
     /// Refuse a request with the wrong method for its route, or a mutation
-    /// whose `Origin` is missing or does not name the `Host`.
+    /// whose `Origin` is missing or does not name the `Host`. A GraphQL query
+    /// takes POST but changes nothing, so it needs no `Origin`.
     fn permit(incoming: &Incoming, route: &Route) -> Result<(), Reply> {
-        let writes = matches!(route, Route::Write(_));
-        match (writes, incoming.method.as_str()) {
+        match (route, incoming.method.as_str()) {
             // A path with no endpoint answers 404 to any method.
-            (false, _) if matches!(route, Route::UnknownApi) => Ok(()),
-            (false, "GET") => Ok(()),
-            (false, _) => Err(Reply::refusal(405, "method_not_allowed", "this path takes GET only")),
-            (true, "POST") => {
+            (Route::UnknownApi, _) | (Route::Graphql, "POST") => Ok(()),
+            (Route::Write(_), "POST") => {
                 // `authorize` passed, so `Host` is present.
                 let served = format!("http://{}", incoming.host.as_deref().unwrap_or_default());
                 match incoming.origin.as_deref() {
@@ -123,7 +121,11 @@ impl Gate {
                     Some(_) => Ok(()),
                 }
             }
-            (true, _) => Err(Reply::refusal(405, "method_not_allowed", "this path takes POST only")),
+            (Route::Write(_) | Route::Graphql, _) => {
+                Err(Reply::refusal(405, "method_not_allowed", "this path takes POST only"))
+            }
+            (_, "GET") => Ok(()),
+            _ => Err(Reply::refusal(405, "method_not_allowed", "this path takes GET only")),
         }
     }
 }

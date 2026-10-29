@@ -258,7 +258,8 @@ to `127.0.0.1` on an ephemeral port by default, prints the URL, and accepts
 `--port` to pin one. Every request needs a matching `Host` header, which
 stops DNS rebinding. Every request also needs the per-run token in a request
 header, never a cookie, and in no query string after the first page load.
-Mutations need a matching `Origin`. The server sends no CORS headers and never
+Mutations need a matching `Origin`. `POST /graphql` runs read-only GraphQL
+queries and needs no `Origin`. The server sends no CORS headers and never
 changes state on GET. The header token and the `Origin` check stop other local
 pages, including those on other `127.0.0.1` ports, from driving it.
 

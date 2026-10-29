@@ -48,6 +48,9 @@ impl Reads for Echo {
     fn work(&self) -> Reply {
         Reply::success("work".to_owned())
     }
+    fn graphql(&self, request: GraphqlRequest) -> Reply {
+        Reply::success(format!("graphql {request:?}"))
+    }
 }
 
 impl Mutations for Echo {
@@ -112,7 +115,7 @@ fn answered(gate: &Gate, incoming: &Incoming) -> Answer {
 fn answered_with(gate: &Gate, incoming: &Incoming, body: &[u8]) -> Answer {
     match gate.admit(incoming) {
         Ok(Route::Write(write)) => Answer::json(mutate(write, body, &Echo)),
-        Ok(route) => dispatch(route, &Echo),
+        Ok(route) => dispatch(route, body, &Echo),
         Err(answer) => answer,
     }
 }
@@ -718,6 +721,107 @@ fn serve_routes_the_read_endpoints() {
     assert_eq!(body("/api/work/x").0, 404);
     assert_eq!(body("/api/nothing").0, 404);
     assert_eq!(body("/api/records/a%ZZ").0, 400);
+}
+
+/// A `POST /graphql` with the token and no `Origin`.
+fn graphql_post() -> Incoming {
+    Incoming { method: "POST".to_owned(), ..get("/graphql", Some(TOKEN)) }
+}
+
+#[test]
+fn serve_runs_graphql_queries_as_reads_without_an_origin() {
+    let body = r#"{"query": "query Q($id: ID!) { task(id: $id) { id } }", "variables": {"id": "x"}, "operationName": "Q", "extensions": {}}"#;
+    let (status, answered) = text(answered_with(&gate(), &graphql_post(), body.as_bytes()));
+    assert_eq!(status, 200);
+    let expected = GraphqlRequest {
+        query: "query Q($id: ID!) { task(id: $id) { id } }".to_owned(),
+        variables: Some(serde_json::json!({ "id": "x" })),
+        operation_name: Some("Q".to_owned()),
+    };
+    assert_eq!(answered, format!("graphql {expected:?}"));
+
+    let foreign = Incoming { origin: Some("http://evil.example".to_owned()), ..graphql_post() };
+    let plain = br#"{"query": "{ work { phases { id } } }", "variables": null}"#;
+    let (status, answered) = text(answered_with(&gate(), &foreign, plain));
+    assert_eq!(status, 200);
+    let expected = GraphqlRequest { query: "{ work { phases { id } } }".to_owned(), ..GraphqlRequest::default() };
+    assert_eq!(answered, format!("graphql {expected:?}"));
+}
+
+#[test]
+fn serve_checks_the_host_and_token_on_graphql() {
+    let body = br#"{"query": "{ work { phases { id } } }"}"#;
+    let tokenless = Incoming { token: None, ..graphql_post() };
+    assert_eq!(answered_with(&gate(), &tokenless, body).status, 401);
+    let wrong = Incoming { token: Some("abc124".to_owned()), ..graphql_post() };
+    assert_eq!(answered_with(&gate(), &wrong, body).status, 401);
+    let wrong_host = Incoming { host: Some("evil.example:4321".to_owned()), ..graphql_post() };
+    let refused = answered_with(&gate(), &wrong_host, body);
+    assert_eq!(refused.status, 403);
+    assert!(refused.close);
+    let query_token = Incoming { url: format!("/graphql?token={TOKEN}"), token: None, ..graphql_post() };
+    assert_eq!(answered_with(&gate(), &query_token, body).status, 401);
+}
+
+#[test]
+fn serve_answers_graphql_only_on_post() {
+    for method in ["GET", "PUT", "DELETE", "OPTIONS"] {
+        let incoming = Incoming { method: method.to_owned(), ..graphql_post() };
+        let answer = answered(&gate(), &incoming);
+        assert_eq!(answer.status, 405, "{method}");
+        assert!(answer.headers().contains(&("Allow", "POST")));
+        assert_eq!(error_code(&answer), "method_not_allowed");
+    }
+}
+
+#[test]
+fn serve_refuses_malformed_graphql_bodies() {
+    for body in [
+        "",
+        "not json",
+        "{}",
+        "[]",
+        r#"{"query": 1}"#,
+        r#"{"variables": {}}"#,
+        r#"{"query": "{ work { phases { id } } }", "variables": [1]}"#,
+        r#"{"query": "{ work { phases { id } } }", "operationName": 2}"#,
+    ] {
+        let answer = answered_with(&gate(), &graphql_post(), body.as_bytes());
+        assert_eq!(answer.status, 400, "{body}");
+        assert_eq!(error_code(&answer), "invalid_request", "{body}");
+    }
+}
+
+#[test]
+fn serve_reads_a_graphql_body_under_the_mutation_limits() {
+    let (port, token) = serve(Duration::from_millis(300));
+    let body = r#"{"query": "{ work { phases { id } } }"}"#;
+    let head = format!(
+        "POST /graphql HTTP/1.1\r\n{TOKEN_HEADER}: {token}\r\nContent-Length: {}\r\nConnection: close",
+        body.len()
+    );
+    let answered = response(send(port, &head, &format!("\r\n{body}")));
+    assert!(answered.starts_with("HTTP/1.1 200"), "{answered}");
+    assert!(answered.contains("graphql GraphqlRequest"), "{answered}");
+
+    let huge = format!("POST /graphql HTTP/1.1\r\n{TOKEN_HEADER}: {token}\r\nContent-Length: 1000000000000000");
+    let refused = response(send(port, &huge, "\r\n{\"query\":"));
+    assert!(refused.starts_with("HTTP/1.1 413"), "{refused}");
+    assert!(refused.contains("payload_too_large"), "{refused}");
+
+    let chunked = format!("POST /graphql HTTP/1.1\r\n{TOKEN_HEADER}: {token}\r\nTransfer-Encoding: chunked");
+    let over = MAX_BODY_BYTES + 1;
+    let mut stream = send(port, &chunked, &format!("\r\n{over:x}\r\n{}", " ".repeat(over)));
+    let refused = response_head(&mut stream);
+    assert!(refused.starts_with("http/1.1 413"), "{refused}");
+    assert!(closes(&mut stream));
+
+    let stalled = format!("POST /graphql HTTP/1.1\r\n{TOKEN_HEADER}: {token}\r\nContent-Length: 100000");
+    let mut stream = send(port, &stalled, "\r\n{\"query\":");
+    let refused = response_head(&mut stream);
+    assert!(refused.starts_with("http/1.1 408"), "{refused}");
+    assert!(refused.contains("connection: close"), "{refused}");
+    assert!(authorized_get(port, &token).starts_with("HTTP/1.1 200"));
 }
 
 #[test]

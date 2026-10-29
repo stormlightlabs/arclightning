@@ -19,16 +19,19 @@ pub(super) fn exec_query(input: QueryInput) -> anyhow::Result<()> {
         return write_output(Some(arcl_graphql::sdl().trim_end().to_owned()));
     }
     let request = request(input).map_err(ApplicationError::from_command)?;
+    let (response, errors) = run_query(request)?;
+    write_output(Some(response))?;
+    if errors == 0 { Ok(()) } else { Err(ApplicationError::query_errors(errors).into()) }
+}
+
+/// Run `request` against the project's records. Returns the GraphQL response
+/// as `arcl query` prints it, and the number of errors in it. `arcl serve`
+/// answers `POST /graphql` with the same response.
+pub(super) fn run_query(request: arcl_graphql::Request) -> anyhow::Result<(String, usize)> {
     let database = open_database().map_err(ApplicationError::from_command)?;
     let response = arcl_graphql::execute(database, request);
-    write_output(Some(
-        serde_json::to_string_pretty(&response).context("writing the GraphQL response")?,
-    ))?;
-    if response.errors.is_empty() {
-        Ok(())
-    } else {
-        Err(ApplicationError::query_errors(response.errors.len()).into())
-    }
+    let body = serde_json::to_string_pretty(&response).context("writing the GraphQL response")?;
+    Ok((body, response.errors.len()))
 }
 
 fn request(input: QueryInput) -> CResult<arcl_graphql::Request> {

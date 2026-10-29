@@ -105,7 +105,7 @@ impl Server {
             .enable_all()
             .build()
             .map_err(ServeError::Start)?;
-        let (reads_queue, read_jobs) = mpsc::channel::<Job<Route>>();
+        let (reads_queue, read_jobs) = mpsc::channel::<Job<(Route, Vec<u8>)>>();
         let (writes_queue, write_jobs) = mpsc::channel::<Job<(Write, Vec<u8>)>>();
         let stopping = Arc::new(AtomicBool::new(false));
         let shared = Arc::new(Shared {
@@ -130,8 +130,8 @@ impl Server {
             // The runtime, and with it every handle on the job queues, drops
             // when this thread ends, which ends both job loops.
             let serving = scope.spawn(move || runtime.block_on(accept(listener, shared, limits, signal)));
-            for Job { work: route, reply } in read_jobs {
-                let _ = reply.send(guarded(|| dispatch(route, reads)));
+            for Job { work: (route, body), reply } in read_jobs {
+                let _ = reply.send(guarded(|| dispatch(route, &body, reads)));
             }
             serving.join().unwrap_or_else(|panic| panic::resume_unwind(panic))
         })
@@ -145,7 +145,7 @@ struct Shared {
     body_deadline: Duration,
     /// Set when the server starts shutting down; mutations no longer run.
     stopping: Arc<AtomicBool>,
-    reads: mpsc::Sender<Job<Route>>,
+    reads: mpsc::Sender<Job<(Route, Vec<u8>)>>,
     writes: mpsc::Sender<Job<(Write, Vec<u8>)>>,
 }
 
@@ -212,7 +212,8 @@ async fn accept<S: Future<Output = ()>>(
 }
 
 /// Answer one request: refuse a declared body over the limit, check the
-/// head, then read a mutation's body or pass a read to the read thread.
+/// head, then read a mutation's body or pass a read to the read thread. A
+/// GraphQL query is a read with a body, read under the mutations' limits.
 async fn handle(State(shared): State<Arc<Shared>>, request: Request) -> Response {
     let (parts, body) = request.into_parts();
     if declares_too_much(&parts.headers) {
@@ -225,8 +226,12 @@ async fn handle(State(shared): State<Arc<Shared>>, request: Request) -> Response
             Ok(body) => ask(&shared.writes, (write, body)).await,
             Err(answer) => answer,
         },
+        Ok(Route::Graphql) => match read_body(body, shared.body_deadline).await {
+            Ok(body) => ask(&shared.reads, (Route::Graphql, body)).await,
+            Err(answer) => answer,
+        },
         Ok(Route::Page) => page(),
-        Ok(route) => ask(&shared.reads, route).await,
+        Ok(route) => ask(&shared.reads, (route, Vec::new())).await,
     };
     answer.into_response()
 }
