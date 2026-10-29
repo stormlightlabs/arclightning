@@ -202,6 +202,8 @@ pub struct PlanningTaskView {
     /// Every gate on the task, open or met, oldest first.
     pub gates: Vec<Gate>,
     /// The task the capture promoted to this task was filed from, if any.
+    /// JSON leaves it out when there is none.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source_task_id: Option<TaskId>,
 }
 

@@ -313,12 +313,14 @@ impl Renderer {
     }
 
     /// Render one connected-model mutation and include the affected record in JSON mode.
-    /// Human output adds a `From:` line naming the capture's source task.
-    pub fn render_capture(&self, action: &str, capture: &Capture) -> Result<Option<String>, OutputError> {
-        let ids = ShortIds::default();
+    /// Human output adds a `From:` line naming the capture's source task by
+    /// its short ID in `ids`.
+    pub fn render_capture(
+        &self, action: &str, capture: &Capture, ids: &ShortIds,
+    ) -> Result<Option<String>, OutputError> {
         let source = capture
             .source_task_id
-            .map(|id| SourceTask { id, ids: &ids, beside_record: false });
+            .map(|id| SourceTask { id, ids, beside_record: false });
         self.render_sourced(
             action,
             "capture",
@@ -1000,8 +1002,9 @@ impl Renderer {
     }
 
     /// Render a record a show command found, as [`Self::render_shown`] does,
-    /// with the task it came from. Human output adds a `From:` line; JSON
-    /// output adds `source_task_id` as [`SourceTask`] says.
+    /// with the task it came from. Human output adds a `From:` line, plain
+    /// output a `from` line, and JSON output `source_task_id` as
+    /// [`SourceTask`] says.
     pub fn render_shown_from<T: Serialize>(
         &self, kind: &str, id: &str, title: &str, record: &T, source: Option<SourceTask<'_>>,
     ) -> Result<Option<String>, OutputError> {
@@ -1028,7 +1031,12 @@ impl Renderer {
                     None => line,
                 }
             }
-            OutputMode::Plain => id.to_owned(),
+            // Only a show adds the `from` line, so a create still prints
+            // the bare ID that scripts capture.
+            OutputMode::Plain => match source.filter(|_| action == "shown") {
+                Some(source) => format!("{id}\nfrom\t{}", source.id),
+                None => id.to_owned(),
+            },
             OutputMode::Json => {
                 let mut data = serde_json::Map::new();
                 data.insert("action".to_owned(), serde_json::Value::String(action.to_owned()));
@@ -2151,7 +2159,7 @@ impl PlanningTaskViewOutput for PlanningTaskView {
             lines.push(format!("Assignee: {assignee}"));
         }
         if let Some(source) = self.source_task_id {
-            lines.push(format!("From: {}", ids.short(&source.to_string())));
+            lines.push(format!("From: task `{}`", ids.short(&source.to_string())));
         }
         lines.extend([
             format!(

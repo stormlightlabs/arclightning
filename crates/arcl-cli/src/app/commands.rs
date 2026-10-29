@@ -118,10 +118,11 @@ pub(super) fn exec_capture(command: CaptureCommand) -> CResult<CaptureResult> {
 }
 
 /// Fill in `capture create --from` when it is left out: the one in-progress
-/// task claimed by a non-empty `ARCL_AGENT`. With no such task or several,
-/// the capture gets no source. `arcl serve` skips this, so the web app never
-/// links a capture to the agent's task.
-pub(super) fn default_capture_source(command: CaptureCommand) -> CResult<CaptureCommand> {
+/// task claimed by a non-empty `ARCL_AGENT`. With no such task the capture
+/// gets no source. With several it gets none either, and `warnings` gains
+/// one naming them. `arcl serve` skips this, so the web app never links a
+/// capture to the agent's task.
+pub(super) fn default_capture_source(command: CaptureCommand, warnings: &mut Vec<Warning>) -> CResult<CaptureCommand> {
     let CaptureCommand::Create { title, body, from: None } = command else {
         return Ok(command);
     };
@@ -136,10 +137,19 @@ pub(super) fn default_capture_source(command: CaptureCommand) -> CResult<Capture
         .planning_tasks()?
         .into_iter()
         .filter(|task| task.status == TaskStatus::InProgress && task.assignee.as_deref() == Some(agent.as_str()))
+        .map(|task| task.id.to_string())
         .collect::<Vec<_>>();
     let from = match claimed.as_slice() {
-        [task] => Some(task.id.to_string()),
-        _ => None,
+        [] => None,
+        [task] => Some(task.clone()),
+        tasks => {
+            warnings.push(Warning::capture_source(format!(
+                "`{agent}` has {} tasks in progress ({}), so the capture has no source; pass --from <task>",
+                tasks.len(),
+                tasks.join(", ")
+            )));
+            None
+        }
     };
     Ok(CaptureCommand::Create { title, body, from })
 }
@@ -149,7 +159,16 @@ pub(super) fn default_capture_source(command: CaptureCommand) -> CResult<Capture
 pub(super) fn run_capture(command: CaptureCommand, renderer: &Renderer) -> Result<Option<String>, ApplicationError> {
     let result = exec_capture(command).map_err(ApplicationError::from_command)?;
     render_output(match result {
-        CaptureResult::Mutation { action, capture } => renderer.render_capture(action, &capture),
+        CaptureResult::Mutation { action, capture } => {
+            // Only a source task needs short IDs, and only human output shows them.
+            let ids = match capture.source_task_id {
+                Some(_) => open_database()
+                    .and_then(|database| display_ids(&database, renderer))
+                    .map_err(ApplicationError::from_command)?,
+                None => ShortIds::default(),
+            };
+            renderer.render_capture(action, &capture, &ids)
+        }
         CaptureResult::Promotion(result) => renderer.render_capture_promotion(&result),
         CaptureResult::List(captures) => renderer.render_captures(&captures),
     })

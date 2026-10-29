@@ -121,14 +121,17 @@ workspace layout.
 
 `arcl capture create <title>` files a capture in the Inbox. `--from <task>`
 records the task it came from, by full or short ID. Without `--from`, the
-capture takes the one in-progress task claimed by `ARCL_AGENT`; with no such
-task, or several, it has no source. An unknown task fails with status code
-`5`, and an ID that is not a task's with `3`.
+capture takes the one in-progress task claimed by `ARCL_AGENT`. With no such
+task it has no source; with several it has none and the command warns,
+naming them. An unknown task fails with status code `5`, and an ID that is
+not a task's with `3`. Only the CLI fills in the source: the MCP
+`capture_create` tool records one only when the call passes `from`.
 
-`show` and `--json` give the source as `source_task_id`. A promoted spec, task
-or note keeps it: `show`, `spec show`, `task show` and `note show` on the new
-record read it through the capture's promotion, and a capture file stores it
-as `source-task`.
+`show` prints the source as a `From: task` line, `--plain` show as a `from`
+line, and `--json` as `source_task_id`, which it leaves out when there is no
+source. A promoted spec, task or note keeps it: `show`, `spec show`,
+`task show` and `note show` on the new record read it through the capture's
+promotion, and a capture file stores it as `source-task`.
 
 ## Idea commands
 
@@ -653,7 +656,8 @@ note** open a form with the capture's title, which runs `arcl capture
 promote`; the new record gets the capture's body. The task form sets the
 priority, milestone and parent, and reads `!priority` and `^REF` from the
 capture's title. A promotion takes no blockers, so the form names each
-`after:REF` for you to add with `arcl dependency add`. The spec form takes optional acceptance criteria.
+`after:REF` for you to add with `arcl dependency add`. The spec form takes
+optional acceptance criteria.
 **Discard** asks first, then runs `arcl capture discard`. After either, the
 next capture is selected, and a notice links to the new task or to Planning.
 While a form holds edits, or a promotion or discard is running, `j`, `k` and

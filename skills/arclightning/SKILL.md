@@ -113,8 +113,10 @@ arcl --json capture create "<title>" --body "<what and why>" --from <task-id>
 ```
 
 `--from` records the task you were working on, so the Inbox shows where the
-capture came from. Leave it out when `ARCL_AGENT` names you and you hold one
-in-progress claim: the capture takes that task. The tool's field is `from`.
+capture came from. Only the CLI fills it in: without `--from`, when
+`ARCL_AGENT` names you and you hold one in-progress claim, the capture takes
+that task, and with several it warns and records none. The MCP tool never
+fills it in, so pass `from` to `capture_create`.
 
 When the new work must wait for other tasks, create it with one
 `--blocked-by <id>` per blocker, or add blockers to an existing task:

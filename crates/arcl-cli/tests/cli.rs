@@ -7474,7 +7474,13 @@ fn capture_create_from_records_and_shows_the_source_task() {
     let created = capture_output(dir, "Found", &["--from", &task], None);
     assert_eq!(capture_source(&created), Some(task.clone()));
     let capture = id(&created.stdout, "capture");
-    assert_eq!(capture_source(&capture_output(dir, "Plain", &[], None)), None);
+    let unsourced = capture_output(dir, "Plain", &[], None);
+    assert_eq!(capture_source(&unsourced), None);
+    let unsourced = json(&unsourced.stdout);
+    assert!(
+        unsourced["data"]["capture"].get("source_task_id").is_none(),
+        "{unsourced}"
+    );
 
     let shown = run_json(dir, ["--json", "capture", "show", &capture].as_ref());
     assert_eq!(shown["data"]["capture"]["source_task_id"], task);
@@ -7489,6 +7495,29 @@ fn capture_create_from_records_and_shows_the_source_task() {
     let short = &task[task.len() - 4..];
     assert!(human.contains(&format!("\nFrom: task `{short}`")), "{human}");
 
+    let created = arcl_in(dir)
+        .args(["--color", "never", "capture", "create", "Human", "--from", &task])
+        .output()
+        .expect("capture create runs");
+    assert_success(&created);
+    let created = String::from_utf8(created.stdout).expect("UTF-8");
+    assert!(created.contains(&format!("\nFrom: task `{short}`")), "{created}");
+    let plain = arcl_in(dir)
+        .args(["--plain", "capture", "show", &capture])
+        .output()
+        .expect("capture show runs");
+    assert_success(&plain);
+    assert_eq!(
+        String::from_utf8(plain.stdout).expect("UTF-8"),
+        format!("{capture}\nfrom\t{task}\n")
+    );
+    let plain_create = arcl_in(dir)
+        .args(["--plain", "capture", "create", "Bare", "--from", &task])
+        .output()
+        .expect("capture create runs");
+    assert_success(&plain_create);
+    assert!(!String::from_utf8(plain_create.stdout).expect("UTF-8").contains("from"));
+
     let short_from = capture_output(dir, "Short", &["--from", short], None);
     assert_eq!(capture_source(&short_from), Some(task.clone()));
 
@@ -7497,7 +7526,7 @@ fn capture_create_from_records_and_shows_the_source_task() {
     let not_task = capture_output(dir, "Wrong", &["--from", &capture], None);
     assert_eq!(not_task.status.code(), Some(3));
     let captures = run_json(dir, ["--json", "capture", "list"].as_ref());
-    assert_eq!(captures["data"]["captures"].as_array().map(Vec::len), Some(3));
+    assert_eq!(captures["data"]["captures"].as_array().map(Vec::len), Some(5));
 }
 
 #[test]
@@ -7521,8 +7550,27 @@ fn capture_create_defaults_to_the_one_task_arcl_agent_claimed() {
     assert_success(&claim_output(dir, &second, Some("agent-7"), None));
     let two = capture_output(dir, "Two claims", &[], Some("agent-7"));
     assert_eq!(capture_source(&two), None);
+    let warnings = json(&two.stderr);
+    assert_eq!(warnings["warnings"][0]["code"], "capture_source", "{warnings}");
+    let message = warnings["warnings"][0]["message"].as_str().expect("warning message");
+    assert!(
+        message.contains(&first) && message.contains(&second) && message.contains("--from"),
+        "{message}"
+    );
+    let human = arcl_in(dir)
+        .args(["capture", "create", "Two claims, human"])
+        .env("ARCL_AGENT", "agent-7")
+        .output()
+        .expect("capture create runs");
+    assert_success(&human);
+    let stderr = String::from_utf8(human.stderr).expect("UTF-8");
+    assert!(
+        stderr.starts_with("warning: `agent-7` has 2 tasks in progress"),
+        "{stderr}"
+    );
     let chosen = capture_output(dir, "Chosen", &["--from", &second], Some("agent-7"));
     assert_eq!(capture_source(&chosen), Some(second));
+    assert!(chosen.stderr.is_empty(), "{}", String::from_utf8_lossy(&chosen.stderr));
 }
 
 #[test]
@@ -7547,9 +7595,18 @@ fn promotion_keeps_the_source_task_on_the_new_record() {
     assert_success(&human);
     let human = String::from_utf8(human.stdout).expect("UTF-8");
     assert!(
-        human.contains(&format!("\nFrom: {}\n", &task[task.len() - 4..])),
+        human.contains(&format!("\nFrom: task `{}`\n", &task[task.len() - 4..])),
         "{human}"
     );
+    let plain = arcl_in(dir)
+        .args(["--plain", "show", &new_task])
+        .output()
+        .expect("show runs");
+    assert_success(&plain);
+    let plain = String::from_utf8(plain.stdout).expect("UTF-8");
+    assert!(plain.contains(&format!("\nfrom\t{task}\n")), "{plain}");
+    let unsourced = run_json(dir, ["--json", "show", &task].as_ref());
+    assert!(unsourced["data"].get("source_task_id").is_none(), "{unsourced}");
 
     let note_capture = id(&capture_output(dir, "Note", &["--from", &task], None).stdout, "capture");
     let promoted = run_json(
@@ -7639,6 +7696,15 @@ fn spec_and_note_show_name_the_promoted_source_task() {
         assert_success(&human);
         let human = String::from_utf8(human.stdout).expect("UTF-8");
         assert!(human.contains(&format!("\nFrom: task `{short}`")), "{human}");
+        let plain = arcl_in(dir)
+            .args(["--plain", kind, "show", &record])
+            .output()
+            .expect("show runs");
+        assert_success(&plain);
+        assert_eq!(
+            String::from_utf8(plain.stdout).expect("UTF-8"),
+            format!("{record}\nfrom\t{task}\n")
+        );
     }
 
     let plain = id(&capture_output(dir, "Plain", &[], None).stdout, "capture");

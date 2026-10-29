@@ -75,7 +75,8 @@ pub struct Capture {
     pub created_at: String,
     /// The task being worked on when this capture was filed, if any. It
     /// stays after promotion, so the promoted record reaches it through the
-    /// capture's promotion link.
+    /// capture's promotion link. JSON leaves it out when there is none.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source_task_id: Option<TaskId>,
 }
 

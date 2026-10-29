@@ -68,6 +68,12 @@ impl Warning {
         Self { code: "workspace_sync", message }
     }
 
+    /// A `capture create` without `--from` whose `ARCL_AGENT` holds several
+    /// in-progress claims, so the capture has no source.
+    fn capture_source(message: String) -> Self {
+        Self { code: "capture_source", message }
+    }
+
     /// A blocker rule violation a workspace import loaded because it did not
     /// introduce it.
     fn blocker_edges(messages: Vec<String>) -> impl Iterator<Item = Self> {
@@ -180,7 +186,7 @@ fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Wa
             write_output(renderer.render_init(&initialization.root, initialization.workspace_enabled)?)
         }
         Some(Command::Capture { command }) => {
-            let command = default_capture_source(command).map_err(ApplicationError::from_command)?;
+            let command = default_capture_source(command, warnings).map_err(ApplicationError::from_command)?;
             write_output(run_capture(command, renderer)?)
         }
         Some(Command::Release { command }) => exec_release(command, renderer),
