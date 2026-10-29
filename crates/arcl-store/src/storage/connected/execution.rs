@@ -201,6 +201,8 @@ pub struct PlanningTaskView {
     pub notes: Vec<TaskNote>,
     /// Every gate on the task, open or met, oldest first.
     pub gates: Vec<Gate>,
+    /// The task the capture promoted to this task was filed from, if any.
+    pub source_task_id: Option<TaskId>,
 }
 
 /// The focused context packet for a connected-model task.
@@ -359,6 +361,7 @@ pub fn planning_task_view(connection: &Connection, id: TaskId) -> Result<Plannin
     let mut notes = notes_for_task(connection, id)?;
     notes.reverse();
     let gates = gates_for_task(connection, id)?;
+    let source_task_id = super::promoted_source_task(connection, &id.to_string())?;
 
     Ok(PlanningTaskView {
         task,
@@ -373,6 +376,7 @@ pub fn planning_task_view(connection: &Connection, id: TaskId) -> Result<Plannin
         phase: ancestry_ids.phase_id.and_then(|value| data.phases.get(&value).cloned()),
         notes,
         gates,
+        source_task_id,
     })
 }
 

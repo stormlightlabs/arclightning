@@ -17,11 +17,15 @@ pub(super) enum PlanResult {
 
 pub(super) fn exec_capture(command: CaptureCommand) -> CResult<CaptureResult> {
     match command {
-        CaptureCommand::Create { title, body } => {
+        CaptureCommand::Create { title, body, from } => {
             validate_title(&title)?;
             let body = resolve_markdown(body)?.unwrap_or_default();
+            let source = from.as_deref().map(parse_task_id).transpose()?;
             let mut database = open_database()?;
-            Ok(CaptureResult::Mutation { action: "created", capture: database.create_capture(title, body)? })
+            Ok(CaptureResult::Mutation {
+                action: "created",
+                capture: database.create_capture_from(title, body, source)?,
+            })
         }
         CaptureCommand::Show { id } => {
             let id = parse_capture_id(&id)?;
@@ -111,6 +115,33 @@ pub(super) fn exec_capture(command: CaptureCommand) -> CResult<CaptureResult> {
             Ok(CaptureResult::Promotion(Box::new(result)))
         }
     }
+}
+
+/// Fill in `capture create --from` when it is left out: the one in-progress
+/// task claimed by a non-empty `ARCL_AGENT`. With no such task or several,
+/// the capture gets no source. `arcl serve` skips this, so the web app never
+/// links a capture to the agent's task.
+pub(super) fn default_capture_source(command: CaptureCommand) -> CResult<CaptureCommand> {
+    let CaptureCommand::Create { title, body, from: None } = command else {
+        return Ok(command);
+    };
+    let Some(agent) = std::env::var("ARCL_AGENT")
+        .ok()
+        .map(|agent| agent.trim().to_owned())
+        .filter(|agent| !agent.is_empty())
+    else {
+        return Ok(CaptureCommand::Create { title, body, from: None });
+    };
+    let claimed = open_database()?
+        .planning_tasks()?
+        .into_iter()
+        .filter(|task| task.status == TaskStatus::InProgress && task.assignee.as_deref() == Some(agent.as_str()))
+        .collect::<Vec<_>>();
+    let from = match claimed.as_slice() {
+        [task] => Some(task.id.to_string()),
+        _ => None,
+    };
+    Ok(CaptureCommand::Create { title, body, from })
 }
 
 /// Run one `arcl capture` command and return what it prints, so `arcl serve`

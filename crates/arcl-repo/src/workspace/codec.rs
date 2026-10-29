@@ -175,6 +175,8 @@ pub struct CaptureRecord {
     pub created_at: String,
     /// The single promotion edge, when the capture has been promoted.
     pub promoted_to: Option<WorkspaceReference>,
+    /// The task the capture was filed from, written as `source-task`.
+    pub source_task_id: Option<TaskId>,
     pub links: Vec<WorkspaceReference>,
     pub body: String,
 }
@@ -378,6 +380,8 @@ struct CaptureFrontMatter {
     created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     promoted_to: Option<WorkspaceReference>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_task: Option<TaskId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     links: Vec<WorkspaceReference>,
 }
@@ -488,6 +492,7 @@ impl CaptureRecord {
             status: front_matter.status,
             created_at: normalize_line_endings(&front_matter.created_at),
             promoted_to: front_matter.promoted_to,
+            source_task_id: front_matter.source_task,
             links: normalize_references(front_matter.links),
             body,
         })
@@ -504,6 +509,7 @@ impl CaptureRecord {
             status: self.status,
             created_at: normalize_line_endings(&self.created_at),
             promoted_to: self.promoted_to.clone(),
+            source_task: self.source_task_id,
             links: {
                 let mut links = self.links.clone();
                 links.sort();
@@ -1041,12 +1047,12 @@ mod tests {
     const OTHER_GATE_ID: &str = "arcl-g-01K0B2ZWTX7JX9PH7W5G1S6A9S";
 
     #[test]
-    fn manifest_reads_and_renders_versions_one_to_three() {
+    fn manifest_reads_and_renders_versions_one_to_five() {
         assert_eq!(
             WorkspaceManifest::default().format_version,
             OLDEST_WORKSPACE_FORMAT_VERSION
         );
-        for version in 1..=4 {
+        for version in 1..=5 {
             let manifest = WorkspaceManifest::parse(&format!("format-version = {version}")).expect("manifest");
             assert_eq!(
                 manifest.render().expect("render"),
@@ -1056,11 +1062,11 @@ mod tests {
                 )
             );
         }
-        assert_eq!(WORKSPACE_FORMAT_VERSION, 4);
-        for version in [0, 5] {
+        assert_eq!(WORKSPACE_FORMAT_VERSION, 5);
+        for version in [0, 6] {
             assert!(matches!(
                 WorkspaceManifest::parse(&format!("format-version = {version}")),
-                Err(WorkspaceError::UnsupportedVersion { found, expected: 4 }) if found == version
+                Err(WorkspaceError::UnsupportedVersion { found, expected: 5 }) if found == version
             ));
         }
     }
@@ -1074,6 +1080,7 @@ mod tests {
                 status: CaptureStatus::Captured,
                 created_at: "2025-01-01T00:00:00.000Z".to_owned(),
                 promoted_to: None,
+                source_task_id: Some(TaskId::parse(TASK_ID).unwrap()),
                 links: vec![],
                 body: "Capture **body**".to_owned(),
             }),
@@ -1163,6 +1170,9 @@ mod tests {
         for record in records {
             let path = record.path();
             let rendered = record.render().expect("render");
+            if matches!(record, WorkspaceRecord::Capture(_)) {
+                assert!(rendered.contains(&format!("source-task = \"{TASK_ID}\"")));
+            }
             let decoded = decode_record(&path, &rendered).expect("decode");
             assert_eq!(decoded, record);
             assert_eq!(decoded.render().expect("re-render"), rendered);

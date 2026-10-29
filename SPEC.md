@@ -115,6 +115,10 @@ Markdown body, status, and creation metadata.
 A capture can be promoted to a spec, task, or note, or it can be discarded.
 Promotion preserves provenance and is idempotent for the same target.
 
+A capture may name the task it came from, its source task. The record it is
+promoted to reaches that task through the promotion, so the link is stored
+once, on the capture.
+
 ### Spec
 
 A spec replaces the current `Epic` concept. It has a title, lifecycle state,
@@ -319,11 +323,13 @@ file under a configurable workspace directory. The target layout is:
 field, version 3 the task `notes` array of tables, oldest first, each
 with `created-at`, an optional `kind`, and `text`, and version 4 the task
 `gates` array of tables, oldest first, each with `id`, `kind`, `target`,
-`status`, `created-at` and, once met, `met-at`. arcl reads versions 1 to 4.
-It writes version 4 when a task file carries a gate, version 3 when one
-carries a note, version 2 when one carries an `assignee`, and otherwise keeps
-the version the workspace already has. A new workspace starts at version 1,
-so a workspace without claims, notes or gates stays there. A workspace never
+`status`, `created-at` and, once met, `met-at`. Version 5 adds the capture
+`source-task` field. arcl reads versions 1 to 5. It writes version 5 when a
+capture file names its source task, version 4 when a task file carries a
+gate, version 3 when one carries a note, version 2 when one carries an
+`assignee`, and otherwise keeps the version the workspace already has. A new
+workspace starts at version 1, so a workspace without claims, notes, gates or
+capture sources stays there. A workspace never
 moves back to an older version on its own. An arcl that reads only older
 versions checks the manifest before any record and refuses a newer workspace
 with an unsupported format version error.

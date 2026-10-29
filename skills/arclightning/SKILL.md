@@ -109,8 +109,12 @@ standard input.
 When you find work outside the task, capture it instead of doing it:
 
 ```sh
-arcl --json capture create "<title>" --body "<what and why>"
+arcl --json capture create "<title>" --body "<what and why>" --from <task-id>
 ```
+
+`--from` records the task you were working on, so the Inbox shows where the
+capture came from. Leave it out when `ARCL_AGENT` names you and you hold one
+claim: the capture takes that task. The tool's field is `from`.
 
 When the new work must wait for other tasks, create it with one
 `--blocked-by <id>` per blocker, or add blockers to an existing task:

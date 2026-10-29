@@ -257,6 +257,11 @@ fn command_owned_change(before: &WorkspaceRecord, after: &WorkspaceRecord) -> Op
                 "promoted-to",
                 "a promotion is set only by `arcl capture promote`",
             ),
+            (
+                before.source_task_id != after.source_task_id,
+                "source-task",
+                "a capture's source task is set only by `arcl capture create --from`",
+            ),
         ],
         (Spec(before), Spec(after)) => vec![
             (

@@ -174,6 +174,10 @@ pub enum CaptureCommand {
         title: String,
         #[command(flatten)]
         body: MarkdownArgs,
+        /// Record the task this capture came from. Without it, use the one
+        /// in-progress task claimed by `ARCL_AGENT`, if exactly one is.
+        #[arg(long, value_name = "TASK")]
+        from: Option<String>,
     },
     /// Show one capture.
     Show {

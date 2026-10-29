@@ -117,6 +117,18 @@ instead of overwriting either version.
 See [Share the project workspace](/guides/workspace/) for the Git workflow and
 workspace layout.
 
+## Capture commands
+
+`arcl capture create <title>` files a capture in the Inbox. `--from <task>`
+records the task it came from, by full or short ID. Without `--from`, the
+capture takes the one in-progress task claimed by `ARCL_AGENT`; with no such
+task, or several, it has no source. An unknown task fails with status code
+`5`, and an ID that is not a task's with `3`.
+
+`show` and `--json` give the source as `source_task_id`. A promoted spec, task
+or note keeps it: `show` on the new record reads it through the capture's
+promotion, and a capture file stores it as `source-task`.
+
 ## Idea commands
 
 | Command                                | Purpose                                    |
@@ -534,7 +546,7 @@ record's other fields stay editable.
 | Kind    | Fields only a command changes           | Commands                                                 |
 | ------- | --------------------------------------- | -------------------------------------------------------- |
 | task    | `status`, `handoff`, `evidence`, `assignee`, `notes`, `gates` | `arcl task start`, `park`, `unpark`, `handoff`, `complete`, `cancel`, `note`; `arcl gate` |
-| capture | `status`, `promoted-to`                 | `arcl capture promote`, `discard`                        |
+| capture | `status`, `promoted-to`, `source-task`  | `arcl capture promote`, `discard`; `arcl capture create` |
 | spec    | `status`, `source-capture`              | `arcl spec complete`, `cancel`; `arcl capture promote`   |
 | plan    | `status`                                | `arcl plan complete`, `cancel`                           |
 | phase   | `status`                                | `arcl plan phase complete`, `cancel`                     |
@@ -634,7 +646,7 @@ the file changed since it was opened, **Reload the file** loads the new
 version in place of the edit.
 
 The Inbox lists the captures not yet promoted or discarded, oldest first, and
-shows the selected one's body. `j` and `k` move the selection. **Promote to
+shows the selected one's body, with a link to the task it came from. `j` and `k` move the selection. **Promote to
 task**, **Promote to spec** and **Make a note** open a form with the
 capture's title, which runs `arcl capture promote`; the new record gets the
 capture's body. The task form sets the priority, milestone and parent, and

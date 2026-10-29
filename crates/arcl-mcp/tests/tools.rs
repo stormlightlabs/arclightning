@@ -208,7 +208,7 @@ async fn an_agent_claims_hands_off_and_completes_work() {
     assert_eq!(shown.format_version, 2);
     let captured = server
         .capture_create(
-            Parameters::from(CaptureCreateInput { title: "Later".to_owned(), body: String::new() }),
+            Parameters::from(CaptureCreateInput { title: "Later".to_owned(), body: String::new(), from: None }),
             CancellationToken::new(),
         )
         .await
@@ -405,6 +405,37 @@ async fn a_missing_database_beside_a_workspace_says_init_imports_it() {
             .contains("run `arcl init`, and the next command imports the workspace in"),
         "{error}"
     );
+}
+
+#[tokio::test]
+async fn capture_create_records_the_task_it_came_from() {
+    let project = project(false);
+    let server = ArclServer::new(project.path().to_owned());
+    let task = create_task(&server, "Working", &[]).await;
+
+    let captured = server
+        .capture_create(
+            Parameters::from_arguments(arguments(json!({"title": "Found", "from": task}))),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("capture with a source")
+        .0;
+    let data = serde_json::to_value(&captured.data).expect("capture serializes");
+    assert_eq!(data["capture"]["source_task_id"], json!(task));
+
+    let unknown = server
+        .capture_create(
+            Parameters::from_arguments(arguments(json!({
+                "title": "Lost",
+                "from": "arcl-t-01K0B31M6VGK4YH8VKT4C0D2DR",
+            }))),
+            CancellationToken::new(),
+        )
+        .await
+        .err()
+        .expect("an unknown source task fails");
+    assert_eq!((unknown.code(), unknown.exit_code()), ("not_found", 5));
 }
 
 #[tokio::test]
@@ -690,7 +721,7 @@ async fn a_failed_sync_warns_reads_and_refuses_writes() {
 
     let refused = server
         .capture_create(
-            Parameters::from(CaptureCreateInput { title: "Refused".to_owned(), body: String::new() }),
+            Parameters::from(CaptureCreateInput { title: "Refused".to_owned(), body: String::new(), from: None }),
             CancellationToken::new(),
         )
         .await
@@ -749,7 +780,7 @@ async fn a_held_sync_lock_fails_after_the_wait() {
 
     let refused = server
         .capture_create(
-            Parameters::from(CaptureCreateInput { title: "Waited".to_owned(), body: String::new() }),
+            Parameters::from(CaptureCreateInput { title: "Waited".to_owned(), body: String::new(), from: None }),
             CancellationToken::new(),
         )
         .await
@@ -784,7 +815,11 @@ async fn a_cancelled_write_does_not_run() {
         tokio::spawn(async move {
             server
                 .capture_create(
-                    Parameters::from(CaptureCreateInput { title: "Cancelled".to_owned(), body: String::new() }),
+                    Parameters::from(CaptureCreateInput {
+                        title: "Cancelled".to_owned(),
+                        body: String::new(),
+                        from: None,
+                    }),
                     cancelled,
                 )
                 .await
@@ -796,7 +831,11 @@ async fn a_cancelled_write_does_not_run() {
         tokio::spawn(async move {
             server
                 .capture_create(
-                    Parameters::from(CaptureCreateInput { title: "Dropped".to_owned(), body: String::new() }),
+                    Parameters::from(CaptureCreateInput {
+                        title: "Dropped".to_owned(),
+                        body: String::new(),
+                        from: None,
+                    }),
                     CancellationToken::new(),
                 )
                 .await
@@ -832,7 +871,7 @@ async fn an_invalid_workspace_path_is_not_a_sync_refusal() {
 
     let refused = server
         .capture_create(
-            Parameters::from(CaptureCreateInput { title: "Refused".to_owned(), body: String::new() }),
+            Parameters::from(CaptureCreateInput { title: "Refused".to_owned(), body: String::new(), from: None }),
             CancellationToken::new(),
         )
         .await

@@ -84,6 +84,19 @@ describe("Inbox route", () => {
     await expect.element(screen.getByText("Body of c-1")).toBeVisible();
   });
 
+  it("links a capture to the task it came from", async () => {
+    source({
+      capture: async (id) => ({ ...captureOf(id), source_task_id: id === "c-1" ? "arcl-t-18" : null }),
+    });
+    await render(InboxRoute);
+    const link = screen.getByRole("link", { name: "arcl-t-18" });
+    await expect.element(link).toBeVisible();
+    await expect.element(screen.getByText("From task")).toBeVisible();
+    await userEvent.keyboard("j");
+    await expect.element(screen.getByText("Body of c-2")).toBeVisible();
+    await expect.element(screen.getByText("From task")).not.toBeInTheDocument();
+  });
+
   it("moves one row on ArrowDown from a focused row, and Home and End reach the ends", async () => {
     source();
     await render(InboxRoute);

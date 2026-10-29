@@ -741,6 +741,15 @@ fn validate_captures(
             }
             _ => {}
         }
+        if let Some(task_id) = record.source_task_id
+            && !index.tasks.contains_key(&task_id)
+        {
+            return Err(relationship_error(
+                path.clone(),
+                "source-task",
+                format!("task `{task_id}` does not exist"),
+            ));
+        }
     }
     Ok(promotions)
 }
@@ -1068,6 +1077,7 @@ fn capture_from_record(record: &CaptureRecord, project_id: ProjectId) -> Capture
         body: record.body.clone(),
         status: record.status,
         created_at: record.created_at.clone(),
+        source_task_id: record.source_task_id,
     }
 }
 fn spec_from_record(record: &SpecRecord, project_id: ProjectId) -> Spec {

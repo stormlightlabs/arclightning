@@ -15,6 +15,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration { version: 5, sql: include_str!("migrations/005_task_assignee.sql") },
     Migration { version: 6, sql: include_str!("migrations/006_task_notes.sql") },
     Migration { version: 7, sql: include_str!("migrations/007_task_gates.sql") },
+    Migration { version: 8, sql: include_str!("migrations/008_capture_source.sql") },
 ];
 
 pub fn apply(connection: &mut Connection) -> Result<(), StorageError> {
@@ -309,7 +310,46 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("format version reads");
-        assert_eq!(format, "7");
+        assert_eq!(format, CURRENT_VERSION.to_string());
+    }
+
+    #[test]
+    fn capture_source_migration_leaves_existing_captures_without_a_source() {
+        let mut connection = rusqlite::Connection::open_in_memory().expect("in-memory SQLite opens");
+        for sql in [
+            include_str!("migrations/001_schema.sql"),
+            include_str!("migrations/002_plan_keys.sql"),
+            include_str!("migrations/003_remove_legacy_model.sql"),
+            include_str!("migrations/004_workspace_files.sql"),
+            include_str!("migrations/005_task_assignee.sql"),
+            include_str!("migrations/006_task_notes.sql"),
+            include_str!("migrations/007_task_gates.sql"),
+        ] {
+            connection.execute_batch(sql).expect("earlier schema creates");
+        }
+        connection
+            .pragma_update(None, "user_version", 7)
+            .expect("version marker writes");
+        connection
+            .execute(
+                "INSERT INTO captures (id, project_id, title, body, status, created_at)
+                 VALUES ('arcl-c-01K0B3N4QSC9R7K6W8X2M5YH1Z', ?1, 'Idea', '', 'captured', '2026-01-01T00:00:00.000Z')",
+                [DEFAULT_PROJECT_ID],
+            )
+            .expect("capture inserts");
+
+        super::apply(&mut connection).expect("capture source migration applies");
+        let graph = super::super::connected::graph(&connection).expect("connected graph reads");
+        assert_eq!(graph.captures.len(), 1);
+        assert_eq!(graph.captures[0].source_task_id, None);
+        let format: String = connection
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'database-format-version'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("format version reads");
+        assert_eq!(format, CURRENT_VERSION.to_string());
     }
 
     #[test]

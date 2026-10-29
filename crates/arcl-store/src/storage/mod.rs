@@ -12,7 +12,7 @@ use thiserror::Error;
 use arcl_core::domain::*;
 
 /// The newest SQLite schema version understood by the application.
-pub const CURRENT_VERSION: i32 = 7;
+pub const CURRENT_VERSION: i32 = 8;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -280,6 +280,7 @@ impl Database {
              DELETE FROM planning_task_dependencies;
              DELETE FROM task_notes;
              DELETE FROM task_gates;
+             UPDATE captures SET source_task_id = NULL;
              UPDATE planning_tasks SET parent_id = NULL;
              DELETE FROM planning_tasks;
              DELETE FROM phases;
@@ -395,6 +396,14 @@ impl Database {
             }
         }
         let mut positions = HashMap::<TaskId, i64>::new();
+        for capture in &graph.captures {
+            if let Some(task_id) = capture.source_task_id {
+                transaction.execute(
+                    "UPDATE captures SET source_task_id = ?1 WHERE id = ?2",
+                    rusqlite::params![task_id.to_string(), capture.id.to_string()],
+                )?;
+            }
+        }
         for note in &graph.task_notes {
             let position = positions.entry(note.task_id).or_default();
             transaction.execute(
@@ -562,8 +571,22 @@ impl Database {
 
     /// Store a Markdown capture in the project inbox.
     pub fn create_capture(&mut self, title: String, body: String) -> Result<Capture> {
+        self.create_capture_from(title, body, None)
+    }
+
+    /// Store a Markdown capture filed from `source_task_id`, when given. An
+    /// unknown task fails with [`StorageError::PlanningTaskNotFound`].
+    pub fn create_capture_from(
+        &mut self, title: String, body: String, source_task_id: Option<TaskId>,
+    ) -> Result<Capture> {
         let project = self.project()?;
-        connected::create_capture(&mut self.connection, project.id, title, body)
+        connected::create_capture(&mut self.connection, project.id, title, body, source_task_id)
+    }
+
+    /// Read the task a promoted record came from: the source task of the
+    /// capture promoted to `record_id`, a spec, task or note ID.
+    pub fn promoted_source_task(&self, record_id: &str) -> Result<Option<TaskId>> {
+        connected::promoted_source_task(&self.connection, record_id)
     }
 
     /// Read the provenance edges created by capture promotion.

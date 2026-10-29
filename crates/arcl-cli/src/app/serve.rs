@@ -195,8 +195,11 @@ impl Mutations for ServeApp {
     }
 
     fn create_capture(&self, input: NewCapture) -> Reply {
-        let command =
-            CaptureCommand::Create { title: input.title, body: MarkdownArgs { body: input.body, body_file: None } };
+        let command = CaptureCommand::Create {
+            title: input.title,
+            body: MarkdownArgs { body: input.body, body_file: None },
+            from: None,
+        };
         self.write(|| run_capture(command, &self.renderer))
     }
 

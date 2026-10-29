@@ -203,7 +203,8 @@ impl ArclServer {
 
     /// Capture work to do later, like `arcl capture create`.
     #[tool(
-        description = "Capture work found outside the current task, like `arcl capture create`.",
+        description = "Capture work found outside the current task, like `arcl capture create`. Pass \
+        `from` with the task in progress to record where the capture came from.",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false),
         meta = version_meta(FORMAT_VERSION)
     )]
@@ -213,7 +214,12 @@ impl ArclServer {
         let input = input?;
         self.call(Access::Write, FORMAT_VERSION, cancelled, move |database| {
             validate_title(&input.title)?;
-            let capture = database.create_capture(input.title, input.body)?;
+            let source = input
+                .from
+                .as_deref()
+                .map(|id| record_id::<TaskId>(database, id))
+                .transpose()?;
+            let capture = database.create_capture_from(input.title, input.body, source)?;
             Ok(CaptureData { action: "created".to_owned(), capture })
         })
         .await

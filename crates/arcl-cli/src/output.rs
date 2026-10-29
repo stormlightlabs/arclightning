@@ -313,8 +313,17 @@ impl Renderer {
     }
 
     /// Render one connected-model mutation and include the affected record in JSON mode.
+    /// Human output adds a `From:` line naming the capture's source task.
     pub fn render_capture(&self, action: &str, capture: &Capture) -> Result<Option<String>, OutputError> {
-        self.render_named_mutation(action, "capture", &capture.id.to_string(), &capture.title, capture)
+        let source = capture.source_task_id.map(|id| id.to_string());
+        self.render_sourced(
+            action,
+            "capture",
+            &capture.id.to_string(),
+            &capture.title,
+            capture,
+            (source.as_deref(), None),
+        )
     }
 
     /// Render captures in their stable creation order.
@@ -987,16 +996,48 @@ impl Renderer {
         self.render_named_mutation("shown", kind, id, title, record)
     }
 
+    /// Render a record `arcl show` found, as [`Self::render_shown`] does, with
+    /// the task it came from. Human output adds a `From:` line with `source`,
+    /// the ID as callers shorten it. JSON output adds `source_task_id` beside
+    /// the record when `json_source` holds one, for records that do not carry
+    /// it themselves.
+    pub fn render_shown_from<T: Serialize>(
+        &self, kind: &str, id: &str, title: &str, record: &T, source: Option<&str>, json_source: Option<TaskId>,
+    ) -> Result<Option<String>, OutputError> {
+        self.render_sourced("shown", kind, id, title, record, (source, json_source))
+    }
+
     fn render_named_mutation<T: Serialize>(
         &self, action: &str, kind: &str, id: &str, title: &str, record: &T,
     ) -> Result<Option<String>, OutputError> {
+        self.render_sourced(action, kind, id, title, record, (None, None))
+    }
+
+    /// Render one record. `source` holds the source task as human output
+    /// shows it and the ID JSON output adds beside the record.
+    fn render_sourced<T: Serialize>(
+        &self, action: &str, kind: &str, id: &str, title: &str, record: &T, source: (Option<&str>, Option<TaskId>),
+    ) -> Result<Option<String>, OutputError> {
+        let (source, json_source) = source;
         let message = match self.mode {
-            OutputMode::Human => format!("{} {} `{id}`: {title}", human_action(action), kind),
+            OutputMode::Human => {
+                let line = format!("{} {} `{id}`: {title}", human_action(action), kind);
+                match source {
+                    Some(source) => format!("{line}\nFrom: task `{source}`"),
+                    None => line,
+                }
+            }
             OutputMode::Plain => id.to_owned(),
             OutputMode::Json => {
                 let mut data = serde_json::Map::new();
                 data.insert("action".to_owned(), serde_json::Value::String(action.to_owned()));
                 data.insert(kind.to_owned(), serde_json::to_value(record)?);
+                if let Some(source) = json_source {
+                    data.insert(
+                        "source_task_id".to_owned(),
+                        serde_json::Value::String(source.to_string()),
+                    );
+                }
                 serde_json::to_string(&Envelope {
                     format_version: FORMAT_VERSION,
                     data: serde_json::Value::Object(data),
@@ -2096,6 +2137,9 @@ impl PlanningTaskViewOutput for PlanningTaskView {
         if let Some(assignee) = &self.task.assignee {
             lines.push(format!("Assignee: {assignee}"));
         }
+        if let Some(source) = self.source_task_id {
+            lines.push(format!("From: {}", ids.short(&source.to_string())));
+        }
         lines.extend([
             format!(
                 "Blockers: {}",
@@ -2184,6 +2228,9 @@ impl PlanningTaskViewOutput for PlanningTaskView {
         ];
         if let Some(assignee) = &self.task.assignee {
             lines.push(format!("assignee\t{}", plain_escape(assignee)));
+        }
+        if let Some(source) = self.source_task_id {
+            lines.push(format!("from\t{source}"));
         }
         lines.extend(self.inherited_blockers.iter().filter_map(|blocker| {
             blocker

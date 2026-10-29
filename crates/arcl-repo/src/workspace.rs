@@ -29,13 +29,14 @@ pub const CONFIG_FORMAT_VERSION: u32 = 1;
 /// The newest on-disk workspace format version this crate reads and writes.
 ///
 /// Version 2 adds the task `assignee` field, version 3 the task `notes`
-/// array and version 4 the task `gates` array; see
-/// [`ASSIGNEE_FORMAT_VERSION`], [`TASK_NOTES_FORMAT_VERSION`] and
-/// [`GATES_FORMAT_VERSION`] for when a projection writes each. Reading also
+/// array, version 4 the task `gates` array and version 5 the capture
+/// `source-task` field; see [`ASSIGNEE_FORMAT_VERSION`],
+/// [`TASK_NOTES_FORMAT_VERSION`], [`GATES_FORMAT_VERSION`] and
+/// [`CAPTURE_SOURCE_FORMAT_VERSION`] for when a projection writes each. Reading also
 /// accepts [`OLDEST_WORKSPACE_FORMAT_VERSION`] and later versions up to this
 /// one; an arcl that predates a version refuses its manifest before it reads
 /// any record.
-pub const WORKSPACE_FORMAT_VERSION: u32 = 4;
+pub const WORKSPACE_FORMAT_VERSION: u32 = 5;
 /// The oldest workspace format version this crate still reads.
 pub const OLDEST_WORKSPACE_FORMAT_VERSION: u32 = 1;
 /// The workspace format version a task `assignee` needs.
@@ -57,6 +58,12 @@ pub const TASK_NOTES_FORMAT_VERSION: u32 = 3;
 /// met, under the same rule as [`ASSIGNEE_FORMAT_VERSION`]: it never lowers
 /// the version a workspace already has.
 pub const GATES_FORMAT_VERSION: u32 = 4;
+/// The workspace format version a capture `source-task` needs.
+///
+/// A projection writes this version once a capture names the task it came
+/// from, under the same rule as [`ASSIGNEE_FORMAT_VERSION`]: it never lowers
+/// the version a workspace already has.
+pub const CAPTURE_SOURCE_FORMAT_VERSION: u32 = 5;
 
 /// Workspace and configuration validation failures.
 #[derive(Debug, Error)]

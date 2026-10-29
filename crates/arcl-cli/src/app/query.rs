@@ -102,8 +102,16 @@ pub(super) fn show_record(database: &Database, id: &str, renderer: &Renderer) ->
         let record = database
             .capture(value)?
             .ok_or_else(|| StorageError::CaptureNotFound { id: id.to_owned() })?;
+        let source = record.source_task_id.map(|task| task.to_string());
         return renderer
-            .render_shown("capture", ids.short(id), &record.title, &record)
+            .render_shown_from(
+                "capture",
+                ids.short(id),
+                &record.title,
+                &record,
+                source.as_deref().map(|task| ids.short(task)),
+                None,
+            )
             .map_err(|error| CommandError::InvalidFilter { message: error.to_string() });
     }
     if id.starts_with(SpecId::PREFIX) {
@@ -111,8 +119,17 @@ pub(super) fn show_record(database: &Database, id: &str, renderer: &Renderer) ->
         let record = database
             .spec(value)?
             .ok_or_else(|| StorageError::SpecNotFound { id: id.to_owned() })?;
+        let source = database.promoted_source_task(id)?;
+        let shown = source.map(|task| task.to_string());
         return renderer
-            .render_shown("spec", ids.short(id), &record.title, &record)
+            .render_shown_from(
+                "spec",
+                ids.short(id),
+                &record.title,
+                &record,
+                shown.as_deref().map(|task| ids.short(task)),
+                source,
+            )
             .map_err(|error| CommandError::InvalidFilter { message: error.to_string() });
     }
     if id.starts_with(PlanId::PREFIX) {
@@ -145,8 +162,17 @@ pub(super) fn show_record(database: &Database, id: &str, renderer: &Renderer) ->
         let record = database
             .note(value)?
             .ok_or_else(|| StorageError::NoteNotFound { id: id.to_owned() })?;
+        let source = database.promoted_source_task(id)?;
+        let shown = source.map(|task| task.to_string());
         return renderer
-            .render_shown("note", ids.short(id), &record.title, &record)
+            .render_shown_from(
+                "note",
+                ids.short(id),
+                &record.title,
+                &record,
+                shown.as_deref().map(|task| ids.short(task)),
+                source,
+            )
             .map_err(|error| CommandError::InvalidFilter { message: error.to_string() });
     }
     if id.starts_with(ReleaseId::PREFIX) {
