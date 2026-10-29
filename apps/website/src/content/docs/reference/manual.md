@@ -126,8 +126,9 @@ task, or several, it has no source. An unknown task fails with status code
 `5`, and an ID that is not a task's with `3`.
 
 `show` and `--json` give the source as `source_task_id`. A promoted spec, task
-or note keeps it: `show` on the new record reads it through the capture's
-promotion, and a capture file stores it as `source-task`.
+or note keeps it: `show`, `spec show`, `task show` and `note show` on the new
+record read it through the capture's promotion, and a capture file stores it
+as `source-task`.
 
 ## Idea commands
 
@@ -259,14 +260,14 @@ task ID, then a `subtask<TAB><id>` line for each completed subtask and an
 A gate makes a task wait on something outside arcl. An open gate keeps its
 task from being ready, and only `gate check` marks it met.
 
-| Command                                  | Purpose                                                    |
-| ---------------------------------------- | ---------------------------------------------------------- |
-| `arcl gate add <task-id> --pr <URL>`     | Wait for a pull request to merge.                          |
-| `arcl gate add <task-id> --run <URL>`    | Wait for a GitHub Actions run to succeed.                  |
-| `arcl gate add <task-id> --until <DATE>` | Wait until a date, `YYYY-MM-DD`, arrives in UTC.           |
-| `arcl gate list [<task-id>]`             | List gates on one task, or on every task, open and met.    |
-| `arcl gate remove <gate-id>`             | Remove a gate, open or met.                                |
-| `arcl gate check [<task-id>]`            | Check open gates and mark the met ones.                    |
+| Command                                  | Purpose                                                 |
+| ---------------------------------------- | ------------------------------------------------------- |
+| `arcl gate add <task-id> --pr <URL>`     | Wait for a pull request to merge.                       |
+| `arcl gate add <task-id> --run <URL>`    | Wait for a GitHub Actions run to succeed.               |
+| `arcl gate add <task-id> --until <DATE>` | Wait until a date, `YYYY-MM-DD`, arrives in UTC.        |
+| `arcl gate list [<task-id>]`             | List gates on one task, or on every task, open and met. |
+| `arcl gate remove <gate-id>`             | Remove a gate, open or met.                             |
+| `arcl gate check [<task-id>]`            | Check open gates and mark the met ones.                 |
 
 `gate add` takes exactly one of `--pr`, `--run` and `--until`. A pull request
 URL is `https://<host>/<owner>/<repo>/pull/<number>` and a run URL
@@ -284,11 +285,11 @@ children.
 
 `gate check` checks every open gate in scope:
 
-| Kind   | Met when                                                | Asks                                                                 |
-| ------ | ------------------------------------------------------- | -------------------------------------------------------------------- |
-| `date` | today's UTC date is on or after the gate's date         | nothing; it needs no network                                         |
-| `pr`   | the pull request merged                                 | `gh pr view <url> --json state,mergedAt`                             |
-| `run`  | the run completed with conclusion `success`             | `gh run view <id> --repo <host/owner/repo> --json status,conclusion` |
+| Kind   | Met when                                        | Asks                                                                 |
+| ------ | ----------------------------------------------- | -------------------------------------------------------------------- |
+| `date` | today's UTC date is on or after the gate's date | nothing; it needs no network                                         |
+| `pr`   | the pull request merged                         | `gh pr view <url> --json state,mergedAt`                             |
+| `run`  | the run completed with conclusion `success`     | `gh run view <id> --repo <host/owner/repo> --json status,conclusion` |
 
 Each gate's outcome is `met`, `waiting`, `failed` (a pull request closed
 without merging, or a run that finished without succeeding), `error` (`gh`
@@ -470,30 +471,30 @@ does not arrive within 5 seconds gets `Connection: close` and the connection
 closes after the reply. It keeps at most
 128 connections open; a new one waits to be accepted until another closes.
 
-| Endpoint                           | Same JSON as             |
-| ---------------------------------- | ------------------------ |
-| `GET /api/records`                 | `arcl list`              |
-| `GET /api/records/<id>`            | `arcl show <id>`         |
-| `GET /api/records/<id>/source`     | none (see below)         |
-| `GET /api/ready`                   | `arcl ready`             |
-| `GET /api/tasks/<id>/explain`      | `arcl explain <task-id>` |
-| `GET /api/tasks/<id>/context`      | `arcl context <task-id>` |
-| `GET /api/tree`                    | `arcl tree`              |
-| `GET /api/work`                    | none (see below)         |
-| `POST /api/tasks`                  | `arcl task create`       |
-| `POST /api/tasks/<id>/update`      | `arcl task update`       |
-| `POST /api/tasks/<id>/start`       | `arcl task start`        |
-| `POST /api/tasks/<id>/park`        | `arcl task park`         |
-| `POST /api/tasks/<id>/unpark`      | `arcl task unpark`       |
-| `POST /api/tasks/<id>/handoff`     | `arcl task handoff`      |
-| `POST /api/tasks/<id>/complete`    | `arcl task complete`     |
-| `POST /api/captures`               | `arcl capture create`    |
-| `POST /api/captures/<id>/promote`  | `arcl capture promote`   |
-| `POST /api/captures/<id>/discard`  | `arcl capture discard`   |
-| `POST /api/specs`                  | `arcl spec create`       |
-| `POST /api/plans`                  | `arcl plan create`       |
-| `POST /api/plans/<id>/apply`       | `arcl plan apply`        |
-| `POST /api/records/<id>/edit`      | none (see below)         |
+| Endpoint                          | Same JSON as             |
+| --------------------------------- | ------------------------ |
+| `GET /api/records`                | `arcl list`              |
+| `GET /api/records/<id>`           | `arcl show <id>`         |
+| `GET /api/records/<id>/source`    | none (see below)         |
+| `GET /api/ready`                  | `arcl ready`             |
+| `GET /api/tasks/<id>/explain`     | `arcl explain <task-id>` |
+| `GET /api/tasks/<id>/context`     | `arcl context <task-id>` |
+| `GET /api/tree`                   | `arcl tree`              |
+| `GET /api/work`                   | none (see below)         |
+| `POST /api/tasks`                 | `arcl task create`       |
+| `POST /api/tasks/<id>/update`     | `arcl task update`       |
+| `POST /api/tasks/<id>/start`      | `arcl task start`        |
+| `POST /api/tasks/<id>/park`       | `arcl task park`         |
+| `POST /api/tasks/<id>/unpark`     | `arcl task unpark`       |
+| `POST /api/tasks/<id>/handoff`    | `arcl task handoff`      |
+| `POST /api/tasks/<id>/complete`   | `arcl task complete`     |
+| `POST /api/captures`              | `arcl capture create`    |
+| `POST /api/captures/<id>/promote` | `arcl capture promote`   |
+| `POST /api/captures/<id>/discard` | `arcl capture discard`   |
+| `POST /api/specs`                 | `arcl spec create`       |
+| `POST /api/plans`                 | `arcl plan create`       |
+| `POST /api/plans/<id>/apply`      | `arcl plan apply`        |
+| `POST /api/records/<id>/edit`     | none (see below)         |
 
 `/api/records` and `/api/ready` take the command's flags as query parameters,
 such as `?kind=task&status=pending&status=parked`. `/api/tree` takes none and
@@ -506,19 +507,19 @@ task has none, and every phase. Its envelope is
 A POST takes a JSON object of the command's options, named like its flags
 with `_` for `-`:
 
-| Endpoint   | Options                                                                                 |
-| ---------- | --------------------------------------------------------------------------------------- |
-| `tasks`    | `title` (required), `body`, `priority`, `parent`, `spec`, `plan`, `phase`, `blocked_by` |
-| `update`   | `title`, `body`, `priority`                                                             |
-| `start`    | `force`                                                                                 |
-| `handoff`  | `note`                                                                                  |
-| `complete` | `evidence`, `allow_open_children`, `with_subtasks`                                      |
-| `captures` | `title` (required), `body`                                                              |
+| Endpoint   | Options                                                                                                |
+| ---------- | ------------------------------------------------------------------------------------------------------ |
+| `tasks`    | `title` (required), `body`, `priority`, `parent`, `spec`, `plan`, `phase`, `blocked_by`                |
+| `update`   | `title`, `body`, `priority`                                                                            |
+| `start`    | `force`                                                                                                |
+| `handoff`  | `note`                                                                                                 |
+| `complete` | `evidence`, `allow_open_children`, `with_subtasks`                                                     |
+| `captures` | `title` (required), `body`                                                                             |
 | `promote`  | `to` (required), `title`, `body`, `acceptance_criteria`, `spec`, `plan`, `phase`, `parent`, `priority` |
-| `specs`    | `title` (required), `body`, `acceptance_criteria`                                       |
-| `plans`    | `title` (required), `spec` (required), `body`                                           |
-| `apply`    | `document` (required)                                                                   |
-| `edit`     | `source` (required), `revision` (required)                                              |
+| `specs`    | `title` (required), `body`, `acceptance_criteria`                                                      |
+| `plans`    | `title` (required), `spec` (required), `body`                                                          |
+| `apply`    | `document` (required)                                                                                  |
+| `edit`     | `source` (required), `revision` (required)                                                             |
 
 `blocked_by` is a list of task IDs. `to` is `task`, `spec` or `note`, and
 `promote` uses the capture's title and body for any it leaves out. `document`
@@ -543,14 +544,14 @@ does not. Such an edit fails with `invalid_request`, status 400, and the
 message names the command. A field left at its value passes, so a closed
 record's other fields stay editable.
 
-| Kind    | Fields only a command changes           | Commands                                                 |
-| ------- | --------------------------------------- | -------------------------------------------------------- |
+| Kind    | Fields only a command changes                                 | Commands                                                                                  |
+| ------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | task    | `status`, `handoff`, `evidence`, `assignee`, `notes`, `gates` | `arcl task start`, `park`, `unpark`, `handoff`, `complete`, `cancel`, `note`; `arcl gate` |
-| capture | `status`, `promoted-to`, `source-task`  | `arcl capture promote`, `discard`; `arcl capture create` |
-| spec    | `status`, `source-capture`              | `arcl spec complete`, `cancel`; `arcl capture promote`   |
-| plan    | `status`                                | `arcl plan complete`, `cancel`                           |
-| phase   | `status`                                | `arcl plan phase complete`, `cancel`                     |
-| release | `status`                                | `arcl release complete`, `cancel`                        |
+| capture | `status`, `promoted-to`, `source-task`                        | `arcl capture promote`, `discard`; `arcl capture create`                                  |
+| spec    | `status`, `source-capture`                                    | `arcl spec complete`, `cancel`; `arcl capture promote`                                    |
+| plan    | `status`                                                      | `arcl plan complete`, `cancel`                                                            |
+| phase   | `status`                                                      | `arcl plan phase complete`, `cancel`                                                      |
+| release | `status`                                                      | `arcl release complete`, `cancel`                                                         |
 
 The record ID in the path is the only file the request names. When the
 file's revision is no longer `revision`, such as after an edit in Git or
@@ -646,13 +647,13 @@ the file changed since it was opened, **Reload the file** loads the new
 version in place of the edit.
 
 The Inbox lists the captures not yet promoted or discarded, oldest first, and
-shows the selected one's body, with a link to the task it came from. `j` and `k` move the selection. **Promote to
-task**, **Promote to spec** and **Make a note** open a form with the
-capture's title, which runs `arcl capture promote`; the new record gets the
-capture's body. The task form sets the priority, milestone and parent, and
-reads `!priority` and `^REF` from the capture's title. A promotion takes no
-blockers, so the form names each `after:REF` for you to add with
-`arcl dependency add`. The spec form takes optional acceptance criteria.
+shows the selected one's body, with a link to the task it came from. `j` and
+`k` move the selection. **Promote to task**, **Promote to spec** and **Make a
+note** open a form with the capture's title, which runs `arcl capture
+promote`; the new record gets the capture's body. The task form sets the
+priority, milestone and parent, and reads `!priority` and `^REF` from the
+capture's title. A promotion takes no blockers, so the form names each
+`after:REF` for you to add with `arcl dependency add`. The spec form takes optional acceptance criteria.
 **Discard** asks first, then runs `arcl capture discard`. After either, the
 next capture is selected, and a notice links to the new task or to Planning.
 While a form holds edits, or a promotion or discard is running, `j`, `k` and
@@ -682,34 +683,34 @@ arrow keys move, `Enter` runs the command and `Escape` closes the menu.
 command runs the same change as its button; from the Work list, Complete and
 Hand off open the Task view with their form.
 
-| Keys          | Command                                       |
-| ------------- | --------------------------------------------- |
-| `⌘K` `Ctrl+K` | Open the command menu                         |
-| `q`           | Quick capture                                 |
-| `g` `i`       | Go to Inbox                                   |
-| `g` `w`       | Go to Work                                    |
-| `g` `p`       | Go to Planning                                |
-| `n`           | New task, in the Work list                    |
-| `s`           | Start the selected task                       |
-| `c`           | Complete the selected task                    |
-| `h`           | Hand off the selected task                    |
-| `p`           | Park the selected task                        |
-| `u`           | Unpark the selected task                      |
-| `e`           | Edit the task, in the Task view               |
-| `v`           | Switch between list and board, in Work        |
-| `m`           | Move the selected card, on the board          |
-| `j` `k`       | Select the next or previous task, in Work     |
-| `Enter`       | Open the selected task, in Work               |
-| `]`           | Collapse or expand properties, in a task      |
-| `Escape`      | Return to Work, in a task                     |
-| `j` `k`       | Select the next or previous row, in Inbox and Planning |
-| `1`           | Promote the capture to a task, in Inbox       |
-| `2`           | Promote the capture to a spec, in Inbox       |
-| `3`           | Make the capture a note, in Inbox             |
-| `Backspace`   | Discard the capture, in Inbox                 |
-| `n`           | New spec, in Planning                         |
-| `a`           | New plan on a spec, or Apply plan on a plan, in Planning |
-| `Enter`       | Open or close the selected row, in Planning   |
+| Keys          | Command                                                       |
+| ------------- | ------------------------------------------------------------- |
+| `⌘K` `Ctrl+K` | Open the command menu                                         |
+| `q`           | Quick capture                                                 |
+| `g` `i`       | Go to Inbox                                                   |
+| `g` `w`       | Go to Work                                                    |
+| `g` `p`       | Go to Planning                                                |
+| `n`           | New task, in the Work list                                    |
+| `s`           | Start the selected task                                       |
+| `c`           | Complete the selected task                                    |
+| `h`           | Hand off the selected task                                    |
+| `p`           | Park the selected task                                        |
+| `u`           | Unpark the selected task                                      |
+| `e`           | Edit the task, in the Task view                               |
+| `v`           | Switch between list and board, in Work                        |
+| `m`           | Move the selected card, on the board                          |
+| `j` `k`       | Select the next or previous task, in Work                     |
+| `Enter`       | Open the selected task, in Work                               |
+| `]`           | Collapse or expand properties, in a task                      |
+| `Escape`      | Return to Work, in a task                                     |
+| `j` `k`       | Select the next or previous row, in Inbox and Planning        |
+| `1`           | Promote the capture to a task, in Inbox                       |
+| `2`           | Promote the capture to a spec, in Inbox                       |
+| `3`           | Make the capture a note, in Inbox                             |
+| `Backspace`   | Discard the capture, in Inbox                                 |
+| `n`           | New spec, in Planning                                         |
+| `a`           | New plan on a spec, or Apply plan on a plan, in Planning      |
+| `Enter`       | Open or close the selected row, in Planning                   |
 | `Escape`      | Close the open form if it has no edits, in Inbox and Planning |
 
 Shortcuts do nothing while you type in a field, the editor or a dialog, or
@@ -767,13 +768,13 @@ capability declaration:
 
 ```json
 {
-  "db": {
-    "rules": [
-      { "path": "", "read": "view", "write": "admin" },
-      { "path": "queue", "read": "view", "write": "interact" }
-    ]
-  },
-  "user": {}
+	"db": {
+		"rules": [
+			{ "path": "", "read": "view", "write": "admin" },
+			{ "path": "queue", "read": "view", "write": "interact" }
+		]
+	},
+	"user": {}
 }
 ```
 
@@ -786,15 +787,15 @@ documents under `<dir>` with the same reads `arcl serve` runs. If the sync
 fails, it exits non-zero and writes nothing, so `meta/sync` never stamps
 records the sync did not update:
 
-| Document         | File                  | Same JSON as                                        |
-| ---------------- | --------------------- | --------------------------------------------------- |
-| `views/work`     | `views/work.json`     | `GET /api/work`                                     |
-| `views/tree`     | `views/tree.json`     | `GET /api/tree`                                     |
-| `views/tasks`    | `views/tasks.json`    | `GET /api/records?kind=task`                        |
-| `views/captures` | `views/captures.json` | `GET /api/records?kind=capture&status=captured`     |
-| `records/<id>`   | `records/<id>.json`   | `GET /api/records/<id>`, per task and open capture  |
-| `sources/<id>`   | `sources/<id>.json`   | `GET /api/records/<id>/source`, per task            |
-| `meta/sync`      | `meta/sync.json`      | the commit, time and revision of the export         |
+| Document         | File                  | Same JSON as                                       |
+| ---------------- | --------------------- | -------------------------------------------------- |
+| `views/work`     | `views/work.json`     | `GET /api/work`                                    |
+| `views/tree`     | `views/tree.json`     | `GET /api/tree`                                    |
+| `views/tasks`    | `views/tasks.json`    | `GET /api/records?kind=task`                       |
+| `views/captures` | `views/captures.json` | `GET /api/records?kind=capture&status=captured`    |
+| `records/<id>`   | `records/<id>.json`   | `GET /api/records/<id>`, per task and open capture |
+| `sources/<id>`   | `sources/<id>.json`   | `GET /api/records/<id>/source`, per task           |
+| `meta/sync`      | `meta/sync.json`      | the commit, time and revision of the export        |
 
 `<dir>/manifest.json` lists every document in `documents`, the ones that are
 new or differ from the files of the last export into `<dir>` in `changed`,
@@ -817,12 +818,12 @@ record:
 
 ```json
 {
-  "op": "discard_capture",
-  "target": "arcl-c-...",
-  "input": {},
-  "created_at": "2026-10-25T06:30:00.000Z",
-  "created_by": "u_...",
-  "status": "queued"
+	"op": "discard_capture",
+	"target": "arcl-c-...",
+	"input": {},
+	"created_at": "2026-10-25T06:30:00.000Z",
+	"created_by": "u_...",
+	"status": "queued"
 }
 ```
 

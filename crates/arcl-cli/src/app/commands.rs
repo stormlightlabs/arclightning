@@ -257,9 +257,16 @@ pub(super) fn run_spec(command: SpecCommand, renderer: &Renderer) -> Result<Opti
                         id: id.to_string(),
                     }))
                 })?;
-            renderer.render_spec("shown", &spec).map_err(|error| {
-                ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() })
-            })?
+            let ids = display_ids(&database, renderer).map_err(ApplicationError::from_command)?;
+            let source = database
+                .promoted_source_task(&spec.id.to_string())
+                .map_err(ApplicationError::from_command)?
+                .map(|task| SourceTask { id: task, ids: &ids, beside_record: true });
+            renderer
+                .render_shown_from("spec", &spec.id.to_string(), &spec.title, &spec, source)
+                .map_err(|error| {
+                    ApplicationError::from_command(CommandError::InvalidFilter { message: error.to_string() })
+                })?
         }
         SpecCommand::List => {
             let database = open_database().map_err(ApplicationError::from_command)?;
@@ -795,7 +802,12 @@ pub(super) fn exec_note(command: NoteCommand, renderer: &Renderer) -> anyhow::Re
                         id: id.to_string(),
                     }))
                 })?;
-            renderer.render_note("shown", &note)
+            let ids = display_ids(&database, renderer).map_err(ApplicationError::from_command)?;
+            let source = database
+                .promoted_source_task(&note.id.to_string())
+                .map_err(ApplicationError::from_command)?
+                .map(|task| SourceTask { id: task, ids: &ids, beside_record: true });
+            renderer.render_shown_from("note", &note.id.to_string(), &note.title, &note, source)
         }
         NoteCommand::List => {
             let database = open_database().map_err(ApplicationError::from_command)?;

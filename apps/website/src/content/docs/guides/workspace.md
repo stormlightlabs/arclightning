@@ -186,9 +186,9 @@ file names its source task, version 4 once a task file carries a gate,
 version 3 once one carries a note, version 2 once one carries an `assignee`,
 and otherwise keeps the version the manifest has. A new workspace starts at
 version 1, so a workspace without claims, notes, gates or capture sources
-stays there. Releasing every
-claim leaves it at 2. An arcl that reads only older versions refuses a newer
-workspace with an unsupported format version error.
+stays there. Releasing every claim leaves it at 2. An arcl that reads only
+older versions refuses a newer workspace with an unsupported format version
+error.
 
 A task file lists its notes oldest first, as an array of tables after the
 other fields:

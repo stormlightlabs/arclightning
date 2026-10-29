@@ -329,10 +329,10 @@ capture file names its source task, version 4 when a task file carries a
 gate, version 3 when one carries a note, version 2 when one carries an
 `assignee`, and otherwise keeps the version the workspace already has. A new
 workspace starts at version 1, so a workspace without claims, notes, gates or
-capture sources stays there. A workspace never
-moves back to an older version on its own. An arcl that reads only older
-versions checks the manifest before any record and refuses a newer workspace
-with an unsupported format version error.
+capture sources stays there. A workspace never moves back to an older
+version on its own. An arcl that reads only older versions checks the
+manifest before any record and refuses a newer workspace with an unsupported
+format version error.
 
 Synchronization uses a three-state comparison: compare
 the last common files, current database projection, and current workspace. Arc

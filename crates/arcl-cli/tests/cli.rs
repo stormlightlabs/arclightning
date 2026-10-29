@@ -7613,3 +7613,71 @@ fn capture_sources_round_trip_through_workspace_files_at_format_five() {
     let shown = run_json(target.path(), ["--json", "capture", "show", &capture].as_ref());
     assert_eq!(shown["data"]["capture"]["source_task_id"], task);
 }
+
+#[test]
+fn spec_and_note_show_name_the_promoted_source_task() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let task = create_task(dir, "Working", None);
+    let short = &task[task.len() - 4..];
+
+    for kind in ["spec", "note"] {
+        let capture = id(
+            &capture_output(dir, "Found", &["--from", &task], None).stdout,
+            "capture",
+        );
+        let promoted = run_json(dir, ["--json", "capture", "promote", &capture, "--to", kind].as_ref());
+        let record = promoted["data"][kind]["id"].as_str().expect("record ID").to_owned();
+
+        let shown = run_json(dir, ["--json", kind, "show", &record].as_ref());
+        assert_eq!(shown["data"]["source_task_id"], task, "{shown}");
+        assert_eq!(shown["data"][kind]["id"], record, "{shown}");
+        let human = arcl_in(dir)
+            .args(["--color", "never", kind, "show", &record])
+            .output()
+            .expect("show runs");
+        assert_success(&human);
+        let human = String::from_utf8(human.stdout).expect("UTF-8");
+        assert!(human.contains(&format!("\nFrom: task `{short}`")), "{human}");
+    }
+
+    let plain = id(&capture_output(dir, "Plain", &[], None).stdout, "capture");
+    let promoted = run_json(dir, ["--json", "capture", "promote", &plain, "--to", "note"].as_ref());
+    let note = promoted["data"]["note"]["id"].as_str().expect("note ID").to_owned();
+    let shown = run_json(dir, ["--json", "note", "show", &note].as_ref());
+    assert!(shown["data"].get("source_task_id").is_none(), "{shown}");
+}
+
+#[test]
+fn workspace_import_refuses_a_capture_whose_source_task_is_missing() {
+    let source = tempdir().expect("temporary directory can be created");
+    let dir = source.path();
+    run_json(dir, ["--json", "init", "--workspace"].as_ref());
+    let task = create_task(dir, "Working", None);
+    let capture = id(
+        &capture_output(dir, "Found", &["--from", &task], None).stdout,
+        "capture",
+    );
+
+    let target = tempdir().expect("temporary directory can be created");
+    run_json(target.path(), ["--json", "init", "--workspace"].as_ref());
+    let capture_path = format!(".arcl/workspace/captures/{capture}.md");
+    for file in [".arcl/workspace/manifest.toml", capture_path.as_str()] {
+        fs::copy(dir.join(file), target.path().join(file)).expect("workspace file copies");
+    }
+    let message = refused_message(target.path(), ["--json", "workspace", "import"].as_ref());
+    assert!(
+        message.ends_with(&format!(
+            "workspace file `captures/{capture}.md`: relationship `source-task`: task `{task}` does not exist"
+        )),
+        "message: {message}"
+    );
+    // The refused file stays in the workspace, so reads warn about it.
+    let listed = arcl_in(target.path())
+        .args(["--json", "capture", "list"])
+        .output()
+        .expect("capture list runs");
+    assert_success(&listed);
+    let captures = json(&listed.stdout);
+    assert_eq!(captures["data"]["captures"].as_array().map(Vec::len), Some(0));
+}

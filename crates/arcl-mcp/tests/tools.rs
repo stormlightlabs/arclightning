@@ -436,6 +436,17 @@ async fn capture_create_records_the_task_it_came_from() {
         .err()
         .expect("an unknown source task fails");
     assert_eq!((unknown.code(), unknown.exit_code()), ("not_found", 5));
+
+    let capture = data["capture"]["id"].as_str().expect("capture ID").to_owned();
+    let not_task = server
+        .capture_create(
+            Parameters::from_arguments(arguments(json!({"title": "Wrong", "from": capture}))),
+            CancellationToken::new(),
+        )
+        .await
+        .err()
+        .expect("a capture ID as the source fails");
+    assert_eq!(not_task.exit_code(), 3, "{}", not_task.code());
 }
 
 #[tokio::test]

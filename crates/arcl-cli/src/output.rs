@@ -315,14 +315,17 @@ impl Renderer {
     /// Render one connected-model mutation and include the affected record in JSON mode.
     /// Human output adds a `From:` line naming the capture's source task.
     pub fn render_capture(&self, action: &str, capture: &Capture) -> Result<Option<String>, OutputError> {
-        let source = capture.source_task_id.map(|id| id.to_string());
+        let ids = ShortIds::default();
+        let source = capture
+            .source_task_id
+            .map(|id| SourceTask { id, ids: &ids, beside_record: false });
         self.render_sourced(
             action,
             "capture",
             &capture.id.to_string(),
             &capture.title,
             capture,
-            (source.as_deref(), None),
+            source,
         )
     }
 
@@ -996,34 +999,32 @@ impl Renderer {
         self.render_named_mutation("shown", kind, id, title, record)
     }
 
-    /// Render a record `arcl show` found, as [`Self::render_shown`] does, with
-    /// the task it came from. Human output adds a `From:` line with `source`,
-    /// the ID as callers shorten it. JSON output adds `source_task_id` beside
-    /// the record when `json_source` holds one, for records that do not carry
-    /// it themselves.
+    /// Render a record a show command found, as [`Self::render_shown`] does,
+    /// with the task it came from. Human output adds a `From:` line; JSON
+    /// output adds `source_task_id` as [`SourceTask`] says.
     pub fn render_shown_from<T: Serialize>(
-        &self, kind: &str, id: &str, title: &str, record: &T, source: Option<&str>, json_source: Option<TaskId>,
+        &self, kind: &str, id: &str, title: &str, record: &T, source: Option<SourceTask<'_>>,
     ) -> Result<Option<String>, OutputError> {
-        self.render_sourced("shown", kind, id, title, record, (source, json_source))
+        self.render_sourced("shown", kind, id, title, record, source)
     }
 
     fn render_named_mutation<T: Serialize>(
         &self, action: &str, kind: &str, id: &str, title: &str, record: &T,
     ) -> Result<Option<String>, OutputError> {
-        self.render_sourced(action, kind, id, title, record, (None, None))
+        self.render_sourced(action, kind, id, title, record, None)
     }
 
-    /// Render one record. `source` holds the source task as human output
-    /// shows it and the ID JSON output adds beside the record.
+    /// Render one record with the task it came from, when `source` holds one.
     fn render_sourced<T: Serialize>(
-        &self, action: &str, kind: &str, id: &str, title: &str, record: &T, source: (Option<&str>, Option<TaskId>),
+        &self, action: &str, kind: &str, id: &str, title: &str, record: &T, source: Option<SourceTask<'_>>,
     ) -> Result<Option<String>, OutputError> {
-        let (source, json_source) = source;
         let message = match self.mode {
             OutputMode::Human => {
                 let line = format!("{} {} `{id}`: {title}", human_action(action), kind);
                 match source {
-                    Some(source) => format!("{line}\nFrom: task `{source}`"),
+                    Some(source) => {
+                        format!("{line}\nFrom: task `{}`", source.ids.short(&source.id.to_string()))
+                    }
                     None => line,
                 }
             }
@@ -1032,10 +1033,10 @@ impl Renderer {
                 let mut data = serde_json::Map::new();
                 data.insert("action".to_owned(), serde_json::Value::String(action.to_owned()));
                 data.insert(kind.to_owned(), serde_json::to_value(record)?);
-                if let Some(source) = json_source {
+                if let Some(source) = source.filter(|source| source.beside_record) {
                     data.insert(
                         "source_task_id".to_owned(),
-                        serde_json::Value::String(source.to_string()),
+                        serde_json::Value::String(source.id.to_string()),
                     );
                 }
                 serde_json::to_string(&Envelope {
@@ -1344,6 +1345,18 @@ impl Renderer {
                 .to_string(),
         }
     }
+}
+
+/// The task a rendered record came from.
+#[derive(Clone, Copy, Debug)]
+pub struct SourceTask<'a> {
+    /// The source task.
+    pub id: TaskId,
+    /// The short IDs human output shows `id` with.
+    pub ids: &'a ShortIds,
+    /// Whether JSON output adds `source_task_id` beside the record, for a
+    /// record that does not carry the field itself.
+    pub beside_record: bool,
 }
 
 #[derive(Debug, Serialize)]
