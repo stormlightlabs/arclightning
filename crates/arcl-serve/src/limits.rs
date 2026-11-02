@@ -16,8 +16,8 @@ use tokio::time::{Instant, Sleep};
 
 use crate::answer::{Answer, Reply};
 
-/// How long the server waits for all of a mutation's body before it answers
-/// 408 and closes the connection.
+/// How long the server waits for all of a mutation's or GraphQL query's body
+/// before it answers 408 and closes the connection.
 pub const BODY_DEADLINE: Duration = Duration::from_secs(5);
 
 /// How long a connection may take to send a request head, counted from when
@@ -44,13 +44,13 @@ pub const MAX_CONNECTIONS: usize = 128;
 /// returns.
 pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
-/// The largest request body a mutation accepts, in bytes.
+/// The largest request body a mutation or GraphQL query accepts, in bytes.
 pub(crate) const MAX_BODY_BYTES: usize = 1024 * 1024;
 
 /// The deadlines and connection cap a [`Server`](crate::Server) runs with.
 #[derive(Clone, Copy)]
 pub(crate) struct Limits {
-    /// How long to wait for a mutation's body.
+    /// How long to wait for a mutation's or GraphQL query's body.
     pub(crate) body: Duration,
     /// How long to wait for a request head.
     pub(crate) header: Duration,

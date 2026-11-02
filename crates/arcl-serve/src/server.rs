@@ -77,14 +77,17 @@ impl Server {
     }
 
     /// Serve requests until Ctrl-C, then let open connections finish for up
-    /// to [`SHUTDOWN_GRACE`] and return. A second Ctrl-C returns at once.
+    /// to [`SHUTDOWN_GRACE`] and return. A second Ctrl-C ends the grace
+    /// period, and this returns once the read or mutation already running
+    /// finishes.
     ///
     /// Connections are served on a tokio runtime on its own thread. Reads run
     /// on this thread and admitted mutations on a mutation thread, each one at
-    /// a time in the order their requests are ready. After Ctrl-C, mutations
+    /// a time in the order their requests are ready. A read whose client has
+    /// gone is dropped without running. After Ctrl-C, reads and mutations
     /// that have not started are answered 503 without running; one already
-    /// running finishes before this returns, so its write and export stay
-    /// together.
+    /// running finishes before this returns, so a mutation's write and export
+    /// stay together.
     pub fn run(self, reads: &dyn Reads, mutations: &(dyn Mutations + Sync)) -> Result<(), ServeError> {
         self.run_until(reads, mutations, || async {
             // Without a Ctrl-C handler, the default one ends the process.
@@ -105,7 +108,7 @@ impl Server {
             .enable_all()
             .build()
             .map_err(ServeError::Start)?;
-        let (reads_queue, read_jobs) = mpsc::channel::<Job<Route>>();
+        let (reads_queue, read_jobs) = mpsc::channel::<Job<(Route, Vec<u8>)>>();
         let (writes_queue, write_jobs) = mpsc::channel::<Job<(Write, Vec<u8>)>>();
         let stopping = Arc::new(AtomicBool::new(false));
         let shared = Arc::new(Shared {
@@ -115,6 +118,7 @@ impl Server {
             reads: reads_queue,
             writes: writes_queue,
         });
+        let reads_stopping = Arc::clone(&stopping);
         thread::scope(|scope| {
             scope.spawn(move || {
                 for Job { work: (write, body), reply } in write_jobs {
@@ -130,8 +134,19 @@ impl Server {
             // The runtime, and with it every handle on the job queues, drops
             // when this thread ends, which ends both job loops.
             let serving = scope.spawn(move || runtime.block_on(accept(listener, shared, limits, signal)));
-            for Job { work: route, reply } in read_jobs {
-                let _ = reply.send(guarded(|| dispatch(route, reads)));
+            for Job { work: (route, body), reply } in read_jobs {
+                // A client that closed its connection no longer waits for
+                // the answer, so its read, such as a slow GraphQL query,
+                // does not hold up the reads queued behind it.
+                if reply.is_closed() {
+                    continue;
+                }
+                let answer = if reads_stopping.load(Ordering::SeqCst) {
+                    Answer::json(Reply::stopping())
+                } else {
+                    guarded(|| dispatch(route, &body, reads))
+                };
+                let _ = reply.send(answer);
             }
             serving.join().unwrap_or_else(|panic| panic::resume_unwind(panic))
         })
@@ -143,9 +158,10 @@ impl Server {
 struct Shared {
     gate: Gate,
     body_deadline: Duration,
-    /// Set when the server starts shutting down; mutations no longer run.
+    /// Set when the server starts shutting down; reads and mutations that
+    /// have not started no longer run.
     stopping: Arc<AtomicBool>,
-    reads: mpsc::Sender<Job<Route>>,
+    reads: mpsc::Sender<Job<(Route, Vec<u8>)>>,
     writes: mpsc::Sender<Job<(Write, Vec<u8>)>>,
 }
 
@@ -212,7 +228,8 @@ async fn accept<S: Future<Output = ()>>(
 }
 
 /// Answer one request: refuse a declared body over the limit, check the
-/// head, then read a mutation's body or pass a read to the read thread.
+/// head, then read a mutation's body or pass a read to the read thread. A
+/// GraphQL query is a read with a body, read under the mutations' limits.
 async fn handle(State(shared): State<Arc<Shared>>, request: Request) -> Response {
     let (parts, body) = request.into_parts();
     if declares_too_much(&parts.headers) {
@@ -225,8 +242,12 @@ async fn handle(State(shared): State<Arc<Shared>>, request: Request) -> Response
             Ok(body) => ask(&shared.writes, (write, body)).await,
             Err(answer) => answer,
         },
+        Ok(Route::Graphql) => match read_body(body, shared.body_deadline).await {
+            Ok(body) => ask(&shared.reads, (Route::Graphql, body)).await,
+            Err(answer) => answer,
+        },
         Ok(Route::Page) => page(),
-        Ok(route) => ask(&shared.reads, route).await,
+        Ok(route) => ask(&shared.reads, (route, Vec::new())).await,
     };
     answer.into_response()
 }

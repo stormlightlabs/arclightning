@@ -2,9 +2,10 @@
 id = "arcl-t-01M5YRFBMHGP74F6CJSSG7FXP7"
 phase = "arcl-ph-01M5YRFB35TZ51QW4AG1A8MS5B"
 title = "Query records with GraphQL"
-status = "in_progress"
+status = "completed"
 priority = "normal"
 position = 9
+evidence = "Merged in #82 (fe31a0b)."
 +++
 
 Let agents and the web app ask for exactly the records and fields they need

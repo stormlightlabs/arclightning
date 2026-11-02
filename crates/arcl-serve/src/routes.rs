@@ -1,6 +1,8 @@
 //! Routing: which read or mutation a request's path names, and the read
 //! operations behind it.
 
+use serde::Deserialize;
+
 use crate::answer::{Answer, Reply, page};
 
 /// Where a request that passed the checks goes.
@@ -24,6 +26,9 @@ pub(crate) enum Route {
     /// Every task with its readiness and phase, and every phase. Holds
     /// whether the request carried query parameters, which it refuses.
     Work { has_query: bool },
+    /// A GraphQL query, which needs POST but no `Origin`, since the schema
+    /// has no mutations. The body is the [`GraphqlRequest`].
+    Graphql,
     /// A mutation, which needs POST and a matching `Origin`.
     Write(Write),
     /// An `/api` path with no endpoint.
@@ -66,6 +71,20 @@ pub(crate) enum Write {
     EditRecord(String),
 }
 
+/// The body of `POST /graphql`, as GraphQL clients send it. Other fields,
+/// such as `extensions`, are ignored.
+#[derive(Debug, Default, Deserialize, Eq, PartialEq)]
+pub struct GraphqlRequest {
+    /// The GraphQL document.
+    pub query: String,
+    /// The values of the document's variables: a JSON object, or `null`.
+    #[serde(default)]
+    pub variables: Option<serde_json::Value>,
+    /// The operation to run when the document holds more than one.
+    #[serde(default, rename = "operationName")]
+    pub operation_name: Option<String>,
+}
+
 /// The application's read operations, each answering with the CLI's JSON
 /// envelope for the same command.
 pub trait Reads {
@@ -89,10 +108,15 @@ pub trait Reads {
     /// Every task with its readiness and effective phase, and every phase,
     /// for the Work list.
     fn work(&self) -> Reply;
+    /// Run `request` as `arcl query` runs it, without its workspace sync, and
+    /// answer status 200 with the GraphQL response `arcl query` prints,
+    /// `errors` included.
+    fn graphql(&self, request: GraphqlRequest) -> Reply;
 }
 
-/// Answer an admitted read or page request.
-pub(crate) fn dispatch(route: Route, reads: &dyn Reads) -> Answer {
+/// Answer an admitted read or page request. `body` is the request body,
+/// which only [`Route::Graphql`] reads.
+pub(crate) fn dispatch(route: Route, body: &[u8], reads: &dyn Reads) -> Answer {
     match route {
         Route::List(query) => Answer::json(reads.list(&query)),
         Route::Show(id) => Answer::json(reads.show(&id)),
@@ -108,10 +132,28 @@ pub(crate) fn dispatch(route: Route, reads: &dyn Reads) -> Answer {
             Answer::json(Reply::invalid_request("`/api/work` takes no query parameters"))
         }
         Route::Work { has_query: false } => Answer::json(reads.work()),
+        Route::Graphql => Answer::json(graphql(body, reads)),
         // `handle` sends mutations to the mutation thread.
         Route::Write(_) => Answer::json(Reply::internal("a mutation reached the read path")),
         Route::UnknownApi => Answer::json(Reply::refusal(404, "not_found", "no endpoint has this path")),
         Route::Page => page(),
+    }
+}
+
+/// Parse `body` as a [`GraphqlRequest`] and run it. A body that is not one,
+/// or whose `variables` is not an object, gets `invalid_request`.
+fn graphql(body: &[u8], reads: &dyn Reads) -> Reply {
+    match serde_json::from_slice::<GraphqlRequest>(body) {
+        Ok(request)
+            if request
+                .variables
+                .as_ref()
+                .is_some_and(|variables| !variables.is_object()) =>
+        {
+            Reply::invalid_request("`variables` must be a JSON object")
+        }
+        Ok(request) => reads.graphql(request),
+        Err(error) => Reply::invalid_request(&format!("the request body is not valid: {error}")),
     }
 }
 
@@ -186,6 +228,7 @@ pub(crate) fn route(path: &str, query: Vec<(String, String)>) -> Route {
             }
         }
         ["api", ..] => Route::UnknownApi,
+        ["graphql"] => Route::Graphql,
         _ => Route::Page,
     }
 }

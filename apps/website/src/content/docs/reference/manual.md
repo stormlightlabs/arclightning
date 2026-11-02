@@ -449,8 +449,9 @@ See [Inspecting Work](/guides/inspect-work/) for the query workflow and context 
 ## GraphQL queries
 
 `arcl query` runs a read-only GraphQL query against the project's records and
-prints the response as JSON. It needs no server. Writes stay with the other
-commands.
+prints the response as JSON. It needs no server, and `arcl serve` answers the
+same queries at `POST /graphql` (see [Web app](#web-app)). Writes stay with the
+other commands.
 
 | Command                                                              | Purpose                                    |
 | -------------------------------------------------------------------- | ------------------------------------------ |
@@ -483,6 +484,10 @@ stdout holds the GraphQL response: `data`, and `errors` when there are any.
 A response with errors exits `3`. Each error from a resolver has an
 `extensions.code` of `NOT_FOUND`, `INVALID_REQUEST`, `CONFLICT` or `INTERNAL`.
 
+A query document may be at most 64 KiB. A longer one is refused before it is
+parsed: `data` is `null` and the error's `extensions.code` is
+`QUERY_TOO_LARGE`.
+
 A query may nest fields at most 16 deep, counting `{ tree { id } }` as 2, and
 select at most 1000 fields, counting each field once. A query over either limit
 runs nothing: `data` is `null` and the error's `extensions.code` is
@@ -502,15 +507,18 @@ carries a per-run token for the first page load. The app moves the token out
 of the URL and sends it in the `X-Arcl-Token` header on every later request.
 The server refuses a request without the token or with a `Host` header that
 does not name the server. Reads take GET and changes take POST; the server
-refuses any other method, so a GET never changes records. A change also needs
-an `Origin` header naming the server, which stops other pages, including
+refuses any other method, so a GET never changes records. `/graphql` takes
+POST only and needs no `Origin`, since a query changes nothing. A change also
+needs an `Origin` header naming the server, which stops other pages, including
 those on other `127.0.0.1` ports, from sending one. Responses carry no CORS
 headers. The page's Content-Security-Policy runs only the app's own script and
 loads images only from the server or `data:` URLs, so Markdown cannot pull
 images from other hosts. The server runs until Ctrl-C, then gives open
-requests up to 5 seconds to finish and exits. A change that has not started
-by Ctrl-C gets status 503 and does not run; one already running finishes. A
-second Ctrl-C exits at once.
+requests up to 5 seconds to finish and exits. A read or change that has not
+started by Ctrl-C gets status 503 and does not run; one already running
+finishes. A second Ctrl-C ends the wait for open requests, and the server exits
+once the read or change already running finishes. A read whose client
+disconnects before it starts does not run.
 
 The server closes a connection that takes more than 5 seconds to send a request
 head or idles that long between requests. It also closes one whose client reads
@@ -546,6 +554,7 @@ closes after the reply. It keeps at most
 | `POST /api/plans`                 | `arcl plan create`       |
 | `POST /api/plans/<id>/apply`      | `arcl plan apply`        |
 | `POST /api/records/<id>/edit`     | none (see below)         |
+| `POST /graphql`                   | `arcl query`             |
 
 `/api/records` and `/api/ready` take the command's flags as query parameters,
 such as `?kind=task&status=pending&status=parked`. `/api/tree` takes none and
@@ -554,6 +563,14 @@ returns the Work list in one request: every task with the readiness
 `arcl explain` reports and its phase ID, inherited from an ancestor where the
 task has none, and every phase. Its envelope is
 `{"format_version": 2, "data": {"tasks": [{"task", "readiness", "phase_id"}], "phases": [...]}}`.
+
+`POST /graphql` takes `{"query", "variables", "operationName"}`, as GraphQL
+clients send it, and answers status 200 with the response `arcl query` prints
+for the same query, with the same limits. Like the other `arcl serve` reads, it
+skips the workspace sync `arcl query` runs first. `errors` and limit refusals
+come back in that body too. A body that is not JSON, has no `query` string,
+has a `variables` that is not an object, or has an `operationName` that is not
+a string gets `invalid_request` with status 400.
 
 A POST takes a JSON object of the command's options, named like its flags
 with `_` for `-`:

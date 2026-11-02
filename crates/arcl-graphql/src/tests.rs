@@ -476,6 +476,20 @@ fn a_query_over_a_limit_is_refused_with_its_code() {
 }
 
 #[test]
+fn a_query_over_the_size_limit_is_refused_before_parsing() {
+    let fixture = Fixture::new();
+    // Not valid GraphQL, so a parse would fail with a syntax error instead.
+    let large = fixture.run(&"{".repeat(MAX_QUERY_BYTES + 1));
+    assert_eq!(large["data"], Value::Null);
+    assert_eq!(code(&large), QUERY_TOO_LARGE);
+    assert_eq!(large["errors"].as_array().map(Vec::len), Some(1));
+
+    let query = "{ work { phases { id } } }";
+    let at_limit = format!("{query}{}", " ".repeat(MAX_QUERY_BYTES - query.len()));
+    assert!(fixture.run(&at_limit).get("errors").is_none());
+}
+
+#[test]
 fn a_query_nested_past_the_parser_limit_is_refused_as_too_deep() {
     let fixture = Fixture::new();
     let deep = fixture.run(&nested_tree(40));

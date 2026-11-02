@@ -3983,6 +3983,107 @@ fn serve_refuses_requests_without_the_host_and_token() {
     assert_eq!(served.get("/", &[served.host(), token]).0, 200);
 }
 
+#[test]
+fn serve_graphql_answers_as_arcl_query_does() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let blocker = create_task(dir, "Blocker", None);
+    let task = run_json(
+        dir,
+        ["--json", "task", "create", "Blocked", "--blocked-by", &blocker].as_ref(),
+    )["data"]["task"]["id"]
+        .as_str()
+        .expect("task ID")
+        .to_owned();
+    let served = Served::start(dir);
+    let token = format!("X-Arcl-Token: {}", served.token);
+    let query = |document: &str, variables: Option<&str>, operation: Option<&str>| {
+        let body = serde_json::json!({
+            "query": document,
+            "variables": variables.map(|variables| serde_json::from_str::<Value>(variables).expect("JSON")),
+            "operationName": operation,
+        });
+        // No `Origin`: a query is a read.
+        served.send("POST", "/graphql", &[served.host(), token.clone()], &body.to_string())
+    };
+
+    let deep = format!("{{ tree {{ {}id{} }} }}", "children { ".repeat(20), " }".repeat(20));
+    let variables = format!(r#"{{"id": "{task}"}}"#);
+    let cases: [(&str, Option<&str>, Option<&str>); 4] = [
+        (
+            "{ records(kind: \"task\") { id title } work { tasks { task { id } } } }",
+            None,
+            None,
+        ),
+        (
+            "query Title($id: ID!) { task(id: $id) { title readiness { ready } blockers { task { id } } } } query Other { work { phases { id } } }",
+            Some(&variables),
+            Some("Title"),
+        ),
+        (&deep, None, None),
+        ("{ task(id: \"arcl-t-00000000000000000000000000\") { id } }", None, None),
+    ];
+    for (document, variables, operation) in cases {
+        let mut args = vec!["query", document];
+        if let Some(variables) = variables {
+            args.extend(["--variables", variables]);
+        }
+        if let Some(operation) = operation {
+            args.extend(["--operation", operation]);
+        }
+        let cli = arcl_in(dir).args(&args).output().expect("arcl query runs");
+        let (status, body) = query(document, variables, operation);
+        assert_eq!(status, 200, "{document}");
+        assert_eq!(
+            body.trim_end(),
+            String::from_utf8_lossy(&cli.stdout).trim_end(),
+            "{document}"
+        );
+    }
+
+    let (_, body) = query(&deep, None, None);
+    let body: Value = serde_json::from_str(&body).expect("JSON");
+    assert_eq!(body["data"], Value::Null);
+    assert_eq!(body["errors"][0]["extensions"]["code"], "QUERY_TOO_DEEP");
+    let (_, body) = query(cases[1].0, cases[1].1, cases[1].2);
+    let body: Value = serde_json::from_str(&body).expect("JSON");
+    assert_eq!(body["data"]["task"]["blockers"][0]["task"]["id"], blocker.as_str());
+}
+
+#[test]
+fn serve_graphql_refuses_as_api_reads_do() {
+    let directory = initialized_directory();
+    let served = Served::start(directory.path());
+    let token = format!("X-Arcl-Token: {}", served.token);
+    let body = r#"{"query": "{ work { phases { id } } }"}"#;
+
+    assert_eq!(served.send("POST", "/graphql", &[served.host()], body).0, 401);
+    let wrong = "X-Arcl-Token: wrong".to_owned();
+    assert_eq!(served.send("POST", "/graphql", &[served.host(), wrong], body).0, 401);
+    let evil = "Host: evil.example".to_owned();
+    assert_eq!(served.send("POST", "/graphql", &[evil, token.clone()], body).0, 403);
+
+    let (status, head, _) = served.exchange("GET", "/graphql", &[served.host(), token.clone()], "");
+    assert_eq!(status, 405);
+    assert!(head.to_ascii_lowercase().contains("allow: post"), "{head}");
+
+    for malformed in [
+        "not json",
+        "{}",
+        r#"{"query": "{ work { phases { id } } }", "variables": [1]}"#,
+    ] {
+        let (status, body) = served.send("POST", "/graphql", &[served.host(), token.clone()], malformed);
+        assert_eq!(status, 400, "{malformed}");
+        let body: Value = serde_json::from_str(&body).expect("JSON");
+        assert_eq!(body["error"]["code"], "invalid_request", "{malformed}");
+    }
+
+    let (status, body) = served.send("POST", "/graphql", &served.write_headers(), body);
+    assert_eq!(status, 200);
+    let body: Value = serde_json::from_str(&body).expect("JSON");
+    assert_eq!(body, serde_json::json!({ "data": { "work": { "phases": [] } } }));
+}
+
 /// The JSON error `arcl --json <args>` prints, with its exit code.
 fn cli_error(directory: &Path, args: &[&str]) -> (Option<i32>, Value) {
     let output = arcl_in(directory)
