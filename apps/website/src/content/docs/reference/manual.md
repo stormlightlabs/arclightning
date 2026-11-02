@@ -477,8 +477,9 @@ the same view as `arcl explain`. `spec`, `plan` and `phase` on a task are the
 effective ones; `specId`, `planId`, `phaseId` and `parentId` are the IDs the
 task stores. A tree node's `descendants` lists every node below it, depth
 first, each with its `depth`, so a tree of any depth reads in one query. IDs
-in responses are full IDs, and every record also has `shortId`. Statuses, kinds and priorities are the strings
-`--json` output uses, such as `in_progress`.
+in responses are full IDs, and every record also has `shortId`. Statuses,
+kinds and priorities are the strings `--json` output uses, such as
+`in_progress`.
 
 The schema is checked in at
 [`crates/arcl-graphql/schema.graphql`](https://github.com/stormlightlabs/arclightning/blob/main/crates/arcl-graphql/schema.graphql).
@@ -486,6 +487,9 @@ The schema is checked in at
 stdout holds the GraphQL response: `data`, and `errors` when there are any.
 A response with errors exits `3`. Each error from a resolver has an
 `extensions.code` of `NOT_FOUND`, `INVALID_REQUEST`, `CONFLICT` or `INTERNAL`.
+A well-formed ID that names no record is `NOT_FOUND`, worded as `arcl show`
+words it. An ID that does not parse, such as `arcl-t-bad`, is
+`INVALID_REQUEST`, in `record` as in the typed fields.
 
 A query document may be at most 64 KiB. A longer one is refused before it is
 parsed: `data` is `null` and the error's `extensions.code` is

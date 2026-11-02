@@ -8,39 +8,8 @@ use super::types::{
 };
 use super::{Reader, coded, storage_error};
 use arcl_core::prelude::*;
+use arcl_repo::workspace::RecordKind;
 use arcl_store::prelude::*;
-
-/// The kinds of record a full ID's prefix names.
-enum RecordKind {
-    Capture,
-    Release,
-    Spec,
-    Plan,
-    Phase,
-    Task,
-    Note,
-}
-
-impl RecordKind {
-    /// The kind `id`'s prefix names, or an `INVALID_REQUEST` error, worded
-    /// as `arcl show` words it, for any other ID.
-    fn from_id(id: &str) -> async_graphql::Result<Self> {
-        let kinds = [
-            (CaptureId::PREFIX, Self::Capture),
-            (ReleaseId::PREFIX, Self::Release),
-            (SpecId::PREFIX, Self::Spec),
-            (PlanId::PREFIX, Self::Plan),
-            (PhaseId::PREFIX, Self::Phase),
-            (TaskId::PREFIX, Self::Task),
-            (NoteId::PREFIX, Self::Note),
-        ];
-        kinds
-            .into_iter()
-            .find(|(prefix, _)| id.starts_with(prefix))
-            .map(|(_, kind)| kind)
-            .ok_or_else(|| coded(format!("unknown record ID `{id}`"), "INVALID_REQUEST"))
-    }
-}
 
 /// The root of every query.
 pub struct QueryRoot;
@@ -238,7 +207,7 @@ fn typed(ctx: &Context<'_>, id: &str) -> async_graphql::Result<RecordNode> {
 /// The full ID `id`, once it parses as an ID of the kind its prefix names,
 /// as `arcl show` checks it.
 fn checked(reader: &Reader, id: &str) -> async_graphql::Result<String> {
-    let kind = RecordKind::from_id(id)?;
+    let kind = RecordKind::from_id(id).ok_or_else(|| coded(format!("unknown record ID `{id}`"), "INVALID_REQUEST"))?;
     let parsed = match kind {
         RecordKind::Capture => reader.parse::<CaptureId>(id)?.to_string(),
         RecordKind::Release => reader.parse::<ReleaseId>(id)?.to_string(),
@@ -255,14 +224,14 @@ fn checked(reader: &Reader, id: &str) -> async_graphql::Result<String> {
 fn not_found(id: &str) -> async_graphql::Error {
     let id = id.to_owned();
     let error = match RecordKind::from_id(&id) {
-        Ok(RecordKind::Capture) => StorageError::CaptureNotFound { id },
-        Ok(RecordKind::Release) => StorageError::ReleaseNotFound { id },
-        Ok(RecordKind::Spec) => StorageError::SpecNotFound { id },
-        Ok(RecordKind::Plan) => StorageError::PlanNotFound { id },
-        Ok(RecordKind::Phase) => StorageError::PhaseNotFound { id },
-        Ok(RecordKind::Task) => StorageError::PlanningTaskNotFound { id },
-        Ok(RecordKind::Note) => StorageError::NoteNotFound { id },
-        Err(_) => return source_not_found(&id),
+        Some(RecordKind::Capture) => StorageError::CaptureNotFound { id },
+        Some(RecordKind::Release) => StorageError::ReleaseNotFound { id },
+        Some(RecordKind::Spec) => StorageError::SpecNotFound { id },
+        Some(RecordKind::Plan) => StorageError::PlanNotFound { id },
+        Some(RecordKind::Phase) => StorageError::PhaseNotFound { id },
+        Some(RecordKind::Task) => StorageError::PlanningTaskNotFound { id },
+        Some(RecordKind::Note) => StorageError::NoteNotFound { id },
+        None => return source_not_found(&id),
     };
     storage_error(error)
 }

@@ -887,16 +887,17 @@ impl WorkItemNode {
 }
 
 /// A node of the record tree, as `arcl tree` builds it, and how deep it
-/// sits.
+/// sits. Nodes share their subtrees, so listing children or descendants
+/// clones a pointer per node, not the records below it.
 pub struct TreeNode {
-    node: RecordTreeNode,
+    node: Arc<TreeRecord>,
     depth: usize,
 }
 
 impl TreeNode {
     /// A node at the top of the tree.
     pub(crate) fn top(node: RecordTreeNode) -> Self {
-        Self { node, depth: 0 }
+        Self { node: Arc::new(TreeRecord::from(node)), depth: 0 }
     }
 
     /// The node's children, one level deeper.
@@ -904,14 +905,14 @@ impl TreeNode {
         self.node
             .children
             .iter()
-            .map(|child| Self { node: child.clone(), depth: self.depth + 1 })
+            .map(|child| Self { node: Arc::clone(child), depth: self.depth + 1 })
     }
 
     /// Push every node below `node`, which sits at `depth`, onto `nodes`,
     /// depth first.
-    fn push_descendants(node: &RecordTreeNode, depth: usize, nodes: &mut Vec<Self>) {
+    fn push_descendants(node: &TreeRecord, depth: usize, nodes: &mut Vec<Self>) {
         for child in &node.children {
-            nodes.push(Self { node: child.clone(), depth: depth + 1 });
+            nodes.push(Self { node: Arc::clone(child), depth: depth + 1 });
             Self::push_descendants(child, depth + 1, nodes);
         }
     }
@@ -921,28 +922,28 @@ impl TreeNode {
 impl TreeNode {
     /// The full record ID.
     async fn id(&self) -> ID {
-        ID(self.node.id.clone())
+        ID(self.node.record.id.clone())
     }
     /// The record kind.
     async fn kind(&self) -> &str {
-        self.node.kind
+        self.node.record.kind
     }
     /// The record title.
     async fn title(&self) -> &str {
-        &self.node.title
+        &self.node.record.title
     }
     /// The stored status; a note's is `available`.
     async fn status(&self) -> &str {
-        &self.node.status
+        &self.node.record.status
     }
     /// For a pending task, whether it is ready.
     async fn ready(&self) -> bool {
-        matches!(self.node.tree_status, TreeStatus::Task { ready: true, .. })
+        matches!(self.node.record.tree_status, TreeStatus::Task { ready: true, .. })
     }
     /// The unfinished tasks that block this task directly. A rooted tree's
     /// root task also lists those it inherits.
     async fn blocked_by(&self) -> Vec<ID> {
-        self.node.blocked_by.iter().cloned().map(ID).collect()
+        self.node.record.blocked_by.iter().cloned().map(ID).collect()
     }
     /// How many levels below the top of the tree the node sits: 0 for a node
     /// `tree` returns, 1 for its children.
@@ -962,7 +963,7 @@ impl TreeNode {
     }
     /// The record itself.
     async fn record(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<RecordNode>> {
-        one(ctx, RecordNode::find(reader(ctx).graph()?, &self.node.id))
+        one(ctx, RecordNode::find(reader(ctx).graph()?, &self.node.record.id))
     }
 }
 
@@ -992,6 +993,23 @@ impl From<RecordSource> for SourceNode {
             content: source.content,
             revision: source.revision,
         }
+    }
+}
+
+/// A tree record with its children behind shared pointers.
+struct TreeRecord {
+    /// The record, with its `children` moved into [`TreeRecord::children`].
+    record: RecordTreeNode,
+    children: Vec<Arc<TreeRecord>>,
+}
+
+impl From<RecordTreeNode> for TreeRecord {
+    fn from(mut record: RecordTreeNode) -> Self {
+        let children = std::mem::take(&mut record.children)
+            .into_iter()
+            .map(|child| Arc::new(Self::from(child)))
+            .collect();
+        Self { record, children }
     }
 }
 

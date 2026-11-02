@@ -683,6 +683,34 @@ fn errors_use_the_wording_of_arcl_show_and_list() {
 }
 
 #[test]
+fn a_missing_record_of_each_kind_is_not_found_in_its_own_words() {
+    let fixture = Fixture::new();
+    let suffix = "00000000000000000000000000";
+    let kinds = [
+        ("capture", "arcl-c-", "capture"),
+        ("release", "arcl-r-", "release"),
+        ("spec", "arcl-s-", "spec"),
+        ("plan", "arcl-pl-", "plan"),
+        ("phase", "arcl-ph-", "phase"),
+        ("task", "arcl-t-", "planning task"),
+        ("note", "arcl-n-", "note"),
+        ("gate", "arcl-g-", "gate"),
+    ];
+    for (field, prefix, noun) in kinds {
+        let id = format!("{prefix}{suffix}");
+        let expected = format!("{noun} `{id}` was not found");
+        for query in [
+            format!(r#"{{ {field}(id: "{id}") {{ id }} }}"#),
+            format!(r#"{{ record(id: "{id}") {{ __typename }} }}"#),
+        ] {
+            let response = fixture.run(&query);
+            assert_eq!(code(&response), "NOT_FOUND", "{query}: {response}");
+            assert_eq!(response["errors"][0]["message"], json!(expected), "{query}");
+        }
+    }
+}
+
+#[test]
 fn an_unbounded_query_resolves_past_the_node_limit() {
     let mut fixture = Fixture::new();
     let project_id = fixture.database.project().expect("project reads").id;

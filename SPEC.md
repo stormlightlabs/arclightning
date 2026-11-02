@@ -265,9 +265,8 @@ pages, including those on other `127.0.0.1` ports, from driving it.
 
 The server is a thin HTTP adapter over the Rust application operations. Its
 `GET /api` reads run named GraphQL queries and map each result into the read's
-JSON envelope. The
-Svelte frontend lives in `apps/web`, uses the shared UI package, and provides
-four views: Inbox, Work, Planning, and Task.
+JSON envelope. The Svelte frontend lives in `apps/web`, uses the shared UI
+package, and provides four views: Inbox, Work, Planning, and Task.
 
 ### Desktop app
 

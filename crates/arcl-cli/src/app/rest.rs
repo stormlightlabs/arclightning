@@ -14,6 +14,8 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
+use arcl_store::prelude::*;
+
 use super::support::*;
 use super::*;
 
@@ -230,9 +232,9 @@ struct Summary {
 struct View {
     #[serde(flatten)]
     task: PlanningTask,
-    readiness: arcl_store::PlanningReadiness,
-    blockers: Vec<arcl_store::PlanningBlockerView>,
-    inherited_blockers: Vec<arcl_store::PlanningBlockerView>,
+    readiness: PlanningReadiness,
+    blockers: Vec<PlanningBlockerView>,
+    inherited_blockers: Vec<PlanningBlockerView>,
     dependents: Vec<PlanningTask>,
     children: Vec<PlanningTask>,
     ancestors: Vec<PlanningTask>,
@@ -245,8 +247,8 @@ struct View {
 }
 
 impl View {
-    fn into_view(self) -> arcl_store::PlanningTaskView {
-        arcl_store::PlanningTaskView {
+    fn into_view(self) -> PlanningTaskView {
+        PlanningTaskView {
             task: self.task,
             readiness: self.readiness,
             blockers: self.blockers,
@@ -373,18 +375,10 @@ pub(super) fn source(id: &str, renderer: &Renderer) -> anyhow::Result<Option<Str
         return Err(ApplicationError::from_command(RecordEditError::NotFound { id: id.to_owned() }).into());
     }
     let source = run::<Source>(SOURCE, json!({ "id": id }), "source")?;
-    let kind = [
-        RecordKind::Capture,
-        RecordKind::Release,
-        RecordKind::Spec,
-        RecordKind::Plan,
-        RecordKind::Phase,
-        RecordKind::Task,
-        RecordKind::Note,
-    ]
-    .into_iter()
-    .find(|kind| kind.as_str() == source.kind)
-    .with_context(|| format!("`source` answered an unknown kind `{}`", source.kind))?;
+    let kind = RecordKind::ALL
+        .into_iter()
+        .find(|kind| kind.as_str() == source.kind)
+        .with_context(|| format!("`source` answered an unknown kind `{}`", source.kind))?;
     let source = RecordSource {
         id: source.id,
         kind,
@@ -416,7 +410,7 @@ pub(super) fn explain(task_id: &str, renderer: &Renderer) -> anyhow::Result<Opti
 
 /// `arcl context <task-id>`.
 pub(super) fn context(task_id: &str, renderer: &Renderer) -> anyhow::Result<Option<String>> {
-    let context = run::<arcl_store::PlanningContext>(CONTEXT, json!({ "id": task_id }), "context")?;
+    let context = run::<PlanningContext>(CONTEXT, json!({ "id": task_id }), "context")?;
     Ok(renderer.render_planning_context(&context)?)
 }
 
@@ -431,7 +425,7 @@ pub(super) fn tree(renderer: &Renderer) -> anyhow::Result<Option<String>> {
 
 /// Every task with its readiness and effective phase, and every phase.
 pub(super) fn work(renderer: &Renderer) -> anyhow::Result<Option<String>> {
-    let work = run::<arcl_store::PlanningWork>(WORK, json!({}), "work")?;
+    let work = run::<PlanningWork>(WORK, json!({}), "work")?;
     Ok(renderer.render_planning_work(&work)?)
 }
 

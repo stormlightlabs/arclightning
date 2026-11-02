@@ -5,9 +5,8 @@
 //! read endpoints return, one document per read, and an agent copies the
 //! files `export` writes into it. Both commands run the same [`ServeApp`] as
 //! `arcl serve`, so the documents come from the endpoints' GraphQL queries
-//! with the endpoints' shapes, and an applied
-//! edit gets the same validation, sync lock, export and warnings as a change
-//! made in the local app.
+//! with the endpoints' shapes, and an applied edit gets the same validation,
+//! sync lock, export and warnings as a change made in the local app.
 //!
 //! | Document           | Same JSON as                                    |
 //! | ------------------ | ----------------------------------------------- |
