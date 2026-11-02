@@ -1031,27 +1031,28 @@ fn serve_page_mode_still_needs_an_origin_on_a_mutation() {
 
 #[test]
 fn serve_api_refuses_a_preflight_without_cors_headers() {
-    for incoming in [
-        // A browser's preflight carries no token.
-        Incoming {
-            method: "OPTIONS".to_owned(),
-            origin: Some("http://evil.example".to_owned()),
-            ..get("/api/tasks", None)
-        },
-        Incoming { method: "OPTIONS".to_owned(), ..post("/api/tasks") },
-        Incoming { method: "OPTIONS".to_owned(), ..get("/graphql", Some(TOKEN)) },
-    ] {
-        let answer = answered(&api_gate(), &incoming);
-        assert!(answer.status >= 400, "{} {}", incoming.url, answer.status);
-        assert!(
-            answer
-                .headers()
-                .iter()
-                .all(|(name, _)| !name.to_ascii_lowercase().starts_with("access-control-")),
-            "{}",
-            incoming.url
-        );
+    let no_cors = |answer: &Answer| {
+        answer
+            .headers()
+            .iter()
+            .all(|(name, _)| !name.to_ascii_lowercase().starts_with("access-control-"))
+    };
+    // A browser's preflight carries an Origin and no token, whatever the origin.
+    for url in ["/api/tasks", "/api/tasks/arcl-t-1/park", "/graphql"] {
+        for origin in ["http://evil.example", &format!("http://127.0.0.1:{PORT}")] {
+            let preflight =
+                Incoming { method: "OPTIONS".to_owned(), origin: Some(origin.to_owned()), ..get(url, None) };
+            let answer = answered(&api_gate(), &preflight);
+            assert_eq!(answer.status, 401, "{url} from {origin}");
+            assert!(answer.close, "{url} from {origin}");
+            assert!(no_cors(&answer), "{url} from {origin}");
+        }
     }
+    // With the token, OPTIONS is a method the path does not take.
+    let tokened = Incoming { method: "OPTIONS".to_owned(), ..get("/graphql", Some(TOKEN)) };
+    let answer = answered(&api_gate(), &tokened);
+    assert_eq!(answer.status, 405);
+    assert!(no_cors(&answer));
 }
 
 #[test]
