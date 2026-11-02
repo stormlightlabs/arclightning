@@ -21,7 +21,7 @@
 //! no query token. The caller may choose the token, which needs at least
 //! [`MIN_TOKEN_CHARS`] characters, all ASCII letters and digits. A mutation
 //! needs a matching `Origin` only when it sends one: a mismatched `Origin` is
-//! still refused, and a request without one must still carry the token. A
+//! refused, and a request without one runs on the token alone. A
 //! browser page on another origin cannot send the [`TOKEN_HEADER`] header
 //! without a CORS preflight, and the server refuses every preflight without
 //! CORS headers, so the token check stands in for `Origin`.

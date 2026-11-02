@@ -978,6 +978,21 @@ fn serve_api_keeps_the_host_and_token_checks() {
 }
 
 #[test]
+fn serve_api_names_the_token_header_for_a_query_token() {
+    for url in [
+        format!("/?{TOKEN_QUERY}={TOKEN}"),
+        format!("/api/tree?{TOKEN_QUERY}={TOKEN}"),
+    ] {
+        let answer = answered(&api_gate(), &get(&url, None));
+        assert_eq!(answer.status, 401);
+        let body: serde_json::Value = serde_json::from_slice(&answer.body).expect("a JSON body");
+        let message = body["error"]["message"].as_str().expect("an error message");
+        assert!(message.contains(&format!("the {TOKEN_HEADER} header")), "{message}");
+        assert!(!message.contains("first page load"), "{message}");
+    }
+}
+
+#[test]
 fn serve_api_runs_a_mutation_without_an_origin() {
     let incoming = Incoming { origin: None, ..post("/api/tasks/arcl-t-1/park") };
     assert_eq!(

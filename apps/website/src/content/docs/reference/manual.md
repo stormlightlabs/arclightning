@@ -538,45 +538,6 @@ does not arrive within 5 seconds gets `Connection: close` and the connection
 closes after the reply. It keeps at most
 128 connections open; a new one waits to be accepted until another closes.
 
-### API only
-
-`arcl serve --api` serves `/graphql` and `/api` without the web app page, so a
-script or another local tool can use the endpoints against the project's
-database. It binds `127.0.0.1` and checks `Host` and the token as the page
-mode does. With them, any path outside `/api` and `/graphql` gets 404, and no
-URL carries a token for a first page load.
-
-The token comes from `ARCL_SERVE_TOKEN` when it is set. It must be at least 32
-characters, ASCII letters and digits only; otherwise `arcl serve --api` exits
-`1` at startup with an error naming that rule. Without the variable, each run
-makes a new token. The page mode always makes a new one and ignores the
-variable.
-
-`arcl --json serve` prints one startup line with the URL, the port and the
-token:
-
-```json
-{ "format_version": 1, "data": { "status": "serving", "url": "http://127.0.0.1:4321", "port": 4321, "token": "..." } }
-```
-
-Under `--api` the URL is the server's origin. In the page mode it is the URL
-to open, with the token for the first page load. Human output under `--api`
-prints the URL and the token, and `--plain` prints them on two lines.
-
-Under `--api`, a change needs a matching `Origin` only when the request sends
-one. A request without `Origin` still needs the token, and a request whose
-`Origin` does not name the server is still refused with 403. A page in a
-browser cannot send the `X-Arcl-Token` header to another origin without a CORS
-preflight, and the server refuses every preflight without CORS headers. The
-page mode keeps requiring `Origin` on every change.
-
-```sh
-export ARCL_SERVE_TOKEN=$(openssl rand -hex 32)
-arcl serve --api --port 4321 &
-curl -s -H "X-Arcl-Token: $ARCL_SERVE_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"query": "{ ready { id title } }"}' http://127.0.0.1:4321/graphql
-```
-
 | Endpoint                          | Same JSON as             |
 | --------------------------------- | ------------------------ |
 | `GET /api/records`                | `arcl list`              |
@@ -872,6 +833,52 @@ produces an `arcl` whose `serve` shows a page saying the web app was not
 built. To compile one with the web app, run `pnpm install` and
 `pnpm --filter @arclightning/web build` in a checkout, then
 `cargo install --path crates/arcl-cli`.
+
+### API only
+
+`arcl serve --api` serves `/graphql` and `/api` without the web app page, so a
+script or another local tool can use the endpoints above against the
+project's database. It binds `127.0.0.1` and refuses a request with the wrong
+`Host` or without the token, as the page mode does. Any path outside `/api` and
+`/graphql` gets 404. No URL carries the token: a request that puts it in the
+query string gets 401, and every request sends it in the `X-Arcl-Token`
+header.
+
+The token comes from `ARCL_SERVE_TOKEN` when it is set. It must be at least 32
+characters, ASCII letters and digits only; otherwise `arcl serve --api` exits
+`1` at startup with an error naming that rule. Without the variable, each run
+makes a new token. The page mode always makes a new one and ignores the
+variable.
+
+`arcl --json serve` prints one startup line with the URL, the port and the
+token:
+
+```json
+{ "format_version": 1, "data": { "status": "serving", "url": "http://127.0.0.1:4321", "port": 4321, "token": "..." } }
+```
+
+Under `--api` the URL is the server's origin. In the page mode it is the URL
+to open, with the token for the first page load. Human output under `--api`
+prints the URL and the token, and `--plain` prints them on two lines. A token
+from `ARCL_SERVE_TOKEN` is never printed, so it stays out of logs: human output
+says the variable's token is in use, `--plain` prints the URL alone, and the
+JSON line has no `token` field.
+
+Under `--api`, a change without an `Origin` header runs once the token
+matches. A change whose `Origin` does not name the server gets 403. A page in
+a browser cannot send the `X-Arcl-Token` header to another origin without a
+CORS preflight, and the server refuses every preflight without CORS headers.
+In the page mode, every change needs an `Origin` naming the server.
+
+`curl` retries until the server is listening and fails on an error status:
+
+```sh
+export ARCL_SERVE_TOKEN=$(openssl rand -hex 32)
+arcl serve --api --port 4321 &
+curl --fail --retry 10 --retry-delay 1 --retry-connrefused \
+  -H "X-Arcl-Token: $ARCL_SERVE_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"query": "{ ready { id title } }"}' http://127.0.0.1:4321/graphql
+```
 
 ## Publishing and syncing the artifact
 

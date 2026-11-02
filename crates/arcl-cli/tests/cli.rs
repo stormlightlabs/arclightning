@@ -3777,7 +3777,8 @@ impl Served {
 
     /// Start `arcl --json serve` with `flags` in `directory`, with
     /// `ARCL_SERVE_TOKEN` set to `token` or unset, and return the server with
-    /// its startup line.
+    /// its startup line. The server's token is the line's, or `token` when
+    /// the line leaves it out.
     fn start_json(directory: &Path, flags: &[&str], token: Option<&str>) -> (Self, Value) {
         use std::io::BufRead;
 
@@ -3799,7 +3800,7 @@ impl Served {
             .expect("arcl serve prints its startup line");
         let started: Value = serde_json::from_str(&line).expect("the startup line is JSON");
         let port = u16::try_from(started["data"]["port"].as_u64().expect("a port")).expect("a port number");
-        let token = started["data"]["token"].as_str().expect("a token").to_owned();
+        let token = started["data"]["token"].as_str().or(token).expect("a token").to_owned();
         (Self { child, port, token }, started)
     }
 
@@ -3946,9 +3947,66 @@ fn serve_api_takes_its_token_from_the_environment() {
     let data = started["data"].as_object().expect("an object");
     let mut keys = data.keys().map(String::as_str).collect::<Vec<_>>();
     keys.sort_unstable();
-    assert_eq!(keys, ["port", "status", "token", "url"]);
+    assert_eq!(keys, ["port", "status", "url"]);
     assert_eq!(started["format_version"], 1);
     assert_eq!(data["status"], "serving");
+}
+
+#[test]
+fn serve_api_prints_a_generated_token_only() {
+    let directory = initialized_directory();
+    let (served, started) = Served::start_json(directory.path(), &["--api"], None);
+    assert_eq!(started["data"]["token"], served.token.as_str());
+    assert_eq!(served.token.len(), 64);
+    drop(served);
+
+    let generated = serve_startup(directory.path(), &["--plain", "serve", "--api"], None, 2);
+    assert_eq!(generated[1].len(), 64, "{generated:?}");
+    let generated = serve_startup(directory.path(), &["serve", "--api"], None, 3);
+    assert!(
+        generated[1].starts_with("Token: ") && generated[1].len() == 71,
+        "{generated:?}"
+    );
+
+    let chosen = "Abc123".repeat(6);
+    let human = serve_startup(directory.path(), &["serve", "--api"], Some(&chosen), 3);
+    assert_eq!(human[1], "Token: the one in ARCL_SERVE_TOKEN", "{human:?}");
+    let plain = serve_startup(directory.path(), &["--plain", "serve", "--api"], Some(&chosen), 1);
+    assert!(plain[0].starts_with("http://127.0.0.1:"), "{plain:?}");
+    for lines in [human, plain] {
+        assert!(lines.iter().all(|line| !line.contains(&chosen)), "{lines:?}");
+    }
+}
+
+/// Run `arcl` with `args` in `directory`, with `ARCL_SERVE_TOKEN` set to
+/// `token` or unset, read `count` lines of its output, then stop it. Fails
+/// if the output holds more than `count` lines once it stops.
+fn serve_startup(directory: &Path, args: &[&str], token: Option<&str>, count: usize) -> Vec<String> {
+    use std::io::{BufRead, Read};
+
+    let mut command = isolated_command(assert_cmd::cargo::cargo_bin("arcl"), directory);
+    command.args(args).env_remove("ARCL_SERVE_TOKEN");
+    if let Some(token) = token {
+        command.env("ARCL_SERVE_TOKEN", token);
+    }
+    let mut child = command
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("arcl serve starts");
+    let mut reader = std::io::BufReader::new(child.stdout.take().expect("stdout is piped"));
+    let lines = (0..count)
+        .map(|_| {
+            let mut line = String::new();
+            reader.read_line(&mut line).expect("arcl serve prints its startup");
+            line.trim_end().to_owned()
+        })
+        .collect::<Vec<_>>();
+    let _ = child.kill();
+    let _ = child.wait();
+    let mut rest = String::new();
+    reader.read_to_string(&mut rest).expect("the output reads");
+    assert!(rest.is_empty(), "{lines:?} then {rest:?}");
+    lines
 }
 
 #[test]

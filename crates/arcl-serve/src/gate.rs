@@ -86,11 +86,12 @@ impl Gate {
             if first_load && same_token(given, &self.token) && !self.first_load_used.swap(true, Ordering::SeqCst) {
                 return Ok(true);
             }
-            return Err(Reply::refusal(
-                401,
-                "unauthorized",
-                &format!("the link's token works for the first page load only; send the token in {TOKEN_HEADER}"),
-            ));
+            let message = if self.api_only {
+                format!("this server takes no token in the URL; send the token in the {TOKEN_HEADER} header")
+            } else {
+                format!("the link's token works for the first page load only; send the token in {TOKEN_HEADER}")
+            };
+            return Err(Reply::refusal(401, "unauthorized", &message));
         }
 
         match incoming.token.as_deref() {

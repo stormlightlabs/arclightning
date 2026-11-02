@@ -288,27 +288,29 @@ impl Mutations for ServeApp {
 ///
 /// With `api`, the server answers only `/api` and `/graphql`, and its token
 /// is [`TOKEN_VARIABLE`] when that is set. The page mode always makes a new
-/// token and ignores the variable.
+/// token and ignores the variable. A token from the variable is not printed.
 pub(super) fn exec_serve(port: Option<u16>, api: bool, renderer: &Renderer) -> anyhow::Result<()> {
     drop(open_database().map_err(ApplicationError::from_command)?);
-    let server = if api {
+    let (server, supplied) = if api {
         let token = match std::env::var(TOKEN_VARIABLE) {
             Ok(token) => Some(token),
             Err(std::env::VarError::NotPresent) => None,
             // Not UTF-8, so not ASCII letters and digits either.
             Err(std::env::VarError::NotUnicode(_)) => Some(String::new()),
         };
-        Server::bind_api(port, token).map_err(|error| match error {
+        let supplied = token.is_some();
+        let server = Server::bind_api(port, token).map_err(|error| match error {
             ServeError::WeakToken => anyhow::anyhow!("{TOKEN_VARIABLE} is not valid: {error}"),
             error => anyhow::Error::new(error).context("could not start the web app server"),
-        })?
+        })?;
+        (server, supplied)
     } else {
-        Server::bind(port).context("could not start the web app server")?
+        (Server::bind(port).context("could not start the web app server")?, false)
     };
     write_output(renderer.render_serve(&ServeStart {
         url: &server.url(),
         port: server.port(),
-        token: server.token(),
+        token: (!supplied).then(|| server.token()),
         api,
     })?)?;
     let app = ServeApp::new(renderer.mode(), LOCK_WAIT);
