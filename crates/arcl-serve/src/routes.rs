@@ -86,7 +86,8 @@ pub struct GraphqlRequest {
 }
 
 /// The application's read operations, each answering with the CLI's JSON
-/// envelope for the same command.
+/// envelope for the same command. `arcl serve` answers each through the
+/// GraphQL schema `arcl query` runs.
 pub trait Reads {
     /// `arcl list`, with the filter flags as `(name, value)` pairs.
     fn list(&self, query: &[(String, String)]) -> Reply;

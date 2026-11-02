@@ -565,3 +565,154 @@ fn the_checked_in_schema_matches_the_schema() {
         "crates/arcl-graphql/schema.graphql is out of date; regenerate it with `arcl query --schema`"
     );
 }
+
+#[test]
+fn records_carry_the_ids_they_store() {
+    let fixture = Fixture::new();
+    let project = fixture.database.project().expect("project reads").id.to_string();
+    let data = fixture.data(&format!(
+        r#"{{
+            task(id: "{task}") {{
+                projectId specId planId phaseId parentId
+                notes {{ taskId }}
+                gates {{ taskId }}
+            }}
+            spec(id: "{spec}") {{ projectId }}
+        }}"#,
+        task = fixture.task.id,
+        spec = fixture.spec.id,
+    ));
+    let task = fixture.task.id.to_string();
+    assert_eq!(
+        data,
+        json!({
+            "task": {
+                "projectId": project,
+                "specId": null,
+                "planId": null,
+                "phaseId": fixture.phase.id.to_string(),
+                "parentId": null,
+                "notes": [{ "taskId": task }],
+                "gates": [{ "taskId": task }],
+            },
+            "spec": { "projectId": project },
+        })
+    );
+}
+
+#[test]
+fn tree_descendants_list_every_node_below_with_its_depth() {
+    let fixture = Fixture::new();
+    let data = fixture.data("{ tree { id depth children { id depth children { id depth children { id depth } } } descendants { id depth } } }");
+    for top in data["tree"].as_array().expect("tree") {
+        let mut nested = Vec::new();
+        flatten(&top["children"], &mut nested);
+        let descendants = top["descendants"]
+            .as_array()
+            .expect("descendants")
+            .iter()
+            .map(|node| (node["id"].clone(), node["depth"].clone()))
+            .collect::<Vec<_>>();
+        assert_eq!(descendants, nested);
+        assert_eq!(top["depth"], json!(0));
+    }
+    let spec = &data["tree"][0];
+    assert_eq!(spec["id"], json!(fixture.spec.id.to_string()));
+    assert_eq!(
+        spec["descendants"].as_array().expect("descendants").len(),
+        4,
+        "a plan, a phase and two tasks"
+    );
+
+    fn flatten(nodes: &Value, out: &mut Vec<(Value, Value)>) {
+        for node in nodes.as_array().into_iter().flatten() {
+            out.push((node["id"].clone(), node["depth"].clone()));
+            flatten(&node["children"], out);
+        }
+    }
+}
+
+#[test]
+fn errors_use_the_wording_of_arcl_show_and_list() {
+    let fixture = Fixture::new();
+    let message = |query: &str| {
+        let response = fixture.run(query);
+        (
+            code(&response).to_owned(),
+            response["errors"][0]["message"].as_str().unwrap_or_default().to_owned(),
+        )
+    };
+    let missing = "arcl-t-00000000000000000000000000";
+    let not_found = (
+        "NOT_FOUND".to_owned(),
+        format!("planning task `{missing}` was not found"),
+    );
+    assert_eq!(message(&format!(r#"{{ task(id: "{missing}") {{ id }} }}"#)), not_found);
+    assert_eq!(
+        message(&format!(r#"{{ record(id: "{missing}") {{ __typename }} }}"#)),
+        not_found
+    );
+    assert_eq!(
+        message(&format!(r#"{{ source(id: "{missing}") {{ id }} }}"#)),
+        ("NOT_FOUND".to_owned(), format!("record `{missing}` was not found"))
+    );
+    assert_eq!(
+        message(r#"{ record(id: "arcl-t-bad") { __typename } }"#),
+        (
+            "INVALID_REQUEST".to_owned(),
+            "invalid ULID suffix for task ID `arcl-t-bad`: invalid length".to_owned()
+        )
+    );
+    let spec = fixture.spec.id.to_string();
+    assert_eq!(
+        message(&format!(r#"{{ task(id: "{spec}") {{ id }} }}"#)),
+        (
+            "INVALID_REQUEST".to_owned(),
+            format!("invalid task ID `{spec}`; expected prefix `arcl-t-`")
+        )
+    );
+    // As `arcl list` does, the kind is checked before the priorities, and
+    // the filters before the record IDs.
+    let (_, kind) = message(r#"{ records(kind: "widget", priority: ["huge"]) { id } }"#);
+    assert!(kind.starts_with("invalid list filter: unknown kind `widget`"), "{kind}");
+    let (_, status) = message(r#"{ records(kind: "spec", status: ["parked"], spec: "arcl-s-bad") { id } }"#);
+    assert_eq!(
+        status,
+        "invalid list filter: status `parked` does not apply to spec records"
+    );
+}
+
+#[test]
+fn an_unbounded_query_resolves_past_the_node_limit() {
+    let mut fixture = Fixture::new();
+    let project_id = fixture.database.project().expect("project reads").id;
+    for index in 0..8 {
+        fixture
+            .database
+            .create_planning_task(PlanningTaskCreate {
+                project_id,
+                spec_id: None,
+                plan_id: None,
+                phase_id: Some(fixture.phase.id),
+                parent_id: None,
+                title: format!("Task {index}"),
+                body: String::new(),
+                priority: TaskPriority::Normal,
+                position: index + 3,
+            })
+            .expect("task creates");
+    }
+    // 4 levels of the plan's 10 tasks resolve 22,221 objects.
+    let plan = fixture.phase.plan_id;
+    let query = format!(
+        r#"{{ plan(id: "{plan}") {{ {}id{} }} }}"#,
+        "tasks { plan { ".repeat(4),
+        " } }".repeat(4)
+    );
+    let database = Database::open(&fixture.path).expect("database opens");
+    assert!(!execute(database, Request::new(query.clone())).errors.is_empty());
+    let database = Database::open(&fixture.path).expect("database opens");
+    let unbounded = execute_unbounded(database, Request::new(query));
+    assert!(unbounded.errors.is_empty(), "{:?}", unbounded.errors);
+    assert!(NODES.with(Cell::get) > MAX_NODES);
+}

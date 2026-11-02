@@ -1,10 +1,12 @@
 //! `arcl serve`: the web app and its endpoints over the CLI's commands.
 //!
-//! Each read opens the database and runs the same read as the CLI, with no
-//! workspace sync. `POST /graphql` is a read too: it runs the same query as
-//! `arcl query`, with the same response and limits, but without the
-//! workspace sync `arcl query` runs first. A read never changes records,
-//! though opening the database can run its migrations. Each mutation runs the same `arcl task` or
+//! Each `GET /api` read opens the database and runs one named GraphQL query
+//! (see [`rest`]), with no workspace sync, and answers the envelope the CLI's
+//! `--json` output gives for the same read. `POST /graphql` is a read too: it
+//! runs the same query as `arcl query`, with the same response and limits,
+//! but without the workspace sync `arcl query` runs first. A read never
+//! changes records, though opening the database can run its migrations.
+//! Each mutation runs the same `arcl task` or
 //! `arcl capture`, `arcl spec` or `arcl plan` command as the CLI, with the
 //! same sync around it: it takes the sync lock, syncs, changes the record and
 //! syncs again to export it. The server holds the lock only during a
@@ -22,7 +24,7 @@ use arcl_serve::{
 };
 
 use super::graphql::run_query;
-use super::reads::*;
+use super::rest;
 use super::support::{RecordScope, parse_plan_document, parse_plan_id};
 use super::*;
 
@@ -98,40 +100,40 @@ impl ServeApp {
 impl Reads for ServeApp {
     fn list(&self, query: &[(String, String)]) -> Reply {
         match list_args(query) {
-            Ok(filters) => reply(read_list(filters, &self.renderer)),
+            Ok(filters) => reply(rest::records(&filters, &self.renderer)),
             Err(message) => Reply::invalid_request(&message),
         }
     }
 
     fn show(&self, id: &str) -> Reply {
-        reply(read_show(id, &self.renderer))
+        reply(rest::record(id, &self.renderer))
     }
 
     fn source(&self, id: &str) -> Reply {
-        reply(read_source(id, &self.renderer))
+        reply(rest::source(id, &self.renderer))
     }
 
     fn ready(&self, query: &[(String, String)]) -> Reply {
         match ready_args(query) {
-            Ok(filters) => reply(read_ready(filters, &self.renderer)),
+            Ok(filters) => reply(rest::ready(&filters, &self.renderer)),
             Err(message) => Reply::invalid_request(&message),
         }
     }
 
     fn explain(&self, task_id: &str) -> Reply {
-        reply(read_explain(task_id, &self.renderer))
+        reply(rest::explain(task_id, &self.renderer))
     }
 
     fn context(&self, task_id: &str) -> Reply {
-        reply(read_context(task_id, &self.renderer))
+        reply(rest::context(task_id, &self.renderer))
     }
 
     fn tree(&self) -> Reply {
-        reply(read_tree(None, TreeArgs::default(), &self.renderer))
+        reply(rest::tree(&self.renderer))
     }
 
     fn work(&self) -> Reply {
-        reply(read_work(&self.renderer))
+        reply(rest::work(&self.renderer))
     }
 
     fn graphql(&self, input: GraphqlRequest) -> Reply {

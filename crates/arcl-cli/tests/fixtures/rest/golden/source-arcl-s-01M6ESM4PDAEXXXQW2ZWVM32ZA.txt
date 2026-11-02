@@ -1,0 +1,2 @@
+200
+{"format_version":1,"data":{"id":"arcl-s-01M6ESM4PDAEXXXQW2ZWVM32ZA","kind":"spec","path":"specs/arcl-s-01M6ESM4PDAEXXXQW2ZWVM32ZA.md","source":"+++\nid = \"arcl-s-01M6ESM4PDAEXXXQW2ZWVM32ZA\"\ntitle = \"Spec idea\"\nstatus = \"open\"\nsource-capture = \"arcl-c-01M6ESM4JAQPD5BXP72E88CS3K\"\nacceptance-criteria = \"- done\"\n+++\n","revision":"249258747903013e4263bb25c941a45890b9872b90212f7da06290a9d8ea66de"}}

@@ -1,0 +1,2 @@
+200
+{"format_version":1,"data":{"id":"arcl-c-01M6ESM4NEB5KCSJEANEARDR1F","kind":"capture","path":"captures/arcl-c-01M6ESM4NEB5KCSJEANEARDR1F.md","source":"+++\nid = \"arcl-c-01M6ESM4NEB5KCSJEANEARDR1F\"\ntitle = \"Bad idea\"\nstatus = \"discarded\"\ncreated-at = \"2026-11-02T18:51:22.670Z\"\n+++\n","revision":"2244abf225a090491de7ad9aa62d33d980112a0cd7326753cad2a05331b0dc5c"}}

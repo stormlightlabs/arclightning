@@ -1,0 +1,2 @@
+200
+{"format_version":1,"data":{"id":"arcl-t-01M6ESM4FEF285TNJBPGR9Q3Y1","kind":"task","path":"tasks/arcl-t-01M6ESM4FEF285TNJBPGR9Q3Y1.md","source":"+++\nid = \"arcl-t-01M6ESM4FEF285TNJBPGR9Q3Y1\"\ntitle = \"Claimed task\"\nstatus = \"in_progress\"\npriority = \"high\"\nposition = 0\nassignee = \"carol\"\n+++\n","revision":"e0b62ac6ac81a7b29c3738a9ac8ba464b190d9d80237157b3fa1ef0044051ab6"}}

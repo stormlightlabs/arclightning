@@ -1,0 +1,2 @@
+400
+{"error":{"code":"invalid_request","exit_code":3,"message":"invalid project or record: invalid ULID suffix for spec ID `arcl-s-bad`: invalid length"},"format_version":1}

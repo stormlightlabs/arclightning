@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{
     DomainError, PhaseId, PlanId, ProjectId, SpecId, TaskId, TaskPriority, TaskStatus, validate_position,
@@ -10,7 +10,7 @@ use super::{
 /// All placement fields are optional after the required project. A task may
 /// therefore be project-level, attached to a spec, attached to a plan, inside
 /// a phase, or nested below another task.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PlanningTask {
     pub id: TaskId,

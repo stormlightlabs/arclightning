@@ -1,0 +1,2 @@
+200
+{"format_version":1,"data":{"id":"arcl-c-01M6ESM4H6XRTTCM5G83JXE7BX","kind":"capture","path":"captures/arcl-c-01M6ESM4H6XRTTCM5G83JXE7BX.md","source":"+++\nid = \"arcl-c-01M6ESM4H6XRTTCM5G83JXE7BX\"\ntitle = \"Inbox idea\"\nstatus = \"captured\"\ncreated-at = \"2026-11-02T18:51:22.534Z\"\nsource-task = \"arcl-t-01M6ESM4FEF285TNJBPGR9Q3Y1\"\n+++\n\nThink about it.\n","revision":"fdd0e3a20fe6a17ddddc0a4cfd09d70095a75cb67656f6bf335476dbe229ca58"}}

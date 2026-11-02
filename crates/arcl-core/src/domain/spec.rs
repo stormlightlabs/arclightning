@@ -1,9 +1,9 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{CaptureId, ContainerStatus, DomainError, ProjectId, SpecId, validate_title};
 
 /// A specification owned and edited by Arc Lightning.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Spec {
     pub id: SpecId,

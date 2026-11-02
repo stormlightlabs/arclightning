@@ -1,0 +1,2 @@
+200
+{"format_version":1,"data":{"id":"arcl-n-01M6ESM4R3XPQ0W25K2ME7JR5Y","kind":"note","path":"notes/arcl-n-01M6ESM4R3XPQ0W25K2ME7JR5Y.md","source":"+++\nid = \"arcl-n-01M6ESM4R3XPQ0W25K2ME7JR5Y\"\ntitle = \"Note idea\"\n+++\n","revision":"6fdd5f5034781d458665c7c65cde708f0b96594cc926e403b70dcdf8e10df64b"}}

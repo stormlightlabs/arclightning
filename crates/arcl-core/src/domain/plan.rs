@@ -1,9 +1,9 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{ContainerStatus, DomainError, PlanId, ProjectId, SpecId, validate_title};
 
 /// A persistent implementation plan belonging to one specification.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Plan {
     pub id: PlanId,

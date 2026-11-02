@@ -1,0 +1,2 @@
+200
+{"format_version":1,"data":{"records":[{"id":"arcl-c-01M6ESM4H6XRTTCM5G83JXE7BX","kind":"capture","status":"captured","title":"Inbox idea"},{"id":"arcl-c-01M6ESM4JAQPD5BXP72E88CS3K","kind":"capture","status":"promoted","title":"Spec idea"},{"id":"arcl-c-01M6ESM4KB90H8AF31MWRD02PX","kind":"capture","status":"promoted","title":"Task idea"},{"id":"arcl-c-01M6ESM4MDHF0YAV8D27W28QDJ","kind":"capture","status":"promoted","title":"Note idea"},{"id":"arcl-c-01M6ESM4NEB5KCSJEANEARDR1F","kind":"capture","status":"discarded","title":"Bad idea"}]}}

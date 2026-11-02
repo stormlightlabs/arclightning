@@ -62,7 +62,7 @@ impl CaptureAction {
 }
 
 /// An unstructured thought waiting in the project inbox.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Capture {
     pub id: CaptureId,

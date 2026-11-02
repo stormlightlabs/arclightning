@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use rusqlite::{Connection, TransactionBehavior, params};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{
     Result, StorageError, gates, gates_for_task, notes_for_task, phases, planning_dependencies, planning_task,
@@ -31,7 +31,7 @@ pub enum OpenSubtasks {
 
 /// The fixed set of conditions that keep a connected-model task from being
 /// ready. JSON writes each as a snake_case `kind`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ReadinessReasonKind {
@@ -78,7 +78,7 @@ pub struct PlanningReadyFilter {
 }
 
 /// Every readiness condition that applies to a connected-model task.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PlanningReadiness {
     /// Whether the task is an actionable pending leaf with satisfied blockers.
@@ -100,7 +100,7 @@ impl PlanningReadiness {
 /// One condition that keeps a task from being ready, with its kind, its human
 /// text and the IDs of the records it names. JSON omits the ID fields a kind
 /// does not use.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReadinessReason {
     /// Which condition this is.
@@ -124,7 +124,7 @@ pub struct ReadinessReason {
     pub container: Option<String>,
     /// For an `invalid_edge`, the cycle closed by repeating its first task,
     /// or the parent chain from the descendant up to the ancestor.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "schema", schemars(default))]
     pub path: Vec<TaskId>,
     /// For an `open_gate`, the gate: its ID, kind and target.
@@ -155,7 +155,7 @@ impl std::fmt::Display for ReadinessReason {
 
 /// A connected-model blocker of a task or of one of its ancestors, with its
 /// completion evidence.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PlanningBlockerView {
     /// The blocking task.
@@ -172,7 +172,7 @@ pub struct PlanningBlockerView {
 }
 
 /// An enriched connected-model task view.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PlanningTaskView {
     /// The task being inspected.
@@ -208,7 +208,7 @@ pub struct PlanningTaskView {
 }
 
 /// The focused context packet for a connected-model task.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PlanningContext {
     /// The task, including its Markdown body, handoff, and evidence.
@@ -276,7 +276,7 @@ impl PlanningContext {
 
 /// One task in the work list: the task, its readiness and its effective
 /// phase.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PlanningWorkItem {
     /// The task.
@@ -288,7 +288,7 @@ pub struct PlanningWorkItem {
 }
 
 /// Every task with its readiness, and every phase, read in one pass.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PlanningWork {
     /// Every task, ordered by position, then ID.

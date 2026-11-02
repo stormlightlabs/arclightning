@@ -1,0 +1,2 @@
+200
+{"format_version":1,"data":{"action":"shown","plan":{"body":"Plan body.","id":"arcl-pl-01M6ESM3K3C7SKW1SCDMMXY8CZ","project_id":"arcl-pj-00000000000000000000000000","spec_id":"arcl-s-01M6ESM3HXTX7F827GYCBK76G9","status":"open","title":"Search plan"}}}

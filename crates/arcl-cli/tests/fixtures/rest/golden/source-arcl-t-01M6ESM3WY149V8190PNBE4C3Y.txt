@@ -1,0 +1,2 @@
+200
+{"format_version":1,"data":{"id":"arcl-t-01M6ESM3WY149V8190PNBE4C3Y","kind":"task","path":"tasks/arcl-t-01M6ESM3WY149V8190PNBE4C3Y.md","source":"+++\nid = \"arcl-t-01M6ESM3WY149V8190PNBE4C3Y\"\ntitle = \"Waits on dropped work\"\nstatus = \"pending\"\npriority = \"normal\"\nposition = 0\nblocked-by = [\"arcl-t-01M6ESM3VH935DBQTCKSQS7J51\"]\n+++\n","revision":"2ced943904cc03fd8b94372f7ac53a43421bed22e84b3af4b5db4015480a93d4"}}

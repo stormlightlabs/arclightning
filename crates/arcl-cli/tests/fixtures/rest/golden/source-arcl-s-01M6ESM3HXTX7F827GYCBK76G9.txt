@@ -1,0 +1,2 @@
+200
+{"format_version":1,"data":{"id":"arcl-s-01M6ESM3HXTX7F827GYCBK76G9","kind":"spec","path":"specs/arcl-s-01M6ESM3HXTX7F827GYCBK76G9.md","source":"+++\nid = \"arcl-s-01M6ESM3HXTX7F827GYCBK76G9\"\ntitle = \"Search\"\nstatus = \"open\"\nacceptance-criteria = \"- [ ] query works\"\n+++\n\nFind records fast.\n","revision":"649225ba3a6ed92f92d7c001d7fa65244c7c53ad29b58dd855a1a34ef0813909"}}

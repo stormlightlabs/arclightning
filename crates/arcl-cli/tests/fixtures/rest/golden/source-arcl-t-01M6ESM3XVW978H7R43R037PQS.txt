@@ -1,0 +1,2 @@
+200
+{"format_version":1,"data":{"id":"arcl-t-01M6ESM3XVW978H7R43R037PQS","kind":"task","path":"tasks/arcl-t-01M6ESM3XVW978H7R43R037PQS.md","source":"+++\nid = \"arcl-t-01M6ESM3XVW978H7R43R037PQS\"\ntitle = \"Parent with blocker\"\nstatus = \"pending\"\npriority = \"normal\"\nposition = 0\nblocked-by = [\"arcl-t-01M6ESM3TNSAKEPPBK3QJJXBYY\"]\n+++\n","revision":"6d883913c6f64e5ae5dcc7951dedcc61aed29ed408938e8fc5c7c964d363781a"}}

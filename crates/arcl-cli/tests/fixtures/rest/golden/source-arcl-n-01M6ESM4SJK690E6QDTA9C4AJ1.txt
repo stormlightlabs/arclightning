@@ -1,0 +1,2 @@
+200
+{"format_version":1,"data":{"id":"arcl-n-01M6ESM4SJK690E6QDTA9C4AJ1","kind":"note","path":"notes/arcl-n-01M6ESM4SJK690E6QDTA9C4AJ1.md","source":"+++\nid = \"arcl-n-01M6ESM4SJK690E6QDTA9C4AJ1\"\ntitle = \"Design notes\"\n+++\n\nUse tries.\n","revision":"c32863b8b41ffa0e087a91c1f7a3d5fb1de4ee310c687694927d1e04ef108a42"}}

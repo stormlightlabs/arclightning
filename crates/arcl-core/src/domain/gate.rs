@@ -79,7 +79,7 @@ impl GateStatus {
 ///
 /// An open gate keeps its task from being ready. Only `arcl gate check`
 /// marks a gate met, so readiness never depends on the clock or the network.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Gate {
     /// The gate's ID, `arcl-g-…`.

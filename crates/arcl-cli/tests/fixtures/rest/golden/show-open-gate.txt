@@ -1,0 +1,2 @@
+200
+{"format_version":1,"data":{"action":"shown","gate":{"created_at":"2026-11-02T18:51:22.007Z","id":"arcl-g-01M6ESM40QGDEYYWYKAKAQ1EJC","kind":"date","status":"open","target":"2999-01-01","task_id":"arcl-t-01M6ESM3ZQ5AST3EQ9T52E0E87"}}}

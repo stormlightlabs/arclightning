@@ -29,6 +29,10 @@ type Capture implements Record {
 	"""
 	body: String!
 	"""
+	The project the record belongs to.
+	"""
+	projectId: ID!
+	"""
 	When the capture was filed, in RFC 3339.
 	"""
 	createdAt: String!
@@ -66,6 +70,10 @@ type Gate {
 	"""
 	metAt: String
 	"""
+	The ID of the task the gate is on.
+	"""
+	taskId: ID!
+	"""
 	The task the gate is on.
 	"""
 	task: Task
@@ -83,6 +91,10 @@ type Note implements Record {
 	"""
 	body: String!
 	"""
+	The project the record belongs to.
+	"""
+	projectId: ID!
+	"""
 	The task the capture promoted to this note was filed from.
 	"""
 	sourceTask: Task
@@ -99,6 +111,10 @@ type Phase implements Record {
 	The Markdown body.
 	"""
 	body: String!
+	"""
+	The project the record belongs to.
+	"""
+	projectId: ID!
 	"""
 	The phase's order within its plan.
 	"""
@@ -128,6 +144,10 @@ type Plan implements Record {
 	The Markdown body.
 	"""
 	body: String!
+	"""
+	The project the record belongs to.
+	"""
+	projectId: ID!
 	"""
 	The spec the plan belongs to.
 	"""
@@ -412,6 +432,10 @@ type Spec implements Record {
 	"""
 	body: String!
 	"""
+	The project the record belongs to.
+	"""
+	projectId: ID!
+	"""
 	The Markdown acceptance criteria.
 	"""
 	acceptanceCriteria: String!
@@ -444,6 +468,27 @@ type Task implements Record {
 	The Markdown body.
 	"""
 	body: String!
+	"""
+	The project the record belongs to.
+	"""
+	projectId: ID!
+	"""
+	The spec the task names itself. `spec` is the effective one, which
+	may come from a plan, phase or ancestor.
+	"""
+	specId: ID
+	"""
+	The plan the task names itself. `plan` is the effective one.
+	"""
+	planId: ID
+	"""
+	The phase the task names itself. `phase` is the effective one.
+	"""
+	phaseId: ID
+	"""
+	The ID of the parent task.
+	"""
+	parentId: ID
 	"""
 	`urgent`, `high`, `normal` or `low`.
 	"""
@@ -594,6 +639,10 @@ type TaskNote {
 	The note text.
 	"""
 	text: String!
+	"""
+	The ID of the task the note is on.
+	"""
+	taskId: ID!
 }
 
 type TreeNode {
@@ -623,9 +672,19 @@ type TreeNode {
 	"""
 	blockedBy: [ID!]!
 	"""
+	How many levels below the top of the tree the node sits: 0 for a node
+	`tree` returns, 1 for its children.
+	"""
+	depth: Int!
+	"""
 	Child records.
 	"""
 	children: [TreeNode!]!
+	"""
+	Every node below this one, depth first in tree order, so a tree of
+	any depth reads in one query. Each node's `depth` places it.
+	"""
+	descendants: [TreeNode!]!
 	"""
 	The record itself.
 	"""

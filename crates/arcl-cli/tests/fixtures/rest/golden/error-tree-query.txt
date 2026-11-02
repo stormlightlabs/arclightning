@@ -1,0 +1,2 @@
+400
+{"error":{"code":"invalid_request","exit_code":2,"message":"`/api/tree` takes no query parameters"},"format_version":1}

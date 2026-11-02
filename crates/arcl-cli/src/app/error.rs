@@ -60,6 +60,20 @@ impl ApplicationError {
         }
     }
 
+    /// A failed GraphQL read, from the `extensions.code` and message of its
+    /// first error, with the code, exit code and wording the CLI gives the
+    /// same failure.
+    pub(super) fn from_query(code: Option<&str>, message: &str) -> Self {
+        let exit_code = match code {
+            Some("INVALID_REQUEST") => 3,
+            Some("CONFLICT") => 4,
+            Some("NOT_FOUND") => 5,
+            _ => 1,
+        };
+        let message = if exit_code == 3 { format!("invalid project or record: {message}") } else { message.to_owned() };
+        Self { message, exit_code, lock_busy: false }
+    }
+
     pub(super) fn from_command<E>(error: E) -> Self
     where
         E: Into<CommandError>,

@@ -1,9 +1,9 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{ContainerStatus, DomainError, PhaseId, PlanId, ProjectId, validate_position, validate_title};
 
 /// An optional ordered grouping within a persistent plan.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Phase {
     pub id: PhaseId,

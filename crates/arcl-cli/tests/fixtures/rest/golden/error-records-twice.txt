@@ -1,0 +1,2 @@
+400
+{"error":{"code":"invalid_request","exit_code":2,"message":"the `kind` filter takes one value"},"format_version":1}
