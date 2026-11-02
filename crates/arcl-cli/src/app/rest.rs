@@ -480,10 +480,18 @@ fn nest(mut entry: TreeEntry) -> anyhow::Result<ConnectedTreeNode> {
     let descendants = std::mem::take(&mut entry.descendants);
     let top = tree_node(&entry)?;
     // `stack[d]` is the open node at depth `d`; each descendant closes the
-    // nodes at its depth or deeper and opens itself.
+    // nodes at its depth or deeper and opens itself. A descendant may sit at
+    // most one deeper than the open node, or it has no parent to go under.
     let mut stack = vec![top];
     for descendant in descendants {
         anyhow::ensure!(descendant.depth > 0, "`tree` answered a descendant at depth 0");
+        anyhow::ensure!(
+            descendant.depth <= stack.len(),
+            "`tree` answered {} at depth {} under a node at depth {}",
+            descendant.id,
+            descendant.depth,
+            stack.len() - 1
+        );
         while stack.len() > descendant.depth {
             close(&mut stack);
         }
@@ -524,4 +532,42 @@ fn record_kind(kind: &str) -> anyhow::Result<&'static str> {
         .into_iter()
         .find(|known| *known == kind)
         .with_context(|| format!("the query answered an unknown record kind `{kind}`"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(id: &str, depth: usize) -> TreeEntry {
+        TreeEntry {
+            kind: "task".to_owned(),
+            id: id.to_owned(),
+            title: id.to_owned(),
+            status: "pending".to_owned(),
+            blocked_by: Vec::new(),
+            depth,
+            descendants: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn nest_places_descendants_under_their_parents() {
+        let mut top = entry("top", 0);
+        top.descendants = vec![entry("a", 1), entry("a1", 2), entry("b", 1)];
+        let node = nest(top).expect("the tree nests");
+        let children: Vec<_> = node.children.iter().map(|child| child.id.as_str()).collect();
+        assert_eq!(children, ["a", "b"]);
+        assert_eq!(node.children[0].children[0].id, "a1");
+    }
+
+    #[test]
+    fn nest_refuses_a_descendant_that_skips_a_depth() {
+        let mut top = entry("top", 0);
+        top.descendants = vec![entry("a", 1), entry("a11", 3)];
+        let error = nest(top).expect_err("a skipped depth is refused");
+        assert!(
+            error.to_string().contains("a11 at depth 3 under a node at depth 1"),
+            "{error}"
+        );
+    }
 }

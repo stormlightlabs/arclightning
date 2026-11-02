@@ -5,7 +5,9 @@
 //! claims, a parked task with a handoff, captures that were promoted and
 //! discarded, and a release. Each test imports it into a fresh directory and
 //! compares the bytes each read returns with the files in
-//! `fixtures/rest/golden`. Set `ARCL_BLESS=1` to rewrite those files.
+//! `fixtures/rest/golden`. Set `ARCL_BLESS=1` to rewrite those files. Each
+//! read the CLI also makes with `--json` must print the same bytes as
+//! `arcl serve` returns.
 
 use std::{
     fs,
@@ -265,6 +267,73 @@ fn serve_reads_return_the_golden_envelopes() {
     );
 }
 
+/// Cases whose `arcl` form is not the same request: the CLI takes
+/// `--assignee` and `--all`, and clap rejects a repeated `--kind` and a
+/// `--status` on `ready` before arcl sees them.
+const NOT_CLI_EQUIVALENT: [&str; 5] = [
+    "error-records-filter",
+    "error-records-twice",
+    "error-ready-filter",
+    "error-tree-query",
+    "error-work-query",
+];
+
+#[test]
+fn cli_json_reads_match_the_serve_reads() {
+    let project = fixture_project();
+    let served = Served::start(project.path());
+    let mut compared = 0;
+    let mut differ = Vec::new();
+    for (name, path) in cases() {
+        if NOT_CLI_EQUIVALENT.contains(&name.as_str()) {
+            continue;
+        }
+        let Some(args) = cli_args(&path) else { continue };
+        let (status, body) = served.get(&path);
+        let output = arcl(project.path())
+            .arg("--json")
+            .args(&args)
+            .output()
+            .expect("arcl runs");
+        // A read prints its envelope on stdout; a failure prints its error
+        // envelope on stderr and exits non-zero.
+        let (succeeded, printed) = if output.status.success() { (true, output.stdout) } else { (false, output.stderr) };
+        let printed = String::from_utf8_lossy(&printed);
+        if succeeded != (status == 200) || printed.trim_end_matches('\n') != body {
+            differ.push(format!("{name}: arcl --json {} against GET {path}", args.join(" ")));
+        }
+        compared += 1;
+    }
+    assert!(
+        differ.is_empty(),
+        "CLI reads differ from the serve reads:\n{}",
+        differ.join("\n")
+    );
+    assert!(compared >= 90, "only {compared} cases have a CLI form");
+}
+
+/// The `arcl` arguments that make the same read as the `/api` request
+/// `path`, if the CLI has one. `source` and `work` have no CLI command.
+fn cli_args(path: &str) -> Option<Vec<String>> {
+    let (route, query) = path.split_once('?').unwrap_or((path, ""));
+    let segments: Vec<&str> = route.strip_prefix("/api/")?.split('/').collect();
+    let mut args: Vec<String> = match segments.as_slice() {
+        ["records"] => vec!["list".to_owned()],
+        ["records", id] => vec!["show".to_owned(), (*id).to_owned()],
+        ["ready"] => vec!["ready".to_owned()],
+        ["tree"] => vec!["tree".to_owned()],
+        ["tasks", id, "explain"] => vec!["explain".to_owned(), (*id).to_owned()],
+        ["tasks", id, "context"] => vec!["context".to_owned(), (*id).to_owned()],
+        _ => return None,
+    };
+    for pair in query.split('&').filter(|pair| !pair.is_empty()) {
+        let (key, value) = pair.split_once('=')?;
+        args.push(format!("--{key}"));
+        args.push(value.to_owned());
+    }
+    Some(args)
+}
+
 #[test]
 fn web_export_writes_the_golden_documents() {
     let project = fixture_project();
@@ -282,13 +351,10 @@ fn web_export_writes_the_golden_documents() {
     let mut differ = Vec::new();
     for relative in &files {
         let text = fs::read_to_string(out.path().join(relative)).expect("the document reads");
-        // `meta/sync` names the time of the export; its revision names the
-        // other documents, so it is compared alone.
+        // `manifest` and `meta/sync` name the time of the export, so that one
+        // field is blanked and the rest of each document compared whole.
         let text = match relative.as_str() {
-            "meta/sync.json" | "manifest.json" => {
-                let value: serde_json::Value = serde_json::from_str(&text).expect("JSON");
-                value["revision"].to_string()
-            }
+            "meta/sync.json" | "manifest.json" => blank_synced_at(&text),
             _ => text,
         };
         if !matches_golden(&golden_dir().join("export").join(relative), &text) {
@@ -304,6 +370,18 @@ fn web_export_writes_the_golden_documents() {
     collect_files(&golden_dir().join("export"), &golden_dir().join("export"), &mut golden);
     golden.sort();
     assert_eq!(files, golden, "the export writes the golden set of documents");
+}
+
+/// `text` with the value of its top-level `synced_at` replaced by
+/// `<synced_at>`.
+fn blank_synced_at(text: &str) -> String {
+    let value: serde_json::Value = serde_json::from_str(text).expect("JSON");
+    let synced_at = value["synced_at"].as_str().expect("a `synced_at` string");
+    assert!(
+        synced_at.len() == 20 && synced_at.ends_with('Z') && synced_at.as_bytes()[10] == b'T',
+        "`synced_at` is a UTC timestamp: {synced_at}"
+    );
+    text.replacen(&format!("\"{synced_at}\""), "\"<synced_at>\"", 1)
 }
 
 /// The golden files' directory.
