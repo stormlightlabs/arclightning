@@ -12,8 +12,11 @@ Store tracker settings per project and tracker IDs per record.
 
 Scope:
 
-- an `[integrations.linear]` table in `.arcl/config.toml` with `team` and
-  `project`; the API key only from `LINEAR_API_KEY`, never written anywhere
+- an `[integrations.linear]` table in `.arcl/config.toml` with `team`,
+  `project` and an optional status map; the API key only from
+  `LINEAR_API_KEY`, never written anywhere. The config `format-version` is
+  raised when the table is present, so an older arcl refuses it clearly
+  instead of failing on an unknown field
 - a `linear` field on phase and task workspace files holding the Linear ID,
   round-tripped by import and export
 - the workspace format version raised only when a record carries the field

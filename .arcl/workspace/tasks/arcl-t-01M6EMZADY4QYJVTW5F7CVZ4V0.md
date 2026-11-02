@@ -12,8 +12,8 @@ Report what people changed in Linear instead of overwriting it.
 
 Scope:
 
-- on push, compare each issue's title, status and assignee with the last
-  pushed values and report differences per record
+- on push, compare each issue's title, status and assignee with the values
+  in `.arcl/linear-state.json` and report differences per record
 - `--accept-status` copies Linear statuses back as task transitions where the
   transition is allowed; comments come back as task notes with `--notes`
 - nothing changes in arcl without one of those flags

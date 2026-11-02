@@ -19,7 +19,8 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] Ready work matches `arcl ready` in each project
+- [ ] Ready work matches `arcl ready` in each project whose workspace is in
+  sync; a stale project is marked instead
 - [ ] Handoffs and gates match `arcl show` for each task
 
 Verification:

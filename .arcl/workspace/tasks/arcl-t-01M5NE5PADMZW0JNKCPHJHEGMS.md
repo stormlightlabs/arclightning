@@ -8,10 +8,11 @@ position = 0
 blocked-by = ["arcl-t-01M5NE5P2N1AMT731RJBAZ66YT", "arcl-t-01M5NE5P4D72Y56E0Y2JDE535B", "arcl-t-01M5NE5P6XHRR4Q84820YACQ07", "arcl-t-01M5NE5P8KF13P2YZ4B8W2B7MS", "arcl-t-01M5NH23PWTRC8KBW9CA93AGPK", "arcl-t-01M5NH242P4SSTMJT0T6R62Q21", "arcl-t-01M6EMZA4GJCCKZZP4Y4B4J9AB"]
 +++
 
+
 Close gaps in the specified workflows and prepare one coherent release across
 the CLI, local web app, MCP server, website, and repository-native mode.
 
-Blocked by: T07, T09, T10, T14, T17, T18
+Blocked by: T07, T09, T10, T14, T17, T18, and "Document the hub and tag v0.7.0"
 
 Acceptance criteria:
 

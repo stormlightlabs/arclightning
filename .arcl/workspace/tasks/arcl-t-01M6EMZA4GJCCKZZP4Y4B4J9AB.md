@@ -8,7 +8,7 @@ position = 5
 blocked-by = ["arcl-t-01M6EMZ9XWMYKAPSXY2NSANKPK", "arcl-t-01M6EMZA0YZWK6ZYVKAJB45M50"]
 +++
 
-Document the hub and cut v0.7.0.
+Document the hub and cut the next minor release, planned as v0.7.0.
 
 Scope:
 
@@ -18,4 +18,4 @@ Scope:
 Acceptance criteria:
 
 - [ ] The guide walks from `arcl hub add` to the dashboard
-- [ ] v0.7.0 is tagged and the release workflow publishes it
+- [ ] The release is tagged and the release workflow publishes it

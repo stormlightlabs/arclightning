@@ -19,7 +19,8 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] `arcl hub ready --json` lists the same tasks as `arcl ready` in each project
+- [ ] `arcl hub ready --json` lists the same tasks as `arcl ready` in each
+  project whose workspace is in sync, and marks stale ones
 - [ ] An unreachable project is reported and the command still succeeds
 
 Verification:

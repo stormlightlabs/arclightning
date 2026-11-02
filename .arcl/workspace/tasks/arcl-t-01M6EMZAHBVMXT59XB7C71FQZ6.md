@@ -8,7 +8,7 @@ position = 3
 blocked-by = ["arcl-t-01M6EMZADY4QYJVTW5F7CVZ4V0"]
 +++
 
-Document the Linear mirror and cut v1.2.0.
+Document the Linear mirror and cut the next minor release, planned as v1.2.0.
 
 Scope:
 
@@ -18,4 +18,4 @@ Scope:
 Acceptance criteria:
 
 - [ ] The guide covers setup to a second, idempotent push
-- [ ] v1.2.0 is tagged and published
+- [ ] The release is tagged and published
