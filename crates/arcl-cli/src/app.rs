@@ -252,7 +252,7 @@ fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Wa
         Some(Command::Query { document, file, variables, operation, schema }) => {
             exec_query(QueryInput { document, file, variables, operation, schema })
         }
-        Some(Command::Serve { port }) => exec_serve(port, renderer),
+        Some(Command::Serve { port, api }) => exec_serve(port, api, renderer),
         Some(Command::Web { command }) => exec_web(command, renderer),
         None => write_output(renderer.render_startup()?),
     }

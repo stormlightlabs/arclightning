@@ -3775,6 +3775,34 @@ impl Served {
         Self { child, port: port.parse().expect("the URL has a port"), token: token.to_owned() }
     }
 
+    /// Start `arcl --json serve` with `flags` in `directory`, with
+    /// `ARCL_SERVE_TOKEN` set to `token` or unset, and return the server with
+    /// its startup line.
+    fn start_json(directory: &Path, flags: &[&str], token: Option<&str>) -> (Self, Value) {
+        use std::io::BufRead;
+
+        let mut command = isolated_command(assert_cmd::cargo::cargo_bin("arcl"), directory);
+        command
+            .args(["--json", "serve"])
+            .args(flags)
+            .env_remove("ARCL_SERVE_TOKEN");
+        if let Some(token) = token {
+            command.env("ARCL_SERVE_TOKEN", token);
+        }
+        let mut child = command
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("arcl serve starts");
+        let mut line = String::new();
+        std::io::BufReader::new(child.stdout.take().expect("stdout is piped"))
+            .read_line(&mut line)
+            .expect("arcl serve prints its startup line");
+        let started: Value = serde_json::from_str(&line).expect("the startup line is JSON");
+        let port = u16::try_from(started["data"]["port"].as_u64().expect("a port")).expect("a port number");
+        let token = started["data"]["token"].as_str().expect("a token").to_owned();
+        (Self { child, port, token }, started)
+    }
+
     /// Send a GET for `path` with these extra header lines, and return the
     /// status and body.
     fn get(&self, path: &str, headers: &[String]) -> (u16, String) {
@@ -3855,6 +3883,133 @@ impl Drop for Served {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+#[test]
+fn serve_api_answers_only_the_api_and_graphql() {
+    let directory = initialized_directory();
+    let (served, started) = Served::start_json(directory.path(), &["--api"], None);
+    let token = format!("X-Arcl-Token: {}", served.token);
+
+    let (status, page) = served.get("/", &[served.host(), token.clone()]);
+    assert_eq!(status, 404, "{page}");
+    assert!(!page.contains("<html"), "{page}");
+    assert_eq!(served.get("/work", &[served.host(), token.clone()]).0, 404);
+    assert_eq!(served.read("/api/ready").0, 200);
+    let query = r#"{"query": "{ work { phases { id } } }"}"#;
+    let (status, body) = served.send("POST", "/graphql", &[served.host(), token.clone()], query);
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(served.get("/api/ready", &[served.host()]).0, 401);
+    assert_eq!(started["data"]["url"], format!("http://127.0.0.1:{}", served.port));
+}
+
+#[test]
+fn serve_api_runs_a_mutation_without_an_origin() {
+    let directory = initialized_directory();
+    let dir = directory.path();
+    let (served, _) = Served::start_json(dir, &["--api"], None);
+    let token = format!("X-Arcl-Token: {}", served.token);
+
+    let (status, body) = served.send(
+        "POST",
+        "/api/captures",
+        &[served.host(), token.clone()],
+        r#"{"title":"From a script"}"#,
+    );
+    assert_eq!(status, 200, "{body}");
+    let created: Value = serde_json::from_str(&body).expect("the body is JSON");
+    let id = created["data"]["capture"]["id"].as_str().expect("a capture ID");
+    let shown = run_json(dir, ["--json", "capture", "show", id].as_ref());
+    assert_eq!(shown["data"]["capture"]["title"], "From a script");
+
+    let foreign = [served.host(), token.clone(), "Origin: http://evil.example".to_owned()];
+    let (status, body) = served.send("POST", "/api/captures", &foreign, r#"{"title":"Forged"}"#);
+    assert_eq!(status, 403, "{body}");
+    let tokenless = served.send("POST", "/api/captures", &[served.host()], r#"{"title":"Forged"}"#);
+    assert_eq!(tokenless.0, 401);
+    let listed = run_json(dir, ["--json", "list", "--kind", "capture"].as_ref());
+    assert_eq!(
+        listed["data"]["records"].as_array().expect("a list").len(),
+        1,
+        "{listed}"
+    );
+}
+
+#[test]
+fn serve_api_takes_its_token_from_the_environment() {
+    let directory = initialized_directory();
+    let chosen = "Abc123".repeat(6);
+    let (served, started) = Served::start_json(directory.path(), &["--api"], Some(&chosen));
+    assert_eq!(served.token, chosen);
+    assert_eq!(served.read("/api/ready").0, 200);
+    let data = started["data"].as_object().expect("an object");
+    let mut keys = data.keys().map(String::as_str).collect::<Vec<_>>();
+    keys.sort_unstable();
+    assert_eq!(keys, ["port", "status", "token", "url"]);
+    assert_eq!(started["format_version"], 1);
+    assert_eq!(data["status"], "serving");
+}
+
+#[test]
+fn serve_page_mode_ignores_the_token_variable() {
+    let directory = initialized_directory();
+    let chosen = "Abc123".repeat(6);
+    let (served, started) = Served::start_json(directory.path(), &[], Some(&chosen));
+    assert_ne!(served.token, chosen);
+    assert_eq!(served.token.len(), 64);
+    assert_eq!(
+        started["data"]["url"],
+        format!("http://127.0.0.1:{}/?token={}", served.port, served.token)
+    );
+    assert_eq!(served.read("/api/ready").0, 200);
+}
+
+#[test]
+fn serve_api_refuses_a_bad_token_variable() {
+    let directory = initialized_directory();
+    let long = "a".repeat(32);
+    for bad in [
+        "a".repeat(31),
+        format!("{long}-"),
+        format!("{long} "),
+        format!(" {long}"),
+        format!("{long}\tb"),
+        String::new(),
+    ] {
+        let mut child = isolated_command(assert_cmd::cargo::cargo_bin("arcl"), directory.path())
+            .args(["serve", "--api"])
+            .env("ARCL_SERVE_TOKEN", &bad)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("arcl serve starts");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let status = loop {
+            if let Some(status) = child.try_wait().expect("arcl serve can be waited on") {
+                break status;
+            }
+            if std::time::Instant::now() > deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("arcl serve started with the token {bad:?}");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        let output = child.wait_with_output().expect("the output reads");
+        assert_eq!(status.code(), Some(1), "{bad:?}");
+        assert!(output.stdout.is_empty(), "{bad:?}");
+        let stderr = String::from_utf8(output.stderr).expect("UTF-8");
+        assert!(
+            stderr.contains(
+                "ARCL_SERVE_TOKEN is not valid: the token must be at least 32 characters, ASCII letters and digits only"
+            ),
+            "{bad:?}: {stderr}"
+        );
+        assert!(
+            bad.trim().is_empty() || !stderr.contains(bad.trim()),
+            "the error echoes the token: {stderr}"
+        );
     }
 }
 

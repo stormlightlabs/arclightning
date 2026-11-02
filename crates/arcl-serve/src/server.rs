@@ -22,7 +22,7 @@ use thiserror::Error;
 use tokio::sync::{Semaphore, oneshot};
 
 use crate::answer::{Answer, Reply, page};
-use crate::gate::{Gate, Incoming, TOKEN_QUERY, new_token};
+use crate::gate::{Gate, Incoming, MIN_TOKEN_CHARS, TOKEN_QUERY, check_token, new_token};
 use crate::limits::{Limits, SHUTDOWN_GRACE, WriteDeadline, declares_too_much, read_body};
 use crate::mutations::{Mutations, mutate};
 use crate::routes::{Reads, Route, Write, dispatch};
@@ -40,6 +40,10 @@ pub enum ServeError {
     /// The operating system's random source failed.
     #[error("could not generate the access token: {0}")]
     Token(getrandom::Error),
+    /// A token given to [`Server::bind_api`] is too short or holds anything
+    /// but ASCII letters and digits.
+    #[error("the token must be at least {MIN_TOKEN_CHARS} characters, ASCII letters and digits only")]
+    WeakToken,
     /// The HTTP server could not start on the bound socket.
     #[error("could not start the HTTP server: {0}")]
     Start(io::Error),
@@ -55,15 +59,30 @@ pub struct Server {
 
 impl Server {
     /// Bind `127.0.0.1` on `port`, or on an ephemeral port when `port` is
-    /// `None`, and generate the token for this run.
+    /// `None`, and generate the token for this run. The server answers the
+    /// web app page as well as `/api` and `/graphql`.
     pub fn bind(port: Option<u16>) -> Result<Self, ServeError> {
-        let requested = port.unwrap_or(0);
-        let bind_error = |source| ServeError::Bind { port: requested, source };
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, requested)).map_err(bind_error)?;
-        listener.set_nonblocking(true).map_err(bind_error)?;
-        let port = listener.local_addr().map_err(bind_error)?.port();
+        let (listener, port) = listen(port)?;
         let token = new_token()?;
-        Ok(Self { listener, gate: Gate::new(token, port), limits: Limits::default() })
+        Ok(Self { listener, gate: Gate::new(token, port, false), limits: Limits::default() })
+    }
+
+    /// Bind as [`Server::bind`] does, for a server that answers only `/api`
+    /// and `/graphql`: any other path gets 404, there is no first-page-load
+    /// token, and a change needs a matching `Origin` only when it sends one.
+    /// The token is `token` when given, which must have at least
+    /// [`MIN_TOKEN_CHARS`] characters, all ASCII letters and digits, and a new
+    /// one otherwise. A refused token binds nothing.
+    pub fn bind_api(port: Option<u16>, token: Option<String>) -> Result<Self, ServeError> {
+        let token = match token {
+            Some(token) => {
+                check_token(&token)?;
+                token
+            }
+            None => new_token()?,
+        };
+        let (listener, port) = listen(port)?;
+        Ok(Self { listener, gate: Gate::new(token, port, true), limits: Limits::default() })
     }
 
     /// The port the server listens on.
@@ -71,9 +90,20 @@ impl Server {
         self.gate.port
     }
 
-    /// The URL to open, with the token for the first page load.
+    /// The token every request sends in [`TOKEN_HEADER`](crate::TOKEN_HEADER).
+    pub fn token(&self) -> &str {
+        &self.gate.token
+    }
+
+    /// The URL to open, with the token for the first page load. A server
+    /// from [`Server::bind_api`] has no page, so its URL is the bare origin,
+    /// such as `http://127.0.0.1:4321`, with no token.
     pub fn url(&self) -> String {
-        format!("http://127.0.0.1:{}/?{TOKEN_QUERY}={}", self.gate.port, self.gate.token)
+        if self.gate.api_only {
+            format!("http://127.0.0.1:{}", self.gate.port)
+        } else {
+            format!("http://127.0.0.1:{}/?{TOKEN_QUERY}={}", self.gate.port, self.gate.token)
+        }
     }
 
     /// Serve requests until Ctrl-C, then let open connections finish for up
@@ -250,6 +280,17 @@ async fn handle(State(shared): State<Arc<Shared>>, request: Request) -> Response
         Ok(route) => ask(&shared.reads, (route, Vec::new())).await,
     };
     answer.into_response()
+}
+
+/// Bind `127.0.0.1` on `port`, or on an ephemeral one when `port` is `None`,
+/// and return the listener with the port it got.
+fn listen(port: Option<u16>) -> Result<(TcpListener, u16), ServeError> {
+    let requested = port.unwrap_or(0);
+    let bind_error = |source| ServeError::Bind { port: requested, source };
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, requested)).map_err(bind_error)?;
+    listener.set_nonblocking(true).map_err(bind_error)?;
+    let port = listener.local_addr().map_err(bind_error)?.port();
+    Ok((listener, port))
 }
 
 /// Send `work` to the thread behind `queue` and wait for its answer.

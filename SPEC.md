@@ -263,6 +263,18 @@ queries and needs no `Origin`. The server sends no CORS headers and never
 changes state on GET. The header token and the `Origin` check stop other local
 pages, including those on other `127.0.0.1` ports, from driving it.
 
+`arcl serve --api` serves `/graphql` and `/api` without the page, for scripts
+and other local tools. Any other path gets 404, and no URL carries a
+first-load token. Its token comes from `ARCL_SERVE_TOKEN` when that is set:
+at least 32 characters, ASCII letters and digits only, or startup fails with
+an error naming the rule. Without it, and always in the page mode, each run
+makes a new token. `--json` prints one startup line with the URL, port and
+token. Under `--api`, a mutation needs a matching `Origin` only when it sends
+one; a mismatched `Origin` is still refused. The token header stands in for
+it, since a browser page cannot send that header cross-origin without a CORS
+preflight, which the server refuses. `Host` and token checks and the
+`127.0.0.1` binding stay the same.
+
 The server is a thin HTTP adapter over the Rust application operations. Its
 `GET /api` reads run named GraphQL queries and map each result into the read's
 JSON envelope. The Svelte frontend lives in `apps/web`, uses the shared UI

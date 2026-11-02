@@ -20,7 +20,7 @@
 
 use arcl_serve::{
     CapturePromotion, Completion, GraphqlRequest, Handoff, Mutations, NewCapture, NewPlan, NewSpec, NewTask, PlanInput,
-    Reads, RecordSourceEdit, Reply, Server, TaskEdit, TaskStart,
+    Reads, RecordSourceEdit, Reply, ServeError, Server, TaskEdit, TaskStart,
 };
 
 use super::graphql::run_query;
@@ -31,6 +31,9 @@ use super::*;
 /// How long a mutation waits for the project's sync lock. The CLI waits as
 /// long as it takes; the web app's user is waiting on a button instead.
 const LOCK_WAIT: Duration = Duration::from_secs(3);
+
+/// The environment variable that sets the token of `arcl serve --api`.
+const TOKEN_VARIABLE: &str = "ARCL_SERVE_TOKEN";
 
 /// The endpoints, answering with the CLI's `--json` envelopes. `arcl web`
 /// runs the same reads and mutations for a claude.ai artifact.
@@ -282,10 +285,32 @@ impl Mutations for ServeApp {
 /// Bind the server, print its URL and serve until interrupted. The database
 /// opens first, so outside a project `serve` fails like other commands
 /// instead of serving endpoints that all fail.
-pub(super) fn exec_serve(port: Option<u16>, renderer: &Renderer) -> anyhow::Result<()> {
+///
+/// With `api`, the server answers only `/api` and `/graphql`, and its token
+/// is [`TOKEN_VARIABLE`] when that is set. The page mode always makes a new
+/// token and ignores the variable.
+pub(super) fn exec_serve(port: Option<u16>, api: bool, renderer: &Renderer) -> anyhow::Result<()> {
     drop(open_database().map_err(ApplicationError::from_command)?);
-    let server = Server::bind(port).context("could not start the web app server")?;
-    write_output(renderer.render_serve(&server.url())?)?;
+    let server = if api {
+        let token = match std::env::var(TOKEN_VARIABLE) {
+            Ok(token) => Some(token),
+            Err(std::env::VarError::NotPresent) => None,
+            // Not UTF-8, so not ASCII letters and digits either.
+            Err(std::env::VarError::NotUnicode(_)) => Some(String::new()),
+        };
+        Server::bind_api(port, token).map_err(|error| match error {
+            ServeError::WeakToken => anyhow::anyhow!("{TOKEN_VARIABLE} is not valid: {error}"),
+            error => anyhow::Error::new(error).context("could not start the web app server"),
+        })?
+    } else {
+        Server::bind(port).context("could not start the web app server")?
+    };
+    write_output(renderer.render_serve(&ServeStart {
+        url: &server.url(),
+        port: server.port(),
+        token: server.token(),
+        api,
+    })?)?;
     let app = ServeApp::new(renderer.mode(), LOCK_WAIT);
     server.run(&app, &app).context("the web app server stopped")?;
     Ok(())

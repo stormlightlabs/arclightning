@@ -450,8 +450,9 @@ See [Inspecting Work](/guides/inspect-work/) for the query workflow and context 
 
 `arcl query` runs a read-only GraphQL query against the project's records and
 prints the response as JSON. It needs no server, and `arcl serve` answers the
-same queries at `POST /graphql` (see [Web app](#web-app)). Writes stay with the
-other commands.
+same queries at `POST /graphql` (see [Web app](#web-app)). `arcl serve --api`
+serves `/graphql` and `/api` without the page, for scripts and other local
+tools (see [API only](#api-only)). Writes stay with the other commands.
 
 | Command                                                              | Purpose                                    |
 | -------------------------------------------------------------------- | ------------------------------------------ |
@@ -536,6 +537,45 @@ refuses for a bad `Host` or token, for a body over 1 MiB, or for a body that
 does not arrive within 5 seconds gets `Connection: close` and the connection
 closes after the reply. It keeps at most
 128 connections open; a new one waits to be accepted until another closes.
+
+### API only
+
+`arcl serve --api` serves `/graphql` and `/api` without the web app page, so a
+script or another local tool can use the endpoints against the project's
+database. It binds `127.0.0.1` and checks `Host` and the token as the page
+mode does. With them, any path outside `/api` and `/graphql` gets 404, and no
+URL carries a token for a first page load.
+
+The token comes from `ARCL_SERVE_TOKEN` when it is set. It must be at least 32
+characters, ASCII letters and digits only; otherwise `arcl serve --api` exits
+`1` at startup with an error naming that rule. Without the variable, each run
+makes a new token. The page mode always makes a new one and ignores the
+variable.
+
+`arcl --json serve` prints one startup line with the URL, the port and the
+token:
+
+```json
+{ "format_version": 1, "data": { "status": "serving", "url": "http://127.0.0.1:4321", "port": 4321, "token": "..." } }
+```
+
+Under `--api` the URL is the server's origin. In the page mode it is the URL
+to open, with the token for the first page load. Human output under `--api`
+prints the URL and the token, and `--plain` prints them on two lines.
+
+Under `--api`, a change needs a matching `Origin` only when the request sends
+one. A request without `Origin` still needs the token, and a request whose
+`Origin` does not name the server is still refused with 403. A page in a
+browser cannot send the `X-Arcl-Token` header to another origin without a CORS
+preflight, and the server refuses every preflight without CORS headers. The
+page mode keeps requiring `Origin` on every change.
+
+```sh
+export ARCL_SERVE_TOKEN=$(openssl rand -hex 32)
+arcl serve --api --port 4321 &
+curl -s -H "X-Arcl-Token: $ARCL_SERVE_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"query": "{ ready { id title } }"}' http://127.0.0.1:4321/graphql
+```
 
 | Endpoint                          | Same JSON as             |
 | --------------------------------- | ------------------------ |
