@@ -4,9 +4,9 @@
 //! The artifact cannot reach `arcl serve`, so its database holds the JSON the
 //! read endpoints return, one document per read, and an agent copies the
 //! files `export` writes into it. Both commands run the same [`ServeApp`] as
-//! `arcl serve`, so the documents have the endpoints' shapes and an applied
-//! edit gets the same validation, sync lock, export and warnings as a change
-//! made in the local app.
+//! `arcl serve`, so the documents come from the endpoints' GraphQL queries
+//! with the endpoints' shapes, and an applied edit gets the same validation,
+//! sync lock, export and warnings as a change made in the local app.
 //!
 //! | Document           | Same JSON as                                    |
 //! | ------------------ | ----------------------------------------------- |

@@ -6,8 +6,9 @@ use super::types::{
     CaptureNode, ContextNode, GateNode, NoteNode, PhaseNode, PlanNode, RecordNode, RecordOrGate, ReleaseNode,
     SourceNode, SpecNode, TaskNode, TreeNode, WorkNode, many, one, reader,
 };
-use super::{Reader, coded};
+use super::{Reader, coded, storage_error};
 use arcl_core::prelude::*;
+use arcl_repo::workspace::RecordKind;
 use arcl_store::prelude::*;
 
 /// The root of every query.
@@ -25,6 +26,7 @@ impl QueryRoot {
             let gate = RecordOrGate::Gate(GateNode(reader.read(|database| database.gate(gate))?));
             return one(ctx, Some(gate));
         }
+        let id = checked(reader, &id)?;
         let record = RecordNode::find(reader.graph()?, &id).ok_or_else(|| not_found(&id))?;
         one(ctx, Some(record.into()))
     }
@@ -115,17 +117,24 @@ impl QueryRoot {
         #[graphql(desc = "Tasks claimed by this name.")] assignee: Option<String>,
     ) -> async_graphql::Result<Vec<RecordNode>> {
         let reader = reader(ctx);
-        let filter = RecordFilter {
+        // Check the filters in the order `arcl list` does: the kind, then
+        // priorities, then what the kind allows, then the record IDs.
+        RecordFilter { kind: kind.clone(), ..RecordFilter::default() }
+            .validate()
+            .map_err(storage_error)?;
+        let mut filter = RecordFilter {
             kind,
             statuses: status,
             priorities: priorities(&priority)?,
-            release_id: optional(reader, release)?,
-            spec_id: optional(reader, spec)?,
-            plan_id: optional(reader, plan)?,
-            phase_id: optional(reader, phase)?,
-            parent_id: optional(reader, parent)?,
             assignee: assignee.map(|name| name.trim().to_owned()),
+            ..RecordFilter::default()
         };
+        filter.validate().map_err(storage_error)?;
+        filter.release_id = optional(reader, release)?;
+        filter.spec_id = optional(reader, spec)?;
+        filter.plan_id = optional(reader, plan)?;
+        filter.phase_id = optional(reader, phase)?;
+        filter.parent_id = optional(reader, parent)?;
         RecordNode::list(reader, &filter)
     }
 
@@ -159,7 +168,7 @@ impl QueryRoot {
         let reader = reader(ctx);
         let root = root.map(|root| reader.resolve(&root, None)).transpose()?;
         let nodes = reader.read(|database| database.record_tree(root.as_deref(), all))?;
-        many(ctx, nodes.into_iter().map(TreeNode).collect())
+        many(ctx, nodes.into_iter().map(TreeNode::top).collect())
     }
 
     /// Every task with its readiness and effective phase, and every phase,
@@ -182,7 +191,7 @@ impl QueryRoot {
     async fn source(&self, ctx: &Context<'_>, id: ID) -> async_graphql::Result<Option<SourceNode>> {
         let reader = reader(ctx);
         let id = reader.resolve(&id, None)?;
-        let source = reader.source(&id)?.ok_or_else(|| not_found(&id))?;
+        let source = reader.source(&id)?.ok_or_else(|| source_not_found(&id))?;
         one(ctx, Some(SourceNode::from(source)))
     }
 }
@@ -195,7 +204,40 @@ fn typed(ctx: &Context<'_>, id: &str) -> async_graphql::Result<RecordNode> {
     Ok(record)
 }
 
+/// The full ID `id`, once it parses as an ID of the kind its prefix names,
+/// as `arcl show` checks it.
+fn checked(reader: &Reader, id: &str) -> async_graphql::Result<String> {
+    let kind = RecordKind::from_id(id).ok_or_else(|| coded(format!("unknown record ID `{id}`"), "INVALID_REQUEST"))?;
+    let parsed = match kind {
+        RecordKind::Capture => reader.parse::<CaptureId>(id)?.to_string(),
+        RecordKind::Release => reader.parse::<ReleaseId>(id)?.to_string(),
+        RecordKind::Spec => reader.parse::<SpecId>(id)?.to_string(),
+        RecordKind::Plan => reader.parse::<PlanId>(id)?.to_string(),
+        RecordKind::Phase => reader.parse::<PhaseId>(id)?.to_string(),
+        RecordKind::Task => reader.parse::<TaskId>(id)?.to_string(),
+        RecordKind::Note => reader.parse::<NoteId>(id)?.to_string(),
+    };
+    Ok(parsed)
+}
+
+/// A missing record, worded as `arcl show` words it for the record's kind.
 fn not_found(id: &str) -> async_graphql::Error {
+    let id = id.to_owned();
+    let error = match RecordKind::from_id(&id) {
+        Some(RecordKind::Capture) => StorageError::CaptureNotFound { id },
+        Some(RecordKind::Release) => StorageError::ReleaseNotFound { id },
+        Some(RecordKind::Spec) => StorageError::SpecNotFound { id },
+        Some(RecordKind::Plan) => StorageError::PlanNotFound { id },
+        Some(RecordKind::Phase) => StorageError::PhaseNotFound { id },
+        Some(RecordKind::Task) => StorageError::PlanningTaskNotFound { id },
+        Some(RecordKind::Note) => StorageError::NoteNotFound { id },
+        None => return source_not_found(&id),
+    };
+    storage_error(error)
+}
+
+/// A record with no workspace file, worded as a raw edit words it.
+fn source_not_found(id: &str) -> async_graphql::Error {
     coded(format!("record `{id}` was not found"), "NOT_FOUND")
 }
 

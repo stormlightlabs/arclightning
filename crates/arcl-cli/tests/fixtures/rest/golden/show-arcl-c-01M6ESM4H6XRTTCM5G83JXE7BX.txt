@@ -1,0 +1,2 @@
+200
+{"format_version":1,"data":{"action":"shown","capture":{"body":"Think about it.","created_at":"2026-11-02T18:51:22.534Z","id":"arcl-c-01M6ESM4H6XRTTCM5G83JXE7BX","project_id":"arcl-pj-00000000000000000000000000","source_task_id":"arcl-t-01M6ESM4FEF285TNJBPGR9Q3Y1","status":"captured","title":"Inbox idea"}}}

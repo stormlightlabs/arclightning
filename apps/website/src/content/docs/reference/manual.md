@@ -473,9 +473,13 @@ filters `arcl list` takes; `ready`, with the filters `arcl ready` takes;
 `arcl show`, `record` also takes a gate ID, so it returns a union: select
 fields with `... on Record { title }` or `... on Gate { target }`. A task's
 `readiness`, `blockers`, `inheritedBlockers`, `gates` and `notes` come from
-the same view as `arcl explain`. IDs in responses are full IDs, and every
-record also has `shortId`. Statuses, kinds and priorities are the strings
-`--json` output uses, such as `in_progress`.
+the same view as `arcl explain`. `spec`, `plan` and `phase` on a task are the
+effective ones; `specId`, `planId`, `phaseId` and `parentId` are the IDs the
+task stores. A tree node's `descendants` lists every node below it, depth
+first, each with its `depth`, so a tree of any depth reads in one query. IDs
+in responses are full IDs, and every record also has `shortId`. Statuses,
+kinds and priorities are the strings `--json` output uses, such as
+`in_progress`.
 
 The schema is checked in at
 [`crates/arcl-graphql/schema.graphql`](https://github.com/stormlightlabs/arclightning/blob/main/crates/arcl-graphql/schema.graphql).
@@ -483,6 +487,9 @@ The schema is checked in at
 stdout holds the GraphQL response: `data`, and `errors` when there are any.
 A response with errors exits `3`. Each error from a resolver has an
 `extensions.code` of `NOT_FOUND`, `INVALID_REQUEST`, `CONFLICT` or `INTERNAL`.
+A well-formed ID that names no record is `NOT_FOUND`, worded as `arcl show`
+words it. An ID that does not parse, such as `arcl-t-bad`, is
+`INVALID_REQUEST`, in `record` as in the typed fields.
 
 A query document may be at most 64 KiB. A longer one is refused before it is
 parsed: `data` is `null` and the error's `extensions.code` is
@@ -563,6 +570,10 @@ returns the Work list in one request: every task with the readiness
 `arcl explain` reports and its phase ID, inherited from an ancestor where the
 task has none, and every phase. Its envelope is
 `{"format_version": 2, "data": {"tasks": [{"task", "readiness", "phase_id"}], "phases": [...]}}`.
+
+Each `GET /api` read runs one named query against the schema `arcl query`
+uses and maps the result into its envelope. These reads have no limit on the
+objects they resolve.
 
 `POST /graphql` takes `{"query", "variables", "operationName"}`, as GraphQL
 clients send it, and answers status 200 with the response `arcl query` prints

@@ -1,6 +1,7 @@
 //! The schema's object types. Each wraps a stored record or read model;
 //! statuses and kinds are the snake_case strings JSON output uses.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_graphql::{Context, ID, Interface, Object, SimpleObject, Union};
@@ -100,13 +101,47 @@ impl RecordNode {
         }
     }
 
+    /// The records whose full IDs are in `wanted`, by ID. It reads each ID
+    /// once, where [`Self::find`] scans the graph for each record.
+    fn index(graph: &ConnectedGraph, wanted: &HashSet<&str>) -> HashMap<String, Self> {
+        let mut index = HashMap::new();
+        let mut add = |id: String, node: &dyn Fn() -> Self| {
+            if wanted.contains(id.as_str()) {
+                index.insert(id, node());
+            }
+        };
+        for record in &graph.captures {
+            add(record.id.to_string(), &|| Self::Capture(CaptureNode(record.clone())));
+        }
+        for record in &graph.releases {
+            add(record.id.to_string(), &|| Self::Release(ReleaseNode(record.clone())));
+        }
+        for record in &graph.specs {
+            add(record.id.to_string(), &|| Self::Spec(SpecNode(record.clone())));
+        }
+        for record in &graph.plans {
+            add(record.id.to_string(), &|| Self::Plan(PlanNode(record.clone())));
+        }
+        for record in &graph.phases {
+            add(record.id.to_string(), &|| Self::Phase(PhaseNode(record.clone())));
+        }
+        for record in &graph.tasks {
+            add(record.id.to_string(), &|| Self::Task(TaskNode::new(record.clone())));
+        }
+        for record in &graph.notes {
+            add(record.id.to_string(), &|| Self::Note(NoteNode(record.clone())));
+        }
+        index
+    }
+
     /// The records `filter` matches, in `arcl list` order.
     pub(crate) fn list(reader: &Reader, filter: &RecordFilter) -> async_graphql::Result<Vec<Self>> {
         let graph = reader.graph()?;
         let summaries = list_records(graph, filter).map_err(super::storage_error)?;
+        let mut index = Self::index(graph, &summaries.iter().map(|summary| summary.id.as_str()).collect());
         let records = summaries
             .iter()
-            .filter_map(|summary| Self::find(graph, &summary.id))
+            .filter_map(|summary| index.remove(&summary.id))
             .collect::<Vec<_>>();
         reader.admit(records.len())?;
         Ok(records)
@@ -169,6 +204,10 @@ impl CaptureNode {
     /// The Markdown body.
     async fn body(&self) -> &str {
         &self.0.body
+    }
+    /// The project the record belongs to.
+    async fn project_id(&self) -> ID {
+        ID(self.0.project_id.to_string())
     }
     /// When the capture was filed, in RFC 3339.
     async fn created_at(&self) -> &str {
@@ -259,6 +298,10 @@ impl SpecNode {
     async fn body(&self) -> &str {
         &self.0.body
     }
+    /// The project the record belongs to.
+    async fn project_id(&self) -> ID {
+        ID(self.0.project_id.to_string())
+    }
     /// The Markdown acceptance criteria.
     async fn acceptance_criteria(&self) -> &str {
         &self.0.acceptance_criteria
@@ -323,6 +366,10 @@ impl PlanNode {
     async fn body(&self) -> &str {
         &self.0.body
     }
+    /// The project the record belongs to.
+    async fn project_id(&self) -> ID {
+        ID(self.0.project_id.to_string())
+    }
     /// The spec the plan belongs to.
     async fn spec(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<SpecNode>> {
         let graph = reader(ctx).graph()?;
@@ -378,6 +425,10 @@ impl PhaseNode {
     /// The Markdown body.
     async fn body(&self) -> &str {
         &self.0.body
+    }
+    /// The project the record belongs to.
+    async fn project_id(&self) -> ID {
+        ID(self.0.project_id.to_string())
     }
     /// The phase's order within its plan.
     async fn position(&self) -> i64 {
@@ -445,6 +496,27 @@ impl TaskNode {
     /// The Markdown body.
     async fn body(&self) -> &str {
         &self.task.body
+    }
+    /// The project the record belongs to.
+    async fn project_id(&self) -> ID {
+        ID(self.task.project_id.to_string())
+    }
+    /// The spec the task names itself. `spec` is the effective one, which
+    /// may come from a plan, phase or ancestor.
+    async fn spec_id(&self) -> Option<ID> {
+        self.task.spec_id.map(|id| ID(id.to_string()))
+    }
+    /// The plan the task names itself. `plan` is the effective one.
+    async fn plan_id(&self) -> Option<ID> {
+        self.task.plan_id.map(|id| ID(id.to_string()))
+    }
+    /// The phase the task names itself. `phase` is the effective one.
+    async fn phase_id(&self) -> Option<ID> {
+        self.task.phase_id.map(|id| ID(id.to_string()))
+    }
+    /// The ID of the parent task.
+    async fn parent_id(&self) -> Option<ID> {
+        self.task.parent_id.map(|id| ID(id.to_string()))
     }
     /// `urgent`, `high`, `normal` or `low`.
     async fn priority(&self) -> &str {
@@ -557,6 +629,10 @@ impl NoteNode {
     async fn body(&self) -> &str {
         &self.0.body
     }
+    /// The project the record belongs to.
+    async fn project_id(&self) -> ID {
+        ID(self.0.project_id.to_string())
+    }
     /// The task the capture promoted to this note was filed from.
     async fn source_task(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<TaskNode>> {
         promoted_source_task(ctx, &self.0.id.to_string())
@@ -594,6 +670,10 @@ impl GateNode {
     async fn met_at(&self) -> Option<&str> {
         self.0.met_at.as_deref()
     }
+    /// The ID of the task the gate is on.
+    async fn task_id(&self) -> ID {
+        ID(self.0.task_id.to_string())
+    }
     /// The task the gate is on.
     async fn task(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<TaskNode>> {
         task_by_id(ctx, Some(self.0.task_id))
@@ -616,6 +696,10 @@ impl TaskNoteNode {
     /// The note text.
     async fn text(&self) -> &str {
         &self.0.text
+    }
+    /// The ID of the task the note is on.
+    async fn task_id(&self) -> ID {
+        ID(self.0.task_id.to_string())
     }
 }
 
@@ -802,43 +886,84 @@ impl WorkItemNode {
     }
 }
 
-/// A node of the record tree, as `arcl tree` builds it.
-pub struct TreeNode(pub RecordTreeNode);
+/// A node of the record tree, as `arcl tree` builds it, and how deep it
+/// sits. Nodes share their subtrees, so listing children or descendants
+/// clones a pointer per node, not the records below it.
+pub struct TreeNode {
+    node: Arc<TreeRecord>,
+    depth: usize,
+}
+
+impl TreeNode {
+    /// A node at the top of the tree.
+    pub(crate) fn top(node: RecordTreeNode) -> Self {
+        Self { node: Arc::new(TreeRecord::from(node)), depth: 0 }
+    }
+
+    /// The node's children, one level deeper.
+    fn child_nodes(&self) -> impl Iterator<Item = Self> + '_ {
+        self.node
+            .children
+            .iter()
+            .map(|child| Self { node: Arc::clone(child), depth: self.depth + 1 })
+    }
+
+    /// Push every node below `node`, which sits at `depth`, onto `nodes`,
+    /// depth first.
+    fn push_descendants(node: &TreeRecord, depth: usize, nodes: &mut Vec<Self>) {
+        for child in &node.children {
+            nodes.push(Self { node: Arc::clone(child), depth: depth + 1 });
+            Self::push_descendants(child, depth + 1, nodes);
+        }
+    }
+}
 
 #[Object(name = "TreeNode")]
 impl TreeNode {
     /// The full record ID.
     async fn id(&self) -> ID {
-        ID(self.0.id.clone())
+        ID(self.node.record.id.clone())
     }
     /// The record kind.
     async fn kind(&self) -> &str {
-        self.0.kind
+        self.node.record.kind
     }
     /// The record title.
     async fn title(&self) -> &str {
-        &self.0.title
+        &self.node.record.title
     }
     /// The stored status; a note's is `available`.
     async fn status(&self) -> &str {
-        &self.0.status
+        &self.node.record.status
     }
     /// For a pending task, whether it is ready.
     async fn ready(&self) -> bool {
-        matches!(self.0.tree_status, TreeStatus::Task { ready: true, .. })
+        matches!(self.node.record.tree_status, TreeStatus::Task { ready: true, .. })
     }
     /// The unfinished tasks that block this task directly. A rooted tree's
     /// root task also lists those it inherits.
     async fn blocked_by(&self) -> Vec<ID> {
-        self.0.blocked_by.iter().cloned().map(ID).collect()
+        self.node.record.blocked_by.iter().cloned().map(ID).collect()
+    }
+    /// How many levels below the top of the tree the node sits: 0 for a node
+    /// `tree` returns, 1 for its children.
+    async fn depth(&self) -> usize {
+        self.depth
     }
     /// Child records.
     async fn children(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<TreeNode>> {
-        many(ctx, self.0.children.iter().cloned().map(TreeNode).collect())
+        many(ctx, self.child_nodes().collect())
+    }
+    /// Every node below this one, depth first in tree order, so a tree of
+    /// any depth reads in one query. Each node's `depth` places it.
+    async fn descendants(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<TreeNode>> {
+        let mut nodes = Vec::new();
+        Self::push_descendants(&self.node, self.depth, &mut nodes);
+        many(ctx, nodes)
     }
     /// The record itself.
     async fn record(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<RecordNode>> {
-        one(ctx, RecordNode::find(reader(ctx).graph()?, &self.0.id))
+        one(ctx, RecordNode::find(reader(ctx).graph()?, &self.node.record.id))
     }
 }
 
@@ -868,6 +993,23 @@ impl From<RecordSource> for SourceNode {
             content: source.content,
             revision: source.revision,
         }
+    }
+}
+
+/// A tree record with its children behind shared pointers.
+struct TreeRecord {
+    /// The record, with its `children` moved into [`TreeRecord::children`].
+    record: RecordTreeNode,
+    children: Vec<Arc<TreeRecord>>,
+}
+
+impl From<RecordTreeNode> for TreeRecord {
+    fn from(mut record: RecordTreeNode) -> Self {
+        let children = std::mem::take(&mut record.children)
+            .into_iter()
+            .map(|child| Arc::new(Self::from(child)))
+            .collect();
+        Self { record, children }
     }
 }
 

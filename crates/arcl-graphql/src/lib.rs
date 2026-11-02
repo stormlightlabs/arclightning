@@ -19,7 +19,7 @@ use arcl_store::prelude::*;
 mod query;
 mod types;
 
-pub use async_graphql::{Request, Response, Variables};
+pub use async_graphql::{Request, Response, Value, Variables};
 pub use query::QueryRoot;
 
 /// The longest query document, in bytes, that a query may send. A longer
@@ -71,11 +71,13 @@ struct Reader {
     planning: OnceLock<PlanningData>,
     views: Mutex<HashMap<TaskId, Arc<PlanningTaskView>>>,
     nodes: AtomicUsize,
+    /// The most objects the query may resolve.
+    max_nodes: usize,
     refused: AtomicBool,
 }
 
 impl Reader {
-    fn new(database: Database) -> Self {
+    fn new(database: Database, max_nodes: usize) -> Self {
         Self {
             database: Mutex::new(database),
             graph: OnceLock::new(),
@@ -84,12 +86,13 @@ impl Reader {
             planning: OnceLock::new(),
             views: Mutex::new(HashMap::new()),
             nodes: AtomicUsize::new(0),
+            max_nodes,
             refused: AtomicBool::new(false),
         }
     }
 
     /// Count `count` more resolved objects, or fail with
-    /// [`RESULT_TOO_LARGE`] when that would pass [`MAX_NODES`]. Once one
+    /// [`RESULT_TOO_LARGE`] when that would pass the query's limit. Once one
     /// call fails, every later call fails too, so the rest of the query
     /// stops at its next object.
     fn admit(&self, count: usize) -> async_graphql::Result<()> {
@@ -103,12 +106,12 @@ impl Reader {
         ))
     }
 
-    /// Add `count` to the resolved objects unless the total would pass
-    /// [`MAX_NODES`]. Returns whether it was added.
+    /// Add `count` to the resolved objects unless the total would pass the
+    /// query's limit. Returns whether it was added.
     fn add_nodes(&self, count: usize) -> bool {
         let mut nodes = self.nodes.load(Ordering::Relaxed);
         loop {
-            let Some(total) = nodes.checked_add(count).filter(|total| *total <= MAX_NODES) else {
+            let Some(total) = nodes.checked_add(count).filter(|total| *total <= self.max_nodes) else {
                 return false;
             };
             match self
@@ -154,7 +157,7 @@ impl Reader {
     /// Parse the full or short ID `input` as a `T`.
     fn parse<T: PrefixedId>(&self, input: &str) -> async_graphql::Result<T> {
         let id = self.resolve(input, Some(T::PREFIX))?;
-        T::parse(&id).map_err(|error| coded(format!("invalid ID `{input}`: {error}"), "INVALID_REQUEST"))
+        T::parse(&id).map_err(|error| coded(error.to_string(), "INVALID_REQUEST"))
     }
 
     /// The workspace file of the record `id`, or `None` when there is none.
@@ -218,6 +221,18 @@ pub fn sdl() -> String {
 /// without being parsed. A query that resolves more than [`MAX_NODES`] objects
 /// comes back with `null` data and the single error [`RESULT_TOO_LARGE`].
 pub fn execute(database: Database, request: Request) -> Response {
+    run(database, request, MAX_NODES)
+}
+
+/// Run `request` as [`execute`] does, without the [`MAX_NODES`] limit. The
+/// other limits apply. It is for documents the program holds, such as the
+/// queries behind `arcl serve`'s REST reads, whose results grow with the
+/// project rather than with the query.
+pub fn execute_unbounded(database: Database, request: Request) -> Response {
+    run(database, request, usize::MAX)
+}
+
+fn run(database: Database, request: Request, max_nodes: usize) -> Response {
     if request.query.len() > MAX_QUERY_BYTES {
         let mut error = ServerError::new(
             format!("the query is longer than {MAX_QUERY_BYTES} bytes; send a shorter query"),
@@ -229,7 +244,7 @@ pub fn execute(database: Database, request: Request) -> Response {
             .set("code", QUERY_TOO_LARGE);
         return Response::from_errors(vec![error]);
     }
-    let reader = Arc::new(Reader::new(database));
+    let reader = Arc::new(Reader::new(database, max_nodes));
     let mut response = block_on(schema().execute(request.data(Arc::clone(&reader))));
     #[cfg(test)]
     tests::count_nodes(reader.nodes.load(Ordering::Relaxed));

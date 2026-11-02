@@ -1,0 +1,2 @@
+200
+{"format_version":1,"data":{"action":"shown","spec":{"acceptance_criteria":"- [ ] query works","body":"Find records fast.","id":"arcl-s-01M6ESM3HXTX7F827GYCBK76G9","project_id":"arcl-pj-00000000000000000000000000","source_capture_id":null,"status":"open","title":"Search"}}}

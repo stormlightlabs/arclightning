@@ -1,0 +1,2 @@
+200
+{"format_version":1,"data":{"id":"arcl-c-01M6ESM4KB90H8AF31MWRD02PX","kind":"capture","path":"captures/arcl-c-01M6ESM4KB90H8AF31MWRD02PX.md","source":"+++\nid = \"arcl-c-01M6ESM4KB90H8AF31MWRD02PX\"\ntitle = \"Task idea\"\nstatus = \"promoted\"\ncreated-at = \"2026-11-02T18:51:22.603Z\"\nsource-task = \"arcl-t-01M6ESM4CY6E640477815T3K09\"\n\n[promoted-to]\nkind = \"task\"\nid = \"arcl-t-01M6ESM4Q70068VAHSVYC6XEHF\"\n+++\n","revision":"17fada5aabe8b1ee1b98d0c95f839b4af85ee6503a17511e162a69f912ce9436"}}

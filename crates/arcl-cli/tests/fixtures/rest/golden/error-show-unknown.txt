@@ -1,0 +1,2 @@
+404
+{"error":{"code":"not_found","exit_code":5,"message":"no record matches short ID `nothing`"},"format_version":1}

@@ -47,7 +47,7 @@ impl TaskNoteKind {
 ///
 /// Notes are append-only. They stay on the task whatever its status, and
 /// never affect readiness.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TaskNote {
     /// The task the note belongs to.

@@ -1,0 +1,2 @@
+200
+{"format_version":2,"data":{"task":{"id":"arcl-t-01M6ESM4Q70068VAHSVYC6XEHF","project_id":"arcl-pj-00000000000000000000000000","spec_id":null,"plan_id":null,"phase_id":null,"parent_id":null,"title":"Task idea","body":"","status":"pending","priority":"high","position":0,"handoff":"","evidence":""},"readiness":{"ready":true,"blocked":false,"reasons":[]},"blockers":[],"inherited_blockers":[],"dependents":[],"children":[],"ancestors":[],"spec":null,"plan":null,"phase":null,"notes":[],"gates":[],"source_task_id":"arcl-t-01M6ESM4CY6E640477815T3K09"}}

@@ -31,6 +31,7 @@ mod init;
 mod prime;
 mod query;
 mod reads;
+mod rest;
 mod serve;
 mod skill;
 mod support;

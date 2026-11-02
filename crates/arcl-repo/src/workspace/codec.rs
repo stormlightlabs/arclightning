@@ -31,6 +31,36 @@ pub enum RecordKind {
 }
 
 impl RecordKind {
+    /// Every record kind, in workspace order.
+    pub const ALL: [Self; 7] = [
+        Self::Capture,
+        Self::Release,
+        Self::Spec,
+        Self::Plan,
+        Self::Phase,
+        Self::Task,
+        Self::Note,
+    ];
+
+    /// The kind whose ID prefix starts `id`, such as [`Self::Task`] for
+    /// `arcl-t-...`. Gate IDs and other strings name no record kind.
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| id.starts_with(kind.prefix()))
+    }
+
+    /// The prefix every ID of this kind starts with, such as `arcl-t-`.
+    pub const fn prefix(self) -> &'static str {
+        match self {
+            Self::Capture => CaptureId::PREFIX,
+            Self::Release => ReleaseId::PREFIX,
+            Self::Spec => SpecId::PREFIX,
+            Self::Plan => PlanId::PREFIX,
+            Self::Phase => PhaseId::PREFIX,
+            Self::Task => TaskId::PREFIX,
+            Self::Note => NoteId::PREFIX,
+        }
+    }
+
     /// Return the workspace directory for this record kind.
     pub const fn directory(self) -> &'static str {
         match self {
@@ -1045,6 +1075,20 @@ mod tests {
     const NOTE_ID: &str = "arcl-n-01K0B2ZWTX7JX9PH7W5G1S6A9Q";
     const GATE_ID: &str = "arcl-g-01K0B2ZWTX7JX9PH7W5G1S6A9R";
     const OTHER_GATE_ID: &str = "arcl-g-01K0B2ZWTX7JX9PH7W5G1S6A9S";
+
+    #[test]
+    fn record_kind_reads_the_id_prefix() {
+        for kind in RecordKind::ALL {
+            assert_eq!(
+                RecordKind::from_id(&format!("{}01K0B2ZWTX7JX9PH7W5G1S6A9Q", kind.prefix())),
+                Some(kind)
+            );
+        }
+        assert_eq!(RecordKind::from_id(PLAN_ID), Some(RecordKind::Plan));
+        assert_eq!(RecordKind::from_id(PHASE_ID), Some(RecordKind::Phase));
+        assert_eq!(RecordKind::from_id(GATE_ID), None);
+        assert_eq!(RecordKind::from_id("arcl-x-1"), None);
+    }
 
     #[test]
     fn manifest_reads_and_renders_versions_one_to_five() {

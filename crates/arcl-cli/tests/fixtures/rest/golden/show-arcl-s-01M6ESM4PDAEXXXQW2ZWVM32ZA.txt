@@ -1,0 +1,2 @@
+200
+{"format_version":1,"data":{"action":"shown","source_task_id":"arcl-t-01M6ESM4FEF285TNJBPGR9Q3Y1","spec":{"acceptance_criteria":"- done","body":"","id":"arcl-s-01M6ESM4PDAEXXXQW2ZWVM32ZA","project_id":"arcl-pj-00000000000000000000000000","source_capture_id":"arcl-c-01M6ESM4JAQPD5BXP72E88CS3K","status":"open","title":"Spec idea"}}}
