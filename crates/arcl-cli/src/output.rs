@@ -1151,15 +1151,28 @@ impl Renderer {
         Ok(Some(self.style(message)))
     }
 
-    /// Render the URL `arcl serve` listens on. Quiet mode prints the URL
-    /// alone, since it is the command's result.
-    pub fn render_serve(&self, url: &str) -> Result<Option<String>, OutputError> {
-        let message = match self.mode {
-            OutputMode::Human => format!("Serving Arc Lightning at {url}\nPress Ctrl-C to stop."),
-            OutputMode::Plain | OutputMode::Quiet => url.to_owned(),
-            OutputMode::Json => serde_json::to_string(&Envelope {
+    /// Render what `arcl serve` prints once it listens. Plain and quiet
+    /// output print the URL alone, since it carries the token, and under
+    /// `--api` the URL and the token on two lines. JSON output is one line
+    /// with the URL, port and token. A token from `ARCL_SERVE_TOKEN` is
+    /// never printed, so it stays out of logs: human output says the
+    /// variable's token is in use, plain and quiet output print the URL
+    /// alone, and JSON output leaves out `token`.
+    pub fn render_serve(&self, start: &ServeStart<'_>) -> Result<Option<String>, OutputError> {
+        let ServeStart { url, port, token, api } = *start;
+        let message = match (self.mode, api, token) {
+            (OutputMode::Human, false, _) => format!("Serving Arc Lightning at {url}\nPress Ctrl-C to stop."),
+            (OutputMode::Human, true, Some(token)) => {
+                format!("Serving the Arc Lightning API at {url}\nToken: {token}\nPress Ctrl-C to stop.")
+            }
+            (OutputMode::Human, true, None) => format!(
+                "Serving the Arc Lightning API at {url}\nToken: the one in ARCL_SERVE_TOKEN\nPress Ctrl-C to stop."
+            ),
+            (OutputMode::Plain | OutputMode::Quiet, true, Some(token)) => format!("{url}\n{token}"),
+            (OutputMode::Plain | OutputMode::Quiet, _, _) => url.to_owned(),
+            (OutputMode::Json, _, _) => serde_json::to_string(&Envelope {
                 format_version: FORMAT_VERSION,
-                data: ServeData { status: "serving", url },
+                data: ServeData { status: "serving", url, port, token },
             })?,
         };
         Ok(Some(self.style(message)))
@@ -1337,6 +1350,20 @@ impl Renderer {
     }
 }
 
+/// What `arcl serve` prints once it listens.
+#[derive(Clone, Copy, Debug)]
+pub struct ServeStart<'a> {
+    /// The URL to open, or the server's origin under `--api`.
+    pub url: &'a str,
+    /// The port the server listens on.
+    pub port: u16,
+    /// The token every request sends in `X-Arcl-Token`, or `None` when it
+    /// came from `ARCL_SERVE_TOKEN` and must not be printed.
+    pub token: Option<&'a str>,
+    /// Whether the server answers only `/api` and `/graphql`.
+    pub api: bool,
+}
+
 /// The task a rendered record came from.
 #[derive(Clone, Copy, Debug)]
 pub struct SourceTask<'a> {
@@ -1376,6 +1403,10 @@ struct StartupData {
 struct ServeData<'a> {
     status: &'static str,
     url: &'a str,
+    port: u16,
+    /// Left out when the token came from `ARCL_SERVE_TOKEN`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    token: Option<&'a str>,
 }
 
 #[derive(Debug, Serialize)]

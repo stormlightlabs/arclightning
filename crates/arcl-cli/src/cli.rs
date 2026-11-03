@@ -175,6 +175,10 @@ pub enum Command {
         /// Listen on this port instead of an ephemeral one.
         #[arg(long, value_name = "PORT")]
         port: Option<u16>,
+        /// Serve only `/api` and `/graphql`, without the web app page. The
+        /// token comes from ARCL_SERVE_TOKEN when it is set.
+        #[arg(long)]
+        api: bool,
     },
     /// Export records for the web app's claude.ai artifact and apply the edits queued on it.
     Web {

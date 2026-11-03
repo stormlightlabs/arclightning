@@ -102,7 +102,12 @@ impl Mutations for Echo {
 }
 
 fn gate() -> Gate {
-    Gate::new(TOKEN.to_owned(), PORT)
+    Gate::new(TOKEN.to_owned(), PORT, false)
+}
+
+/// The checks of `arcl serve --api`.
+fn api_gate() -> Gate {
+    Gate::new(TOKEN.to_owned(), PORT, true)
 }
 
 /// Check and answer `incoming` as [`Server::run`] does, with an empty body.
@@ -936,6 +941,179 @@ fn serve_tokens_are_random_hex() {
     assert_eq!(first.len(), TOKEN_BYTES * 2);
     assert!(first.bytes().all(|byte| byte.is_ascii_hexdigit()));
     assert_ne!(first, new_token().expect("a token"));
+}
+
+#[test]
+fn serve_api_answers_only_the_api_and_graphql() {
+    for url in ["/", "/work", "/planning/anything", "/graphql/", "/index.html"] {
+        for method in ["GET", "POST"] {
+            let incoming = Incoming { method: method.to_owned(), ..get(url, Some(TOKEN)) };
+            let answer = answered(&api_gate(), &incoming);
+            assert_eq!(answer.status, 404, "{method} {url}");
+            assert_eq!(error_code(&answer), "not_found");
+            assert_eq!(answer.content_type, "application/json");
+        }
+    }
+    assert_eq!(
+        text(answered(&api_gate(), &get("/api/tree", Some(TOKEN)))),
+        (200, "tree".to_owned())
+    );
+    let query = br#"{"query": "{ work { phases { id } } }"}"#;
+    let graphql = Incoming { method: "POST".to_owned(), ..get("/graphql", Some(TOKEN)) };
+    assert_eq!(answered_with(&api_gate(), &graphql, query).status, 200);
+}
+
+#[test]
+fn serve_api_keeps_the_host_and_token_checks() {
+    assert_eq!(answered(&api_gate(), &get("/", None)).status, 401);
+    assert_eq!(answered(&api_gate(), &get("/api/tree", None)).status, 401);
+    assert_eq!(answered(&api_gate(), &get("/api/tree", Some("abc124"))).status, 401);
+    let wrong_host = Incoming { host: Some("evil.example:4321".to_owned()), ..get("/api/tree", Some(TOKEN)) };
+    assert_eq!(answered(&api_gate(), &wrong_host).status, 403);
+    // No page, so no first page load takes the query token.
+    let first_load = answered(&api_gate(), &get(&format!("/?{TOKEN_QUERY}={TOKEN}"), None));
+    assert_eq!(first_load.status, 401);
+    let tokenless = Incoming { origin: None, token: None, ..post("/api/tasks/arcl-t-1/park") };
+    assert_eq!(answered(&api_gate(), &tokenless).status, 401);
+}
+
+#[test]
+fn serve_api_names_the_token_header_for_a_query_token() {
+    for url in [
+        format!("/?{TOKEN_QUERY}={TOKEN}"),
+        format!("/api/tree?{TOKEN_QUERY}={TOKEN}"),
+    ] {
+        let answer = answered(&api_gate(), &get(&url, None));
+        assert_eq!(answer.status, 401);
+        let body: serde_json::Value = serde_json::from_slice(&answer.body).expect("a JSON body");
+        let message = body["error"]["message"].as_str().expect("an error message");
+        assert!(message.contains(&format!("the {TOKEN_HEADER} header")), "{message}");
+        assert!(!message.contains("first page load"), "{message}");
+    }
+}
+
+#[test]
+fn serve_api_runs_a_mutation_without_an_origin() {
+    let incoming = Incoming { origin: None, ..post("/api/tasks/arcl-t-1/park") };
+    assert_eq!(
+        text(answered(&api_gate(), &incoming)),
+        (200, "park arcl-t-1".to_owned())
+    );
+    let incoming = Incoming { origin: None, ..post("/api/captures") };
+    let (status, body) = text(answered_with(&api_gate(), &incoming, br#"{"title":"T"}"#));
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(text(answered(&api_gate(), &post("/api/tasks/arcl-t-1/park"))).0, 200);
+}
+
+#[test]
+fn serve_api_refuses_a_mismatched_origin() {
+    for origin in [
+        "http://evil.example",
+        "http://127.0.0.1:1234",
+        "http://localhost:4321",
+        "https://127.0.0.1:4321",
+        "null",
+    ] {
+        let incoming = Incoming { origin: Some(origin.to_owned()), ..post("/api/tasks/arcl-t-1/park") };
+        let answer = answered(&api_gate(), &incoming);
+        assert_eq!(answer.status, 403, "{origin}");
+        assert_eq!(error_code(&answer), "forbidden");
+    }
+}
+
+#[test]
+fn serve_page_mode_still_needs_an_origin_on_a_mutation() {
+    let incoming = Incoming { origin: None, ..post("/api/tasks/arcl-t-1/park") };
+    let answer = answered(&gate(), &incoming);
+    assert_eq!(answer.status, 403);
+    assert_eq!(error_code(&answer), "forbidden");
+}
+
+#[test]
+fn serve_api_refuses_a_preflight_without_cors_headers() {
+    let no_cors = |answer: &Answer| {
+        answer
+            .headers()
+            .iter()
+            .all(|(name, _)| !name.to_ascii_lowercase().starts_with("access-control-"))
+    };
+    // A browser's preflight carries an Origin and no token, whatever the origin.
+    for url in ["/api/tasks", "/api/tasks/arcl-t-1/park", "/graphql"] {
+        for origin in ["http://evil.example", &format!("http://127.0.0.1:{PORT}")] {
+            let preflight =
+                Incoming { method: "OPTIONS".to_owned(), origin: Some(origin.to_owned()), ..get(url, None) };
+            let answer = answered(&api_gate(), &preflight);
+            assert_eq!(answer.status, 401, "{url} from {origin}");
+            assert!(answer.close, "{url} from {origin}");
+            assert!(no_cors(&answer), "{url} from {origin}");
+        }
+    }
+    // With the token, OPTIONS is a method the path does not take.
+    let tokened = Incoming { method: "OPTIONS".to_owned(), ..get("/graphql", Some(TOKEN)) };
+    let answer = answered(&api_gate(), &tokened);
+    assert_eq!(answer.status, 405);
+    assert!(no_cors(&answer));
+}
+
+#[test]
+fn serve_api_checks_a_chosen_token() {
+    let long = "A1".repeat(MIN_TOKEN_CHARS / 2);
+    for bad in [
+        "a".repeat(MIN_TOKEN_CHARS - 1),
+        format!("{long}-"),
+        format!("{long}_x"),
+        format!(" {long}"),
+        format!("{long}\n"),
+        format!("{}é", "a".repeat(MIN_TOKEN_CHARS)),
+        String::new(),
+    ] {
+        assert!(
+            matches!(Server::bind_api(None, Some(bad.clone())), Err(ServeError::WeakToken)),
+            "{bad:?}"
+        );
+    }
+    let error = Server::bind_api(None, Some("short".to_owned()))
+        .err()
+        .expect("a refusal");
+    assert_eq!(
+        error.to_string(),
+        "the token must be at least 32 characters, ASCII letters and digits only"
+    );
+
+    let server = Server::bind_api(None, Some(long.clone())).expect("a server");
+    assert_eq!(server.token(), long);
+    assert_eq!(server.url(), format!("http://127.0.0.1:{}", server.port()));
+
+    let random = Server::bind_api(None, None).expect("a server");
+    assert_eq!(random.token().len(), TOKEN_BYTES * 2);
+    assert_ne!(random.token(), Server::bind_api(None, None).expect("a server").token());
+}
+
+#[test]
+fn serve_api_answers_over_tcp_without_a_page() {
+    let mut server = Server::bind_api(None, None).expect("a server");
+    server.limits = Limits::default();
+    let port = server.port();
+    let token = server.token().to_owned();
+    thread::spawn(move || server.run_until(&Echo, &Echo, std::future::pending));
+    let page = response(send(
+        port,
+        &format!("GET / HTTP/1.1\r\n{TOKEN_HEADER}: {token}\r\nConnection: close"),
+        "\r\n",
+    ));
+    assert!(page.starts_with("HTTP/1.1 404"), "{page}");
+    assert!(!page.contains("<html"), "{page}");
+    let read = authorized_get(port, &token);
+    assert!(read.starts_with("HTTP/1.1 200"), "{read}");
+    let park = response(send(
+        port,
+        &format!(
+            "POST /api/tasks/arcl-t-1/park HTTP/1.1\r\n{TOKEN_HEADER}: {token}\r\nContent-Length: 0\r\nConnection: close"
+        ),
+        "\r\n",
+    ));
+    assert!(park.starts_with("HTTP/1.1 200"), "{park}");
+    assert!(park.ends_with("park arcl-t-1"), "{park}");
 }
 
 #[test]

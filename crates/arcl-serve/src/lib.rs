@@ -15,6 +15,17 @@
 //! changes state. `/graphql` takes POST only, and needs no `Origin`, since
 //! the schema has no mutations. Responses carry no CORS headers.
 //!
+//! [`Server::bind_api`] makes a server that answers only `/api` and
+//! `/graphql`, for scripts and other local tools. Any other path gets 404
+//! once the `Host` and token checks pass, and there is no first page load, so
+//! no query token. The caller may choose the token, which needs at least
+//! [`MIN_TOKEN_CHARS`] characters, all ASCII letters and digits. A mutation
+//! needs a matching `Origin` only when it sends one: a mismatched `Origin` is
+//! refused, and a request without one runs on the token alone. A
+//! browser page on another origin cannot send the [`TOKEN_HEADER`] header
+//! without a CORS preflight, and the server refuses every preflight without
+//! CORS headers, so the token check stands in for `Origin`.
+//!
 //! The server runs axum on hyper and a single-threaded tokio runtime. It
 //! checks a request's head before it reads any of the body, and reads a body
 //! only for a mutation or GraphQL query that passed every check. A request
@@ -126,7 +137,7 @@ mod server;
 mod tests;
 
 pub use answer::Reply;
-pub use gate::{TOKEN_HEADER, TOKEN_QUERY};
+pub use gate::{MIN_TOKEN_CHARS, TOKEN_HEADER, TOKEN_QUERY};
 pub use limits::{BODY_DEADLINE, HEADER_DEADLINE, MAX_CONNECTIONS, MIN_WRITE_RATE, SHUTDOWN_GRACE, WRITE_DEADLINE};
 pub use mutations::{
     CapturePromotion, Completion, Handoff, Mutations, NewCapture, NewPlan, NewSpec, NewTask, PlanInput,

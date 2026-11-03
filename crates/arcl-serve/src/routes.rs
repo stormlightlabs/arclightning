@@ -31,8 +31,9 @@ pub(crate) enum Route {
     Graphql,
     /// A mutation, which needs POST and a matching `Origin`.
     Write(Write),
-    /// An `/api` path with no endpoint.
-    UnknownApi,
+    /// A path with no endpoint: an `/api` path that names none, or any path
+    /// outside `/api` and `/graphql` when the server answers only those.
+    NotFound,
     /// A web app page. The app routes on the client, so every page is
     /// `index.html`.
     Page,
@@ -136,7 +137,7 @@ pub(crate) fn dispatch(route: Route, body: &[u8], reads: &dyn Reads) -> Answer {
         Route::Graphql => Answer::json(graphql(body, reads)),
         // `handle` sends mutations to the mutation thread.
         Route::Write(_) => Answer::json(Reply::internal("a mutation reached the read path")),
-        Route::UnknownApi => Answer::json(Reply::refusal(404, "not_found", "no endpoint has this path")),
+        Route::NotFound => Answer::json(Reply::refusal(404, "not_found", "no endpoint has this path")),
         Route::Page => page(),
     }
 }
@@ -225,10 +226,10 @@ pub(crate) fn route(path: &str, query: Vec<(String, String)>) -> Route {
                 "unpark" => Route::Write(Write::Unpark(id)),
                 "handoff" => Route::Write(Write::Handoff(id)),
                 "complete" => Route::Write(Write::Complete(id)),
-                _ => Route::UnknownApi,
+                _ => Route::NotFound,
             }
         }
-        ["api", ..] => Route::UnknownApi,
+        ["api", ..] => Route::NotFound,
         ["graphql"] => Route::Graphql,
         _ => Route::Page,
     }

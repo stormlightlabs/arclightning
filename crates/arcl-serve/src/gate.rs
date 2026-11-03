@@ -15,6 +15,10 @@ pub const TOKEN_HEADER: &str = "X-Arcl-Token";
 /// The query parameter that carries the token on the first page load.
 pub const TOKEN_QUERY: &str = "token";
 
+/// The fewest characters a token given to [`Server::bind_api`](crate::Server::bind_api)
+/// may have. It may hold only ASCII letters and digits.
+pub const MIN_TOKEN_CHARS: usize = 32;
+
 /// The number of random bytes in a token, which is printed as hex.
 pub(crate) const TOKEN_BYTES: usize = 32;
 
@@ -22,13 +26,17 @@ pub(crate) const TOKEN_BYTES: usize = 32;
 pub(crate) struct Gate {
     pub(crate) token: String,
     pub(crate) port: u16,
+    /// Whether the server answers only `/api` and `/graphql`, as
+    /// `arcl serve --api` does: no page, and no `Origin` needed on a change
+    /// that sends none.
+    pub(crate) api_only: bool,
     /// Whether a page load has used the query token.
     first_load_used: AtomicBool,
 }
 
 impl Gate {
-    pub(crate) fn new(token: String, port: u16) -> Self {
-        Self { token, port, first_load_used: AtomicBool::new(false) }
+    pub(crate) fn new(token: String, port: u16, api_only: bool) -> Self {
+        Self { token, port, api_only, first_load_used: AtomicBool::new(false) }
     }
 
     /// Check the head of `incoming` and route it, or answer with the refusal.
@@ -38,14 +46,17 @@ impl Gate {
         let (path, query) =
             split_url(&incoming.url).map_err(|message| Answer::closing(Reply::invalid_request(&message)))?;
         let query_token = token_in(&query);
-        let route = route(&path, query);
+        let route = match route(&path, query) {
+            Route::Page if self.api_only => Route::NotFound,
+            route => route,
+        };
         if self
             .authorize(incoming, &route, query_token.as_deref())
             .map_err(Answer::closing)?
         {
             return Ok(route);
         }
-        if let Err(reply) = Self::permit(incoming, &route) {
+        if let Err(reply) = self.permit(incoming, &route) {
             let posts = matches!(route, Route::Write(_) | Route::Graphql);
             let allow = (reply.status() == 405).then_some(if posts { "POST" } else { "GET" });
             return Err(Answer { allow, ..Answer::json(reply) });
@@ -75,11 +86,12 @@ impl Gate {
             if first_load && same_token(given, &self.token) && !self.first_load_used.swap(true, Ordering::SeqCst) {
                 return Ok(true);
             }
-            return Err(Reply::refusal(
-                401,
-                "unauthorized",
-                &format!("the link's token works for the first page load only; send the token in {TOKEN_HEADER}"),
-            ));
+            let message = if self.api_only {
+                format!("this server takes no token in the URL; send the token in the {TOKEN_HEADER} header")
+            } else {
+                format!("the link's token works for the first page load only; send the token in {TOKEN_HEADER}")
+            };
+            return Err(Reply::refusal(401, "unauthorized", &message));
         }
 
         match incoming.token.as_deref() {
@@ -98,16 +110,20 @@ impl Gate {
     }
 
     /// Refuse a request with the wrong method for its route, or a mutation
-    /// whose `Origin` is missing or does not name the `Host`. A GraphQL query
+    /// whose `Origin` does not name the `Host`. The page mode also refuses a
+    /// mutation without `Origin`; the API-only mode lets the token stand for
+    /// it, since a browser page cannot send the token header cross-origin
+    /// without a CORS preflight the server never answers. A GraphQL query
     /// takes POST but changes nothing, so it needs no `Origin`.
-    fn permit(incoming: &Incoming, route: &Route) -> Result<(), Reply> {
+    fn permit(&self, incoming: &Incoming, route: &Route) -> Result<(), Reply> {
         match (route, incoming.method.as_str()) {
             // A path with no endpoint answers 404 to any method.
-            (Route::UnknownApi, _) | (Route::Graphql, "POST") => Ok(()),
+            (Route::NotFound, _) | (Route::Graphql, "POST") => Ok(()),
             (Route::Write(_), "POST") => {
                 // `authorize` passed, so `Host` is present.
                 let served = format!("http://{}", incoming.host.as_deref().unwrap_or_default());
                 match incoming.origin.as_deref() {
+                    None if self.api_only => Ok(()),
                     None => Err(Reply::refusal(
                         403,
                         "forbidden",
@@ -168,6 +184,16 @@ pub(crate) fn new_token() -> Result<String, ServeError> {
     let mut bytes = [0_u8; TOKEN_BYTES];
     getrandom::fill(&mut bytes).map_err(ServeError::Token)?;
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+/// Refuse a token that is shorter than [`MIN_TOKEN_CHARS`] or holds anything
+/// but ASCII letters and digits.
+pub(crate) fn check_token(token: &str) -> Result<(), ServeError> {
+    if token.len() >= MIN_TOKEN_CHARS && token.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+        Ok(())
+    } else {
+        Err(ServeError::WeakToken)
+    }
 }
 
 /// Compare tokens in time that does not depend on where they differ.

@@ -2,7 +2,7 @@
 id = "arcl-t-01M61HW51Z6X4YHYAB35AYZDQ8"
 phase = "arcl-ph-01M5YRFB35TZ51QW4AG1A8MS5B"
 title = "Serve only the API with arcl serve --api"
-status = "pending"
+status = "in_progress"
 priority = "normal"
 position = 12
 blocked-by = ["arcl-t-01M61HW4VBTNF4G8PEJ6G996Z4"]
