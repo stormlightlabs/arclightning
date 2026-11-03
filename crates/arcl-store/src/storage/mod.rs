@@ -92,8 +92,13 @@ pub enum StorageError {
     },
     #[error("structured plan input is invalid: {0}")]
     InvalidPlanInput(#[from] arcl_core::plan::PlanError),
-    #[error("database user_version {found} is newer than this application supports (latest {latest})")]
-    NewerDatabase { found: i32, latest: i32 },
+    /// A database whose schema version is newer than [`CURRENT_VERSION`].
+    /// It was written by a newer arcl, so opening it stops before any read
+    /// or write of records.
+    #[error(
+        "database schema version {stored} was written by a newer arcl; this arcl supports schema versions up to {supported}. Upgrade arcl to open it"
+    )]
+    NewerDatabase { stored: i32, supported: i32 },
     #[error("migration sequence is missing version {expected} before version {found}")]
     MigrationGap { expected: i32, found: i32 },
     /// Another connection committed after this command read the database, so
@@ -210,6 +215,10 @@ pub struct Database {
 }
 
 impl Database {
+    /// Open the database at `path`, creating it when missing, and apply any
+    /// pending migrations. A database stamped with a schema version newer than
+    /// [`CURRENT_VERSION`] fails with [`StorageError::NewerDatabase`] and is
+    /// left as it was.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let mut connection = Connection::open(path)?;
@@ -1157,6 +1166,36 @@ mod tests {
             )
             .expect("format marker exists");
         assert_eq!(format_version, CURRENT_VERSION.to_string());
+    }
+
+    #[test]
+    fn a_database_from_a_newer_arcl_is_refused_and_left_unchanged() {
+        let directory = tempfile::tempdir().expect("directory creates");
+        let path = directory.path().join("arcl.db");
+        let future = CURRENT_VERSION + 1;
+        {
+            let connection = rusqlite::Connection::open(&path).expect("SQLite opens");
+            connection
+                .execute_batch("CREATE TABLE future_records (id TEXT PRIMARY KEY)")
+                .expect("future table creates");
+            connection
+                .pragma_update(None, "user_version", future)
+                .expect("future version writes");
+        }
+        let before = std::fs::read(&path).expect("database reads");
+
+        let error = Database::open(&path).expect_err("newer database refuses");
+        assert!(
+            matches!(error, StorageError::NewerDatabase { stored, supported }
+                if stored == future && supported == CURRENT_VERSION),
+            "{error:?}"
+        );
+        assert_eq!(error.exit_code(), 3);
+        let message = error.to_string();
+        assert!(message.contains(&format!("schema version {future}")), "{message}");
+        assert!(message.contains(&format!("up to {CURRENT_VERSION}")), "{message}");
+        assert!(message.contains("Upgrade arcl"), "{message}");
+        assert_eq!(std::fs::read(&path).expect("database reads"), before);
     }
 
     #[test]

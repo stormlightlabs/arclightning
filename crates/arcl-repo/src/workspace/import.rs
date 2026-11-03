@@ -93,6 +93,7 @@ impl WorkspaceImportError {
             Self::Storage(StorageError::ChangedSinceRead) => 4,
             Self::Storage(_) | Self::Vcs(_) | Self::ReadDirectory { .. } | Self::InspectEntry { .. } => 1,
             Self::Export(super::WorkspaceExportError::Conflict { .. }) => 4,
+            Self::Export(super::WorkspaceExportError::NewerWorkspace { .. }) => 3,
             Self::Export(_) => 1,
             Self::MissingManifest { .. }
             | Self::UnknownEntry { .. }

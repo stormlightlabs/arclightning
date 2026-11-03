@@ -253,6 +253,7 @@ impl CommandError {
             Self::NotInitialized { .. } | Self::InvalidConfig { .. } | Self::WorkspaceDisabled | Self::Domain(_) => 3,
             Self::WorkspaceExport(error) => match error.as_ref() {
                 WorkspaceExportError::Conflict { .. } => 4,
+                WorkspaceExportError::NewerWorkspace { .. } => 3,
                 _ => 1,
             },
             Self::WorkspaceImport(error) => error.exit_code(),

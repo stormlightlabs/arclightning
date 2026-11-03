@@ -345,8 +345,9 @@ gate, version 3 when one carries a note, version 2 when one carries an
 workspace starts at version 1, so a workspace without claims, notes, gates or
 capture sources stays there. A workspace never moves back to an older
 version on its own. An arcl that reads only older versions checks the
-manifest before any record and refuses a newer workspace with an unsupported
-format version error.
+manifest before any record is read or written. It refuses a newer workspace
+with an error that names the manifest's version and the newest version it
+reads, and says to upgrade arcl.
 
 Synchronization uses a three-state comparison: compare
 the last common files, current database projection, and current workspace. Arc
@@ -385,6 +386,13 @@ The Rust core must not depend on Tauri, terminal presentation, MCP or HTTP
 transport, or frontend persistence. The shared UI package must not depend on
 Tauri APIs or website-only routing. Each application supplies those adapters at
 its composition root.
+
+The database stores its schema version in SQLite's `user_version`. Opening a
+database applies the migrations an older version needs, in order. A database
+with a version newer than the arcl opening it supports came from a newer arcl.
+The CLI, the MCP server and `arcl serve` refuse it before any read or write,
+with exit code `3` and an error that names the stored version and the newest
+supported one and says to upgrade arcl. The database is left as it was.
 
 ## Shared UI and visual direction
 

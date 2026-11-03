@@ -18,10 +18,15 @@ const MIGRATIONS: &[Migration] = &[
     Migration { version: 8, sql: include_str!("migrations/008_capture_source.sql") },
 ];
 
+/// Bring the schema up to [`CURRENT_VERSION`].
+///
+/// The stored version is read first, and a database from a newer arcl is
+/// refused with [`StorageError::NewerDatabase`] before anything else is read
+/// or written.
 pub fn apply(connection: &mut Connection) -> Result<(), StorageError> {
     let current: i32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if current > CURRENT_VERSION {
-        return Err(StorageError::NewerDatabase { found: current, latest: CURRENT_VERSION });
+        return Err(StorageError::NewerDatabase { stored: current, supported: CURRENT_VERSION });
     }
 
     let mut expected = current + 1;

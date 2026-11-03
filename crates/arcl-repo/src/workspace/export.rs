@@ -40,6 +40,12 @@ pub enum WorkspaceExportError {
         path: PathBuf,
         source: super::WorkspaceError,
     },
+    /// The manifest on disk was written by a newer arcl. Nothing is written.
+    /// The message is [`WorkspaceError::NewerWorkspace`]'s.
+    ///
+    /// [`WorkspaceError::NewerWorkspace`]: super::WorkspaceError::NewerWorkspace
+    #[error("{}", super::WorkspaceError::NewerWorkspace { stored: *stored, supported: *supported })]
+    NewerWorkspace { stored: u32, supported: u32 },
 }
 
 /// A single canonical file produced by a workspace projection.
@@ -246,13 +252,21 @@ pub fn project_graph_at(graph: &ConnectedGraph, floor: u32) -> Result<Vec<Worksp
 ///
 /// A changed working-tree file is overwritten only when it is unchanged from the
 /// stored base (or already contains the canonical bytes). All conflicts are
-/// found before any generated file is replaced.
+/// found before any generated file is replaced. A manifest on disk from a
+/// newer arcl fails with [`WorkspaceExportError::NewerWorkspace`] before any
+/// file is written.
 pub fn export_graph_with_base(
     root: &Path, graph: &ConnectedGraph, base: &[WorkspaceBaseFile],
 ) -> Result<Vec<WorkspaceFile>, WorkspaceExportError> {
     let on_disk = fs::read(root.join(MANIFEST))
         .ok()
         .map(|content| WorkspaceFile { path: PathBuf::from(MANIFEST), content });
+    if let Some(file) = &on_disk
+        && let Err(super::WorkspaceError::NewerWorkspace { stored, supported }) =
+            WorkspaceManifest::parse(&String::from_utf8_lossy(&file.content))
+    {
+        return Err(WorkspaceExportError::NewerWorkspace { stored, supported });
+    }
     let files = project_graph_at(graph, format_floor(base, on_disk.as_slice()))?;
     let base = base
         .iter()

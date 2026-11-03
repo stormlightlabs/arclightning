@@ -759,6 +759,69 @@ fn a_missing_database_beside_a_workspace_says_init_imports_it() {
 }
 
 #[test]
+fn a_database_from_a_newer_arcl_is_refused_by_reads_writes_and_sync() {
+    let directory = tempdir().expect("temporary directory can be created");
+    run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
+    run_json(directory.path(), ["--json", "task", "create", "Kept"].as_ref());
+    let path = directory.path().join(".arcl/arcl.db");
+    let database = rusqlite::Connection::open(&path).expect("database opens");
+    database
+        .pragma_update(None, "user_version", 99)
+        .expect("future version writes");
+    drop(database);
+    let before = fs::read(&path).expect("database reads");
+
+    for args in [
+        ["--json", "task", "list"].as_ref(),
+        ["--json", "task", "create", "Refused"].as_ref(),
+        ["--json", "workspace", "sync"].as_ref(),
+    ] {
+        let output = arcl_in(directory.path()).args(args).output().expect("command runs");
+        assert_eq!(output.status.code(), Some(3), "{}", args.join(" "));
+        let stderr: Value = serde_json::from_slice(&output.stderr).expect("stderr is one JSON value");
+        let message = stderr["error"]["message"].as_str().expect("error message");
+        assert!(
+            message.contains("schema version 99 was written by a newer arcl"),
+            "{message}"
+        );
+        assert!(message.contains("supports schema versions up to "), "{message}");
+        assert!(message.contains("Upgrade arcl"), "{message}");
+    }
+    assert_eq!(fs::read(&path).expect("database reads"), before);
+}
+
+#[test]
+fn a_workspace_from_a_newer_arcl_is_refused_before_a_write() {
+    let directory = tempdir().expect("temporary directory can be created");
+    run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
+    run_json(directory.path(), ["--json", "task", "create", "Kept"].as_ref());
+    let manifest = directory.path().join(".arcl/workspace/manifest.toml");
+    fs::write(&manifest, "format-version = 99\n").expect("manifest writes");
+
+    for args in [
+        ["--json", "task", "create", "Refused"].as_ref(),
+        ["--json", "workspace", "export"].as_ref(),
+    ] {
+        let output = arcl_in(directory.path()).args(args).output().expect("command runs");
+        assert_eq!(output.status.code(), Some(3), "{}", args.join(" "));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("workspace format version 99 was written by a newer arcl"),
+            "{stderr}"
+        );
+        assert!(stderr.contains("Upgrade arcl"), "{stderr}");
+    }
+    assert_eq!(
+        fs::read_to_string(&manifest).expect("manifest reads"),
+        "format-version = 99\n"
+    );
+    let tasks = with_workspace_off(directory.path(), || {
+        run_json(directory.path(), ["--json", "task", "list"].as_ref())
+    });
+    assert_eq!(tasks["data"]["tasks"].as_array().expect("tasks").len(), 1);
+}
+
+#[test]
 fn blocked_by_takes_one_id_per_flag_in_task_create_and_dependency_add() {
     let directory = initialized_directory();
     let path = directory.path();
