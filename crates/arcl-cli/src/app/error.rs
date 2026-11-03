@@ -119,6 +119,7 @@ impl InitError {
         match self {
             Self::Vcs(error) => error.exit_code(),
             Self::InvalidConfig { .. } => 3,
+            Self::OpenDatabase { source, .. } => source.exit_code(),
             _ => 1,
         }
     }

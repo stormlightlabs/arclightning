@@ -5,7 +5,7 @@ title = "Refuse databases written by a newer arcl"
 status = "completed"
 priority = "normal"
 position = 14
-evidence = "Done on claude/schema-skew: the store refuses a database whose schema version is newer than it supports, and the workspace refuses a newer manifest, before any read or write. Both errors name the stored and supported versions and say to upgrade arcl. Store, repo and CLI tests cover a future-stamped database and manifest; the existing migration tests cover older databases."
+evidence = "Delivered by #87: the store refuses a database whose schema version is newer than it supports, and the workspace refuses a newer manifest, before any read or write. Both errors name the stored and supported versions and say to upgrade arcl. Store, repo, CLI and MCP tests cover a future-stamped database and manifest, including arcl init and arcl serve; the existing migration tests cover older databases."
 +++
 
 Stop with a clear message when the database or workspace was written by a

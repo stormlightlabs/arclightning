@@ -16,10 +16,13 @@ pub(super) fn initialize(start: &Path, workspace: bool) -> IResult<Initializatio
     fs::create_dir_all(&arcl_directory)
         .map_err(|source| InitError::CreateDirectory { path: arcl_directory.clone(), source })?;
     let config_path = arcl_directory.join(CONFIG_FILE);
-    let config = load_or_create_config(&config_path, workspace)?;
-    ensure_gitignore(&arcl_directory.join(GITIGNORE_FILE))?;
+    let existing = read_config(&config_path)?;
+    // The database opens before any project file is written, so a database
+    // from a newer arcl is refused with the project left as it was.
     let database_path = arcl_directory.join(DATABASE_FILE);
     Database::open(&database_path).map_err(|source| InitError::OpenDatabase { path: database_path, source })?;
+    let config = write_config(&config_path, existing, workspace)?;
+    ensure_gitignore(&arcl_directory.join(GITIGNORE_FILE))?;
     if config.workspace.enabled {
         ensure_workspace_layout(&root, &config)?;
     }
@@ -37,31 +40,42 @@ fn initialization_root(start: &Path) -> IResult<PathBuf> {
     }
 }
 
-fn load_or_create_config(path: &Path, workspace: bool) -> IResult<ProjectConfig> {
+/// Read and validate the project configuration at `path` without writing
+/// it. `None` means there is no configuration yet.
+fn read_config(path: &Path) -> IResult<Option<ProjectConfig>> {
     match fs::read_to_string(path) {
-        Ok(input) => {
-            let mut config = ProjectConfig::parse(&input)
-                .map_err(|source| InitError::InvalidConfig { path: path.to_owned(), source })?;
+        Ok(input) => ProjectConfig::parse(&input)
+            .map(Some)
+            .map_err(|source| InitError::InvalidConfig { path: path.to_owned(), source }),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(source) => Err(InitError::ReadConfig { path: path.to_owned(), source }),
+    }
+}
+
+/// Write the configuration `read_config` returned: create it when missing,
+/// and turn the workspace on when `workspace` asks for it.
+fn write_config(path: &Path, existing: Option<ProjectConfig>, workspace: bool) -> IResult<ProjectConfig> {
+    let render = |config: &ProjectConfig| {
+        config
+            .render()
+            .map_err(|source| InitError::RenderConfig { path: path.to_owned(), source })
+    };
+    match existing {
+        Some(mut config) => {
             if workspace && !config.workspace.enabled {
                 config.workspace.enabled = true;
-                let rendered = config
-                    .render()
-                    .map_err(|source| InitError::RenderConfig { path: path.to_owned(), source })?;
-                fs::write(path, rendered).map_err(|source| InitError::WriteConfig { path: path.to_owned(), source })?;
+                fs::write(path, render(&config)?)
+                    .map_err(|source| InitError::WriteConfig { path: path.to_owned(), source })?;
             }
             Ok(config)
         }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+        None => {
             let mut config = ProjectConfig::default();
             config.workspace.enabled = workspace;
-            let rendered = config
-                .render()
-                .map_err(|source| InitError::RenderConfig { path: path.to_owned(), source })?;
-            create_file(path, rendered.as_bytes())
+            create_file(path, render(&config)?.as_bytes())
                 .map_err(|source| InitError::WriteConfig { path: path.to_owned(), source })?;
             Ok(config)
         }
-        Err(source) => Err(InitError::ReadConfig { path: path.to_owned(), source }),
     }
 }
 
