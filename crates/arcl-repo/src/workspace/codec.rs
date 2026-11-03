@@ -181,8 +181,8 @@ impl WorkspaceManifest {
             let stored = toml::from_str::<toml::Table>(input)
                 .ok()
                 .and_then(|table| table.get("format-version")?.as_integer())
-                .and_then(|version| u32::try_from(version).ok())
-                .filter(|version| *version > WORKSPACE_FORMAT_VERSION);
+                .and_then(|version| u64::try_from(version).ok())
+                .filter(|version| *version > u64::from(WORKSPACE_FORMAT_VERSION));
             match stored {
                 Some(stored) => WorkspaceError::NewerWorkspace { stored, supported: WORKSPACE_FORMAT_VERSION },
                 None => WorkspaceError::ManifestParse(error),
@@ -196,7 +196,7 @@ impl WorkspaceManifest {
     pub fn validate(&self) -> Result<()> {
         if self.format_version > WORKSPACE_FORMAT_VERSION {
             return Err(WorkspaceError::NewerWorkspace {
-                stored: self.format_version,
+                stored: self.format_version.into(),
                 supported: WORKSPACE_FORMAT_VERSION,
             });
         }
@@ -1131,6 +1131,19 @@ mod tests {
             WorkspaceManifest::parse("format-version = 0"),
             Err(WorkspaceError::UnsupportedVersion { found: 0, expected: 5 })
         ));
+    }
+
+    #[test]
+    fn a_manifest_version_past_u32_is_newer_and_shown_as_written() {
+        for stored in [4_294_967_296_u64, i64::MAX as u64] {
+            let error =
+                WorkspaceManifest::parse(&format!("format-version = {stored}")).expect_err("newer manifest refuses");
+            assert!(
+                matches!(error, WorkspaceError::NewerWorkspace { stored: found, supported: 5 } if found == stored),
+                "{error:?}"
+            );
+            assert!(error.to_string().contains(&format!("version {stored} ")), "{error}");
+        }
     }
 
     #[test]

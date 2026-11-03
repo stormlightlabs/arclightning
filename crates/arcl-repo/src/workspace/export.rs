@@ -45,7 +45,7 @@ pub enum WorkspaceExportError {
     ///
     /// [`WorkspaceError::NewerWorkspace`]: super::WorkspaceError::NewerWorkspace
     #[error("{}", super::WorkspaceError::NewerWorkspace { stored: *stored, supported: *supported })]
-    NewerWorkspace { stored: u32, supported: u32 },
+    NewerWorkspace { stored: u64, supported: u32 },
 }
 
 /// A single canonical file produced by a workspace projection.

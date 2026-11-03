@@ -886,6 +886,64 @@ fn a_workspace_from_a_newer_arcl_is_refused_before_a_write() {
     assert_eq!(tasks["data"]["tasks"].as_array().expect("tasks").len(), 1);
 }
 
+/// Every file under `root` with its content, sorted by path.
+fn tree_files(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    let mut files = Vec::new();
+    let mut pending = vec![root.to_owned()];
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(&directory).expect("directory reads") {
+            let path = entry.expect("entry reads").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                let content = fs::read(&path).expect("file reads");
+                files.push((path, content));
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+#[test]
+fn init_on_a_workspace_from_a_newer_arcl_exits_3_and_changes_no_file() {
+    // A fresh clone: the committed configuration and workspace, no database.
+    let clone = tempdir().expect("temporary directory can be created");
+    run_json(clone.path(), ["--json", "init", "--workspace"].as_ref());
+    for entry in fs::read_dir(clone.path().join(".arcl")).expect("directory reads") {
+        let path = entry.expect("entry reads").path();
+        if path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("arcl.db"))
+        {
+            fs::remove_file(path).expect("database removes");
+        }
+    }
+    // A workspace alone, which `--workspace` would add a configuration to.
+    let bare = tempdir().expect("temporary directory can be created");
+    fs::create_dir_all(bare.path().join(".arcl/workspace")).expect("workspace creates");
+
+    for directory in [clone.path(), bare.path()] {
+        fs::write(directory.join(".arcl/workspace/manifest.toml"), "format-version = 99\n").expect("manifest writes");
+        let before = tree_files(directory);
+
+        let output = arcl_in(directory)
+            .args(["--json", "init", "--workspace"])
+            .output()
+            .expect("arcl init runs");
+        assert_eq!(output.status.code(), Some(3));
+        let stderr: Value = serde_json::from_slice(&output.stderr).expect("stderr is one JSON value");
+        assert_eq!(stderr["error"]["exit_code"], 3);
+        let message = stderr["error"]["message"].as_str().expect("error message");
+        assert!(
+            message.contains("workspace format version 99 was written by a newer arcl"),
+            "{message}"
+        );
+        assert!(!directory.join(".arcl/arcl.db").exists());
+        assert_eq!(tree_files(directory), before);
+    }
+}
+
 #[test]
 fn blocked_by_takes_one_id_per_flag_in_task_create_and_dependency_add() {
     let directory = initialized_directory();

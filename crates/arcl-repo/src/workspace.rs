@@ -85,7 +85,7 @@ pub enum WorkspaceError {
     #[error(
         "workspace format version {stored} was written by a newer arcl; this arcl supports workspace format versions up to {supported}. Upgrade arcl to use this workspace"
     )]
-    NewerWorkspace { stored: u32, supported: u32 },
+    NewerWorkspace { stored: u64, supported: u32 },
     #[error("workspace path `{path}` must be a non-empty worktree-relative path")]
     InvalidPath { path: PathBuf },
     #[error("workspace path component `{path}` must not be a symbolic link")]

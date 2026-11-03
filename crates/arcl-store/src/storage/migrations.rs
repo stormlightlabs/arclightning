@@ -1,4 +1,4 @@
-use rusqlite::Connection;
+use rusqlite::{Connection, TransactionBehavior};
 
 use super::{CURRENT_VERSION, StorageError};
 
@@ -22,34 +22,53 @@ const MIGRATIONS: &[Migration] = &[
 ///
 /// The stored version is read first, and a database from a newer arcl is
 /// refused with [`StorageError::NewerDatabase`] before anything else is read
-/// or written.
+/// or written. A current database takes no write lock.
 pub fn apply(connection: &mut Connection) -> Result<(), StorageError> {
-    let current: i32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if current > CURRENT_VERSION {
-        return Err(StorageError::NewerDatabase { stored: current, supported: CURRENT_VERSION });
+    if is_current(stored_version(connection)?)? {
+        return Ok(());
+    }
+    upgrade(connection)
+}
+
+/// Apply the pending migrations in one `BEGIN IMMEDIATE` transaction.
+///
+/// The stored version is read again under the write lock, because another
+/// connection may have migrated the file, or a newer arcl stamped it, since
+/// [`apply`] read it.
+fn upgrade(connection: &mut Connection) -> Result<(), StorageError> {
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let stored = stored_version(&transaction)?;
+    if is_current(stored)? {
+        return Ok(());
     }
 
-    let mut expected = current + 1;
-    for migration in MIGRATIONS {
-        if migration.version < expected {
-            continue;
-        }
+    let pending = MIGRATIONS.iter().filter(|migration| migration.version > stored);
+    for (expected, migration) in (stored + 1..).zip(pending) {
         if migration.version != expected {
             return Err(StorageError::MigrationGap { expected, found: migration.version });
         }
-
-        let transaction = connection.transaction()?;
         transaction.execute_batch(migration.sql)?;
         transaction.pragma_update(None, "user_version", migration.version)?;
-        transaction.commit()?;
-        expected += 1;
     }
+    transaction.commit()?;
     Ok(())
+}
+
+fn stored_version(connection: &Connection) -> Result<i32, StorageError> {
+    Ok(connection.pragma_query_value(None, "user_version", |row| row.get(0))?)
+}
+
+/// Whether `stored` is [`CURRENT_VERSION`]. A newer version is refused.
+fn is_current(stored: i32) -> Result<bool, StorageError> {
+    if stored > CURRENT_VERSION {
+        return Err(StorageError::NewerDatabase { stored, supported: CURRENT_VERSION });
+    }
+    Ok(stored == CURRENT_VERSION)
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::{CURRENT_VERSION, DEFAULT_PROJECT_ID, Database};
+    use crate::storage::{CURRENT_VERSION, DEFAULT_PROJECT_ID, Database, StorageError};
 
     #[test]
     fn plan_key_migration_upgrades_a_version_one_database() {
@@ -355,6 +374,59 @@ mod tests {
             )
             .expect("format version reads");
         assert_eq!(format, CURRENT_VERSION.to_string());
+    }
+
+    /// Create a file database at schema version 6, as an older arcl left it.
+    fn version_six_file(path: &std::path::Path) -> rusqlite::Connection {
+        let connection = rusqlite::Connection::open(path).expect("SQLite opens");
+        for migration in super::MIGRATIONS.iter().filter(|migration| migration.version <= 6) {
+            connection.execute_batch(migration.sql).expect("earlier schema creates");
+        }
+        connection
+            .pragma_update(None, "user_version", 6)
+            .expect("version marker writes");
+        connection
+    }
+
+    #[test]
+    fn an_upgrade_after_another_connection_migrated_the_file_changes_nothing() {
+        let directory = tempfile::tempdir().expect("directory creates");
+        let path = directory.path().join("arcl.db");
+        let mut first = version_six_file(&path);
+        // The first connection has read version 6 and decided to upgrade.
+        // A second connection migrates the file before it takes the lock.
+        let mut second = rusqlite::Connection::open(&path).expect("SQLite opens");
+        super::apply(&mut second).expect("second connection migrates");
+        let before = std::fs::read(&path).expect("database reads");
+
+        super::upgrade(&mut first).expect("upgrade is a no-op");
+        assert_eq!(std::fs::read(&path).expect("database reads"), before);
+        super::apply(&mut first).expect("a later open succeeds");
+        let version: i32 = first
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .expect("version reads");
+        assert_eq!(version, CURRENT_VERSION);
+    }
+
+    #[test]
+    fn an_upgrade_after_a_newer_arcl_stamped_the_file_is_refused() {
+        let directory = tempfile::tempdir().expect("directory creates");
+        let path = directory.path().join("arcl.db");
+        let mut first = version_six_file(&path);
+        let future = CURRENT_VERSION + 1;
+        rusqlite::Connection::open(&path)
+            .expect("SQLite opens")
+            .pragma_update(None, "user_version", future)
+            .expect("future version writes");
+        let before = std::fs::read(&path).expect("database reads");
+
+        let error = super::upgrade(&mut first).expect_err("newer database refuses");
+        assert!(
+            matches!(error, StorageError::NewerDatabase { stored, supported }
+                if stored == future && supported == CURRENT_VERSION),
+            "{error:?}"
+        );
+        assert_eq!(std::fs::read(&path).expect("database reads"), before);
     }
 
     #[test]
