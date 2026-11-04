@@ -23,17 +23,17 @@ const SKILL_NAME: &str = "arclightning";
 /// Every file in `skills/arclightning/`, as a path relative to that directory
 /// and its contents. The `embedded_files_match_the_source_directory` test
 /// fails when a file is added there but not here.
-const SKILL_FILES: &[(&str, &str)] = &[("SKILL.md", SKILL_MARKDOWN)];
+pub(super) const SKILL_FILES: &[(&str, &str)] = &[("SKILL.md", SKILL_MARKDOWN)];
 
 /// One skill file to compare and maybe write, after its path passed the
 /// checks in [`check_target`].
-struct SkillTarget {
+pub(super) struct SkillTarget {
     /// The path relative to the project root, as reported.
     relative: String,
     /// The path with every symbolic link in its directories resolved. Reads
     /// and writes go through it, and two targets that reach the same file
     /// through a linked directory share it.
-    resolved: PathBuf,
+    pub(super) resolved: PathBuf,
     /// The embedded contents.
     content: &'static str,
 }
@@ -43,17 +43,7 @@ struct SkillTarget {
 pub(super) fn exec_skill(command: SkillCommand, renderer: &Renderer) -> anyhow::Result<()> {
     match command {
         SkillCommand::Install { check } => {
-            let start = std::env::current_dir()
-                .map_err(|source| ApplicationError::from_command(CommandError::CurrentDirectory { source }))?;
-            let Some(root) = nearest_project_root(&start)
-                .map_err(|(path, source)| ApplicationError::from_command(CommandError::ReadConfig { path, source }))?
-            else {
-                return Err(ApplicationError::from_command(CommandError::NotInitialized {
-                    root: start,
-                    workspace: None,
-                })
-                .into());
-            };
+            let root = current_project_root().map_err(ApplicationError::from_command)?;
             let report = install_skill(&root, check).map_err(ApplicationError::from_command)?;
             let drifted = report
                 .files
@@ -70,10 +60,19 @@ pub(super) fn exec_skill(command: SkillCommand, renderer: &Renderer) -> anyhow::
     }
 }
 
+/// The root of the initialized project that holds the current directory.
+pub(super) fn current_project_root() -> CResult<PathBuf> {
+    let start = std::env::current_dir().map_err(|source| CommandError::CurrentDirectory { source })?;
+    match nearest_project_root(&start).map_err(|(path, source)| CommandError::ReadConfig { path, source })? {
+        Some(root) => Ok(root),
+        None => Err(CommandError::NotInitialized { root: start, workspace: None }),
+    }
+}
+
 /// Compare each embedded skill file with its copy under `root`, and write the
 /// copies that are missing or differ unless `check` is set. Every target is
 /// checked before any file is written.
-fn install_skill(root: &Path, check: bool) -> CResult<SkillReport> {
+pub(super) fn install_skill(root: &Path, check: bool) -> CResult<SkillReport> {
     let canonical_root =
         fs::canonicalize(root).map_err(|source| CommandError::ReadSkill { path: root.to_owned(), source })?;
     let targets = SKILL_DIRECTORIES
@@ -122,7 +121,9 @@ fn install_skill(root: &Path, check: bool) -> CResult<SkillReport> {
 /// Check one target before anything is written: the file must be a regular
 /// file or absent, not a symbolic link, and its directory must resolve to a
 /// directory under `canonical_root`.
-fn check_target(root: &Path, canonical_root: &Path, relative: String, content: &'static str) -> CResult<SkillTarget> {
+pub(super) fn check_target(
+    root: &Path, canonical_root: &Path, relative: String, content: &'static str,
+) -> CResult<SkillTarget> {
     let path = root.join(&relative);
     match fs::symlink_metadata(&path) {
         Ok(meta) if meta.file_type().is_symlink() => return Err(CommandError::SkillSymlink { path }),
@@ -171,7 +172,7 @@ fn check_target(root: &Path, canonical_root: &Path, relative: String, content: &
 /// `path`, so a reader sees the old file or the new one and never a partial
 /// write. The temporary file is created exclusively, so it never follows a
 /// link.
-fn write_replacing(path: &Path, content: &str) -> CResult<()> {
+pub(super) fn write_replacing(path: &Path, content: &str) -> CResult<()> {
     let (Some(parent), Some(file_name)) = (path.parent(), path.file_name()) else {
         return Err(CommandError::SkillNotFile { path: path.to_owned() });
     };
@@ -199,7 +200,7 @@ fn write_replacing(path: &Path, content: &str) -> CResult<()> {
 
 /// Whether a metadata lookup failed because the path does not exist, either
 /// missing or below a file.
-fn absent(error: &io::Error) -> bool {
+pub(super) fn absent(error: &io::Error) -> bool {
     matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory)
 }
 

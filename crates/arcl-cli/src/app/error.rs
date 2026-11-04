@@ -196,20 +196,35 @@ pub(super) enum CommandError {
     NoClaimName,
     #[error("database or graph integrity check failed: {message}")]
     Integrity { message: String },
-    #[error("could not read skill file `{path}`: {source}")]
+    #[error("could not read `{path}`: {source}")]
     ReadSkill { path: PathBuf, source: io::Error },
-    #[error("could not write skill file `{path}`: {source}")]
+    #[error("could not write `{path}`: {source}")]
     WriteSkill { path: PathBuf, source: io::Error },
-    #[error("skill file `{path}` is a symbolic link; replace it with a regular file or remove it")]
+    #[error("`{path}` is a symbolic link; replace it with a regular file or remove it")]
     SkillSymlink { path: PathBuf },
-    #[error("skill file `{path}` is not a regular file")]
+    #[error("`{path}` is not a regular file")]
     SkillNotFile { path: PathBuf },
-    #[error("skill path `{path}` is not a directory")]
+    #[error("`{path}` is not a directory")]
     SkillNotDirectory { path: PathBuf },
-    #[error("skill file `{path}` resolves outside the project root `{root}`")]
+    #[error("`{path}` resolves outside the project root `{root}`")]
     SkillOutsideProject { path: PathBuf, root: PathBuf },
     #[error("{count} skill file(s) are missing or differ from this arcl; run `arcl skill install`")]
     SkillDrift { count: usize },
+    #[error("`{path}` is not valid JSON: {message}")]
+    InvalidSetupJson { path: PathBuf, message: String },
+    #[error("`{path}` has `{marker}` with no `{end}` after it; fix or remove the block")]
+    UnclosedSetupBlock {
+        path: PathBuf,
+        marker: &'static str,
+        end: &'static str,
+    },
+    #[error(
+        "`arcl setup` would change existing files and standard input is not a terminal to ask: {}; pass `--yes` to change them, or `--dry-run` to see the diff",
+        paths.join(", ")
+    )]
+    SetupNeedsConfirmation { paths: Vec<String> },
+    #[error("no files changed")]
+    SetupDeclined,
     #[error("could not read `{path}`: {source}")]
     ReadWebFile { path: PathBuf, source: io::Error },
     #[error("could not write `{path}`: {source}")]
@@ -281,8 +296,9 @@ impl CommandError {
             | Self::WriteSkill { .. }
             | Self::ReadWebFile { .. }
             | Self::WriteWebFile { .. }
-            | Self::WebExport { .. } => 1,
-            Self::SkillDrift { .. } => 4,
+            | Self::WebExport { .. }
+            | Self::SetupDeclined => 1,
+            Self::SkillDrift { .. } | Self::SetupNeedsConfirmation { .. } => 4,
             Self::OpenDatabase { source, .. } => source.exit_code(),
             Self::Storage(error) => error.exit_code(),
             Self::InvalidMarkdown { .. }
@@ -296,6 +312,8 @@ impl CommandError {
             | Self::SkillNotFile { .. }
             | Self::SkillNotDirectory { .. }
             | Self::SkillOutsideProject { .. }
+            | Self::InvalidSetupJson { .. }
+            | Self::UnclosedSetupBlock { .. }
             | Self::InvalidQueue { .. } => 3,
         }
     }

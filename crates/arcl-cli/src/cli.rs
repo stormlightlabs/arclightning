@@ -43,6 +43,17 @@ pub enum TreeStyle {
     Outline,
 }
 
+/// The coding agent `arcl setup` writes files for.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum SetupAgent {
+    /// Claude Code: `CLAUDE.md` and a `SessionStart` hook in `.claude/settings.json`.
+    Claude,
+    /// Codex: `AGENTS.md` and a `SessionStart` hook in `.codex/hooks.json`.
+    Codex,
+    /// Pi: `AGENTS.md` and an extension in `.pi/extensions/`.
+    Pi,
+}
+
 /// Arc Lightning commands.
 #[derive(Clone, Debug, Subcommand)]
 pub enum Command {
@@ -96,6 +107,19 @@ pub enum Command {
     Skill {
         #[command(subcommand)]
         command: SkillCommand,
+    },
+    /// Set up a coding agent: the skill, the arcl lines in its instruction
+    /// file, and a session-start hook that runs `arcl prime`.
+    Setup {
+        /// The agent to set up.
+        #[arg(value_enum)]
+        agent: SetupAgent,
+        /// Change existing files without asking.
+        #[arg(long)]
+        yes: bool,
+        /// Print each change as a diff and write nothing.
+        #[arg(long, conflicts_with = "yes")]
+        dry_run: bool,
     },
     /// Inspect one record selected by its typed ID prefix.
     Show {
