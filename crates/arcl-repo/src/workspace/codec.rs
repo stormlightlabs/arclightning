@@ -172,15 +172,35 @@ impl Default for WorkspaceManifest {
 
 impl WorkspaceManifest {
     /// Parse and validate a workspace manifest.
+    ///
+    /// A manifest from a newer arcl fails with
+    /// [`WorkspaceError::NewerWorkspace`], even when it also carries fields
+    /// this crate does not know.
     pub fn parse(input: &str) -> Result<Self> {
-        let manifest = toml::from_str::<Self>(input).map_err(WorkspaceError::ManifestParse)?;
+        let manifest = toml::from_str::<Self>(input).map_err(|error| {
+            let stored = toml::from_str::<toml::Table>(input)
+                .ok()
+                .and_then(|table| table.get("format-version")?.as_integer())
+                .and_then(|version| u64::try_from(version).ok())
+                .filter(|version| *version > u64::from(WORKSPACE_FORMAT_VERSION));
+            match stored {
+                Some(stored) => WorkspaceError::NewerWorkspace { stored, supported: WORKSPACE_FORMAT_VERSION },
+                None => WorkspaceError::ManifestParse(error),
+            }
+        })?;
         manifest.validate()?;
         Ok(manifest)
     }
 
     /// Validate that this manifest uses a workspace format this crate reads.
     pub fn validate(&self) -> Result<()> {
-        if !(OLDEST_WORKSPACE_FORMAT_VERSION..=WORKSPACE_FORMAT_VERSION).contains(&self.format_version) {
+        if self.format_version > WORKSPACE_FORMAT_VERSION {
+            return Err(WorkspaceError::NewerWorkspace {
+                stored: self.format_version.into(),
+                supported: WORKSPACE_FORMAT_VERSION,
+            });
+        }
+        if self.format_version < OLDEST_WORKSPACE_FORMAT_VERSION {
             return Err(WorkspaceError::UnsupportedVersion {
                 found: self.format_version,
                 expected: WORKSPACE_FORMAT_VERSION,
@@ -1107,11 +1127,37 @@ mod tests {
             );
         }
         assert_eq!(WORKSPACE_FORMAT_VERSION, 5);
-        for version in [0, 6] {
-            assert!(matches!(
-                WorkspaceManifest::parse(&format!("format-version = {version}")),
-                Err(WorkspaceError::UnsupportedVersion { found, expected: 5 }) if found == version
-            ));
+        assert!(matches!(
+            WorkspaceManifest::parse("format-version = 0"),
+            Err(WorkspaceError::UnsupportedVersion { found: 0, expected: 5 })
+        ));
+    }
+
+    #[test]
+    fn a_manifest_version_past_u32_is_newer_and_shown_as_written() {
+        for stored in [4_294_967_296_u64, i64::MAX as u64] {
+            let error =
+                WorkspaceManifest::parse(&format!("format-version = {stored}")).expect_err("newer manifest refuses");
+            assert!(
+                matches!(error, WorkspaceError::NewerWorkspace { stored: found, supported: 5 } if found == stored),
+                "{error:?}"
+            );
+            assert!(error.to_string().contains(&format!("version {stored} ")), "{error}");
+        }
+    }
+
+    #[test]
+    fn a_manifest_from_a_newer_arcl_names_both_versions() {
+        for input in ["format-version = 6", "format-version = 6\nfuture-field = true"] {
+            let error = WorkspaceManifest::parse(input).expect_err("newer manifest refuses");
+            assert!(
+                matches!(error, WorkspaceError::NewerWorkspace { stored: 6, supported: 5 }),
+                "{error:?}"
+            );
+            let message = error.to_string();
+            assert!(message.contains("version 6"), "{message}");
+            assert!(message.contains("up to 5"), "{message}");
+            assert!(message.contains("Upgrade arcl"), "{message}");
         }
     }
 

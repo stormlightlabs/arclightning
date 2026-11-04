@@ -759,6 +759,192 @@ fn a_missing_database_beside_a_workspace_says_init_imports_it() {
 }
 
 #[test]
+fn a_database_from_a_newer_arcl_is_refused_by_reads_writes_and_sync() {
+    let directory = tempdir().expect("temporary directory can be created");
+    run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
+    run_json(directory.path(), ["--json", "task", "create", "Kept"].as_ref());
+    let path = stamp_newer_database(directory.path());
+    let before = fs::read(&path).expect("database reads");
+
+    for args in [
+        ["--json", "task", "list"].as_ref(),
+        ["--json", "task", "create", "Refused"].as_ref(),
+        ["--json", "workspace", "sync"].as_ref(),
+    ] {
+        let output = arcl_in(directory.path()).args(args).output().expect("command runs");
+        assert_eq!(output.status.code(), Some(3), "{}", args.join(" "));
+        let stderr: Value = serde_json::from_slice(&output.stderr).expect("stderr is one JSON value");
+        assert_eq!(stderr["error"]["code"], "invalid_request");
+        assert_newer_database_message(stderr["error"]["message"].as_str().expect("error message"));
+    }
+    assert_eq!(fs::read(&path).expect("database reads"), before);
+}
+
+/// Stamp the project database in `directory` with schema version 99, as a
+/// newer arcl would, and return its path.
+fn stamp_newer_database(directory: &Path) -> PathBuf {
+    let path = directory.join(".arcl/arcl.db");
+    let database = rusqlite::Connection::open(&path).expect("database opens");
+    database
+        .pragma_update(None, "user_version", 99)
+        .expect("future version writes");
+    path
+}
+
+/// Assert that `message` refuses a database stamped by [`stamp_newer_database`].
+fn assert_newer_database_message(message: &str) {
+    assert!(
+        message.contains("schema version 99 was written by a newer arcl"),
+        "{message}"
+    );
+    assert!(message.contains("supports schema versions up to "), "{message}");
+    assert!(message.contains("Upgrade arcl"), "{message}");
+}
+
+#[test]
+fn init_on_a_database_from_a_newer_arcl_exits_3_and_changes_no_file() {
+    let directory = initialized_directory();
+    let arcl = directory.path().join(".arcl");
+    let database = stamp_newer_database(directory.path());
+    // An ignore file without the required entries, which init would extend.
+    fs::write(arcl.join(".gitignore"), "custom\n").expect("ignore file writes");
+    let files = [database, arcl.join("config.toml"), arcl.join(".gitignore")];
+    let before = files.each_ref().map(|path| fs::read(path).expect("file reads"));
+
+    let output = arcl_in(directory.path())
+        .args(["--json", "init", "--workspace"])
+        .output()
+        .expect("arcl init runs");
+    assert_eq!(output.status.code(), Some(3));
+    let stderr: Value = serde_json::from_slice(&output.stderr).expect("stderr is one JSON value");
+    assert_eq!(stderr["error"]["code"], "invalid_request");
+    assert_eq!(stderr["error"]["exit_code"], 3);
+    assert_newer_database_message(stderr["error"]["message"].as_str().expect("error message"));
+    assert_eq!(files.each_ref().map(|path| fs::read(path).expect("file reads")), before);
+    assert!(!arcl.join("workspace").exists());
+}
+
+#[test]
+fn serve_refuses_a_database_from_a_newer_arcl() {
+    let directory = initialized_directory();
+    let database = stamp_newer_database(directory.path());
+    let before = fs::read(&database).expect("database reads");
+    let mut child = isolated_command(assert_cmd::cargo::cargo_bin("arcl"), directory.path())
+        .args(["serve", "--api", "--port", "0"])
+        .env_remove("ARCL_SERVE_TOKEN")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("arcl serve starts");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("arcl serve can be waited on") {
+            break status;
+        }
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("arcl serve started on a database from a newer arcl");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    let output = child.wait_with_output().expect("the output reads");
+    assert_eq!(status.code(), Some(3));
+    assert!(output.stdout.is_empty());
+    assert_newer_database_message(&String::from_utf8(output.stderr).expect("UTF-8"));
+    assert_eq!(fs::read(&database).expect("database reads"), before);
+}
+
+#[test]
+fn a_workspace_from_a_newer_arcl_is_refused_before_a_write() {
+    let directory = tempdir().expect("temporary directory can be created");
+    run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
+    run_json(directory.path(), ["--json", "task", "create", "Kept"].as_ref());
+    let manifest = directory.path().join(".arcl/workspace/manifest.toml");
+    fs::write(&manifest, "format-version = 99\n").expect("manifest writes");
+
+    for args in [
+        ["--json", "task", "create", "Refused"].as_ref(),
+        ["--json", "workspace", "export"].as_ref(),
+    ] {
+        let output = arcl_in(directory.path()).args(args).output().expect("command runs");
+        assert_eq!(output.status.code(), Some(3), "{}", args.join(" "));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("workspace format version 99 was written by a newer arcl"),
+            "{stderr}"
+        );
+        assert!(stderr.contains("Upgrade arcl"), "{stderr}");
+    }
+    assert_eq!(
+        fs::read_to_string(&manifest).expect("manifest reads"),
+        "format-version = 99\n"
+    );
+    let tasks = with_workspace_off(directory.path(), || {
+        run_json(directory.path(), ["--json", "task", "list"].as_ref())
+    });
+    assert_eq!(tasks["data"]["tasks"].as_array().expect("tasks").len(), 1);
+}
+
+/// Every file under `root` with its content, sorted by path.
+fn tree_files(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    let mut files = Vec::new();
+    let mut pending = vec![root.to_owned()];
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(&directory).expect("directory reads") {
+            let path = entry.expect("entry reads").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                let content = fs::read(&path).expect("file reads");
+                files.push((path, content));
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+#[test]
+fn init_on_a_workspace_from_a_newer_arcl_exits_3_and_changes_no_file() {
+    // A fresh clone: the committed configuration and workspace, no database.
+    let clone = tempdir().expect("temporary directory can be created");
+    run_json(clone.path(), ["--json", "init", "--workspace"].as_ref());
+    for entry in fs::read_dir(clone.path().join(".arcl")).expect("directory reads") {
+        let path = entry.expect("entry reads").path();
+        if path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("arcl.db"))
+        {
+            fs::remove_file(path).expect("database removes");
+        }
+    }
+    // A workspace alone, which `--workspace` would add a configuration to.
+    let bare = tempdir().expect("temporary directory can be created");
+    fs::create_dir_all(bare.path().join(".arcl/workspace")).expect("workspace creates");
+
+    for directory in [clone.path(), bare.path()] {
+        fs::write(directory.join(".arcl/workspace/manifest.toml"), "format-version = 99\n").expect("manifest writes");
+        let before = tree_files(directory);
+
+        let output = arcl_in(directory)
+            .args(["--json", "init", "--workspace"])
+            .output()
+            .expect("arcl init runs");
+        assert_eq!(output.status.code(), Some(3));
+        let stderr: Value = serde_json::from_slice(&output.stderr).expect("stderr is one JSON value");
+        assert_eq!(stderr["error"]["exit_code"], 3);
+        let message = stderr["error"]["message"].as_str().expect("error message");
+        assert!(
+            message.contains("workspace format version 99 was written by a newer arcl"),
+            "{message}"
+        );
+        assert!(!directory.join(".arcl/arcl.db").exists());
+        assert_eq!(tree_files(directory), before);
+    }
+}
+
+#[test]
 fn blocked_by_takes_one_id_per_flag_in_task_create_and_dependency_add() {
     let directory = initialized_directory();
     let path = directory.path();

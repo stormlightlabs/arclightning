@@ -408,6 +408,53 @@ async fn a_missing_database_beside_a_workspace_says_init_imports_it() {
 }
 
 #[tokio::test]
+async fn a_database_from_a_newer_arcl_is_refused_by_reads_and_writes() {
+    let project = project(true);
+    let server = ArclServer::new(project.path().to_owned());
+    create_task(&server, "Kept", &[]).await;
+    let path = project.path().join(".arcl/arcl.db");
+    rusqlite::Connection::open(&path)
+        .expect("database opens")
+        .pragma_update(None, "user_version", 99)
+        .expect("future version writes");
+    let before = fs::read(&path).expect("database reads");
+
+    let read = server
+        .ready(Parameters::from(ReadyInput::default()), CancellationToken::new())
+        .await
+        .err()
+        .expect("read refuses");
+    let write = server
+        .task_create(
+            Parameters::from(TaskCreateInput {
+                title: "Refused".to_owned(),
+                body: String::new(),
+                spec: None,
+                plan: None,
+                phase: None,
+                parent: None,
+                priority: TaskPriority::Normal,
+                position: 0,
+                blocked_by: Vec::new(),
+            }),
+            CancellationToken::new(),
+        )
+        .await
+        .err()
+        .expect("write refuses");
+    for error in [read, write] {
+        assert_eq!((error.code(), error.exit_code()), ("invalid_request", 3));
+        let message = error.to_string();
+        assert!(
+            message.contains("schema version 99 was written by a newer arcl"),
+            "{message}"
+        );
+        assert!(message.contains("Upgrade arcl"), "{message}");
+    }
+    assert_eq!(fs::read(&path).expect("database reads"), before);
+}
+
+#[tokio::test]
 async fn capture_create_records_the_task_it_came_from() {
     let project = project(false);
     let server = ArclServer::new(project.path().to_owned());

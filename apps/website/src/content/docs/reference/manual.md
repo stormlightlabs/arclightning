@@ -70,6 +70,19 @@ A fresh clone or worktree has the committed config and workspace but no
 database. Other commands fail there with exit code `3` and say to run
 `arcl init`; the command after it imports the workspace.
 
+Every command that opens the database applies the migrations an older
+database needs. A database written by a newer arcl is refused before any
+read or write, with exit code `3`:
+
+```text
+database schema version 9 was written by a newer arcl; this arcl supports schema versions up to 8. Upgrade arcl to open it
+```
+
+The CLI, `arcl serve` and the `arcl-mcp` server all run this check, and
+leave the database as it was. A workspace whose `manifest.toml` has a newer
+`format-version` is refused the same way before any workspace file is read
+or written.
+
 ### `arcl skill install`
 
 Install the Arc Lightning agent skill into the project.

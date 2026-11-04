@@ -79,6 +79,13 @@ pub enum WorkspaceError {
     Render(#[from] toml::ser::Error),
     #[error("unsupported configuration format version {found}; expected {expected}")]
     UnsupportedVersion { found: u32, expected: u32 },
+    /// A workspace manifest whose format version is newer than
+    /// [`WORKSPACE_FORMAT_VERSION`]. It was written by a newer arcl, so the
+    /// workspace is refused before any record is read or written.
+    #[error(
+        "workspace format version {stored} was written by a newer arcl; this arcl supports workspace format versions up to {supported}. Upgrade arcl to use this workspace"
+    )]
+    NewerWorkspace { stored: u64, supported: u32 },
     #[error("workspace path `{path}` must be a non-empty worktree-relative path")]
     InvalidPath { path: PathBuf },
     #[error("workspace path component `{path}` must not be a symbolic link")]

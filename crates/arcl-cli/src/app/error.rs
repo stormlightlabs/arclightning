@@ -106,6 +106,11 @@ pub(super) enum InitError {
     RenderWorkspaceManifest { path: PathBuf, source: WorkspaceError },
     #[error("could not write workspace manifest `{path}`: {source}")]
     WriteWorkspaceManifest { path: PathBuf, source: io::Error },
+    #[error("could not read workspace manifest `{path}`: {source}")]
+    ReadWorkspaceManifest { path: PathBuf, source: io::Error },
+    /// The workspace manifest on disk was written by a newer arcl.
+    #[error("workspace manifest `{path}` cannot be used: {source}")]
+    NewerWorkspace { path: PathBuf, source: WorkspaceError },
     #[error("could not read scoped ignore file `{path}`: {source}")]
     ReadGitignore { path: PathBuf, source: io::Error },
     #[error("could not write scoped ignore file `{path}`: {source}")]
@@ -118,7 +123,8 @@ impl InitError {
     fn exit_code(&self) -> u8 {
         match self {
             Self::Vcs(error) => error.exit_code(),
-            Self::InvalidConfig { .. } => 3,
+            Self::InvalidConfig { .. } | Self::NewerWorkspace { .. } => 3,
+            Self::OpenDatabase { source, .. } => source.exit_code(),
             _ => 1,
         }
     }
@@ -253,6 +259,7 @@ impl CommandError {
             Self::NotInitialized { .. } | Self::InvalidConfig { .. } | Self::WorkspaceDisabled | Self::Domain(_) => 3,
             Self::WorkspaceExport(error) => match error.as_ref() {
                 WorkspaceExportError::Conflict { .. } => 4,
+                WorkspaceExportError::NewerWorkspace { .. } => 3,
                 _ => 1,
             },
             Self::WorkspaceImport(error) => error.exit_code(),

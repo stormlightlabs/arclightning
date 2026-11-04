@@ -13,13 +13,21 @@ pub(super) struct Initialization {
 pub(super) fn initialize(start: &Path, workspace: bool) -> IResult<Initialization> {
     let root = initialization_root(start)?;
     let arcl_directory = root.join(ARCL_DIRECTORY);
+    let config_path = arcl_directory.join(CONFIG_FILE);
+    let existing = read_config(&config_path)?;
+    // A workspace or database from a newer arcl is refused before any project
+    // file is written, so the project is left as it was.
+    let default = ProjectConfig::default();
+    let planned = existing.as_ref().unwrap_or(&default);
+    if workspace || planned.workspace.enabled {
+        refuse_newer_workspace(&root, planned)?;
+    }
     fs::create_dir_all(&arcl_directory)
         .map_err(|source| InitError::CreateDirectory { path: arcl_directory.clone(), source })?;
-    let config_path = arcl_directory.join(CONFIG_FILE);
-    let config = load_or_create_config(&config_path, workspace)?;
-    ensure_gitignore(&arcl_directory.join(GITIGNORE_FILE))?;
     let database_path = arcl_directory.join(DATABASE_FILE);
     Database::open(&database_path).map_err(|source| InitError::OpenDatabase { path: database_path, source })?;
+    let config = write_config(&config_path, existing, workspace)?;
+    ensure_gitignore(&arcl_directory.join(GITIGNORE_FILE))?;
     if config.workspace.enabled {
         ensure_workspace_layout(&root, &config)?;
     }
@@ -37,31 +45,59 @@ fn initialization_root(start: &Path) -> IResult<PathBuf> {
     }
 }
 
-fn load_or_create_config(path: &Path, workspace: bool) -> IResult<ProjectConfig> {
+/// Read and validate the project configuration at `path` without writing
+/// it. `None` means there is no configuration yet.
+fn read_config(path: &Path) -> IResult<Option<ProjectConfig>> {
     match fs::read_to_string(path) {
-        Ok(input) => {
-            let mut config = ProjectConfig::parse(&input)
-                .map_err(|source| InitError::InvalidConfig { path: path.to_owned(), source })?;
+        Ok(input) => ProjectConfig::parse(&input)
+            .map(Some)
+            .map_err(|source| InitError::InvalidConfig { path: path.to_owned(), source }),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(source) => Err(InitError::ReadConfig { path: path.to_owned(), source }),
+    }
+}
+
+/// Write the configuration `read_config` returned: create it when missing,
+/// and turn the workspace on when `workspace` asks for it.
+fn write_config(path: &Path, existing: Option<ProjectConfig>, workspace: bool) -> IResult<ProjectConfig> {
+    let render = |config: &ProjectConfig| {
+        config
+            .render()
+            .map_err(|source| InitError::RenderConfig { path: path.to_owned(), source })
+    };
+    match existing {
+        Some(mut config) => {
             if workspace && !config.workspace.enabled {
                 config.workspace.enabled = true;
-                let rendered = config
-                    .render()
-                    .map_err(|source| InitError::RenderConfig { path: path.to_owned(), source })?;
-                fs::write(path, rendered).map_err(|source| InitError::WriteConfig { path: path.to_owned(), source })?;
+                fs::write(path, render(&config)?)
+                    .map_err(|source| InitError::WriteConfig { path: path.to_owned(), source })?;
             }
             Ok(config)
         }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+        None => {
             let mut config = ProjectConfig::default();
             config.workspace.enabled = workspace;
-            let rendered = config
-                .render()
-                .map_err(|source| InitError::RenderConfig { path: path.to_owned(), source })?;
-            create_file(path, rendered.as_bytes())
+            create_file(path, render(&config)?.as_bytes())
                 .map_err(|source| InitError::WriteConfig { path: path.to_owned(), source })?;
             Ok(config)
         }
-        Err(source) => Err(InitError::ReadConfig { path: path.to_owned(), source }),
+    }
+}
+
+/// Refuse a workspace manifest already on disk that a newer arcl wrote.
+/// Other manifest problems are left to the import that reads it.
+fn refuse_newer_workspace(root: &Path, config: &ProjectConfig) -> IResult<()> {
+    let workspace_root = resolve_workspace_root(root, &config.workspace.path)
+        .map_err(|source| InitError::InvalidConfig { path: root.join(ARCL_DIRECTORY).join(CONFIG_FILE), source })?;
+    let path = workspace_root.join("manifest.toml");
+    let input = match fs::read(&path) {
+        Ok(input) => input,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => return Err(InitError::ReadWorkspaceManifest { path, source }),
+    };
+    match WorkspaceManifest::parse(&String::from_utf8_lossy(&input)) {
+        Err(source @ WorkspaceError::NewerWorkspace { .. }) => Err(InitError::NewerWorkspace { path, source }),
+        _ => Ok(()),
     }
 }
 

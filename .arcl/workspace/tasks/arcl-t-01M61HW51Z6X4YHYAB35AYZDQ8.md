@@ -2,10 +2,11 @@
 id = "arcl-t-01M61HW51Z6X4YHYAB35AYZDQ8"
 phase = "arcl-ph-01M5YRFB35TZ51QW4AG1A8MS5B"
 title = "Serve only the API with arcl serve --api"
-status = "in_progress"
+status = "completed"
 priority = "normal"
 position = 12
 blocked-by = ["arcl-t-01M61HW4VBTNF4G8PEJ6G996Z4"]
+evidence = "Done in #86 at 82932cb: `arcl serve --api` serves `/graphql` and `/api` without the web page."
 +++
 
 `arcl serve --api` serves `/graphql` and `/api` without the web page, so a
@@ -27,11 +28,11 @@ Scope:
 
 Acceptance criteria:
 
-- [ ] `arcl serve --api` answers `/graphql` and `/api` and returns 404 for `/`
-- [ ] A client without an `Origin` header can run a mutation with the token
-- [ ] A mutation with a mismatched `Origin` is still refused
-- [ ] A bad `ARCL_SERVE_TOKEN` stops startup with an error naming the rule
-- [ ] The manual and SPEC.md "Local web app" document `--api`,
+- [x] `arcl serve --api` answers `/graphql` and `/api` and returns 404 for `/`
+- [x] A client without an `Origin` header can run a mutation with the token
+- [x] A mutation with a mismatched `Origin` is still refused
+- [x] A bad `ARCL_SERVE_TOKEN` stops startup with an error naming the rule
+- [x] The manual and SPEC.md "Local web app" document `--api`,
   `ARCL_SERVE_TOKEN`, the startup line and the `Origin` rule
 
 Verification:

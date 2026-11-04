@@ -112,7 +112,9 @@ impl WorkspaceSyncError {
             | Self::Divergent { .. }
             | Self::Export(WorkspaceExportError::Conflict { .. })
             | Self::Storage(StorageError::ChangedSinceRead) => 4,
-            Self::Removed { .. } | Self::NothingToResolve { .. } => 3,
+            Self::Removed { .. }
+            | Self::NothingToResolve { .. }
+            | Self::Export(WorkspaceExportError::NewerWorkspace { .. }) => 3,
             Self::Import(error) => error.exit_code(),
             Self::Export(_) | Self::Storage(_) => 1,
         }
@@ -383,7 +385,7 @@ mod tests {
 
     use super::*;
     use crate::vcs::{FakeVcs, PathState};
-    use crate::workspace::{WorkspaceFile, export::export_graph_with_base, project_graph};
+    use crate::workspace::{WORKSPACE_FORMAT_VERSION, WorkspaceFile, export::export_graph_with_base, project_graph};
 
     struct Project {
         root: tempfile::TempDir,
@@ -961,6 +963,37 @@ mod tests {
         assert_eq!(outcome.converged, std::slice::from_ref(&manifest));
         assert_eq!(project.read(&manifest), "format-version = 2\n");
         assert!(project.sync().expect("repeat sync succeeds").is_empty());
+    }
+
+    #[test]
+    fn a_workspace_from_a_newer_arcl_is_refused_before_any_write() {
+        let mut project = Project::synced();
+        let manifest = PathBuf::from(MANIFEST);
+        let newer = format!("format-version = {}\n", WORKSPACE_FORMAT_VERSION + 1);
+        fs::write(project.root.path().join(MANIFEST), &newer).expect("manifest writes");
+        project
+            .database
+            .create_note("Note".to_owned(), "Not exported".to_owned())
+            .expect("note creates");
+        let base = project.database.workspace_base().expect("base loads");
+
+        let error = project.sync().expect_err("sync refuses");
+        assert_eq!(error.exit_code(), 3);
+        assert!(error.to_string().contains("written by a newer arcl"), "{error}");
+        let error = export_graph_with_base(
+            project.root.path(),
+            &project.database.connected_graph().expect("graph loads"),
+            &base,
+        )
+        .expect_err("export refuses");
+        assert!(
+            matches!(error, WorkspaceExportError::NewerWorkspace { .. }),
+            "{error:?}"
+        );
+        assert_eq!(project.read(&manifest), newer);
+        let notes = project.root.path().join("notes");
+        assert!(!notes.exists() || fs::read_dir(&notes).expect("notes read").next().is_none());
+        assert_eq!(project.database.workspace_base().expect("base loads"), base);
     }
 
     #[test]
