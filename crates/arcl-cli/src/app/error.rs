@@ -220,6 +220,10 @@ pub(super) enum CommandError {
     },
     #[error("`{path}` has `{marker}` more than once; keep one arcl block and remove the others")]
     DuplicateSetupBlock { path: PathBuf, marker: &'static str },
+    #[error("`{path}` has the key `{key}` more than once; JSON readers keep only the last, so remove the others")]
+    DuplicateSetupJsonKey { path: PathBuf, key: String },
+    #[error("`{path}` changed after `arcl setup` read it; nothing was written, so run it again")]
+    SetupFileChanged { path: String },
     #[error(
         "`arcl setup` would change existing files and standard input is not a terminal to ask: {}; pass `--yes` to change them, or `--dry-run` to see the diff",
         paths.join(", ")
@@ -300,7 +304,7 @@ impl CommandError {
             | Self::WriteWebFile { .. }
             | Self::WebExport { .. }
             | Self::SetupDeclined => 1,
-            Self::SkillDrift { .. } | Self::SetupNeedsConfirmation { .. } => 4,
+            Self::SkillDrift { .. } | Self::SetupNeedsConfirmation { .. } | Self::SetupFileChanged { .. } => 4,
             Self::OpenDatabase { source, .. } => source.exit_code(),
             Self::Storage(error) => error.exit_code(),
             Self::InvalidMarkdown { .. }
@@ -317,6 +321,7 @@ impl CommandError {
             | Self::InvalidSetupJson { .. }
             | Self::UnclosedSetupBlock { .. }
             | Self::DuplicateSetupBlock { .. }
+            | Self::DuplicateSetupJsonKey { .. }
             | Self::InvalidQueue { .. } => 3,
         }
     }

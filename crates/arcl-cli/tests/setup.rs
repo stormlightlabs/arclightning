@@ -406,3 +406,26 @@ fn setup_outside_a_project_fails() {
     assert_eq!(output.status.code(), Some(3));
     assert!(fs::read_dir(dir.path()).expect("reads").next().is_none());
 }
+
+#[test]
+fn setup_refuses_a_settings_file_with_a_repeated_hooks_key() {
+    let project = Project::new();
+    let settings = "{\n  \"hooks\": {},\n  \"hooks\": {\"Stop\": []}\n}\n";
+    project.write(".claude/settings.json", settings);
+    let output = project
+        .arcl(&["--json", "setup", "claude", "--yes"])
+        .output()
+        .expect("setup runs");
+    assert_eq!(output.status.code(), Some(3));
+    let error: Value = serde_json::from_slice(&output.stderr).expect("error envelope");
+    let message = error["error"]["message"].as_str().expect("message");
+    assert!(
+        message.contains(".claude/settings.json") && message.contains("`hooks`"),
+        "{message}"
+    );
+    assert_eq!(project.read(".claude/settings.json"), settings);
+    assert!(
+        !project.path().join("CLAUDE.md").exists(),
+        "setup wrote files before failing"
+    );
+}

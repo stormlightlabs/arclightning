@@ -130,12 +130,13 @@ arcl setup pi --yes
 | `pi`     | `AGENTS.md`      | `session_start` extension in `.pi/extensions/arcl-prime.ts` |
 
 Every agent gets the skill as `arcl skill install` writes it. The instruction
-lines sit between `<!-- arcl-setup:begin -->` and `<!-- arcl-setup:end -->`.
-A later run replaces that block and leaves the rest of the file alone. The
-hooks run `if command -v arcl >/dev/null; then arcl prime; fi`. A settings
-file that already has a `SessionStart` hook running `arcl prime` is left as it
-is. Otherwise the hook is added, and the other keys keep their order and
-indentation style. Pi has no command hooks, so it gets an extension that runs
+lines sit between `<!-- arcl-setup:begin -->` and `<!-- arcl-setup:end -->`,
+each on a line of its own. A marker inside a line of text does not count. A
+later run replaces that block and leaves the rest of the file alone. The hooks
+run `if command -v arcl >/dev/null; then arcl prime; fi`. A settings file
+whose `SessionStart` hooks already run exactly that command, with no matcher
+or a matcher that covers `startup`, is left as it is. Otherwise the hook is
+added and every other byte of the file stays as it was. Pi has no command hooks, so it gets an extension that runs
 `arcl prime` on `session_start` and adds the output to the next prompt. A
 symbolic link, such as `CLAUDE.md` pointing at `AGENTS.md`, is followed to its
 file under the project root.
@@ -144,16 +145,19 @@ A missing file is created. Before changing a file that exists, the command
 prints the diff to standard error and asks for `y`. `--yes` skips the
 question. With no terminal on standard input and no `--yes`, it writes nothing
 and exits with status code `4`, naming the files. Any answer other than `y` or
-`yes` writes nothing and exits with status code `1`.
+`yes` writes nothing and exits with status code `1`. If a file changes between
+the diff and the write, such as an edit saved while the question waits, the
+command writes nothing and exits with status code `4`, naming the file.
 
 `--dry-run` writes nothing. Its human and `--json` output include each change
 as a unified diff. Each file is `created`, `updated`, or `unchanged`, and a
 second run reports every file as `unchanged` and writes nothing. `--plain` prints `<status>\t<path>` per file.
 `--json` prints `action` (`applied`, or `planned` under `--dry-run`), `agent`,
 `agent_name`, `root`, `notes`, and a `files` array of `path`, `status` and,
-under `--dry-run`, `diff`. A settings file that is not a JSON object, or an
-instruction file with a begin marker and no end marker or with two begin
-markers, exits with status code `3`.
+under `--dry-run`, `diff`. A settings file that is not a JSON object or
+repeats a key on the path to the hook, such as two `hooks` keys, exits with
+status code `3`. So does an instruction file with a begin marker and no end
+marker, or with two begin markers.
 
 Codex runs project hooks only in a trusted project, after you trust the hook
 in `/hooks`. Pi loads `.pi/extensions/` and `.agents/skills/` only after you

@@ -8,8 +8,7 @@
 
 mod json;
 
-use json::Json;
-use serde::Serialize;
+use json::{Json, Node, Value, insert_last, line_ending};
 
 use super::skill::{SKILL_FILES, absent, check_target, current_project_root, install_skill, write_replacing};
 use super::support::write_output;
@@ -18,9 +17,6 @@ use super::*;
 /// The command every hook runs. It does nothing when `arcl` is not
 /// installed, so a teammate without it gets no hook error.
 const HOOK_COMMAND: &str = "if command -v arcl >/dev/null; then arcl prime; fi";
-
-/// What a hook command must contain for `setup` to count it as the arcl hook.
-const HOOK_NEEDLE: &str = "arcl prime";
 
 /// The line that opens the arcl block in an instruction file.
 const BLOCK_BEGIN: &str = "<!-- arcl-setup:begin -->";
@@ -234,8 +230,16 @@ fn plan(root: &Path, files: &AgentFiles) -> CResult<Vec<PlannedFile>> {
 }
 
 /// Write the planned changes: the skill through `skill install`, then each
-/// other created or updated file.
+/// other created or updated file. Every planned file is read again first, and
+/// if any differs from what the diff was made from, such as an edit saved
+/// while the prompt waited, nothing is written.
 fn apply(root: &Path, planned: Vec<PlannedFile>) -> CResult<Vec<SetupFile>> {
+    for file in &planned {
+        let path = file.resolved.clone().unwrap_or_else(|| root.join(&file.relative));
+        if read_optional(&path)? != file.before {
+            return Err(CommandError::SetupFileChanged { path: file.relative.clone() });
+        }
+    }
     let skill_changes = planned
         .iter()
         .any(|file| file.resolved.is_none() && file.status != SetupFileStatus::Unchanged);
@@ -318,13 +322,25 @@ fn read_optional(path: &Path) -> CResult<Option<String>> {
 }
 
 /// `text` with the arcl block: replaced where the markers are, or appended
-/// after a blank line. The block takes the line ending of the file's first
-/// line. A begin marker with no end after it, or a second begin marker, is an
-/// error.
+/// after a blank line. A marker counts only on a line of its own, so one
+/// named in prose or inline code is left alone. The block takes the line
+/// ending of the file's first line. A begin marker with no end after it, or
+/// a second begin marker, is an error.
 fn with_block(text: &str, path: &Path) -> CResult<String> {
     let eol = line_ending(text);
     let block = format!("{BLOCK_BEGIN}\n{BLOCK_BODY}{BLOCK_END}\n").replace('\n', eol);
-    let Some(start) = text.find(BLOCK_BEGIN) else {
+    // Each line's byte range, with its line ending, and its trimmed text.
+    let mut offset = 0;
+    let lines = text
+        .split_inclusive('\n')
+        .map(|line| {
+            let start = offset;
+            offset += line.len();
+            (start, offset, line.trim())
+        })
+        .collect::<Vec<_>>();
+    let mut begins = lines.iter().filter(|(_, _, line)| *line == BLOCK_BEGIN);
+    let Some(&(start, _, _)) = begins.next() else {
         let separator = match text {
             "" => String::new(),
             _ if text.ends_with(&eol.repeat(2)) => String::new(),
@@ -333,43 +349,26 @@ fn with_block(text: &str, path: &Path) -> CResult<String> {
         };
         return Ok(format!("{text}{separator}{block}"));
     };
-    if text[start + BLOCK_BEGIN.len()..].contains(BLOCK_BEGIN) {
+    if begins.next().is_some() {
         return Err(CommandError::DuplicateSetupBlock { path: path.to_owned(), marker: BLOCK_BEGIN });
     }
-    let Some(offset) = text[start..].find(BLOCK_END) else {
+    let Some(&(_, end, _)) = lines
+        .iter()
+        .find(|(line_start, _, line)| *line_start > start && *line == BLOCK_END)
+    else {
         return Err(CommandError::UnclosedSetupBlock { path: path.to_owned(), marker: BLOCK_BEGIN, end: BLOCK_END });
     };
-    let mut end = start + offset + BLOCK_END.len();
-    if text[end..].starts_with("\r\n") {
-        end += 2;
-    } else if text[end..].starts_with('\n') {
-        end += 1;
-    }
     Ok(format!("{}{block}{}", &text[..start], &text[end..]))
 }
 
-/// `"\r\n"` when the first line of `text` ends with it, otherwise `"\n"`.
-fn line_ending(text: &str) -> &'static str {
-    match text.find('\n') {
-        Some(index) if text[..index].ends_with('\r') => "\r\n",
-        _ => "\n",
-    }
-}
-
 /// The settings file with a `SessionStart` hook that runs [`HOOK_COMMAND`],
-/// unless a `SessionStart` hook already runs `arcl prime`. Other keys keep
-/// their order, and a rewritten file keeps the existing indentation.
+/// unless [`has_hook`] finds one. The hook is spliced into the existing text,
+/// so every other byte of the file stays as it was. A repeated key on the
+/// path to the hook is an error: JSON readers keep the last one, and the
+/// hook could land in a copy the agent ignores.
 fn with_hook(before: Option<&str>, matcher: Option<&str>, path: &Path) -> CResult<String> {
     let invalid = |message: String| CommandError::InvalidSetupJson { path: path.to_owned(), message };
     let text = before.unwrap_or("");
-    let mut settings = if text.trim().is_empty() {
-        Json::Object(Vec::new())
-    } else {
-        serde_json::from_str::<Json>(text).map_err(|error| invalid(error.to_string()))?
-    };
-    if has_hook(&settings) {
-        return Ok(text.to_owned());
-    }
     let mut entry = Vec::new();
     if let Some(matcher) = matcher {
         entry.push(("matcher".to_owned(), Json::String(matcher.to_owned())));
@@ -379,56 +378,86 @@ fn with_hook(before: Option<&str>, matcher: Option<&str>, path: &Path) -> CResul
         ("command".to_owned(), Json::String(HOOK_COMMAND.to_owned())),
     ]);
     entry.push(("hooks".to_owned(), Json::Array(vec![command])));
+    let entry = Json::Object(entry);
+    let session_start = || Json::Object(vec![("SessionStart".to_owned(), Json::Array(vec![entry.clone()]))]);
 
-    let kind = settings.kind();
-    let Json::Object(top) = &mut settings else {
-        return Err(invalid(format!("the file holds {kind}, not an object")));
-    };
-    if !top.iter().any(|(key, _)| key == "hooks") {
-        top.push(("hooks".to_owned(), Json::Object(Vec::new())));
+    if text.trim().is_empty() {
+        let settings = Json::Object(vec![("hooks".to_owned(), session_start())]);
+        return Ok(settings.render(Some("\t")) + "\n");
     }
-    let hooks = settings.get_mut("hooks").expect("`hooks` was just added");
-    let kind = hooks.kind();
-    let Json::Object(events) = &mut *hooks else {
-        return Err(invalid(format!("`hooks` is {kind}, not an object")));
-    };
-    if !events.iter().any(|(key, _)| key == "SessionStart") {
-        events.push(("SessionStart".to_owned(), Json::Array(Vec::new())));
+    let root = json::parse(text).map_err(invalid)?;
+    if !matches!(root.value, Value::Object(_)) {
+        return Err(invalid(format!("the file holds {}, not an object", root.kind())));
     }
-    let session_start = hooks.get_mut("SessionStart").expect("`SessionStart` was just added");
-    let kind = session_start.kind();
-    let Json::Array(entries) = session_start else {
-        return Err(invalid(format!("`hooks.SessionStart` is {kind}, not an array")));
+    unique_keys(&root, "", path)?;
+    let unit = indentation(text);
+    let Some(hooks) = root.get("hooks") else {
+        return Ok(insert_last(text, &root, Some("hooks"), &session_start(), &unit));
     };
-    entries.push(Json::Object(entry));
-
-    let indent = indentation(text);
-    let mut out = Vec::new();
-    let formatter = serde_json::ser::PrettyFormatter::with_indent(indent.as_bytes());
-    let mut serializer = serde_json::Serializer::with_formatter(&mut out, formatter);
-    settings
-        .serialize(&mut serializer)
-        .map_err(|error| invalid(error.to_string()))?;
-    let mut rendered = String::from_utf8(out).map_err(|error| invalid(error.to_string()))?;
-    rendered.push('\n');
-    Ok(rendered)
+    if !matches!(hooks.value, Value::Object(_)) {
+        return Err(invalid(format!("`hooks` is {}, not an object", hooks.kind())));
+    }
+    unique_keys(hooks, "hooks.", path)?;
+    let Some(events) = hooks.get("SessionStart") else {
+        let events = Json::Array(vec![entry]);
+        return Ok(insert_last(text, hooks, Some("SessionStart"), &events, &unit));
+    };
+    let Some(entries) = events.as_array() else {
+        return Err(invalid(format!(
+            "`hooks.SessionStart` is {}, not an array",
+            events.kind()
+        )));
+    };
+    for (index, existing) in entries.iter().enumerate() {
+        let prefix = format!("hooks.SessionStart[{index}].");
+        unique_keys(existing, &prefix, path)?;
+        for (inner, hook) in existing
+            .get("hooks")
+            .and_then(Node::as_array)
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+        {
+            unique_keys(hook, &format!("{prefix}hooks[{inner}]."), path)?;
+        }
+    }
+    if has_hook(entries) {
+        return Ok(text.to_owned());
+    }
+    Ok(insert_last(text, events, None, &entry, &unit))
 }
 
-/// Whether a `SessionStart` hook in `settings` already runs `arcl prime`.
-fn has_hook(settings: &Json) -> bool {
-    let Some(entries) = settings
-        .get("hooks")
-        .and_then(|hooks| hooks.get("SessionStart"))
-        .and_then(Json::as_array)
-    else {
-        return false;
-    };
+/// Fail when `node` is an object with a key more than once. `prefix` is the
+/// path to `node`, for the message.
+fn unique_keys(node: &Node, prefix: &str, path: &Path) -> CResult<()> {
+    match node.duplicate_key() {
+        Some(key) => Err(CommandError::DuplicateSetupJsonKey { path: path.to_owned(), key: format!("{prefix}{key}") }),
+        None => Ok(()),
+    }
+}
+
+/// Whether a `SessionStart` entry already runs [`HOOK_COMMAND`] when a
+/// session starts: its command is exactly that, and its matcher, if any,
+/// covers `startup`.
+fn has_hook(entries: &[Node]) -> bool {
     entries
         .iter()
-        .filter_map(|entry| entry.get("hooks").and_then(Json::as_array))
+        .filter(|entry| {
+            entry
+                .get("matcher")
+                .is_none_or(|matcher| matcher.as_str().is_some_and(covers_startup))
+        })
+        .filter_map(|entry| entry.get("hooks").and_then(Node::as_array))
         .flatten()
-        .filter_map(|hook| hook.get("command").and_then(Json::as_str))
-        .any(|command| command.contains(HOOK_NEEDLE))
+        .filter_map(|hook| hook.get("command").and_then(Node::as_str))
+        .any(|command| command.trim() == HOOK_COMMAND)
+}
+
+/// Whether a `SessionStart` matcher selects sessions that start fresh: an
+/// empty matcher, `*`, or a `|` list that names `startup`.
+fn covers_startup(matcher: &str) -> bool {
+    let matcher = matcher.trim();
+    matcher.is_empty() || matcher == "*" || matcher.split('|').any(|part| part.trim() == "startup")
 }
 
 /// The indentation of the first indented line of `text`, or a tab.
@@ -516,6 +545,110 @@ mod tests {
             let error = with_hook(Some(text), None, &path()).expect_err(text);
             assert!(matches!(error, CommandError::InvalidSetupJson { .. }), "{text}");
         }
+    }
+
+    #[test]
+    fn markers_named_inside_a_line_are_left_alone() {
+        let text = "Wrap it in `<!-- arcl-setup:begin -->` and `<!-- arcl-setup:end -->`.\nKeep this.\n";
+        let once = with_block(text, &path()).expect("appends");
+        assert!(
+            once.starts_with(&format!("{text}\n<!-- arcl-setup:begin -->\n")),
+            "{once}"
+        );
+        assert_eq!(with_block(&once, &path()).expect("replaces"), once);
+
+        let unclosed = format!("{BLOCK_BEGIN}\nsee `{BLOCK_END}`\n");
+        let error = with_block(&unclosed, &path()).expect_err("refuses");
+        assert!(matches!(error, CommandError::UnclosedSetupBlock { .. }));
+
+        let indented = once.replace(&format!("\n{BLOCK_BEGIN}\n"), &format!("\n  {BLOCK_BEGIN}\t\n"));
+        assert_ne!(indented, once);
+        assert_eq!(with_block(&indented, &path()).expect("replaces"), once);
+    }
+
+    #[test]
+    fn a_repeated_key_on_the_hook_path_is_an_error() {
+        for (text, key) in [
+            (r#"{"hooks": {}, "hooks": {"Stop": []}}"#, "`hooks`"),
+            (
+                r#"{"hooks": {"SessionStart": [], "SessionStart": []}}"#,
+                "`hooks.SessionStart`",
+            ),
+            (
+                r#"{"hooks": {"SessionStart": [{"hooks": [], "hooks": []}]}}"#,
+                "`hooks.SessionStart[0].hooks`",
+            ),
+        ] {
+            let error = with_hook(Some(text), None, &path()).expect_err(text);
+            assert!(matches!(error, CommandError::DuplicateSetupJsonKey { .. }), "{text}");
+            let message = error.to_string();
+            assert!(message.contains("settings.json") && message.contains(key), "{message}");
+        }
+    }
+
+    #[test]
+    fn numbers_setup_does_not_touch_keep_their_text() {
+        let before = "{\n  \"big\": 12345678901234567890123,\n  \"small\": 1E5\n}\n";
+        let after = with_hook(Some(before), None, &path()).expect("merges");
+        assert!(
+            after.starts_with("{\n  \"big\": 12345678901234567890123,\n  \"small\": 1E5,\n  \"hooks\": {"),
+            "{after}"
+        );
+        assert_eq!(with_hook(Some(&after), None, &path()).expect("second run"), after);
+    }
+
+    #[test]
+    fn only_the_exact_command_with_a_startup_matcher_counts_as_the_hook() {
+        let settings = |matcher: &str, command: &str| {
+            format!(
+                r#"{{"hooks": {{"SessionStart": [{{{matcher}"hooks": [{{"type": "command", "command": {command:?}}}]}}]}}}}"#
+            )
+        };
+        let present = [
+            settings("", HOOK_COMMAND),
+            settings(r#""matcher": "startup|resume", "#, &format!(" {HOOK_COMMAND} ")),
+            settings(r#""matcher": "*", "#, HOOK_COMMAND),
+        ];
+        for text in present {
+            assert_eq!(
+                with_hook(Some(&text), Some("startup|resume"), &path()).expect("reads"),
+                text
+            );
+        }
+        let absent = [
+            settings("", "echo \"run arcl prime\""),
+            settings(r#""matcher": "compact", "#, HOOK_COMMAND),
+            settings(r#""matcher": 1, "#, HOOK_COMMAND),
+        ];
+        for text in absent {
+            let after = with_hook(Some(&text), Some("startup|resume"), &path()).expect("adds");
+            assert_ne!(after, text);
+            assert_eq!(
+                after.matches(HOOK_COMMAND).count(),
+                1 + text.matches(HOOK_COMMAND).count(),
+                "{after}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_file_changed_after_the_plan_stops_every_write() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path();
+        fs::write(root.join("CLAUDE.md"), "# Rules\n").expect("writes");
+        let planned = plan(root, &AgentFiles::of(SetupAgent::Claude)).expect("plans");
+        fs::write(root.join("CLAUDE.md"), "# Rules\n\nSaved during the prompt.\n").expect("writes");
+
+        let error = apply(root, planned).expect_err("refuses");
+        assert!(
+            matches!(&error, CommandError::SetupFileChanged { path } if path == "CLAUDE.md"),
+            "{error}"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("CLAUDE.md")).expect("reads"),
+            "# Rules\n\nSaved during the prompt.\n"
+        );
+        assert!(!root.join(".claude").exists(), "wrote the skill or the hook");
     }
 
     #[test]
