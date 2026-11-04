@@ -332,6 +332,69 @@ fn setup_follows_a_linked_instruction_file() {
     assert_eq!(statuses(&codex)[2], ("AGENTS.md".to_owned(), "unchanged".to_owned()));
 }
 
+#[cfg(unix)]
+#[test]
+fn setup_keeps_the_mode_of_a_file_it_changes() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let project = Project::new();
+    project.write(".claude/settings.json", "{\"model\": \"x\"}\n");
+    let settings = project.path().join(".claude/settings.json");
+    fs::set_permissions(&settings, fs::Permissions::from_mode(0o600)).expect("mode sets");
+    project.setup_json(&["claude", "--yes"]);
+    assert_hook(&project, "claude");
+    let mode = fs::metadata(&settings).expect("metadata").permissions().mode();
+    assert_eq!(mode & 0o777, 0o600, "mode is {mode:o}");
+}
+
+/// Run `arcl --json setup claude --yes` with `CLAUDE.md` linked to `target`,
+/// assert it exits with `code` naming `CLAUDE.md`, and that it wrote no skill.
+#[cfg(unix)]
+fn assert_linked_claude_md_fails(project: &Project, target: &Path, code: i32) {
+    std::os::unix::fs::symlink(target, project.path().join("CLAUDE.md")).expect("link creates");
+    let output = project
+        .arcl(&["--json", "setup", "claude", "--yes"])
+        .output()
+        .expect("setup runs");
+    assert_eq!(
+        output.status.code(),
+        Some(code),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty());
+    let error: Value = serde_json::from_slice(&output.stderr).expect("error envelope");
+    let message = error["error"]["message"].as_str().expect("message");
+    assert!(message.contains("CLAUDE.md"), "{message}");
+    assert!(
+        !project.path().join(".claude").exists(),
+        "setup wrote files before failing"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn setup_refuses_a_linked_instruction_file_outside_the_project() {
+    let project = Project::new();
+    let outside = tempdir().expect("outside directory");
+    let target = outside.path().join("AGENTS.md");
+    fs::write(&target, "# Elsewhere\n").expect("file writes");
+    assert_linked_claude_md_fails(&project, &target, 3);
+    assert_eq!(fs::read_to_string(&target).expect("reads"), "# Elsewhere\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn setup_refuses_a_link_loop_or_a_dangling_link() {
+    let project = Project::new();
+    std::os::unix::fs::symlink("CLAUDE.md", project.path().join("loop.md")).expect("link creates");
+    assert_linked_claude_md_fails(&project, Path::new("loop.md"), 1);
+
+    let project = Project::new();
+    assert_linked_claude_md_fails(&project, Path::new("missing.md"), 1);
+    assert!(!project.path().join("missing.md").exists());
+}
+
 #[test]
 fn setup_outside_a_project_fails() {
     let dir = tempdir().expect("directory");

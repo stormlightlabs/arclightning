@@ -188,6 +188,12 @@ pub(super) fn write_replacing(path: &Path, content: &str) -> CResult<()> {
         .open(&temporary)
         .and_then(|mut file| {
             file.write_all(content.as_bytes())?;
+            // The rename replaces the file, so keep the mode it had.
+            match fs::metadata(path) {
+                Ok(existing) => file.set_permissions(existing.permissions())?,
+                Err(error) if absent(&error) => {}
+                Err(error) => return Err(error),
+            }
             file.sync_all()
         })
         .and_then(|()| fs::rename(&temporary, path));

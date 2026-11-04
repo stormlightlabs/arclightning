@@ -318,26 +318,42 @@ fn read_optional(path: &Path) -> CResult<Option<String>> {
 }
 
 /// `text` with the arcl block: replaced where the markers are, or appended
-/// after a blank line.
+/// after a blank line. The block takes the line ending of the file's first
+/// line. A begin marker with no end after it, or a second begin marker, is an
+/// error.
 fn with_block(text: &str, path: &Path) -> CResult<String> {
-    let block = format!("{BLOCK_BEGIN}\n{BLOCK_BODY}{BLOCK_END}\n");
+    let eol = line_ending(text);
+    let block = format!("{BLOCK_BEGIN}\n{BLOCK_BODY}{BLOCK_END}\n").replace('\n', eol);
     let Some(start) = text.find(BLOCK_BEGIN) else {
         let separator = match text {
-            "" => "",
-            _ if text.ends_with("\n\n") => "",
-            _ if text.ends_with('\n') => "\n",
-            _ => "\n\n",
+            "" => String::new(),
+            _ if text.ends_with(&eol.repeat(2)) => String::new(),
+            _ if text.ends_with('\n') => eol.to_owned(),
+            _ => eol.repeat(2),
         };
         return Ok(format!("{text}{separator}{block}"));
     };
+    if text[start + BLOCK_BEGIN.len()..].contains(BLOCK_BEGIN) {
+        return Err(CommandError::DuplicateSetupBlock { path: path.to_owned(), marker: BLOCK_BEGIN });
+    }
     let Some(offset) = text[start..].find(BLOCK_END) else {
         return Err(CommandError::UnclosedSetupBlock { path: path.to_owned(), marker: BLOCK_BEGIN, end: BLOCK_END });
     };
     let mut end = start + offset + BLOCK_END.len();
-    if text[end..].starts_with('\n') {
+    if text[end..].starts_with("\r\n") {
+        end += 2;
+    } else if text[end..].starts_with('\n') {
         end += 1;
     }
     Ok(format!("{}{block}{}", &text[..start], &text[end..]))
+}
+
+/// `"\r\n"` when the first line of `text` ends with it, otherwise `"\n"`.
+fn line_ending(text: &str) -> &'static str {
+    match text.find('\n') {
+        Some(index) if text[..index].ends_with('\r') => "\r\n",
+        _ => "\n",
+    }
 }
 
 /// The settings file with a `SessionStart` hook that runs [`HOOK_COMMAND`],
@@ -447,6 +463,34 @@ mod tests {
     fn an_unclosed_block_is_an_error() {
         let error = with_block("<!-- arcl-setup:begin -->\nhalf\n", &path()).expect_err("refuses");
         assert!(matches!(error, CommandError::UnclosedSetupBlock { .. }));
+    }
+
+    #[test]
+    fn a_second_begin_marker_is_an_error() {
+        let once = with_block("# Project\n", &path()).expect("appends");
+        for text in [format!("{once}{once}"), format!("{once}<!-- arcl-setup:begin -->\n")] {
+            let error = with_block(&text, &path()).expect_err("refuses");
+            assert!(matches!(error, CommandError::DuplicateSetupBlock { .. }), "{text}");
+            assert!(error.to_string().contains("settings.json"), "{error}");
+        }
+    }
+
+    #[test]
+    fn the_block_takes_a_crlf_file_line_ending() {
+        let once = with_block("# Project\r\n", &path()).expect("appends");
+        assert!(
+            once.starts_with("# Project\r\n\r\n<!-- arcl-setup:begin -->\r\n"),
+            "{once}"
+        );
+        assert!(once.ends_with("<!-- arcl-setup:end -->\r\n"), "{once}");
+        assert_eq!(once.matches('\n').count(), once.matches("\r\n").count(), "{once:?}");
+        assert_eq!(with_block(&once, &path()).expect("replaces"), once);
+
+        let stale = once.replace("A fresh clone", "An old line. A fresh clone") + "tail\r\n";
+        assert_eq!(
+            with_block(&stale, &path()).expect("replaces"),
+            once.clone() + "tail\r\n"
+        );
     }
 
     #[test]

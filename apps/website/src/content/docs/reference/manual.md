@@ -146,14 +146,14 @@ question. With no terminal on standard input and no `--yes`, it writes nothing
 and exits with status code `4`, naming the files. Any answer other than `y` or
 `yes` writes nothing and exits with status code `1`.
 
-`--dry-run` writes nothing and prints each change as a unified diff. Each file
-is `created`, `updated`, or `unchanged`, and a second run reports every file as
-`unchanged` and writes nothing. `--plain` prints `<status>\t<path>` per file.
+`--dry-run` writes nothing. Its human and `--json` output include each change
+as a unified diff. Each file is `created`, `updated`, or `unchanged`, and a
+second run reports every file as `unchanged` and writes nothing. `--plain` prints `<status>\t<path>` per file.
 `--json` prints `action` (`applied`, or `planned` under `--dry-run`), `agent`,
 `agent_name`, `root`, `notes`, and a `files` array of `path`, `status` and,
 under `--dry-run`, `diff`. A settings file that is not a JSON object, or an
-instruction file with a begin marker and no end marker, exits with status code
-`3`.
+instruction file with a begin marker and no end marker or with two begin
+markers, exits with status code `3`.
 
 Codex runs project hooks only in a trusted project, after you trust the hook
 in `/hooks`. Pi loads `.pi/extensions/` and `.agents/skills/` only after you

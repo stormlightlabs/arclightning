@@ -218,6 +218,8 @@ pub(super) enum CommandError {
         marker: &'static str,
         end: &'static str,
     },
+    #[error("`{path}` has `{marker}` more than once; keep one arcl block and remove the others")]
+    DuplicateSetupBlock { path: PathBuf, marker: &'static str },
     #[error(
         "`arcl setup` would change existing files and standard input is not a terminal to ask: {}; pass `--yes` to change them, or `--dry-run` to see the diff",
         paths.join(", ")
@@ -314,6 +316,7 @@ impl CommandError {
             | Self::SkillOutsideProject { .. }
             | Self::InvalidSetupJson { .. }
             | Self::UnclosedSetupBlock { .. }
+            | Self::DuplicateSetupBlock { .. }
             | Self::InvalidQueue { .. } => 3,
         }
     }
