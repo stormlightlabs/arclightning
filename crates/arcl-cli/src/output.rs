@@ -158,6 +158,48 @@ impl SkillFileStatus {
     }
 }
 
+/// Whether a `setup` report describes files written or, under `--dry-run`,
+/// the changes it would make.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SetupAction {
+    /// `setup` wrote the missing and changed files.
+    Applied,
+    /// `setup --dry-run` wrote nothing.
+    Planned,
+}
+
+/// What `setup` did, or under `--dry-run` would do, to one file.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SetupFileStatus {
+    /// The file was missing.
+    Created,
+    /// The file existed and its contents changed.
+    Updated,
+    /// The file already held what `setup` writes.
+    Unchanged,
+}
+
+impl SetupFileStatus {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Updated => "updated",
+            Self::Unchanged => "unchanged",
+        }
+    }
+
+    /// The verb a dry run's human output prints for the file.
+    const fn planned(self) -> &'static str {
+        match self {
+            Self::Created => "create",
+            Self::Updated => "update",
+            Self::Unchanged => "unchanged",
+        }
+    }
+}
+
 /// The mark at the start of each human `arcl tree` line.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StatusMark {
@@ -1198,6 +1240,56 @@ impl Renderer {
         Ok(Some(message))
     }
 
+    /// Render a `setup` report. Human output lists the files that are not
+    /// unchanged and the agent's notes, then under `--dry-run` each diff;
+    /// plain output lists every file as `<status>\t<path>`.
+    pub fn render_setup(&self, report: &SetupReport) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human => {
+                let changed = report
+                    .files
+                    .iter()
+                    .filter(|file| file.status != SetupFileStatus::Unchanged)
+                    .collect::<Vec<_>>();
+                let (name, root) = (report.agent_name, &report.root);
+                let heading = match (report.action, changed.is_empty()) {
+                    (_, true) => format!("{name} is already set up in `{root}`."),
+                    (SetupAction::Applied, false) => format!("Set up {name} in `{root}`:"),
+                    (SetupAction::Planned, false) => {
+                        format!("Setting up {name} in `{root}` would change these files (dry run, nothing written):")
+                    }
+                };
+                let mut lines = vec![heading];
+                lines.extend(changed.iter().map(|file| {
+                    let verb = match report.action {
+                        SetupAction::Applied => file.status.as_str(),
+                        SetupAction::Planned => file.status.planned(),
+                    };
+                    format!("  {verb} {}", file.path)
+                }));
+                for note in &report.notes {
+                    lines.push(String::new());
+                    lines.push((*note).to_owned());
+                }
+                let mut message = self.style(lines.join("\n"));
+                for diff in changed.iter().filter_map(|file| file.diff.as_deref()) {
+                    message.push_str("\n\n");
+                    message.push_str(diff.trim_end());
+                }
+                return Ok(Some(message));
+            }
+            OutputMode::Plain => report
+                .files
+                .iter()
+                .map(|file| format!("{}\t{}", file.status.as_str(), plain_escape(&file.path)))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            OutputMode::Json => serde_json::to_string(&Envelope { format_version: FORMAT_VERSION, data: report })?,
+            OutputMode::Quiet => return Ok(None),
+        };
+        Ok(Some(message))
+    }
+
     /// Render a `skill install` report. Human output lists only the files
     /// that are not unchanged; plain output lists every file as
     /// `<status>\t<path>`.
@@ -1447,6 +1539,37 @@ pub struct SkillReport {
     pub root: String,
     /// One entry per agent directory and skill file, in install order.
     pub files: Vec<SkillFile>,
+}
+
+/// One file in a [`SetupReport`].
+#[derive(Clone, Debug, Serialize)]
+pub struct SetupFile {
+    /// The path relative to the project root, with `/` separators.
+    pub path: String,
+    /// What `setup` did to the file, or would do under `--dry-run`.
+    pub status: SetupFileStatus,
+    /// Under `--dry-run`, the change as a unified diff, for a created or
+    /// updated file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diff: Option<String>,
+}
+
+/// The result of `setup` for one agent.
+#[derive(Clone, Debug, Serialize)]
+pub struct SetupReport {
+    /// `applied`, or `planned` under `--dry-run`.
+    pub action: SetupAction,
+    /// The agent name as the command takes it: `claude`, `codex` or `pi`.
+    pub agent: &'static str,
+    /// The agent's display name, such as `Claude Code`.
+    pub agent_name: &'static str,
+    /// The project root the paths are relative to.
+    pub root: String,
+    /// The skill files, then the instruction file, then the hook file.
+    pub files: Vec<SetupFile>,
+    /// What the agent needs before it reads the files, such as trusting the
+    /// project.
+    pub notes: Vec<&'static str>,
 }
 
 /// What `arcl prime` prints: the skill's working loop, open work and ready
