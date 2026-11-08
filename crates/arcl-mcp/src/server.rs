@@ -135,8 +135,9 @@ impl ArclServer {
 
     /// List record summaries, like `arcl list`.
     #[tool(
-        description = read_description!("List record summaries ordered by kind, then ID, like `arcl list`. Filter by kind \
-        and status. Returns at most `limit` records (1 to 200, default 50) and a `next_cursor` while more remain."),
+        description = read_description!("List record summaries ordered by kind, then ID, like `arcl list`. Filter by kind, \
+        status, priority, release, spec, plan, phase and parent task; every filter given must match. Returns at \
+        most `limit` records (1 to 200, default 50) and a `next_cursor` while more remain."),
         annotations(read_only_hint = true, open_world_hint = false),
         meta = version_meta(FORMAT_VERSION)
     )]
@@ -606,8 +607,15 @@ impl Records {
     /// short ID, such as `535B` or `t-535B`, resolves among records of kind
     /// `T` first, unless it names a kind.
     fn parse<T: PrefixedId>(&self, database: &Database, input: &str) -> Result<T, ToolError> {
+        Ok(T::parse(&self.resolve(database, input, T::PREFIX)?)?)
+    }
+
+    /// The full ID `input` names: a full ID as it is, or the ID of the one
+    /// record a short ID ends, among records whose IDs start with `prefix`
+    /// first, unless it names a kind.
+    fn resolve(&self, database: &Database, input: &str, prefix: &str) -> Result<String, ToolError> {
         if is_full_id(input) {
-            return Ok(T::parse(input)?);
+            return Ok(input.to_owned());
         }
         let records = match self.0.get() {
             Some(records) => records,
@@ -616,8 +624,8 @@ impl Records {
                 self.0.get_or_init(|| read)
             }
         };
-        let record = resolve_short_id(input, records, Some(T::PREFIX)).map_err(StorageError::from)?;
-        Ok(T::parse(&record.id)?)
+        let record = resolve_short_id(input, records, Some(prefix)).map_err(StorageError::from)?;
+        Ok(record.id.clone())
     }
 }
 
@@ -766,88 +774,41 @@ fn record_id<T: PrefixedId>(database: &Database, input: &str) -> Result<T, ToolE
 }
 
 /// One page of record summaries matching `input`, ordered by kind, then ID.
-/// The cursor is the `<kind>:<id>` of the last record on the previous page,
-/// so records added before it do not shift later pages.
+/// The filters go through [`RecordFilterArgs::resolve`] and
+/// [`Database::list_records`], as `arcl list` does, so they check and match
+/// the same way. The cursor is the `<kind>:<id>` of the last record on the
+/// previous page, so records added before it do not shift later pages.
 fn list_records(database: &mut Database, input: ListInput) -> Result<ListData, ToolError> {
     let limit = page_limit(input.limit)?;
-    if let Some(kind) = input.kind
-        && let Some(status) = input.status.iter().find(|status| !status_applies(kind, **status))
-    {
-        return Err(ToolError::invalid_request(format!(
-            "status `{}` does not apply to {} records",
-            status.as_str(),
-            kind.as_str()
-        )));
-    }
     let after = input.cursor.as_deref().map(list_cursor).transpose()?;
-
-    let wanted = |kind: RecordKind| input.kind.is_none_or(|wanted| wanted == kind);
-    let mut records = Vec::new();
-    let mut push = |kind: RecordKind, id: String, title: &str, status: &str| {
-        records.push(RecordSummary {
-            kind: kind.as_str().to_owned(),
-            id,
-            title: title.to_owned(),
-            status: status.to_owned(),
-        });
-    };
-    if wanted(RecordKind::Capture) {
-        for capture in database.captures()? {
-            push(
-                RecordKind::Capture,
-                capture.id.to_string(),
-                &capture.title,
-                capture.status.as_str(),
-            );
-        }
+    let records = Records::default();
+    let filter = RecordFilterArgs {
+        kind: input.kind.map(|kind| kind.as_str().to_owned()),
+        statuses: input.status.iter().map(|status| status.as_str().to_owned()).collect(),
+        priorities: input
+            .priority
+            .iter()
+            .map(|priority| priority.as_str().to_owned())
+            .collect(),
+        release: input.release,
+        spec: input.spec,
+        plan: input.plan,
+        phase: input.phase,
+        parent: input.parent,
+        assignee: None,
+        all: input.all,
     }
-    if wanted(RecordKind::Release) {
-        for release in database.releases()? {
-            push(
-                RecordKind::Release,
-                release.id.to_string(),
-                &release.title,
-                release.status.as_str(),
-            );
-        }
-    }
-    if wanted(RecordKind::Spec) {
-        for spec in database.specs()? {
-            push(RecordKind::Spec, spec.id.to_string(), &spec.title, spec.status.as_str());
-        }
-    }
-    if wanted(RecordKind::Plan) {
-        for plan in database.plans()? {
-            push(RecordKind::Plan, plan.id.to_string(), &plan.title, plan.status.as_str());
-        }
-    }
-    if wanted(RecordKind::Phase) {
-        for phase in database.phases()? {
-            push(
-                RecordKind::Phase,
-                phase.id.to_string(),
-                &phase.title,
-                phase.status.as_str(),
-            );
-        }
-    }
-    if wanted(RecordKind::Task) {
-        for task in database
-            .planning_tasks()?
-            .into_iter()
-            .filter(|task| input.all || task.archived_at.is_none())
-        {
-            push(RecordKind::Task, task.id.to_string(), &task.title, task.status.as_str());
-        }
-    }
-    if wanted(RecordKind::Note) {
-        for note in database.notes()? {
-            push(RecordKind::Note, note.id.to_string(), &note.title, "available");
-        }
-    }
-    records
-        .retain(|record| input.status.is_empty() || input.status.iter().any(|status| status.as_str() == record.status));
-    records.sort_by(|left, right| left.kind.cmp(&right.kind).then_with(|| left.id.cmp(&right.id)));
+    .resolve(|value, prefix| records.resolve(database, value, prefix))?;
+    let mut records = database
+        .list_records(&filter)?
+        .into_iter()
+        .map(|record| RecordSummary {
+            kind: record.kind.to_owned(),
+            id: record.id,
+            title: record.title,
+            status: record.status,
+        })
+        .collect::<Vec<_>>();
     if let Some((kind, id)) = after {
         records.retain(|record| (record.kind.as_str(), record.id.as_str()) > (kind.as_str(), id));
     }
@@ -946,18 +907,5 @@ fn page_limit(limit: Option<u32>) -> Result<usize, ToolError> {
         limit => Err(ToolError::invalid_request(format!(
             "limit {limit} is outside 1 to {MAX_LIMIT}"
         ))),
-    }
-}
-
-/// Whether records of `kind` can have `status`, as `arcl list` checks it.
-fn status_applies(kind: RecordKind, status: RecordStatus) -> bool {
-    use RecordStatus::*;
-    match kind {
-        RecordKind::Capture => matches!(status, Captured | Promoted | Discarded),
-        RecordKind::Release | RecordKind::Spec | RecordKind::Plan | RecordKind::Phase => {
-            matches!(status, Open | Completed | Cancelled)
-        }
-        RecordKind::Task => matches!(status, Pending | InProgress | Parked | Completed | Cancelled),
-        RecordKind::Note => false,
     }
 }

@@ -232,6 +232,15 @@ page. `list` pages by kind, then ID, so new records do not shift later pages.
 then ID), so a task that starts between pages does not hide the next one. A
 malformed `cursor` fails with `invalid_request`.
 
+`list` takes the filters of `arcl list` other than `--assignee`: `kind`,
+`status`, `priority`, `release`, `spec`, `plan`, `phase`, `parent` and `all`.
+IDs may be full or short. `spec`, `plan` and `phase` match that record and
+the records under it, `release` matches the release and its members, and
+`parent` matches direct subtasks. Every filter given must match. The checks
+run in the command's order and fail as it does: a status or priority the
+`kind` cannot have, or an ID of another kind, fails with `invalid_request`,
+and an ID that names no record fails with `not_found`.
+
 `task_start` has no force option. A task that is not ready fails with
 `invalid_request`, and `explain` gives the typed reasons.
 

@@ -12,7 +12,7 @@ use arcl_repo::vcs::{GixVcs, Vcs, VcsError};
 use arcl_repo::workspace::*;
 use arcl_store::{
     CaptureTaskPromotion, CaptureUpdate, CheckReport, Database, NoteUpdate, PhaseUpdate, PlanUpdate,
-    PlanningReadyFilter, PlanningTaskCreate, PlanningTaskUpdate, RecordFilter, RecordTreeNode, SpecUpdate,
+    PlanningReadyFilter, PlanningTaskCreate, PlanningTaskUpdate, RecordFilterArgs, RecordTreeNode, SpecUpdate,
     StorageError,
 };
 

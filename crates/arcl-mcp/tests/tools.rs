@@ -311,6 +311,313 @@ async fn lists_page_with_bounded_limits() {
     assert_eq!(error.code(), "invalid_request");
 }
 
+/// The records the list filter tests read: a spec with a plan, two phases
+/// and three tasks, a loose task, a release, a capture and a note.
+struct Filtered {
+    release: String,
+    spec: String,
+    plan: String,
+    first: String,
+    second: String,
+    high: String,
+    low: String,
+    child: String,
+    loose: String,
+    capture: String,
+    note: String,
+}
+
+/// Build [`Filtered`]'s records in `project`. `high` sits in the first phase,
+/// `low` in the second, `child` under `high`, and `loose`, a critical task,
+/// outside any spec. The release holds the spec and `loose`.
+fn filtered_records(project: &TempDir) -> Filtered {
+    let mut database = Database::open(project.path().join(".arcl/arcl.db")).expect("database opens");
+    let project_id = database.project().expect("project reads").id;
+    let spec = database
+        .create_spec("Feature".to_owned(), String::new(), String::new())
+        .expect("spec creates");
+    let plan = database
+        .create_plan(spec.id, "Roadmap".to_owned(), String::new())
+        .expect("plan creates");
+    let first = database
+        .create_phase(plan.id, "First".to_owned(), String::new(), 1)
+        .expect("phase creates");
+    let second = database
+        .create_phase(plan.id, "Second".to_owned(), String::new(), 2)
+        .expect("phase creates");
+    let mut task = |title: &str, phase_id: Option<PhaseId>, parent_id: Option<TaskId>, priority: TaskPriority| {
+        database
+            .create_planning_task(PlanningTaskCreate {
+                project_id,
+                spec_id: None,
+                plan_id: None,
+                phase_id,
+                parent_id,
+                title: title.to_owned(),
+                body: String::new(),
+                priority,
+                position: 0,
+            })
+            .expect("task creates")
+            .id
+    };
+    let high = task("High", Some(first.id), None, TaskPriority::High);
+    let low = task("Low", Some(second.id), None, TaskPriority::Low);
+    let child = task("Child", None, Some(high), TaskPriority::Normal);
+    let loose = task("Loose", None, None, TaskPriority::Critical);
+    let release = database
+        .create_release("v1".to_owned(), String::new())
+        .expect("release creates");
+    database
+        .add_release_membership(release.id, ReleaseMemberKind::Spec, spec.id.to_string())
+        .expect("spec joins the release");
+    database
+        .add_release_membership(release.id, ReleaseMemberKind::Task, loose.to_string())
+        .expect("task joins the release");
+    let capture = database
+        .create_capture("Idea".to_owned(), String::new())
+        .expect("capture creates");
+    let note = database
+        .create_note("Finding".to_owned(), String::new())
+        .expect("note creates");
+    Filtered {
+        release: release.id.to_string(),
+        spec: spec.id.to_string(),
+        plan: plan.id.to_string(),
+        first: first.id.to_string(),
+        second: second.id.to_string(),
+        high: high.to_string(),
+        low: low.to_string(),
+        child: child.to_string(),
+        loose: loose.to_string(),
+        capture: capture.id.to_string(),
+        note: note.id.to_string(),
+    }
+}
+
+/// `ids` in `list` order: by kind, then ID.
+fn in_list_order(ids: &[&String]) -> Vec<String> {
+    let kind = |id: &str| match id.split('-').nth(1) {
+        Some("c") => "capture",
+        Some("n") => "note",
+        Some("ph") => "phase",
+        Some("pl") => "plan",
+        Some("r") => "release",
+        Some("s") => "spec",
+        _ => "task",
+    };
+    let mut ids = ids.iter().map(|id| (*id).clone()).collect::<Vec<_>>();
+    ids.sort_by(|left, right| kind(left).cmp(kind(right)).then_with(|| left.cmp(right)));
+    ids
+}
+
+async fn list_ids(server: &ArclServer, input: ListInput) -> Vec<String> {
+    let listed = server
+        .list(Parameters::from(input), CancellationToken::new())
+        .await
+        .unwrap_or_else(|error: ToolError| panic!("list: {error}"))
+        .0;
+    listed.data.records.into_iter().map(|record| record.id).collect()
+}
+
+async fn list_error(server: &ArclServer, input: ListInput) -> ToolError {
+    server
+        .list(Parameters::from(input), CancellationToken::new())
+        .await
+        .err()
+        .expect("the list refuses")
+}
+
+#[tokio::test]
+async fn list_filters_by_ancestry_release_and_priority_like_the_cli() {
+    let project = project(false);
+    let records = filtered_records(&project);
+    let server = ArclServer::new(project.path().to_owned());
+    let Filtered { release, spec, plan, first, second, high, low, child, loose, capture, note } = &records;
+
+    assert_eq!(
+        list_ids(&server, ListInput::default()).await,
+        in_list_order(&[
+            release, spec, plan, first, second, high, low, child, loose, capture, note
+        ])
+    );
+    let cases = [
+        (
+            ListInput { spec: Some(spec.clone()), ..ListInput::default() },
+            vec![spec, plan, high, low, child],
+        ),
+        (
+            ListInput { plan: Some(plan.clone()), ..ListInput::default() },
+            vec![plan, first, second, high, low, child],
+        ),
+        (
+            ListInput { phase: Some(first.clone()), ..ListInput::default() },
+            vec![first, high, child],
+        ),
+        (
+            ListInput { parent: Some(high.clone()), ..ListInput::default() },
+            vec![child],
+        ),
+        (
+            ListInput { release: Some(release.clone()), ..ListInput::default() },
+            vec![release, spec, loose],
+        ),
+        (
+            ListInput { priority: vec![TaskPriority::High], ..ListInput::default() },
+            vec![high],
+        ),
+        (
+            ListInput { priority: vec![TaskPriority::Critical, TaskPriority::High], ..ListInput::default() },
+            vec![high, loose],
+        ),
+    ];
+    for (input, expected) in cases {
+        let described = format!("{input:?}");
+        assert_eq!(list_ids(&server, input).await, in_list_order(&expected), "{described}");
+    }
+}
+
+#[tokio::test]
+async fn list_filters_combine_and_take_short_ids() {
+    let project = project(false);
+    let records = filtered_records(&project);
+    let server = ArclServer::new(project.path().to_owned());
+    let Filtered { release, spec, plan, first, high, low, child, loose, .. } = &records;
+    let short = |id: &str| id[id.len() - 8..].to_owned();
+
+    let cases = [
+        (
+            ListInput { spec: Some(spec.clone()), priority: vec![TaskPriority::Low], ..ListInput::default() },
+            vec![low],
+        ),
+        (
+            ListInput { phase: Some(first.clone()), parent: Some(high.clone()), ..ListInput::default() },
+            vec![child],
+        ),
+        (
+            ListInput {
+                kind: Some(RecordKind::Task),
+                status: vec![RecordStatus::Pending],
+                plan: Some(plan.clone()),
+                ..ListInput::default()
+            },
+            vec![high, low, child],
+        ),
+        (
+            ListInput { release: Some(release.clone()), spec: Some(spec.clone()), ..ListInput::default() },
+            vec![spec],
+        ),
+        (
+            ListInput { release: Some(release.clone()), kind: Some(RecordKind::Task), ..ListInput::default() },
+            vec![loose],
+        ),
+        (
+            ListInput { spec: Some(spec.clone()), parent: Some(loose.clone()), ..ListInput::default() },
+            vec![],
+        ),
+        (
+            ListInput { phase: Some(short(first)), ..ListInput::default() },
+            vec![first, high, child],
+        ),
+        (
+            ListInput { parent: Some(format!("t-{}", short(high))), ..ListInput::default() },
+            vec![child],
+        ),
+    ];
+    for (input, expected) in cases {
+        let described = format!("{input:?}");
+        assert_eq!(list_ids(&server, input).await, in_list_order(&expected), "{described}");
+    }
+}
+
+#[tokio::test]
+async fn list_filter_failures_match_the_cli() {
+    let project = project(false);
+    let records = filtered_records(&project);
+    let server = ArclServer::new(project.path().to_owned());
+    let short = |id: &str| id[id.len() - 8..].to_owned();
+    let invalid = |message: &str| ToolError::from(StorageError::InvalidFilter { message: message.to_owned() });
+
+    // A filter the kind cannot take is refused before any ID resolves.
+    let error = list_error(
+        &server,
+        ListInput {
+            kind: Some(RecordKind::Spec),
+            priority: vec![TaskPriority::High],
+            spec: Some("arcl-s-nope".to_owned()),
+            ..ListInput::default()
+        },
+    )
+    .await;
+    assert_eq!(error, invalid("priority filters apply only to tasks"));
+    assert_eq!(
+        error.envelope()["error"]["message"],
+        json!("invalid project or record: invalid list filter: priority filters apply only to tasks")
+    );
+    let error = list_error(
+        &server,
+        ListInput { kind: Some(RecordKind::Capture), status: vec![RecordStatus::Pending], ..ListInput::default() },
+    )
+    .await;
+    assert_eq!(error, invalid("status `pending` does not apply to capture records"));
+
+    // IDs no record has are not found, as `arcl list` reports them.
+    let missing = SpecId::new().to_string();
+    let error = list_error(
+        &server,
+        ListInput { spec: Some(missing.clone()), ..ListInput::default() },
+    )
+    .await;
+    assert_eq!(error, ToolError::from(StorageError::SpecNotFound { id: missing }));
+    assert_eq!((error.code(), error.exit_code()), ("not_found", 5));
+    let missing = TaskId::new().to_string();
+    let error = list_error(
+        &server,
+        ListInput { parent: Some(missing.clone()), ..ListInput::default() },
+    )
+    .await;
+    assert_eq!(
+        error,
+        ToolError::from(StorageError::PlanningTaskNotFound { id: missing })
+    );
+    let missing = ReleaseId::new().to_string();
+    let error = list_error(
+        &server,
+        ListInput { release: Some(missing.clone()), ..ListInput::default() },
+    )
+    .await;
+    assert_eq!(error, ToolError::from(StorageError::ReleaseNotFound { id: missing }));
+    let error = list_error(
+        &server,
+        ListInput { plan: Some("ZZZZZZZZ".to_owned()), ..ListInput::default() },
+    )
+    .await;
+    assert_eq!(
+        error,
+        ToolError::from(StorageError::from(ShortIdError::NotFound {
+            input: "ZZZZZZZZ".to_owned()
+        }))
+    );
+
+    // An ID of another kind does not parse as the kind the filter takes.
+    let error = list_error(
+        &server,
+        ListInput { spec: Some(records.plan.clone()), ..ListInput::default() },
+    )
+    .await;
+    assert_eq!(
+        error,
+        ToolError::from(SpecId::parse(&records.plan).expect_err("a plan ID is not a spec ID"))
+    );
+    assert_eq!((error.code(), error.exit_code()), ("invalid_request", 3));
+    let named = format!("t-{}", short(&records.high));
+    let error = list_error(&server, ListInput { phase: Some(named), ..ListInput::default() }).await;
+    assert_eq!(
+        error,
+        ToolError::from(PhaseId::parse(&records.high).expect_err("a task ID is not a phase ID"))
+    );
+}
+
 #[tokio::test]
 async fn failures_use_the_cli_error_envelope() {
     let project = project(false);
@@ -1433,6 +1740,20 @@ async fn list_and_context_leave_out_archived_tasks() {
     };
     let ids = |data: ListData| data.records.into_iter().map(|record| record.id).collect::<Vec<_>>();
     assert_eq!(ids(listed(false).await.expect("list").0.data), vec![follow.clone()]);
+    let in_phase = |all: bool| {
+        server.list(
+            Parameters::from(ListInput { phase: Some(first.id.to_string()), all, ..ListInput::default() }),
+            CancellationToken::new(),
+        )
+    };
+    assert_eq!(
+        ids(in_phase(false).await.expect("list phase").0.data),
+        vec![first.id.to_string()]
+    );
+    assert_eq!(
+        ids(in_phase(true).await.expect("list phase with all").0.data),
+        vec![first.id.to_string(), shipped.clone()]
+    );
     let mut all = ids(listed(true).await.expect("list all").0.data);
     all.sort();
     let mut expected = vec![shipped.clone(), follow.clone()];
