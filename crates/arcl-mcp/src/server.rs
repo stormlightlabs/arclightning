@@ -19,7 +19,7 @@ use rmcp::{
 use tokio_util::sync::CancellationToken;
 
 use arcl_core::prelude::*;
-use arcl_repo::prelude::Warning;
+use arcl_repo::prelude::{Primer, Warning};
 use arcl_store::prelude::*;
 
 use crate::error::ToolError;
@@ -45,7 +45,8 @@ macro_rules! read_description {
     };
 }
 
-const INSTRUCTIONS: &str = "Arc Lightning tracks this project's tasks. Find work with `ready`, \
+const INSTRUCTIONS: &str = "Arc Lightning tracks this project's tasks. Call `prime` at the start \
+of a session for the working loop, open work and the first ready tasks. Find work with `ready`, \
 claim it with `task_start`, read `context`, leave notes on decisions and findings with \
 `task_note`, make a task wait on a pull request, run or date with `gate_add`, then finish with \
 `task_complete` or park it with `task_handoff`. `explain` says why a task is not ready. Record work \
@@ -114,6 +115,26 @@ impl ArclServer {
 
 #[tool_router(router = tool_router)]
 impl ArclServer {
+    /// Return the session primer, like `arcl --json prime`.
+    #[tool(
+        description = "Return the session primer, like `arcl --json prime`: the Arc Lightning working loop as \
+        Markdown in `data.loop`, then up to 5 open tasks (in progress, then parked) with handoffs and open gate \
+        counts, and up to 5 ready tasks. Each list's `more` counts the tasks it leaves out. Call it at the start \
+        of a session. With the workspace on, the call first syncs, as a command does; when an `arcl` command \
+        holds the sync lock past the wait, it returns the database as it is with a `workspace_sync` warning.",
+        annotations(read_only_hint = true, open_world_hint = false),
+        meta = version_meta(FORMAT_VERSION)
+    )]
+    pub async fn prime(
+        &self, Parameters(input): Parameters<PrimeInput>, cancelled: CancellationToken,
+    ) -> Result<Json<Envelope<Primer>>, ToolError> {
+        input?;
+        self.call(Access::Prime, FORMAT_VERSION, cancelled, |database| {
+            Ok(Primer::read(database, &ShortIds::default())?)
+        })
+        .await
+    }
+
     /// Show one record by ID, like `arcl show`.
     #[tool(
         description = read_description!("Show one record by ID, like `arcl show`. A task returns its readiness view \

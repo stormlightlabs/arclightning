@@ -8,10 +8,7 @@ use super::support::write_output;
 use super::*;
 
 /// `skills/arclightning/SKILL.md`. `arcl prime` prints the loop it marks.
-pub(super) const SKILL_MARKDOWN: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../skills/arclightning/SKILL.md"
-));
+pub(super) const SKILL_MARKDOWN: &str = arcl_repo::prime::SKILL_MARKDOWN;
 
 /// The agent skill directories, relative to the project root, that receive
 /// the skill.

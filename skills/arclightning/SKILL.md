@@ -36,7 +36,7 @@ ID fields.
 
 ## Work the loop
 
-In short (`arcl prime` prints this list):
+In short (`arcl prime` [`prime`] prints this list):
 
 <!-- arcl-prime:begin -->
 

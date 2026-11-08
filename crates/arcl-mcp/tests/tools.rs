@@ -7,6 +7,8 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+use arcl_cli::cli::ColorChoice;
+use arcl_cli::output::{OutputMode, Renderer};
 use arcl_mcp::params::Parameters;
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -16,6 +18,7 @@ use arcl_core::prelude::*;
 use arcl_mcp::{error::ToolError, server::ArclServer, tools::*};
 // The MCP input enum, which the store prelude's `OpenSubtasks` would otherwise make ambiguous.
 use arcl_mcp::tools::OpenSubtasks;
+use arcl_repo::prelude::{PRIME_LIST_LIMIT, PRIME_MAX_BYTES, PRIME_MAX_LINES, Primer};
 use arcl_repo::workspace::{ProjectConfig, WorkspaceManifest, encode_manifest};
 use arcl_store::prelude::*;
 
@@ -30,6 +33,7 @@ const TOOLS: &[(&str, u64)] = &[
     ("list", 1),
     ("note_create", 1),
     ("plan_create", 1),
+    ("prime", 1),
     ("ready", 1),
     ("show", 2),
     ("spec_create", 1),
@@ -1895,4 +1899,153 @@ async fn list_and_context_leave_out_archived_tasks() {
             "{refused}"
         );
     }
+}
+
+#[tokio::test]
+async fn prime_returns_what_arcl_prime_json_prints() {
+    let project = project(false);
+    let mut database = Database::open(project.path().join(".arcl/arcl.db")).expect("database opens");
+    let project_id = database.project().expect("project reads").id;
+    let create = |database: &mut Database, title: String, phase_id: Option<PhaseId>| {
+        database
+            .create_planning_task(PlanningTaskCreate {
+                project_id,
+                spec_id: None,
+                plan_id: None,
+                phase_id,
+                parent_id: None,
+                title,
+                body: String::new(),
+                priority: TaskPriority::Normal,
+                position: 0,
+            })
+            .expect("task creates")
+            .id
+    };
+    // A completed task the compaction archives.
+    let spec = database
+        .create_spec("Feature".to_owned(), String::new(), String::new())
+        .expect("spec creates");
+    let plan = database
+        .create_plan(spec.id, "Roadmap".to_owned(), String::new())
+        .expect("plan creates");
+    let phase = database
+        .create_phase(plan.id, "First".to_owned(), String::new(), 1)
+        .expect("phase creates");
+    let archived = create(&mut database, "Archived".to_owned(), Some(phase.id));
+    database
+        .complete_planning_task(archived, arcl_store::OpenSubtasks::Refuse, None)
+        .expect("task completes");
+    database
+        .compact(&CompactionRequest {
+            before: "2999-01-01".to_owned(),
+            phase_id: Some(phase.id),
+            include_undated: true,
+            dry_run: false,
+        })
+        .expect("compaction runs");
+    // More open and ready tasks than a list shows, with long titles and handoffs.
+    let long = format!("{}\nsecond line", "\u{1b}x".repeat(200));
+    for index in 0..PRIME_LIST_LIMIT + 2 {
+        let open = create(&mut database, format!("Open {index} {long}"), None);
+        database.claim_planning_task(open, false, "agent").expect("task claims");
+        database.handoff_planning_task(open, long.clone()).expect("task parks");
+        database
+            .add_gate(open, GateKind::Date, "2999-01-01")
+            .expect("gate adds");
+        create(&mut database, format!("Ready {index} {long}"), None);
+    }
+    let expected = Primer::read(&database, &ShortIds::default()).expect("primer reads");
+    drop(database);
+
+    let server = ArclServer::new(project.path().to_owned());
+    let primed = server
+        .prime(Parameters::from(PrimeInput::default()), CancellationToken::new())
+        .await
+        .expect("prime")
+        .0;
+    assert!(primed.warnings.is_empty(), "{:?}", primed.warnings);
+
+    // The CLI renders `arcl --json prime` with this renderer and full IDs.
+    let renderer = Renderer::new(OutputMode::Json, ColorChoice::Never);
+    let cli = renderer.render_primer(&expected).expect("render").expect("JSON output");
+    let cli: Value = serde_json::from_str(&cli).expect("CLI JSON");
+    assert_eq!(to_json(&primed), cli);
+
+    let tools = server.tools();
+    let tool = tools.iter().find(|tool| tool.name == "prime").expect("prime is listed");
+    let schema = Value::Object((**tool.output_schema.as_ref().expect("output schema")).clone());
+    let validator = jsonschema::validator_for(&schema).expect("output schema compiles");
+    let errors = validator
+        .iter_errors(&cli)
+        .map(|error| error.to_string())
+        .collect::<Vec<_>>();
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let data = &primed.data;
+    assert_eq!((data.open.tasks.len(), data.open.more), (PRIME_LIST_LIMIT, 2));
+    assert_eq!((data.ready.tasks.len(), data.ready.more), (PRIME_LIST_LIMIT, 2));
+    assert_eq!(data.open.tasks[0].open_gates, 1);
+    let archived = archived.to_string();
+    assert!(
+        data.open
+            .tasks
+            .iter()
+            .chain(&data.ready.tasks)
+            .all(|task| task.id != archived),
+        "an archived task is listed"
+    );
+    let text = data.text();
+    assert!(text.lines().count() <= PRIME_MAX_LINES, "{text}");
+    assert!(text.len() <= PRIME_MAX_BYTES, "{} bytes", text.len());
+}
+
+#[tokio::test]
+async fn prime_reads_unsynced_when_the_sync_lock_stays_held() {
+    let project = project(true);
+    let server = ArclServer::new(project.path().to_owned()).with_lock_wait(Duration::from_millis(200));
+    let id = create_task(&server, "Ready", &[]).await;
+    let lock = hold_sync_lock(project.path());
+
+    let primed = server
+        .prime(Parameters::from(PrimeInput::default()), CancellationToken::new())
+        .await
+        .expect("prime reads past a held lock")
+        .0;
+    assert_eq!(primed.data.ready.tasks[0].id, id);
+    assert_eq!(primed.warnings.len(), 1);
+    let warning = to_json(&primed.warnings[0]);
+    assert_eq!(warning["code"], json!("workspace_sync"));
+    assert!(
+        warning["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("arcl.db-sync.lock")),
+        "{warning}"
+    );
+
+    // A cancelled call still stops.
+    let cancelled = CancellationToken::new();
+    cancelled.cancel();
+    let error = server
+        .prime(Parameters::from(PrimeInput::default()), cancelled)
+        .await
+        .err()
+        .expect("a cancelled call fails");
+    assert!(error.to_string().contains("cancelled"), "{error}");
+    drop(lock);
+}
+
+#[tokio::test]
+async fn prime_refuses_arguments() {
+    let project = project(false);
+    let server = ArclServer::new(project.path().to_owned());
+    let refused = server
+        .prime(
+            Parameters::from_arguments(arguments(json!({"limit": 3}))),
+            CancellationToken::new(),
+        )
+        .await
+        .err()
+        .expect("prime takes no arguments");
+    assert_eq!((refused.code(), refused.exit_code()), ("invalid_request", 3));
 }

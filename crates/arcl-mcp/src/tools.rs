@@ -217,6 +217,11 @@ pub struct ListInput {
     pub all: bool,
 }
 
+/// `prime` takes no arguments.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PrimeInput {}
+
 /// Filters and a page for `ready`.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
