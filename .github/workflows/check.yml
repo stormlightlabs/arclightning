@@ -32,9 +32,6 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # `pnpm test` runs the website's Vitest browser tests in Chromium.
-      - run: pnpm --filter @arclightning/website exec playwright install --with-deps chromium
-
       - uses: extractions/setup-just@v3
 
       - run: just check

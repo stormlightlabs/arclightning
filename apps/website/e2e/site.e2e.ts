@@ -141,6 +141,16 @@ test.describe('mobile', () => {
 		await expect(page.locator('.mobile-menu__panel')).toBeHidden();
 		await expect(page.getByLabel('Open documentation menu')).toBeFocused();
 	});
+
+	test('closes the menu on Escape with nothing focused', async ({ page }) => {
+		await page.goto('/quick-start/');
+		await page.getByText('Menu').click();
+		await expect(page.locator('.mobile-menu__panel')).toBeVisible();
+		await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+		await page.keyboard.press('Escape');
+		await expect(page.locator('.mobile-menu__panel')).toBeHidden();
+		await expect(page.getByLabel('Open documentation menu')).toBeFocused();
+	});
 });
 
 test.describe('without JavaScript', () => {

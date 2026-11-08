@@ -19,10 +19,14 @@
 		if (menu) menu.open = false;
 	});
 
-	/** Close the open menu on Escape from inside it and return focus to its toggle. The search dialog handles its own Escape. */
+	/**
+	 * Close the open menu on Escape and return focus to its toggle. Escape counts from inside the menu or with nothing
+	 * focused (the target is the body), so other controls keep their own Escape. The search dialog handles its own Escape.
+	 */
 	function closeOnEscape(event: KeyboardEvent): void {
 		if (event.key !== 'Escape' || !menu?.open || event.defaultPrevented) return;
-		if (!(event.target instanceof Node) || !menu.contains(event.target)) return;
+		const fromPage = event.target === document.body || event.target === document.documentElement;
+		if (!fromPage && !(event.target instanceof Node && menu.contains(event.target))) return;
 		if (event.target instanceof Element && event.target.closest('dialog')) return;
 		menu.open = false;
 		menu.querySelector('summary')?.focus();

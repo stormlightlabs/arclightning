@@ -6,7 +6,7 @@ status = "completed"
 priority = "normal"
 position = 0
 blocked-by = ["arcl-t-01M5NE5P6XHRR4Q84820YACQ07", "arcl-t-01M5NH1N3R9AX3XZH6XG9ZX1QE"]
-evidence = "Done in this PR: the website shell takes its colors from the packages/ui grey and blue tokens and its fonts (IBM Plex Sans, Google Sans, Google Sans Code) from Fontsource under the OFL. The mobile menu closes on Escape and after navigation. Vitest browser tests cover the theme toggle, copy controls, table of contents, search dialog and menu. Playwright covers axe WCAG A/AA in both themes, keyboard, search, copy, reduced motion, mobile fit and the no-JavaScript path, with screenshots of the landing page, Quick Start and Tasks at 1280 and 390 px in both themes."
+evidence = "Done in #95: the website shell takes its colors from the packages/ui grey and blue tokens and its fonts (IBM Plex Sans, Google Sans, Google Sans Code) from Fontsource under the OFL. The mobile menu closes on Escape and after navigation. Vitest browser tests cover the theme toggle, copy controls, table of contents, search dialog and menu. Playwright covers axe WCAG A/AA in both themes, keyboard, search, copy, reduced motion, mobile fit and the no-JavaScript path, with screenshots of the landing page, Quick Start and Tasks at 1280 and 390 px in both themes."
 completed-at = "2026-11-08T19:47:52.812Z"
 +++
 

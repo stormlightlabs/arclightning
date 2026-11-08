@@ -47,15 +47,16 @@
 			</figcaption>
 			<pre><code
 					><span class="prompt">$</span> arcl capture create "Ship keyboard navigation"
-<span class="success">created</span>  arcl-c-01J…
+<span class="success">Created capture</span> `arcl-c-01M6YB…`: Ship keyboard navigation
 
-<span class="prompt">$</span> arcl task list --ready
-<span class="meta">READY   HIGH</span>  Add focus-visible states
-<span class="meta">READY   MED</span>   Document keyboard shortcuts
+<span class="prompt">$</span> arcl ready
+arcl-t-01M6YB…  <span class="meta">[high]   pending</span>  Add focus-visible states
+arcl-t-01M6YB…  <span class="meta">[normal] pending</span>  Document keyboard shortcuts
 
-<span class="prompt">$</span> arcl context arcl-t-01J…
-<span class="accent">spec</span>      Keyboard navigation
-<span class="accent">handoff</span>   Continue from the dialog focus trap</code></pre>
+<span class="prompt">$</span> arcl context arcl-t-01M6YB…
+<span class="accent">Task</span> `arcl-t-01M6YB…` [pending] Add focus-visible states
+<span class="accent">Ready:</span> true
+<span class="accent">Handoff:</span> Continue from the dialog focus trap</code></pre>
 		</figure>
 	</section>
 

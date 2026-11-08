@@ -8,9 +8,10 @@ position = 1
 blocked-by = ["arcl-t-01M5NE5P8KF13P2YZ4B8W2B7MS"]
 +++
 
-Write the documentation the shell from T14 presents, in `apps/website`, so the
-site documents the CLI, the web app, MCP, the GraphQL API and the repository
-workflows in the current product vocabulary.
+Write the documentation that the shell from "Rebuild the website and
+documentation shell" presents, in `apps/website`, so the site documents the
+CLI, the web app, MCP, the GraphQL API and the repository workflows in the
+current product vocabulary.
 
 Acceptance criteria:
 
