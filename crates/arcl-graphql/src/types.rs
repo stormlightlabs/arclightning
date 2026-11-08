@@ -15,7 +15,9 @@ use arcl_store::{PlanningWorkItem, RecordTreeNode, list_records};
 /// Any record a project holds. Every record has an ID, a kind, a title and a
 /// status; a note's status is `available`.
 // Clippy reads the repeated `ty` keys of the `field(...)` lists as duplicates.
-#[allow(clippy::duplicated_attributes)]
+// Boxing the task variant would add an allocation per task to save a few
+// hundred bytes per record.
+#[allow(clippy::duplicated_attributes, clippy::large_enum_variant)]
 #[derive(Interface)]
 #[graphql(
     name = "Record",
@@ -151,6 +153,8 @@ impl RecordNode {
 /// A record or a gate, which `arcl show` shows by ID alike. A gate is not a
 /// `Record`: it has no title or workspace file, and its `kind` is the
 /// gate kind, such as `pr`.
+// One is built per `record` query, so the task variant's size does not matter.
+#[allow(clippy::large_enum_variant)]
 #[derive(Union)]
 #[graphql(name = "RecordOrGate")]
 pub enum RecordOrGate {
@@ -541,6 +545,15 @@ impl TaskNode {
     /// The name that claimed the task.
     async fn assignee(&self) -> Option<&str> {
         self.task.assignee.as_deref()
+    }
+    /// When the task was completed, as an RFC 3339 UTC timestamp. A task
+    /// completed before arcl recorded completion times has none.
+    async fn completed_at(&self) -> Option<&str> {
+        self.task.completed_at.as_deref()
+    }
+    /// When `arcl compact` archived the task, as an RFC 3339 UTC timestamp.
+    async fn archived_at(&self) -> Option<&str> {
+        self.task.archived_at.as_deref()
     }
     /// The parent task.
     async fn parent(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<TaskNode>> {
@@ -944,6 +957,11 @@ impl TreeNode {
     /// root task also lists those it inherits.
     async fn blocked_by(&self) -> Vec<ID> {
         self.node.record.blocked_by.iter().cloned().map(ID).collect()
+    }
+    /// How many archived tasks the tree left out directly below this node,
+    /// counting their subtasks. They count as done.
+    async fn archived_tasks(&self) -> usize {
+        self.node.record.archived_tasks
     }
     /// How many levels below the top of the tree the node sits: 0 for a node
     /// `tree` returns, 1 for its children.

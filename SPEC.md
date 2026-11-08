@@ -157,6 +157,7 @@ Tasks retain:
   it is parked, handed off, completed, or cancelled
 - timestamped notes, each with an optional kind
 - gates: a pull request, CI run or date the task waits on
+- the time it was completed, and the time `arcl compact` archived it
 
 Readiness is calculated for actionable leaf tasks. A task is ready when it is
 pending, its applicable ancestors and containers permit work, every blocker
@@ -222,6 +223,22 @@ about them without holding the sync lock or a database transaction, then
 marks the met ones in one transaction that reads each gate again. A met gate
 stays met; `arcl gate remove` deletes a gate in either state. `arcl show`
 shows a gate by its ID.
+
+`arcl compact --before <date> [--phase <id>]` keeps long-lived projects'
+reads small. It archives completed tasks whose completion time is before the
+start of the date in UTC, and appends each archived task's title, ID,
+completion time and evidence to one compaction note per phase, linked to the
+phase. A task with no completion time, completed before arcl recorded one,
+is archived only with `--include-undated`. Open and cancelled tasks are never
+archived, and neither is a task that blocks an open task or has a subtask
+that stays. An archived task keeps status `completed` and gains an archive
+time; it stays in the workspace files. `list`, `tree` and `context` leave it
+out unless `--all` is given, `show` always shows it, and phase progress in
+`tree`, `roadmap` and the web app counts it as done. GraphQL `records`,
+`tree` and `context`, the REST reads built on them, and the MCP `list` and
+`context` tools leave it out the same way. Archived tasks are never selected
+again, so repeating a compaction changes nothing, and `--dry-run` writes
+nothing.
 
 ### Note
 
@@ -351,12 +368,14 @@ field, version 3 the task `notes` array of tables, oldest first, each
 with `created-at`, an optional `kind`, and `text`, and version 4 the task
 `gates` array of tables, oldest first, each with `id`, `kind`, `target`,
 `status`, `created-at` and, once met, `met-at`. Version 5 adds the capture
-`source-task` field. arcl reads versions 1 to 5. It writes version 5 when a
-capture file names its source task, version 4 when a task file carries a
-gate, version 3 when one carries a note, version 2 when one carries an
-`assignee`, and otherwise keeps the version the workspace already has. A new
-workspace starts at version 1, so a workspace without claims, notes, gates or
-capture sources stays there. A workspace never moves back to an older
+`source-task` field, and version 6 the task `completed-at` and `archived-at`
+timestamps, which only a completed task carries. arcl reads versions 1 to 6.
+It writes version 6 when a task file carries a completion or archive time,
+version 5 when a capture file names its source task, version 4 when a task
+file carries a gate, version 3 when one carries a note, version 2 when one
+carries an `assignee`, and otherwise keeps the version the workspace already
+has. A new workspace starts at version 1, so a workspace without claims,
+notes, gates, capture sources or completed tasks stays there. A workspace never moves back to an older
 version on its own. An arcl that reads only older versions checks the
 manifest before any record is read or written. It refuses a newer workspace
 with an error that names the manifest's version and the newest version it

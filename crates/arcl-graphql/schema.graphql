@@ -240,7 +240,11 @@ type Query {
 		"""
 		Tasks claimed by this name.
 		"""
-		assignee: String
+		assignee: String,
+		"""
+		Include archived tasks.
+		"""
+		all: Boolean! = false
 	): [Record!]!
 	"""
 	The tasks ready to start, as `arcl ready` lists them: by priority,
@@ -274,7 +278,7 @@ type Query {
 	"""
 	tree(		root: ID,
 		"""
-		Include promoted and discarded captures.
+		Include promoted and discarded captures and archived tasks.
 		"""
 		all: Boolean! = false
 	): [TreeNode!]!
@@ -286,7 +290,12 @@ type Query {
 	"""
 	The context packet of the task `task` names, as `arcl context` prints it.
 	"""
-	context(task: ID!): TaskContext
+	context(		task: ID!,
+		"""
+		Include archived blockers, dependents and evidence.
+		"""
+		all: Boolean! = false
+	): TaskContext
 	"""
 	The workspace file of the record `id` names, with its revision.
 	"""
@@ -514,6 +523,15 @@ type Task implements Record {
 	"""
 	assignee: String
 	"""
+	When the task was completed, as an RFC 3339 UTC timestamp. A task
+	completed before arcl recorded completion times has none.
+	"""
+	completedAt: String
+	"""
+	When `arcl compact` archived the task, as an RFC 3339 UTC timestamp.
+	"""
+	archivedAt: String
+	"""
 	The parent task.
 	"""
 	parent: Task
@@ -671,6 +689,11 @@ type TreeNode {
 	root task also lists those it inherits.
 	"""
 	blockedBy: [ID!]!
+	"""
+	How many archived tasks the tree left out directly below this node,
+	counting their subtasks. They count as done.
+	"""
+	archivedTasks: Int!
 	"""
 	How many levels below the top of the tree the node sits: 0 for a node
 	`tree` returns, 1 for its children.

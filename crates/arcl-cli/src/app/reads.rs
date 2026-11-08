@@ -1,6 +1,8 @@
 //! The read commands of the CLI. `arcl serve` answers the same reads through
 //! GraphQL, in [`super::rest`], with the same envelopes and errors.
 
+use arcl_store::CompactionRequest;
+
 use super::query::{connected_tree, list_connected, resolve_ready_filter, show_record};
 use super::skill::{absent, write_replacing};
 use super::support::*;
@@ -34,12 +36,30 @@ pub(super) fn read_explain(task_id: &str, renderer: &Renderer) -> anyhow::Result
     Ok(renderer.render_planning_task_view(&view, &ids)?)
 }
 
-/// `arcl context <task-id>`.
-pub(super) fn read_context(task_id: &str, renderer: &Renderer) -> anyhow::Result<Option<String>> {
+/// `arcl context <task-id>`, with archived related tasks only when `all` is
+/// set.
+pub(super) fn read_context(task_id: &str, all: bool, renderer: &Renderer) -> anyhow::Result<Option<String>> {
     let id = parse_task_id(task_id).map_err(ApplicationError::from_command)?;
     let database = open_database().map_err(ApplicationError::from_command)?;
-    let context = database.planning_context(id).map_err(ApplicationError::from_command)?;
+    let mut context = database.planning_context(id).map_err(ApplicationError::from_command)?;
+    if !all {
+        context.hide_archived();
+    }
     Ok(renderer.render_planning_context(&context)?)
+}
+
+/// `arcl compact`: archive the tasks completed before `before`, under
+/// `phase` when given, and print what was archived. With `dry_run` it prints
+/// what would be and writes nothing.
+pub(super) fn exec_compact(
+    before: String, phase: Option<String>, include_undated: bool, dry_run: bool, renderer: &Renderer,
+) -> anyhow::Result<Option<String>> {
+    let phase_id = parse_optional_id::<PhaseId>(phase).map_err(ApplicationError::from_command)?;
+    let mut database = open_database().map_err(ApplicationError::from_command)?;
+    let request = CompactionRequest { before, phase_id, include_undated, dry_run };
+    let compaction = database.compact(&request).map_err(ApplicationError::from_command)?;
+    let ids = display_ids(&database, renderer).map_err(ApplicationError::from_command)?;
+    Ok(renderer.render_compaction(&compaction, &ids)?)
 }
 
 /// `arcl ready`.
@@ -81,7 +101,10 @@ pub(super) fn read_tree(root: Option<&str>, options: TreeArgs, renderer: &Render
 /// root.
 pub(super) fn exec_roadmap(output: Option<&Path>, renderer: &Renderer) -> anyhow::Result<()> {
     let database = open_database().map_err(ApplicationError::from_command)?;
-    let nodes = connected_tree(&database, None, TreeArgs::default()).map_err(ApplicationError::from_command)?;
+    // Archived tasks are done work, so the roadmap counts them, as `arcl
+    // tree` does when it leaves them out.
+    let options = TreeArgs { all: true, ..TreeArgs::default() };
+    let nodes = connected_tree(&database, None, options).map_err(ApplicationError::from_command)?;
     let memberships = database.release_memberships().map_err(ApplicationError::from_command)?;
     let roadmap = Roadmap::new(&nodes, &memberships);
     let Some(path) = output else {

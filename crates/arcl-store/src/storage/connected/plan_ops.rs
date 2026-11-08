@@ -216,6 +216,8 @@ fn prepared_task(prepared: &PreparedPlan, task_entry: &PlanTaskEntry) -> Result<
             handoff: current.handoff.clone(),
             evidence: current.evidence.clone(),
             assignee: current.assignee.clone(),
+            completed_at: current.completed_at.clone(),
+            archived_at: current.archived_at.clone(),
         })
     } else {
         let mut task = PlanningTask::new(

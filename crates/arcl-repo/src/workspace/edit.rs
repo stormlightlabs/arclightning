@@ -254,6 +254,16 @@ fn command_owned_change(before: &WorkspaceRecord, after: &WorkspaceRecord) -> Op
                  completed or cancelled",
             ),
             (
+                before.completed_at != after.completed_at,
+                "completed-at",
+                "a completion time is set only when `arcl task complete` or the web app's Complete action completes the task",
+            ),
+            (
+                before.archived_at != after.archived_at,
+                "archived-at",
+                "an archive time is set only by `arcl compact`",
+            ),
+            (
                 before.notes != after.notes,
                 "notes",
                 "notes are added only by `arcl task note`; to change or remove one, edit the task file and run `arcl workspace sync`",

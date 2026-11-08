@@ -326,6 +326,10 @@ when the note has none.
 Completion accepts either `--evidence <MARKDOWN>` or `--evidence-file <PATH|->`.
 Each pair is mutually exclusive, and `-` reads UTF-8 Markdown from standard input.
 
+Completing a task records when, as `completed_at` in JSON and `completed-at` in
+its workspace file. Subtasks that `--with-subtasks` completes get the same
+time. A task completed before arcl recorded completion times has none.
+
 `complete` refuses a task with open descendants. `--allow-open-children`
 completes only the task. `--with-subtasks` also completes its pending and
 in-progress descendants in one write, and refuses, writing nothing, while a
@@ -335,6 +339,52 @@ the IDs it completed in tree order, and `unblocked`, the IDs of tasks that were
 not ready before the command and are ready after it. Plain output prints the
 task ID, then a `subtask<TAB><id>` line for each completed subtask and an
 `unblocked<TAB><id>` line for each task it made ready.
+
+## Compaction
+
+`arcl compact --before <DATE>` archives tasks completed before the start of
+`DATE` in UTC, written `YYYY-MM-DD`, and keeps their evidence in one note per
+phase. `--phase <ID>` archives only tasks under that phase. `--dry-run` prints
+what would be written and archived, and writes nothing.
+
+A task is archived when all of these hold:
+
+- it is completed, and not archived yet;
+- its completion time is before `DATE`;
+- it sits under a phase, its own or its parent's;
+- it does not block a pending, in-progress or parked task, or a task with
+  such a subtask;
+- every subtask it has is archived in the same run or already.
+
+Pending, in-progress, parked and cancelled tasks are never archived, so a
+parent with a cancelled subtask stays. A completed task with no completion
+time stays unless `--include-undated` is given, which treats it as completed
+before any date.
+
+An archived task keeps its status, `completed`, and gets `archived_at` in JSON
+and `archived-at` in its workspace file. It stays in the workspace files.
+
+Each phase's tasks go into its compaction note: the note linked to the phase
+whose title starts with `Compacted work`. A phase without one gets a new note
+titled `Compacted work: <phase title>`, linked to the phase. The note holds a
+section per task, oldest completion first, with its title as a heading, its ID,
+its completion time and its evidence. A later run appends new sections to the
+same note. Archived tasks are never selected again, so running the same
+command twice changes nothing the second time.
+
+`list`, `tree` and `context` leave archived tasks out; `--all` shows them.
+`show` always shows a task. `tree`, `roadmap` and the web app count archived
+tasks as done in phase progress, so a phase keeps its totals after compaction.
+`prime`, `ready` and `next` list only open tasks, so archived tasks never show
+there.
+
+Human output names each phase, its note and its tasks. Plain output prints a
+`phase<TAB><phase-id><TAB><note-id><TAB><created|appended>` line per phase,
+with `-` for the note a dry run would create, then a `task<TAB><id>` line per
+task. JSON returns `dry_run`, `archived_at`, which is `null` on a dry run or
+when nothing was archived, and `phases`, each with `phase_id`, `phase_title`,
+`note_id`, `note_title`, `note_created` and `tasks`. A date that is not
+`YYYY-MM-DD` exits `3`.
 
 ## Gates
 
@@ -405,11 +455,11 @@ and when it was created. Plain output prints the gate's `gate` line, then
 | Command                                                              | Purpose                                                            |
 | -------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | `arcl show <id>`                                                     | Show one record by its full or short ID.                           |
-| `arcl list`                                                          | List records using kind, state, priority, and association filters. |
+| `arcl list [--all]`                                                  | List records using kind, state, priority, and association filters. |
 | `arcl tree [<id>] [--all] [--ascii] [--depth <N>] [--style <STYLE>]` | Show the complete hierarchy or one rooted subtree.                 |
 | `arcl roadmap [--output <PATH>]`                                     | Print specs, plans, phases and releases as one Markdown page.      |
 | `arcl explain <task-id>`                                             | Report every condition affecting task readiness.                   |
-| `arcl context <task-id>`                                             | Return the bounded context needed to work on a task.               |
+| `arcl context <task-id> [--all]`                                     | Return the bounded context needed to work on a task.               |
 | `arcl check`                                                         | Sync the workspace, then validate database and graph invariants.   |
 | `arcl ready`                                                         | List actionable leaf tasks in deterministic order.                 |
 | `arcl next`                                                          | Return the first actionable task, if one exists.                   |
@@ -438,7 +488,10 @@ still run.
 
 `list` accepts `--kind`, `--status`, `--priority`, `--release`, `--epic`,
 `--milestone`, and `--parent`. `ready` and `next` accept the same priority and
-association filters.
+association filters. `list` leaves out archived tasks; `--all` includes them.
+
+`context` leaves archived tasks out of the blockers, dependents and earlier
+evidence; `--all` includes them. The task itself always shows.
 
 `next --start` selects and starts the task in one write transaction, so two
 concurrent calls never start the same task. The second waits up to 5 seconds
@@ -471,9 +524,12 @@ prints the one-line message other commands fail with there, which says to run
 `--json` returns `initialized` as `false`, `root` and that `message`. A
 database `prime` cannot open still fails.
 
-`tree` leaves out promoted and discarded captures in human, `--plain` and
-`--json` output; `--all` includes them. A closed capture named as the root
-still shows. The JSON nodes keep their shape either way.
+`tree` leaves out promoted and discarded captures and archived tasks in human,
+`--plain` and `--json` output; `--all` includes them. A closed capture or an
+archived task named as the root still shows, an archived task with its
+subtree. The JSON nodes keep their shape either way, and a node with archived
+tasks left out below it adds `archived_tasks`, their count with their
+subtasks.
 
 `tree` prints specs first, then tasks outside any spec, then captures, notes
 and releases, each kind in ID order. `--plain` keeps one record per row, with
@@ -483,7 +539,8 @@ same order. Both print every record and ignore `--ascii`, `--depth` and
 
 Human output draws a box-drawing tree. Each line holds a status mark and the
 record's title, with no ID. A phase adds its completed and total task counts,
-such as `7/12`, counting subtasks and leaving out cancelled tasks. A task with
+such as `7/12`, counting subtasks and archived tasks and leaving out cancelled
+tasks. A task with
 unfinished direct blockers ends with `blocked by` and their short IDs.
 
 Each run of consecutive completed phases folds into one line. A completed
@@ -501,7 +558,7 @@ parts, and an empty project prints none.
 
 | Flag              | Human output                                                                                                                      |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `--all`           | Unfolds every phase and lists captures, notes and releases under `Inbox`, `Notes` and `Releases` headings in place of the footer. |
+| `--all`           | Unfolds every phase, shows archived tasks, and lists captures, notes and releases under `Inbox`, `Notes` and `Releases` headings in place of the footer. |
 | `--ascii`         | Draws with `\|--`, `` `-- `` and `\|`, as GNU `tree -A` does, and uses each mark's ASCII form.                                    |
 | `--depth N`       | Stops after `N` levels of records, counting top-level records as `1`.                                                             |
 | `--style <STYLE>` | Lays the tree out as `folded`, the default, `full` or `outline`.                                                                  |

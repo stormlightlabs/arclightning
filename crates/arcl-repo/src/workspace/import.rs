@@ -1158,6 +1158,8 @@ fn task_from_record(record: &TaskRecord, project_id: ProjectId) -> PlanningTask 
         handoff: record.handoff.clone().unwrap_or_default(),
         evidence: record.evidence.clone().unwrap_or_default(),
         assignee: record.assignee.clone(),
+        completed_at: record.completed_at.clone(),
+        archived_at: record.archived_at.clone(),
     }
 }
 fn note_from_record(record: &NoteRecord, project_id: ProjectId) -> Note {

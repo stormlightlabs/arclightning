@@ -115,6 +115,7 @@ impl QueryRoot {
         #[graphql(desc = "Tasks under this phase.")] phase: Option<ID>,
         #[graphql(desc = "Direct subtasks of this task.")] parent: Option<ID>,
         #[graphql(desc = "Tasks claimed by this name.")] assignee: Option<String>,
+        #[graphql(default, desc = "Include archived tasks.")] all: bool,
     ) -> async_graphql::Result<Vec<RecordNode>> {
         let reader = reader(ctx);
         // Check the filters in the order `arcl list` does: the kind, then
@@ -127,6 +128,7 @@ impl QueryRoot {
             statuses: status,
             priorities: priorities(&priority)?,
             assignee: assignee.map(|name| name.trim().to_owned()),
+            archived: all,
             ..RecordFilter::default()
         };
         filter.validate().map_err(storage_error)?;
@@ -163,7 +165,7 @@ impl QueryRoot {
     /// names, or of every record.
     async fn tree(
         &self, ctx: &Context<'_>, root: Option<ID>,
-        #[graphql(default, desc = "Include promoted and discarded captures.")] all: bool,
+        #[graphql(default, desc = "Include promoted and discarded captures and archived tasks.")] all: bool,
     ) -> async_graphql::Result<Vec<TreeNode>> {
         let reader = reader(ctx);
         let root = root.map(|root| reader.resolve(&root, None)).transpose()?;
@@ -180,11 +182,18 @@ impl QueryRoot {
     }
 
     /// The context packet of the task `task` names, as `arcl context` prints it.
-    async fn context(&self, ctx: &Context<'_>, task: ID) -> async_graphql::Result<Option<ContextNode>> {
+    async fn context(
+        &self, ctx: &Context<'_>, task: ID,
+        #[graphql(default, desc = "Include archived blockers, dependents and evidence.")] all: bool,
+    ) -> async_graphql::Result<Option<ContextNode>> {
         let reader = reader(ctx);
         let id = reader.parse::<TaskId>(&task)?;
         let view = (*reader.task_view(id)?).clone();
-        one(ctx, Some(ContextNode(PlanningContext::from_view(view))))
+        let mut context = PlanningContext::from_view(view);
+        if !all {
+            context.hide_archived();
+        }
+        one(ctx, Some(ContextNode(context)))
     }
 
     /// The workspace file of the record `id` names, with its revision.

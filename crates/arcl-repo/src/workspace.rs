@@ -31,14 +31,16 @@ pub const CONFIG_FORMAT_VERSION: u32 = 1;
 /// The newest on-disk workspace format version this crate reads and writes.
 ///
 /// Version 2 adds the task `assignee` field, version 3 the task `notes`
-/// array, version 4 the task `gates` array and version 5 the capture
-/// `source-task` field; see [`ASSIGNEE_FORMAT_VERSION`],
-/// [`TASK_NOTES_FORMAT_VERSION`], [`GATES_FORMAT_VERSION`] and
-/// [`CAPTURE_SOURCE_FORMAT_VERSION`] for when a projection writes each. Reading also
+/// array, version 4 the task `gates` array, version 5 the capture
+/// `source-task` field and version 6 the task `completed-at` and
+/// `archived-at` fields; see [`ASSIGNEE_FORMAT_VERSION`],
+/// [`TASK_NOTES_FORMAT_VERSION`], [`GATES_FORMAT_VERSION`],
+/// [`CAPTURE_SOURCE_FORMAT_VERSION`] and [`TASK_TIMES_FORMAT_VERSION`] for
+/// when a projection writes each. Reading also
 /// accepts [`OLDEST_WORKSPACE_FORMAT_VERSION`] and later versions up to this
 /// one; an arcl that predates a version refuses its manifest before it reads
 /// any record.
-pub const WORKSPACE_FORMAT_VERSION: u32 = 5;
+pub const WORKSPACE_FORMAT_VERSION: u32 = 6;
 /// The oldest workspace format version this crate still reads.
 pub const OLDEST_WORKSPACE_FORMAT_VERSION: u32 = 1;
 /// The workspace format version a task `assignee` needs.
@@ -66,6 +68,13 @@ pub const GATES_FORMAT_VERSION: u32 = 4;
 /// from, under the same rule as [`ASSIGNEE_FORMAT_VERSION`]: it never lowers
 /// the version a workspace already has.
 pub const CAPTURE_SOURCE_FORMAT_VERSION: u32 = 5;
+/// The workspace format version a task `completed-at` or `archived-at`
+/// needs.
+///
+/// A projection writes this version once a task carries a completion or
+/// archive time, under the same rule as [`ASSIGNEE_FORMAT_VERSION`]: it
+/// never lowers the version a workspace already has.
+pub const TASK_TIMES_FORMAT_VERSION: u32 = 6;
 
 /// Workspace and configuration validation failures.
 #[derive(Debug, Error)]
@@ -138,6 +147,17 @@ pub enum WorkspaceError {
         value.escape_debug()
     )]
     InvalidRecordNoteCreatedAt { value: String },
+    /// A task `completed-at` or `archived-at` that is not an RFC 3339
+    /// timestamp.
+    #[error(
+        "workspace task `{field}` `{}` must be an RFC 3339 timestamp, such as `2026-10-27T10:00:00.000Z`",
+        value.escape_debug()
+    )]
+    InvalidRecordTaskTime { field: &'static str, value: String },
+    /// A task `completed-at` or `archived-at` on a task that is not
+    /// completed.
+    #[error("workspace task `{field}` is set on a `{status}` task; only a completed task carries it")]
+    TaskTimeNotCompleted { field: &'static str, status: String },
     #[error("workspace capture creation time cannot be empty")]
     EmptyRecordCreatedAt,
     /// A task gate with an invalid target, an empty `created-at`, or a

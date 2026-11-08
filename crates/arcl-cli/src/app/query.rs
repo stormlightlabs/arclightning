@@ -104,6 +104,7 @@ pub(super) fn list_connected(database: &Database, args: ListArgs) -> CResult<Vec
         assignee: args.assignee.map(|name| name.trim().to_owned()),
         kind: args.kind,
         statuses: args.status,
+        archived: args.all,
         ..RecordFilter::default()
     };
     filter.validate().map_err(filter_error)?;
@@ -160,5 +161,6 @@ fn tree_node(node: RecordTreeNode) -> ConnectedTreeNode {
         mark: StatusMark::of(node.tree_status),
         blocked_by: node.blocked_by,
         children: node.children.into_iter().map(tree_node).collect(),
+        archived_tasks: node.archived_tasks,
     }
 }

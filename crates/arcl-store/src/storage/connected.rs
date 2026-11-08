@@ -8,11 +8,13 @@ use rusqlite::{Connection, OptionalExtension, params};
 use super::{Result, StorageError, releases};
 use arcl_core::domain::*;
 
+mod compaction;
 mod execution;
 mod gates;
 mod plan_ops;
 mod promotions;
 
+pub use compaction::*;
 pub use execution::*;
 pub use gates::*;
 pub use plan_ops::*;
@@ -185,6 +187,8 @@ struct RawTask {
     handoff: String,
     evidence: String,
     assignee: Option<String>,
+    completed_at: Option<String>,
+    archived_at: Option<String>,
 }
 
 pub fn project(connection: &Connection) -> Result<Project> {
@@ -701,7 +705,7 @@ fn has_open_phase_descendants(connection: &Connection, id: PhaseId) -> Result<bo
 /// Check a structured plan against an existing persistent plan without writing.
 pub fn planning_tasks(connection: &Connection, project_id: ProjectId) -> Result<Vec<PlanningTask>> {
     let mut statement = connection.prepare(
-        "SELECT id, project_id, spec_id, plan_id, phase_id, parent_id, plan_key, title, body, status, priority, position, handoff, evidence, assignee
+        "SELECT id, project_id, spec_id, plan_id, phase_id, parent_id, plan_key, title, body, status, priority, position, handoff, evidence, assignee, completed_at, archived_at
          FROM planning_tasks WHERE project_id = ?1
          ORDER BY COALESCE(phase_id, ''), COALESCE(plan_id, ''), COALESCE(spec_id, ''), COALESCE(parent_id, ''), position, id",
     )?;
@@ -711,7 +715,7 @@ pub fn planning_tasks(connection: &Connection, project_id: ProjectId) -> Result<
 
 pub fn planning_task(connection: &Connection, id: TaskId) -> Result<Option<PlanningTask>> {
     let raw = connection.query_row(
-        "SELECT id, project_id, spec_id, plan_id, phase_id, parent_id, plan_key, title, body, status, priority, position, handoff, evidence, assignee FROM planning_tasks WHERE id = ?1",
+        "SELECT id, project_id, spec_id, plan_id, phase_id, parent_id, plan_key, title, body, status, priority, position, handoff, evidence, assignee, completed_at, archived_at FROM planning_tasks WHERE id = ?1",
         [id.to_string()], raw_task,
     ).optional()?;
     raw.map(decode_task).transpose()
@@ -818,6 +822,8 @@ pub fn update_planning_task(
         handoff: current.handoff,
         evidence: current.evidence,
         assignee: current.assignee,
+        completed_at: current.completed_at,
+        archived_at: current.archived_at,
     };
     validate_task_ancestry(&tx, &next)?;
     tx.execute(
@@ -1379,6 +1385,8 @@ fn raw_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawTask> {
         handoff: row.get(12)?,
         evidence: row.get(13)?,
         assignee: row.get(14)?,
+        completed_at: row.get(15)?,
+        archived_at: row.get(16)?,
     })
 }
 fn decode_task(raw: RawTask) -> Result<PlanningTask> {
@@ -1410,6 +1418,8 @@ fn decode_task(raw: RawTask) -> Result<PlanningTask> {
         handoff: raw.handoff,
         evidence: raw.evidence,
         assignee: raw.assignee,
+        completed_at: raw.completed_at,
+        archived_at: raw.archived_at,
     })
 }
 fn parse_id<T>(

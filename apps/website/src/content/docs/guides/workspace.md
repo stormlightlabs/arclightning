@@ -184,16 +184,32 @@ The workspace contains `manifest.toml` and one Markdown file per record:
 - `notes/<note-id>.md`
 - `releases/<release-id>.md`
 
-The manifest contains `format-version`, 1 to 5. Version 2 adds the task
-`assignee` field, version 3 the task `notes`, version 4 the task `gates` and
-version 5 the capture `source-task`. A sync writes version 5 once a capture
-file names its source task, version 4 once a task file carries a gate,
-version 3 once one carries a note, version 2 once one carries an `assignee`,
-and otherwise keeps the version the manifest has. A new workspace starts at
-version 1, so a workspace without claims, notes, gates or capture sources
-stays there. Releasing every claim leaves it at 2. An arcl that reads only
+The manifest contains `format-version`, 1 to 6. Version 2 adds the task
+`assignee` field, version 3 the task `notes`, version 4 the task `gates`,
+version 5 the capture `source-task` and version 6 the task `completed-at` and
+`archived-at`. A sync writes version 6 once a task file carries a completion
+or archive time, version 5 once a capture file names its source task,
+version 4 once a task file carries a gate, version 3 once one carries a note,
+version 2 once one carries an `assignee`, and otherwise keeps the version the
+manifest has. A new workspace starts at version 1, so a workspace without
+claims, notes, gates, capture sources or completed tasks stays there. Releasing every claim leaves it at 2. An arcl that reads only
 older versions refuses a newer workspace before it reads or writes any file,
 with an error that names both versions and says to upgrade arcl.
+
+A completed task file carries `completed-at`, when the task was completed,
+and `archived-at` once `arcl compact` archived it:
+
+```toml
+status = "completed"
+completed-at = "2026-10-27T10:00:00.000Z"
+archived-at = "2026-11-08T09:00:00.000Z"
+```
+
+Both must be RFC 3339 timestamps, and only a completed task may carry them;
+import stores them in UTC to the millisecond. A task file written before
+version 6 has neither and imports as a completed task with no completion
+time. Only arcl commands set them, so the web app's raw editor refuses a
+change to either.
 
 A task file lists its notes oldest first, as an array of tables after the
 other fields:

@@ -50,6 +50,8 @@ pub struct RecordFilter {
     pub parent_id: Option<TaskId>,
     /// Tasks claimed by this name.
     pub assignee: Option<String>,
+    /// Include archived tasks, which a list leaves out by default.
+    pub archived: bool,
 }
 
 impl RecordFilter {
@@ -147,6 +149,9 @@ pub struct RecordTreeNode {
     pub blocked_by: Vec<String>,
     /// Child records in the planning hierarchy.
     pub children: Vec<RecordTreeNode>,
+    /// How many archived tasks, counting their subtasks, the tree left out
+    /// directly below this node. They count as done in progress counts.
+    pub archived_tasks: usize,
 }
 
 /// The records `filter` matches, sorted by kind, then ID. A filter that names
@@ -248,6 +253,7 @@ pub fn list_records(graph: &ConnectedGraph, filter: &RecordFilter) -> Result<Vec
     for task in &graph.tasks {
         let ancestry = task_ancestry(graph, task.id)?;
         let task_matches = filter.kind.as_deref().is_none_or(|kind| kind == "task")
+            && (filter.archived || task.archived_at.is_none())
             && status_matches(&filter.statuses, task.status.as_str())
             && (filter.priorities.is_empty() || filter.priorities.contains(&task.priority))
             && filter.spec_id.is_none_or(|id| ancestry.0 == Some(id))
@@ -296,6 +302,8 @@ pub fn list_records(graph: &ConnectedGraph, filter: &RecordFilter) -> Result<Vec
 /// status. Specs come first, then tasks outside any spec, then captures,
 /// notes and releases in [`TREE_SECTIONS`] order; each kind is in ID order.
 /// Promoted and discarded captures appear only with `all` or as `root`.
+/// Archived tasks appear only with `all`, or as `root` with their subtree;
+/// otherwise each node counts those left out below it in `archived_tasks`.
 pub fn record_tree(
     graph: &ConnectedGraph, ready: &HashSet<TaskId>, root: Option<&str>, all: bool,
 ) -> Result<Vec<RecordTreeNode>> {
@@ -309,6 +317,7 @@ pub fn record_tree(
             tree_status: TreeStatus::Container { status: release.status, started: false },
             blocked_by: Vec::new(),
             children: Vec::new(),
+            archived_tasks: 0,
         });
     }
     let all_captures = all || root.is_some();
@@ -325,6 +334,7 @@ pub fn record_tree(
             tree_status: TreeStatus::Capture(capture.status),
             blocked_by: Vec::new(),
             children: Vec::new(),
+            archived_tasks: 0,
         });
     }
     for spec in &graph.specs {
@@ -356,6 +366,7 @@ pub fn record_tree(
             tree_status: TreeStatus::Container { status: spec.status, started },
             blocked_by: Vec::new(),
             children,
+            archived_tasks: 0,
         });
     }
     nodes.extend(
@@ -377,14 +388,49 @@ pub fn record_tree(
             tree_status: TreeStatus::Note,
             blocked_by: Vec::new(),
             children: Vec::new(),
+            archived_tasks: 0,
         });
     }
     nodes.sort_by(|left, right| (tree_rank(left.kind), &left.id).cmp(&(tree_rank(right.kind), &right.id)));
-    let Some(root) = root else { return Ok(nodes) };
-    if let Some(node) = find_tree_node(&nodes, root) {
-        return Ok(vec![node.clone()]);
+    let archived = graph
+        .tasks
+        .iter()
+        .filter(|task| task.archived_at.is_some())
+        .map(|task| task.id.to_string())
+        .collect::<HashSet<_>>();
+    let Some(root) = root else {
+        if !all {
+            hide_archived(&mut nodes, &archived);
+        }
+        return Ok(nodes);
+    };
+    let Some(node) = find_tree_node(&nodes, root) else {
+        return Err(tree_root_error(root));
+    };
+    let mut node = node.clone();
+    if !all && !archived.contains(&node.id) {
+        hide_archived(&mut node.children, &archived);
     }
-    Err(tree_root_error(root))
+    Ok(vec![node])
+}
+
+/// Remove the nodes of `archived` tasks from `nodes` and every subtree, and
+/// count each removed task and its subtasks on the node it sat below.
+fn hide_archived(nodes: &mut Vec<RecordTreeNode>, archived: &HashSet<String>) {
+    nodes.retain(|node| !(node.kind == "task" && archived.contains(&node.id)));
+    for node in nodes {
+        let (hidden, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut node.children)
+            .into_iter()
+            .partition(|child| child.kind == "task" && archived.contains(&child.id));
+        node.archived_tasks += hidden.iter().map(count_tasks).sum::<usize>();
+        node.children = kept;
+        hide_archived(&mut node.children, archived);
+    }
+}
+
+/// How many task nodes `node`'s subtree holds, counting `node`.
+fn count_tasks(node: &RecordTreeNode) -> usize {
+    usize::from(node.kind == "task") + node.archived_tasks + node.children.iter().map(count_tasks).sum::<usize>()
 }
 
 /// The effective spec, plan and phase of task `id`: its own, or those its
@@ -428,6 +474,7 @@ fn plan_tree_node(graph: &ConnectedGraph, ready: &HashSet<TaskId>, plan: &Plan) 
                 tree_status: TreeStatus::Container { status: phase.status, started },
                 blocked_by: Vec::new(),
                 children: tasks,
+                archived_tasks: 0,
             };
             Ok((node, started))
         })
@@ -451,6 +498,7 @@ fn plan_tree_node(graph: &ConnectedGraph, ready: &HashSet<TaskId>, plan: &Plan) 
         tree_status: TreeStatus::Container { status: plan.status, started },
         blocked_by: Vec::new(),
         children,
+        archived_tasks: 0,
     };
     Ok((node, started))
 }
@@ -482,6 +530,7 @@ fn task_tree_node(
         tree_status: TreeStatus::Task { status: task.status, ready: ready.contains(&task.id) },
         blocked_by,
         children,
+        archived_tasks: 0,
     };
     Ok((node, started))
 }

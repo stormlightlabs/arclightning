@@ -16,6 +16,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration { version: 6, sql: include_str!("migrations/006_task_notes.sql") },
     Migration { version: 7, sql: include_str!("migrations/007_task_gates.sql") },
     Migration { version: 8, sql: include_str!("migrations/008_capture_source.sql") },
+    Migration { version: 9, sql: include_str!("migrations/009_task_times.sql") },
 ];
 
 /// Bring the schema up to [`CURRENT_VERSION`].
@@ -366,6 +367,38 @@ mod tests {
         let graph = super::super::connected::graph(&connection).expect("connected graph reads");
         assert_eq!(graph.captures.len(), 1);
         assert_eq!(graph.captures[0].source_task_id, None);
+        let format: String = connection
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'database-format-version'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("format version reads");
+        assert_eq!(format, CURRENT_VERSION.to_string());
+    }
+
+    #[test]
+    fn task_times_migration_leaves_existing_tasks_undated_and_unarchived() {
+        let mut connection = rusqlite::Connection::open_in_memory().expect("in-memory SQLite opens");
+        for migration in super::MIGRATIONS.iter().filter(|migration| migration.version <= 8) {
+            connection.execute_batch(migration.sql).expect("earlier schema creates");
+        }
+        connection
+            .pragma_update(None, "user_version", 8)
+            .expect("version marker writes");
+        connection
+            .execute(
+                "INSERT INTO planning_tasks (id, project_id, title, body, status, priority, position, handoff, evidence)
+                 VALUES ('arcl-t-01K0B31M6VGK4YH8VKT4C0D2DS', ?1, 'Task', '', 'completed', 'normal', 0, '', 'Done')",
+                [DEFAULT_PROJECT_ID],
+            )
+            .expect("task inserts");
+
+        super::apply(&mut connection).expect("task times migration applies");
+        let graph = super::super::connected::graph(&connection).expect("connected graph reads");
+        assert_eq!(graph.tasks.len(), 1);
+        assert_eq!(graph.tasks[0].completed_at, None);
+        assert_eq!(graph.tasks[0].archived_at, None);
         let format: String = connection
             .query_row(
                 "SELECT value FROM meta WHERE key = 'database-format-version'",

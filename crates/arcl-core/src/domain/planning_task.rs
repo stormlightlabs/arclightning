@@ -36,6 +36,15 @@ pub struct PlanningTask {
     /// completing and cancelling the task clear it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assignee: Option<String>,
+    /// When the task was completed, as an RFC 3339 UTC timestamp. A task
+    /// completed before arcl recorded completion times has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<String>,
+    /// When `arcl compact` archived the task, as an RFC 3339 UTC timestamp.
+    /// Only a completed task is archived. Default reads leave archived tasks
+    /// out, and `--all` shows them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archived_at: Option<String>,
 }
 
 impl PlanningTask {
@@ -63,6 +72,8 @@ impl PlanningTask {
             handoff: String::new(),
             evidence: String::new(),
             assignee: None,
+            completed_at: None,
+            archived_at: None,
         })
     }
 }

@@ -14,7 +14,7 @@ use thiserror::Error;
 use arcl_core::domain::*;
 
 /// The newest SQLite schema version understood by the application.
-pub const CURRENT_VERSION: i32 = 8;
+pub const CURRENT_VERSION: i32 = 9;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -143,6 +143,9 @@ pub enum StorageError {
     /// apply to the kind it names. The filter comes from the request.
     #[error("invalid list filter: {message}")]
     InvalidFilter { message: String },
+    /// A `--before` value for `arcl compact` that is not a `YYYY-MM-DD` date.
+    #[error("invalid compaction date `{value}`; use a YYYY-MM-DD date")]
+    InvalidCompactDate { value: String },
 }
 
 impl StorageError {
@@ -185,6 +188,7 @@ impl StorageError {
             | Self::InvalidGate(_)
             | Self::GateOnClosedTask { .. }
             | Self::InvalidFilter { .. }
+            | Self::InvalidCompactDate { .. }
             | Self::NewerDatabase { .. }
             | Self::MigrationGap { .. } => 3,
             Self::ShortId(error) => {
@@ -383,8 +387,8 @@ impl Database {
             transaction.execute(
                 "INSERT INTO planning_tasks
                  (id, project_id, spec_id, plan_id, phase_id, parent_id, plan_key, title, body,
-                  status, priority, position, handoff, evidence, assignee)
-                 VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                  status, priority, position, handoff, evidence, assignee, completed_at, archived_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
                 rusqlite::params![
                     task.id.to_string(),
                     task.project_id.to_string(),
@@ -399,7 +403,9 @@ impl Database {
                     task.position,
                     task.handoff,
                     task.evidence,
-                    task.assignee
+                    task.assignee,
+                    task.completed_at,
+                    task.archived_at
                 ],
             )?;
         }
@@ -880,6 +886,13 @@ impl Database {
             }
         }
         Ok(nodes)
+    }
+
+    /// Archive the old completed tasks `request` selects and keep their
+    /// evidence in one note per phase, as [`compact`] does.
+    pub fn compact(&mut self, request: &CompactionRequest) -> Result<Compaction> {
+        let project = self.project()?;
+        connected::compact(&mut self.connection, project.id, request)
     }
 
     /// Build the focused context packet for a connected-model task.

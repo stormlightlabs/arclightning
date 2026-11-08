@@ -132,10 +132,10 @@ function planRow(plan: TreeNode, readiness: Map<string, Readiness>): PlanRow {
     status: plan.status,
     milestones,
     tasks: loose.map(treeNode),
-    ...progressOf([
-      ...plan.children.filter((node) => node.kind === "phase").flatMap((phase) => phase.children),
-      ...loose,
-    ]),
+    ...progressOf(
+      [...plan.children.filter((node) => node.kind === "phase").flatMap((phase) => phase.children), ...loose],
+      [plan, ...plan.children.filter((node) => node.kind === "phase")],
+    ),
   };
 }
 
@@ -150,15 +150,20 @@ function milestoneRow(phase: TreeNode, readiness: Map<string, Readiness>): Miles
     ready: tasks.filter((task) => task.status === "pending" && readiness.get(task.id)?.ready).length,
     blocked: tasks.filter((task) => waiting(task) && readiness.get(task.id)?.blocked).length,
     tree: phase.children.map(treeNode),
-    ...progressOf(phase.children),
+    ...progressOf(phase.children, [phase]),
   };
 }
 
-function progressOf(nodes: TreeNode[]): Progress {
+/**
+ * The progress of the tasks in `nodes` and below them. Archived tasks the
+ * tree left out below `containers` or those tasks count as done.
+ */
+function progressOf(nodes: TreeNode[], containers: TreeNode[]): Progress {
   const tasks = flatten(nodes);
+  const archived = [...containers, ...tasks].reduce((sum, node) => sum + (node.archived_tasks ?? 0), 0);
   return {
-    done: tasks.filter((task) => task.status === "completed").length,
-    total: tasks.filter((task) => task.status !== "cancelled").length,
+    done: tasks.filter((task) => task.status === "completed").length + archived,
+    total: tasks.filter((task) => task.status !== "cancelled").length + archived,
   };
 }
 

@@ -14,7 +14,7 @@ use serde::Serialize;
 
 use arcl_core::domain::ReleaseMembership;
 
-use super::{ConnectedTreeNode, StatusMark, task_progress};
+use super::{ConnectedTreeNode, StatusMark};
 
 /// The label of the line for tasks directly under a spec.
 const TASKS_OUTSIDE_PLANS: &str = "Tasks outside plans";
@@ -100,7 +100,7 @@ impl RoadmapItem {
 
     /// The item for a spec, plan or phase, counting the tasks below it.
     fn of(node: &ConnectedTreeNode) -> Self {
-        let (done, total) = task_progress(&node.children);
+        let (done, total) = node.progress();
         Self::new(node, RoadmapState::of(node.mark), RoadmapProgress { done, total })
     }
 
@@ -399,6 +399,7 @@ mod tests {
             mark,
             blocked_by: Vec::new(),
             children,
+            archived_tasks: 0,
         }
     }
 

@@ -51,7 +51,9 @@ pub struct CaptureTaskPromotion {
     pub position: i64,
 }
 
-/// The record created or found by a capture promotion.
+/// The record created or found by a capture promotion. One is built per
+/// promotion, so the size of the task variant does not matter.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "kind", content = "record", rename_all = "snake_case")]
 pub enum CapturePromotionRecord {
