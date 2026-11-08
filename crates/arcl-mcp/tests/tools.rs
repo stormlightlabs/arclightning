@@ -1299,3 +1299,118 @@ async fn gates_hold_a_task_back_until_gate_check_meets_them() {
         [GateStatus::Met, GateStatus::Open]
     );
 }
+
+#[tokio::test]
+async fn list_and_context_leave_out_archived_tasks() {
+    let project = project(false);
+    let mut database = Database::open(project.path().join(".arcl/arcl.db")).expect("database opens");
+    let project_id = database.project().expect("project reads").id;
+    let spec = database
+        .create_spec("Feature".to_owned(), String::new(), String::new())
+        .expect("spec creates");
+    let plan = database
+        .create_plan(spec.id, "Roadmap".to_owned(), String::new())
+        .expect("plan creates");
+    let first = database
+        .create_phase(plan.id, "First".to_owned(), String::new(), 1)
+        .expect("phase creates");
+    let second = database
+        .create_phase(plan.id, "Second".to_owned(), String::new(), 2)
+        .expect("phase creates");
+    let mut done = |title: &str, phase: PhaseId| {
+        let task = database
+            .create_planning_task(PlanningTaskCreate {
+                project_id,
+                spec_id: None,
+                plan_id: None,
+                phase_id: Some(phase),
+                parent_id: None,
+                title: title.to_owned(),
+                body: String::new(),
+                priority: TaskPriority::Normal,
+                position: 0,
+            })
+            .expect("task creates");
+        database
+            .complete_planning_task(
+                task.id,
+                arcl_store::OpenSubtasks::Refuse,
+                Some(format!("{title} evidence")),
+            )
+            .expect("task completes");
+        task.id
+    };
+    let shipped = done("Shipped", first.id);
+    // `follow` sits in the second phase, which the compaction leaves out.
+    let follow = done("Follow", second.id);
+    database
+        .add_planning_dependency(follow, shipped)
+        .expect("dependency adds");
+    database
+        .compact(&CompactionRequest {
+            before: "2999-01-01".to_owned(),
+            phase_id: Some(first.id),
+            include_undated: false,
+            dry_run: false,
+        })
+        .expect("compaction runs");
+    drop(database);
+    let (shipped, follow) = (shipped.to_string(), follow.to_string());
+
+    let server = ArclServer::new(project.path().to_owned());
+    let listed = |all: bool| {
+        server.list(
+            Parameters::from(ListInput { kind: Some(RecordKind::Task), all, ..ListInput::default() }),
+            CancellationToken::new(),
+        )
+    };
+    let ids = |data: ListData| data.records.into_iter().map(|record| record.id).collect::<Vec<_>>();
+    assert_eq!(ids(listed(false).await.expect("list").0.data), vec![follow.clone()]);
+    let mut all = ids(listed(true).await.expect("list all").0.data);
+    all.sort();
+    let mut expected = vec![shipped.clone(), follow.clone()];
+    expected.sort();
+    assert_eq!(all, expected);
+
+    let context = server
+        .context(
+            Parameters::from(TaskInput { task_id: follow }),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("context")
+        .0
+        .data;
+    assert!(context.blockers.is_empty(), "{:?}", context.blockers);
+    assert!(
+        context.completion_evidence.is_empty(),
+        "{:?}",
+        context.completion_evidence
+    );
+
+    for (parent, blocked_by) in [(Some(shipped.clone()), Vec::new()), (None, vec![shipped.clone()])] {
+        let refused = server
+            .task_create(
+                Parameters::from(TaskCreateInput {
+                    title: "Late".to_owned(),
+                    body: String::new(),
+                    spec: None,
+                    plan: None,
+                    phase: parent.is_none().then(|| first.id.to_string()),
+                    parent,
+                    priority: TaskPriority::Normal,
+                    position: 0,
+                    blocked_by,
+                }),
+                CancellationToken::new(),
+            )
+            .await
+            .err()
+            .expect("an archived task takes no subtask or dependent");
+        assert_eq!((refused.code(), refused.exit_code()), ("invalid_request", 3));
+        assert!(
+            refused.to_string().contains(&format!("task `{shipped}` is archived")),
+            "{refused}"
+        );
+    }
+}

@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use arcl_core::domain::TaskId;
 use arcl_store::{ConnectedGraph, Database, StorageError};
 
 use super::import::validate_candidate;
@@ -215,9 +216,11 @@ pub fn edit_record(
         };
         let record = if file.path == path {
             let edited = decode(content)?;
-            if let Some((field, message)) = command_owned_change(&decode(&current)?, &edited) {
+            let previous = decode(&current)?;
+            if let Some((field, message)) = command_owned_change(&previous, &edited) {
                 return Err(RecordEditError::CommandOwned { path, field, message });
             }
+            ensure_no_archived_links(&before, &previous, &edited)?;
             edited
         } else {
             decode(&current)?
@@ -252,6 +255,16 @@ fn command_owned_change(before: &WorkspaceRecord, after: &WorkspaceRecord) -> Op
                 "assignee",
                 "an assignee is set only by `arcl task start --claim`, and cleared when the task is parked, handed off, \
                  completed or cancelled",
+            ),
+            (
+                before.completed_at != after.completed_at,
+                "completed-at",
+                "a completion time is set only when `arcl task complete` or the web app's Complete action completes the task",
+            ),
+            (
+                before.archived_at != after.archived_at,
+                "archived-at",
+                "an archive time is set only by `arcl compact`",
             ),
             (
                 before.notes != after.notes,
@@ -315,6 +328,40 @@ fn command_owned_change(before: &WorkspaceRecord, after: &WorkspaceRecord) -> Op
         .into_iter()
         .find(|(changed, ..)| *changed)
         .map(|(_, field, message)| (field, message))
+}
+
+/// Refuse an edit that moves a task under an archived task, or adds a
+/// blocker to an archived task or on one, as `arcl task update` and
+/// `arcl task block` refuse them.
+fn ensure_no_archived_links(
+    graph: &ConnectedGraph, before: &WorkspaceRecord, after: &WorkspaceRecord,
+) -> Result<(), StorageError> {
+    let (WorkspaceRecord::Task(before), WorkspaceRecord::Task(after)) = (before, after) else {
+        return Ok(());
+    };
+    let archived = |id: TaskId| {
+        graph
+            .tasks
+            .iter()
+            .any(|task| task.id == id && task.archived_at.is_some())
+    };
+    if let Some(parent) = after
+        .parent_id
+        .filter(|parent| before.parent_id != Some(*parent) && archived(*parent))
+    {
+        return Err(StorageError::ArchivedParent { id: parent.to_string() });
+    }
+    let mut added = after
+        .blocked_by
+        .iter()
+        .filter(|blocker| !before.blocked_by.contains(blocker));
+    if let Some(blocker) = added.clone().find(|blocker| archived(**blocker)) {
+        return Err(StorageError::ArchivedDependency { id: blocker.to_string() });
+    }
+    if added.next().is_some() && archived(after.id) {
+        return Err(StorageError::ArchivedDependency { id: after.id.to_string() });
+    }
+    Ok(())
 }
 
 /// The record file whose name is `id`, leaving out `manifest.toml`.
@@ -518,6 +565,66 @@ mod tests {
         let edit = block(&mut database, &first, &second).expect("edit saves");
         assert!(edit.warnings.is_empty(), "{:?}", edit.warnings);
         assert!(edit.source.content.contains(&second));
+    }
+
+    #[test]
+    fn an_edit_that_links_open_work_to_an_archived_task_is_refused() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let spec = database
+            .create_spec("Spec".to_owned(), String::new(), String::new())
+            .expect("spec creates");
+        let plan = database
+            .create_plan(spec.id, "Plan".to_owned(), String::new())
+            .expect("plan creates");
+        let phase = database
+            .create_phase(plan.id, "Phase".to_owned(), String::new(), 0)
+            .expect("phase creates");
+        let project = database.project().expect("project exists");
+        let archived = database
+            .create_planning_task(PlanningTaskCreate {
+                project_id: project.id,
+                spec_id: None,
+                plan_id: None,
+                phase_id: Some(phase.id),
+                parent_id: None,
+                title: "Archived".to_owned(),
+                body: "Body".to_owned(),
+                priority: TaskPriority::Normal,
+                position: 0,
+            })
+            .expect("task creates")
+            .id;
+        database
+            .complete_planning_task(archived, OpenSubtasks::Refuse, Some("Done".to_owned()))
+            .expect("task completes");
+        database
+            .compact(&arcl_store::CompactionRequest {
+                before: "2999-01-01".to_owned(),
+                phase_id: None,
+                include_undated: false,
+                dry_run: false,
+            })
+            .expect("compaction runs");
+        let archived = archived.to_string();
+        let open = task(&mut database, "Open");
+
+        let before = source(&database, &open);
+        let moved = before
+            .content
+            .replace("priority", &format!("parent = \"{archived}\"\npriority"));
+        let errors = [
+            edit_record(&mut database, &open, &moved, &before.revision).unwrap_err(),
+            block(&mut database, &open, &archived).unwrap_err(),
+            block(&mut database, &archived, &open).unwrap_err(),
+        ];
+        for error in errors {
+            assert_eq!(error.exit_code(), 3, "{error}");
+            assert!(
+                error.to_string().contains(&format!("task `{archived}` is archived")),
+                "{error}"
+            );
+        }
+        assert_eq!(source(&database, &open), before);
     }
 
     /// Replace the first `from` in `id`'s file with `to` through a raw edit.

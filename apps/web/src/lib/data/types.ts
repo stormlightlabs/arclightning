@@ -28,6 +28,10 @@ export type Task = {
   evidence: string;
   /** Who claimed the task when starting it. Absent while nobody holds it. */
   assignee?: string;
+  /** When the task was completed, as an RFC 3339 UTC timestamp. Absent on a task completed before arcl recorded it. */
+  completed_at?: string;
+  /** When `arcl compact` archived the task, as an RFC 3339 UTC timestamp. */
+  archived_at?: string;
 };
 
 /** What a task note records. */
@@ -306,6 +310,8 @@ export type TreeNode = {
   title: string;
   status: string;
   children: TreeNode[];
+  /** Archived tasks the tree leaves out directly below this node, counting their subtasks. They count as done. */
+  archived_tasks?: number;
 };
 
 /**

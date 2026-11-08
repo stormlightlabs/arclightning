@@ -13,8 +13,8 @@ use arcl_store::{ConnectedGraph, WorkspaceBaseFile};
 use super::{
     ASSIGNEE_FORMAT_VERSION, CAPTURE_SOURCE_FORMAT_VERSION, CaptureRecord, GATES_FORMAT_VERSION, NoteRecord,
     OLDEST_WORKSPACE_FORMAT_VERSION, PhaseRecord, PlanRecord, ReleaseRecord, SpecRecord, TASK_NOTES_FORMAT_VERSION,
-    TaskGateRecord, TaskNoteRecord, TaskRecord, WorkspaceManifest, WorkspaceRecord, WorkspaceReference,
-    encode_manifest, encode_record,
+    TASK_TIMES_FORMAT_VERSION, TaskGateRecord, TaskNoteRecord, TaskRecord, WorkspaceManifest, WorkspaceRecord,
+    WorkspaceReference, encode_manifest, encode_record,
 };
 
 const MANIFEST: &str = "manifest.toml";
@@ -58,13 +58,20 @@ pub struct WorkspaceFile {
 }
 
 /// Return the workspace format version `graph` needs:
-/// [`CAPTURE_SOURCE_FORMAT_VERSION`] when a capture carries a source task,
+/// [`TASK_TIMES_FORMAT_VERSION`] when a task carries a completion or archive
+/// time, [`CAPTURE_SOURCE_FORMAT_VERSION`] when a capture carries a source task,
 /// [`GATES_FORMAT_VERSION`] when a task carries a gate,
 /// [`TASK_NOTES_FORMAT_VERSION`] when a task carries a note,
 /// [`ASSIGNEE_FORMAT_VERSION`] when a task carries an assignee, and
 /// [`OLDEST_WORKSPACE_FORMAT_VERSION`] otherwise.
 pub fn required_format_version(graph: &ConnectedGraph) -> u32 {
-    if graph.captures.iter().any(|capture| capture.source_task_id.is_some()) {
+    if graph
+        .tasks
+        .iter()
+        .any(|task| task.completed_at.is_some() || task.archived_at.is_some())
+    {
+        TASK_TIMES_FORMAT_VERSION
+    } else if graph.captures.iter().any(|capture| capture.source_task_id.is_some()) {
         CAPTURE_SOURCE_FORMAT_VERSION
     } else if !graph.gates.is_empty() {
         GATES_FORMAT_VERSION
@@ -91,8 +98,9 @@ pub fn project_graph(graph: &ConnectedGraph) -> Result<Vec<WorkspaceFile>, Works
 ///
 /// `floor` is the version the workspace already has, so a projection never
 /// lowers it: a workspace stays at version 2 once a claim has moved it there,
-/// at version 3 once a note has, at version 4 once a gate has, and at
-/// version 5 once a capture source has.
+/// at version 3 once a note has, at version 4 once a gate has, at version 5
+/// once a capture source has, and at version 6 once a completion or archive
+/// time has.
 pub fn project_graph_at(graph: &ConnectedGraph, floor: u32) -> Result<Vec<WorkspaceFile>, WorkspaceExportError> {
     let manifest = WorkspaceManifest { format_version: required_format_version(graph).max(floor) };
     let mut files = Vec::new();
@@ -205,6 +213,8 @@ pub fn project_graph_at(graph: &ConnectedGraph, floor: u32) -> Result<Vec<Worksp
                 handoff: nonempty(&task.handoff),
                 evidence: nonempty(&task.evidence),
                 assignee: task.assignee.clone(),
+                completed_at: task.completed_at.clone(),
+                archived_at: task.archived_at.clone(),
                 links: links_for(&links, LinkedRecordKind::Task, task.id.to_string()),
                 notes: graph
                     .task_notes

@@ -25,6 +25,7 @@ macro_rules! planning_task {
         "fragment PlanningTask on Task {
             id project_id: projectId spec_id: specId plan_id: planId phase_id: phaseId parent_id: parentId
             plan_key: planKey title body status priority position handoff evidence assignee
+            completed_at: completedAt archived_at: archivedAt
         }"
     };
 }
@@ -124,11 +125,11 @@ macro_rules! view {
 /// `GET /api/records`: `arcl list`.
 const RECORDS: &str = "query Records(
     $kind: String, $status: [String!]!, $priority: [String!]!, $release: ID, $spec: ID, $plan: ID, $phase: ID,
-    $parent: ID
+    $parent: ID, $all: Boolean!
 ) {
     records(
         kind: $kind, status: $status, priority: $priority, release: $release, spec: $spec, plan: $plan,
-        phase: $phase, parent: $parent
+        phase: $phase, parent: $parent, all: $all
     ) { kind id title status }
 }";
 
@@ -201,7 +202,7 @@ const CONTEXT: &str = concat!(
 const TREE: &str = "query Tree {
     tree { ...TreeFields descendants { ...TreeFields depth } }
 }
-fragment TreeFields on TreeNode { kind id title status blocked_by: blockedBy }";
+fragment TreeFields on TreeNode { kind id title status blocked_by: blockedBy archived_tasks: archivedTasks }";
 
 /// `GET /api/work`: every task with its readiness and phase, and every phase.
 const WORK: &str = concat!(
@@ -295,6 +296,8 @@ struct TreeEntry {
     status: String,
     blocked_by: Vec<String>,
     #[serde(default)]
+    archived_tasks: usize,
+    #[serde(default)]
     depth: usize,
     #[serde(default)]
     descendants: Vec<TreeEntry>,
@@ -311,6 +314,7 @@ pub(super) fn records(filters: &ListArgs, renderer: &Renderer) -> anyhow::Result
         "plan": filters.plan,
         "phase": filters.phase,
         "parent": filters.parent,
+        "all": filters.all,
     });
     let summaries = run::<Vec<Summary>>(RECORDS, variables, "records")?
         .into_iter()
@@ -523,6 +527,7 @@ fn tree_node(entry: &TreeEntry) -> anyhow::Result<ConnectedTreeNode> {
         mark: StatusMark::Waiting,
         blocked_by: entry.blocked_by.clone(),
         children: Vec::new(),
+        archived_tasks: entry.archived_tasks,
     })
 }
 
@@ -545,6 +550,7 @@ mod tests {
             title: id.to_owned(),
             status: "pending".to_owned(),
             blocked_by: Vec::new(),
+            archived_tasks: 0,
             depth,
             descendants: Vec::new(),
         }

@@ -21,6 +21,17 @@ describe("planningView", () => {
     expect(planningView(planning())[0].plans[0]).toMatchObject({ done: 2, total: 6 });
   });
 
+  it("counts the archived tasks the tree leaves out as done", () => {
+    const data = planning();
+    const plan = data.tree[1].children[0];
+    plan.archived_tasks = 1;
+    plan.children[0].archived_tasks = 2;
+    plan.children[0].children[1].archived_tasks = 1;
+    const [first] = planningView(data)[0].plans[0].milestones;
+    expect(first).toMatchObject({ done: 4, total: 7 });
+    expect(planningView(data)[0].plans[0]).toMatchObject({ done: 6, total: 10 });
+  });
+
   it("gives each milestone its task tree", () => {
     const [first] = planningView(planning())[0].plans[0].milestones;
     expect(first.tree.map((task) => [task.id, task.status, task.children?.map((child) => child.id)])).toEqual([

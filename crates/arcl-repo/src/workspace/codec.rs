@@ -298,6 +298,11 @@ pub struct TaskRecord {
     pub evidence: Option<String>,
     /// Who claimed the task when starting it.
     pub assignee: Option<String>,
+    /// When the task was completed. Only a completed task carries it.
+    pub completed_at: Option<String>,
+    /// When `arcl compact` archived the task. Only a completed task carries
+    /// it.
+    pub archived_at: Option<String>,
     pub links: Vec<WorkspaceReference>,
     /// Notes on the task, oldest first.
     pub notes: Vec<TaskNoteRecord>,
@@ -513,6 +518,10 @@ struct TaskFrontMatter {
     evidence: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     assignee: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    completed_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    archived_at: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     links: Vec<WorkspaceReference>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -696,6 +705,8 @@ impl TaskRecord {
             handoff: normalize_optional_markdown(front_matter.handoff),
             evidence: normalize_optional_markdown(front_matter.evidence),
             assignee: normalize_assignee(front_matter.assignee, front_matter.status)?,
+            completed_at: normalize_task_time("completed-at", front_matter.completed_at, front_matter.status)?,
+            archived_at: normalize_task_time("archived-at", front_matter.archived_at, front_matter.status)?,
             links: normalize_references(front_matter.links),
             notes: normalize_task_notes(front_matter.notes)?,
             gates: normalize_task_gates(front_matter.gates)?,
@@ -725,6 +736,8 @@ impl TaskRecord {
             handoff: normalize_optional_markdown(self.handoff.clone()),
             evidence: normalize_optional_markdown(self.evidence.clone()),
             assignee: normalize_assignee(self.assignee.clone(), self.status)?,
+            completed_at: normalize_task_time("completed-at", self.completed_at.clone(), self.status)?,
+            archived_at: normalize_task_time("archived-at", self.archived_at.clone(), self.status)?,
             links,
             notes: normalize_task_notes(self.notes.clone())?,
             gates: normalize_task_gates(self.gates.clone())?,
@@ -876,6 +889,21 @@ fn normalize_assignee(value: Option<String>, status: TaskStatus) -> Result<Optio
     arcl_core::domain::validate_assignee(&value)
         .map(Some)
         .map_err(|_| WorkspaceError::InvalidRecordAssignee { value })
+}
+
+/// Normalize a task's `completed-at` or `archived-at` to UTC with
+/// millisecond precision, as [`normalize_note_created_at`] does, or refuse
+/// one that is not an RFC 3339 timestamp or sits on a task that is not
+/// completed.
+fn normalize_task_time(field: &'static str, value: Option<String>, status: TaskStatus) -> Result<Option<String>> {
+    let Some(value) = value else { return Ok(None) };
+    if status != TaskStatus::Completed {
+        return Err(WorkspaceError::TaskTimeNotCompleted { field, status: status.as_str().to_owned() });
+    }
+    parse_rfc3339_millis(value.trim())
+        .and_then(format_utc_millis)
+        .map(Some)
+        .ok_or(WorkspaceError::InvalidRecordTaskTime { field, value })
 }
 
 /// Validate each task note's text as [`validate_task_note_text`] does,
@@ -1111,12 +1139,12 @@ mod tests {
     }
 
     #[test]
-    fn manifest_reads_and_renders_versions_one_to_five() {
+    fn manifest_reads_and_renders_versions_one_to_six() {
         assert_eq!(
             WorkspaceManifest::default().format_version,
             OLDEST_WORKSPACE_FORMAT_VERSION
         );
-        for version in 1..=5 {
+        for version in 1..=6 {
             let manifest = WorkspaceManifest::parse(&format!("format-version = {version}")).expect("manifest");
             assert_eq!(
                 manifest.render().expect("render"),
@@ -1126,10 +1154,10 @@ mod tests {
                 )
             );
         }
-        assert_eq!(WORKSPACE_FORMAT_VERSION, 5);
+        assert_eq!(WORKSPACE_FORMAT_VERSION, 6);
         assert!(matches!(
             WorkspaceManifest::parse("format-version = 0"),
-            Err(WorkspaceError::UnsupportedVersion { found: 0, expected: 5 })
+            Err(WorkspaceError::UnsupportedVersion { found: 0, expected: 6 })
         ));
     }
 
@@ -1139,7 +1167,7 @@ mod tests {
             let error =
                 WorkspaceManifest::parse(&format!("format-version = {stored}")).expect_err("newer manifest refuses");
             assert!(
-                matches!(error, WorkspaceError::NewerWorkspace { stored: found, supported: 5 } if found == stored),
+                matches!(error, WorkspaceError::NewerWorkspace { stored: found, supported: 6 } if found == stored),
                 "{error:?}"
             );
             assert!(error.to_string().contains(&format!("version {stored} ")), "{error}");
@@ -1148,15 +1176,15 @@ mod tests {
 
     #[test]
     fn a_manifest_from_a_newer_arcl_names_both_versions() {
-        for input in ["format-version = 6", "format-version = 6\nfuture-field = true"] {
+        for input in ["format-version = 7", "format-version = 7\nfuture-field = true"] {
             let error = WorkspaceManifest::parse(input).expect_err("newer manifest refuses");
             assert!(
-                matches!(error, WorkspaceError::NewerWorkspace { stored: 6, supported: 5 }),
+                matches!(error, WorkspaceError::NewerWorkspace { stored: 7, supported: 6 }),
                 "{error:?}"
             );
             let message = error.to_string();
-            assert!(message.contains("version 6"), "{message}");
-            assert!(message.contains("up to 5"), "{message}");
+            assert!(message.contains("version 7"), "{message}");
+            assert!(message.contains("up to 6"), "{message}");
             assert!(message.contains("Upgrade arcl"), "{message}");
         }
     }
@@ -1216,6 +1244,8 @@ mod tests {
                 handoff: Some("Resume here".to_owned()),
                 evidence: Some("Evidence".to_owned()),
                 assignee: Some("codex".to_owned()),
+                completed_at: None,
+                archived_at: None,
                 links: vec![WorkspaceReference::new("spec", SPEC_ID)],
                 notes: vec![
                     TaskNoteRecord {
@@ -1286,6 +1316,8 @@ mod tests {
             handoff: Some(String::new()),
             evidence: None,
             assignee: None,
+            completed_at: None,
+            archived_at: None,
             links: vec![],
             notes: vec![],
             gates: vec![],
@@ -1314,6 +1346,8 @@ mod tests {
             handoff: None,
             evidence: None,
             assignee: Some("codex".to_owned()),
+            completed_at: None,
+            archived_at: None,
             links: vec![],
             notes: vec![],
             gates: vec![],
@@ -1345,6 +1379,57 @@ mod tests {
     }
 
     #[test]
+    fn only_a_completed_task_carries_completion_and_archive_times() {
+        let task = TaskRecord {
+            id: TaskId::parse(TASK_ID).unwrap(),
+            spec_id: None,
+            plan_id: None,
+            phase_id: None,
+            parent_id: None,
+            plan_key: None,
+            title: "Task".to_owned(),
+            status: TaskStatus::Completed,
+            priority: TaskPriority::Normal,
+            position: 0,
+            blocked_by: vec![],
+            handoff: None,
+            evidence: None,
+            assignee: None,
+            completed_at: Some("2026-10-27T12:00:00+02:00".to_owned()),
+            archived_at: Some("2026-11-01T00:00:00Z".to_owned()),
+            links: vec![],
+            notes: vec![],
+            gates: vec![],
+            body: String::new(),
+        };
+        let path = WorkspaceRecord::Task(task.clone()).path();
+        let rendered = WorkspaceRecord::Task(task).render().expect("render");
+        assert!(
+            rendered.contains("completed-at = \"2026-10-27T10:00:00.000Z\"\n"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("archived-at = \"2026-11-01T00:00:00.000Z\"\n"),
+            "{rendered}"
+        );
+        let WorkspaceRecord::Task(decoded) = decode_record(&path, &rendered).expect("decode") else {
+            panic!("a task decodes as a task");
+        };
+        assert_eq!(decoded.completed_at.as_deref(), Some("2026-10-27T10:00:00.000Z"));
+
+        let pending = rendered.replace("\"completed\"", "\"pending\"");
+        assert!(matches!(
+            decode_record(&path, &pending),
+            Err(WorkspaceError::TaskTimeNotCompleted { field: "completed-at", .. })
+        ));
+        let invalid = rendered.replace("2026-10-27T10:00:00.000Z", "yesterday");
+        assert!(matches!(
+            decode_record(&path, &invalid),
+            Err(WorkspaceError::InvalidRecordTaskTime { field: "completed-at", .. })
+        ));
+    }
+
+    #[test]
     fn task_notes_render_as_an_array_of_tables_and_refuse_invalid_text() {
         let record = WorkspaceRecord::Task(TaskRecord {
             id: TaskId::parse(TASK_ID).unwrap(),
@@ -1361,6 +1446,8 @@ mod tests {
             handoff: None,
             evidence: None,
             assignee: None,
+            completed_at: None,
+            archived_at: None,
             links: vec![],
             notes: vec![TaskNoteRecord {
                 created_at: "2026-10-27T10:00:00.000Z".to_owned(),
@@ -1477,6 +1564,8 @@ mod tests {
             handoff: None,
             evidence: None,
             assignee: None,
+            completed_at: None,
+            archived_at: None,
             links: vec![],
             notes: vec![],
             gates: vec![TaskGateRecord {

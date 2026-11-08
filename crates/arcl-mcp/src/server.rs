@@ -186,8 +186,8 @@ impl ArclServer {
     /// Return a task's context packet, like `arcl context`.
     #[tool(
         description = read_description!("Return a task with its ancestors, spec, plan, phase, blockers, dependents, \
-        readiness, earlier evidence and the most recent notes, like `arcl context`. `data.task.handoff` holds the \
-        last resume note; `data.omitted_notes` counts older notes, which `show` lists."),
+        readiness, earlier evidence and the most recent notes, like `arcl context`, leaving out archived tasks. \
+        `data.task.handoff` holds the last resume note; `data.omitted_notes` counts older notes, which `show` lists."),
         annotations(read_only_hint = true, open_world_hint = false),
         meta = version_meta(READINESS_FORMAT_VERSION)
     )]
@@ -196,7 +196,9 @@ impl ArclServer {
     ) -> Result<Json<Envelope<PlanningContext>>, ToolError> {
         let input = input?;
         self.call(Access::Read, READINESS_FORMAT_VERSION, cancelled, move |database| {
-            Ok(database.planning_context(record_id::<TaskId>(database, &input.task_id)?)?)
+            let mut context = database.planning_context(record_id::<TaskId>(database, &input.task_id)?)?;
+            context.hide_archived();
+            Ok(context)
         })
         .await
     }
@@ -829,7 +831,11 @@ fn list_records(database: &mut Database, input: ListInput) -> Result<ListData, T
         }
     }
     if wanted(RecordKind::Task) {
-        for task in database.planning_tasks()? {
+        for task in database
+            .planning_tasks()?
+            .into_iter()
+            .filter(|task| input.all || task.archived_at.is_none())
+        {
             push(RecordKind::Task, task.id.to_string(), &task.title, task.status.as_str());
         }
     }

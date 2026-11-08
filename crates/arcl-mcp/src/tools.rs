@@ -118,6 +118,8 @@ pub enum OpenSubtasks {
 }
 
 /// The record a promotion created, keyed by its kind.
+// One is built per promotion, so the task variant's size does not matter.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PromotedRecord {
@@ -197,6 +199,9 @@ pub struct ListInput {
     pub limit: Option<u32>,
     /// The `next_cursor` of the previous page.
     pub cursor: Option<String>,
+    /// Include tasks `arcl compact` archived, which are left out by default.
+    #[serde(default)]
+    pub all: bool,
 }
 
 /// Filters and a page for `ready`.

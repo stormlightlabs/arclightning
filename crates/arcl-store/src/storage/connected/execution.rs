@@ -272,6 +272,17 @@ impl PlanningContext {
             gates: view.gates,
         }
     }
+
+    /// Leave archived tasks out of the blockers, dependents and evidence, as
+    /// `arcl context` does without `--all`. The task itself, its ancestors
+    /// and its readiness stay as they are.
+    pub fn hide_archived(&mut self) {
+        let shown = |task: &PlanningTask| task.archived_at.is_none();
+        self.blockers.retain(|blocker| shown(&blocker.task));
+        self.inherited_blockers.retain(|blocker| shown(&blocker.task));
+        self.completion_evidence.retain(|blocker| shown(&blocker.task));
+        self.dependents.retain(shown);
+    }
 }
 
 /// One task in the work list: the task, its readiness and its effective
@@ -678,11 +689,24 @@ fn transition_in(
             params![next_status.as_str(), evidence, assignee, id.to_string()],
         )?;
     }
-    for subtask in &completed_subtasks {
+    // Completion is terminal, so a task gets its completion time once.
+    let completed_at = if next_status == TaskStatus::Completed && current.status != TaskStatus::Completed {
+        let now: String = tx.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| row.get(0))?;
         tx.execute(
-            "UPDATE planning_tasks SET status = ?1, assignee = NULL WHERE id = ?2",
-            params![TaskStatus::Completed.as_str(), subtask.id.to_string()],
+            "UPDATE planning_tasks SET completed_at = ?1 WHERE id = ?2",
+            params![now, id.to_string()],
         )?;
+        Some(now)
+    } else {
+        current.completed_at.clone()
+    };
+    let mut completed_subtasks = completed_subtasks;
+    for subtask in &mut completed_subtasks {
+        tx.execute(
+            "UPDATE planning_tasks SET status = ?1, assignee = NULL, completed_at = ?2 WHERE id = ?3",
+            params![TaskStatus::Completed.as_str(), completed_at, subtask.id.to_string()],
+        )?;
+        subtask.completed_at.clone_from(&completed_at);
     }
     let unblocked = if completes {
         planning_ready_tasks(tx, project_id, &PlanningReadyFilter::default())?
@@ -693,7 +717,13 @@ fn transition_in(
         Vec::new()
     };
     Ok(PlanningCompletion {
-        task: PlanningTask { status: next_status, evidence: evidence.unwrap_or(current.evidence), assignee, ..current },
+        task: PlanningTask {
+            status: next_status,
+            evidence: evidence.unwrap_or(current.evidence),
+            assignee,
+            completed_at,
+            ..current
+        },
         completed_subtasks,
         unblocked,
     })
@@ -795,11 +825,26 @@ pub(super) fn validate_task_graph_candidates(
 ) -> Result<()> {
     ensure_project(connection, project_id)?;
     let mut data = load_data(connection, project_id)?;
+    let mut moved = Vec::new();
     for candidate in candidates {
         ensure_project_task(candidate, project_id)?;
-        data.tasks.insert(candidate.id, candidate.clone());
+        let previous = data.tasks.insert(candidate.id, candidate.clone());
+        if let Some(parent_id) = candidate.parent_id
+            && previous.is_none_or(|previous| previous.parent_id != Some(parent_id))
+        {
+            moved.push(parent_id);
+        }
     }
     data.children = index_children(&data.tasks);
+    // A task created or moved under an archived task would be open work the
+    // tree, the roadmap and the web app count as done.
+    if let Some(parent_id) = moved.into_iter().find(|parent_id| {
+        data.tasks
+            .get(parent_id)
+            .is_some_and(|parent| parent.archived_at.is_some())
+    }) {
+        return Err(StorageError::ArchivedParent { id: parent_id.to_string() });
+    }
 
     // Validate every candidate reference before evaluating effective ancestry. In
     // particular, this preserves a cross-project error instead of turning it into

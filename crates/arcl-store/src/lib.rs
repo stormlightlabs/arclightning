@@ -14,10 +14,11 @@ pub use storage::*;
 pub mod prelude {
     pub use crate::{
         CONTEXT_NOTE_LIMIT, CURRENT_VERSION, CapturePromotionInput, CapturePromotionRecord, CapturePromotionResult,
-        CaptureTaskPromotion, CaptureUpdate, CheckReport, ConnectedGraph, DEFAULT_PROJECT_ID, DataVersion, Database,
-        NoteUpdate, OpenSubtasks, PhaseUpdate, PlanApplyResult, PlanChange, PlanDependencyDiff, PlanDiff, PlanDiffItem,
-        PlanUpdate, PlanningBlockerView, PlanningCompletion, PlanningContext, PlanningData, PlanningReadiness,
-        PlanningReadyFilter, PlanningTaskCreate, PlanningTaskUpdate, PlanningTaskView, PlanningWork, ReadinessReason,
-        ReadinessReasonKind, RecordFilter, RecordTreeNode, SpecUpdate, StorageError, TreeStatus, WorkspaceBaseFile,
+        CaptureTaskPromotion, CaptureUpdate, CheckReport, Compaction, CompactionRequest, ConnectedGraph,
+        DEFAULT_PROJECT_ID, DataVersion, Database, NoteUpdate, OpenSubtasks, PhaseCompaction, PhaseUpdate,
+        PlanApplyResult, PlanChange, PlanDependencyDiff, PlanDiff, PlanDiffItem, PlanUpdate, PlanningBlockerView,
+        PlanningCompletion, PlanningContext, PlanningData, PlanningReadiness, PlanningReadyFilter, PlanningTaskCreate,
+        PlanningTaskUpdate, PlanningTaskView, PlanningWork, ReadinessReason, ReadinessReasonKind, RecordFilter,
+        RecordTreeNode, SpecUpdate, StorageError, TreeStatus, WorkspaceBaseFile,
     };
 }

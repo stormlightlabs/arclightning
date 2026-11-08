@@ -87,6 +87,7 @@ pub(super) fn command_access(command: Option<&Command>) -> Access {
             | Command::Query { schema: false, .. },
         ) => Access::Read,
         Some(Command::Next { start: true, .. }) => Access::Write,
+        Some(Command::Compact { dry_run, .. }) => read_when(*dry_run),
         Some(Command::Capture { command }) => {
             read_when(matches!(command, CaptureCommand::Show { .. } | CaptureCommand::List))
         }
@@ -103,7 +104,10 @@ pub(super) fn command_access(command: Option<&Command>) -> Access {
         }),
         Some(Command::Task { command }) => read_when(matches!(
             command,
-            TaskCommand::Show { .. } | TaskCommand::List | TaskCommand::Explain { .. } | TaskCommand::Context { .. }
+            TaskCommand::Show { .. }
+                | TaskCommand::List { .. }
+                | TaskCommand::Explain { .. }
+                | TaskCommand::Context { .. }
         )),
         Some(Command::Dependency { command }) => read_when(matches!(command, DependencyCommand::List)),
         // `gate check` takes the lock to read and again to write, and not

@@ -8,11 +8,13 @@ use rusqlite::{Connection, OptionalExtension, params};
 use super::{Result, StorageError, releases};
 use arcl_core::domain::*;
 
+mod compaction;
 mod execution;
 mod gates;
 mod plan_ops;
 mod promotions;
 
+pub use compaction::*;
 pub use execution::*;
 pub use gates::*;
 pub use plan_ops::*;
@@ -185,6 +187,8 @@ struct RawTask {
     handoff: String,
     evidence: String,
     assignee: Option<String>,
+    completed_at: Option<String>,
+    archived_at: Option<String>,
 }
 
 pub fn project(connection: &Connection) -> Result<Project> {
@@ -701,7 +705,7 @@ fn has_open_phase_descendants(connection: &Connection, id: PhaseId) -> Result<bo
 /// Check a structured plan against an existing persistent plan without writing.
 pub fn planning_tasks(connection: &Connection, project_id: ProjectId) -> Result<Vec<PlanningTask>> {
     let mut statement = connection.prepare(
-        "SELECT id, project_id, spec_id, plan_id, phase_id, parent_id, plan_key, title, body, status, priority, position, handoff, evidence, assignee
+        "SELECT id, project_id, spec_id, plan_id, phase_id, parent_id, plan_key, title, body, status, priority, position, handoff, evidence, assignee, completed_at, archived_at
          FROM planning_tasks WHERE project_id = ?1
          ORDER BY COALESCE(phase_id, ''), COALESCE(plan_id, ''), COALESCE(spec_id, ''), COALESCE(parent_id, ''), position, id",
     )?;
@@ -711,7 +715,7 @@ pub fn planning_tasks(connection: &Connection, project_id: ProjectId) -> Result<
 
 pub fn planning_task(connection: &Connection, id: TaskId) -> Result<Option<PlanningTask>> {
     let raw = connection.query_row(
-        "SELECT id, project_id, spec_id, plan_id, phase_id, parent_id, plan_key, title, body, status, priority, position, handoff, evidence, assignee FROM planning_tasks WHERE id = ?1",
+        "SELECT id, project_id, spec_id, plan_id, phase_id, parent_id, plan_key, title, body, status, priority, position, handoff, evidence, assignee, completed_at, archived_at FROM planning_tasks WHERE id = ?1",
         [id.to_string()], raw_task,
     ).optional()?;
     raw.map(decode_task).transpose()
@@ -762,6 +766,7 @@ pub fn create_planning_task_with_dependencies(
     for blocker_id in blockers {
         let dependency = TaskDependency::new(task.id, *blocker_id).map_err(StorageError::InvalidPlanningDependency)?;
         ensure_task(&tx, create.project_id, *blocker_id)?;
+        ensure_unarchived(&tx, *blocker_id)?;
         tx.execute(
             "INSERT INTO planning_task_dependencies (project_id, task_id, blocker_id) VALUES (?1, ?2, ?3)",
             params![
@@ -818,6 +823,8 @@ pub fn update_planning_task(
         handoff: current.handoff,
         evidence: current.evidence,
         assignee: current.assignee,
+        completed_at: current.completed_at,
+        archived_at: current.archived_at,
     };
     validate_task_ancestry(&tx, &next)?;
     tx.execute(
@@ -938,9 +945,11 @@ pub fn add_planning_dependencies(
     ensure_project(connection, project_id)?;
     let tx = connection.transaction()?;
     ensure_task(&tx, project_id, task_id)?;
+    ensure_unarchived(&tx, task_id)?;
     for dependency in &dependencies {
         let blocker_id = dependency.blocker_id;
         ensure_task(&tx, project_id, blocker_id)?;
+        ensure_unarchived(&tx, blocker_id)?;
         let duplicate: bool = tx.query_row(
             "SELECT EXISTS (SELECT 1 FROM planning_task_dependencies WHERE project_id = ?1 AND task_id = ?2 AND blocker_id = ?3)",
             params![project_id.to_string(), task_id.to_string(), blocker_id.to_string()],
@@ -1379,6 +1388,8 @@ fn raw_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawTask> {
         handoff: row.get(12)?,
         evidence: row.get(13)?,
         assignee: row.get(14)?,
+        completed_at: row.get(15)?,
+        archived_at: row.get(16)?,
     })
 }
 fn decode_task(raw: RawTask) -> Result<PlanningTask> {
@@ -1410,6 +1421,8 @@ fn decode_task(raw: RawTask) -> Result<PlanningTask> {
         handoff: raw.handoff,
         evidence: raw.evidence,
         assignee: raw.assignee,
+        completed_at: raw.completed_at,
+        archived_at: raw.archived_at,
     })
 }
 fn parse_id<T>(
@@ -1562,6 +1575,20 @@ fn ensure_task(c: &Connection, p: ProjectId, id: TaskId) -> Result<()> {
         &id.to_string(),
         StorageError::PlanningTaskNotFound { id: id.to_string() },
     )
+}
+/// Refuse a new dependency to or on task `id` once `arcl compact` archived
+/// it. Compaction archives no task that blocks open work, and the default
+/// views leave an archived task out of the blockers they show.
+fn ensure_unarchived(c: &Connection, id: TaskId) -> Result<()> {
+    let archived: bool = c.query_row(
+        "SELECT archived_at IS NOT NULL FROM planning_tasks WHERE id = ?1",
+        [id.to_string()],
+        |row| row.get(0),
+    )?;
+    if archived {
+        return Err(StorageError::ArchivedDependency { id: id.to_string() });
+    }
+    Ok(())
 }
 fn ensure_note(c: &Connection, p: ProjectId, id: NoteId) -> Result<()> {
     ensure_record(

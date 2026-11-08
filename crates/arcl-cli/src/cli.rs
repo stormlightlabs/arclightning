@@ -159,6 +159,27 @@ pub enum Command {
     Context {
         /// The task identifier.
         task_id: String,
+        /// Include archived blockers, dependents and evidence.
+        #[arg(long)]
+        all: bool,
+    },
+    /// Archive tasks completed before a date and keep their evidence in one
+    /// summary note per phase.
+    Compact {
+        /// Archive tasks completed before the start of this UTC date,
+        /// written YYYY-MM-DD.
+        #[arg(long, value_name = "DATE")]
+        before: String,
+        /// Archive only tasks under this phase.
+        #[arg(long, value_name = "ID")]
+        phase: Option<String>,
+        /// Also archive completed tasks with no completion time, as if they
+        /// were completed before any date.
+        #[arg(long)]
+        include_undated: bool,
+        /// Print what would be written and archived, and write nothing.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Print the agent loop, open work with handoffs, and the first ready
     /// tasks, for a session-start hook.
@@ -612,7 +633,11 @@ pub enum TaskCommand {
         id: String,
     },
     /// List tasks.
-    List,
+    List {
+        /// Include archived tasks.
+        #[arg(long)]
+        all: bool,
+    },
     /// Update task metadata, Markdown, or ancestry.
     Update {
         /// The task ID to update.
@@ -735,6 +760,9 @@ pub enum TaskCommand {
     Context {
         /// The task ID to contextualize.
         id: String,
+        /// Include archived blockers, dependents and evidence.
+        #[arg(long)]
+        all: bool,
     },
 }
 
@@ -933,8 +961,9 @@ pub struct GateTargetArgs {
 /// Options that choose what `arcl tree` shows.
 #[derive(Clone, Copy, Debug, Default, Args)]
 pub struct TreeArgs {
-    /// Include promoted and discarded captures. Human output also unfolds
-    /// finished phases and lists the Inbox, Notes and Releases sections.
+    /// Include promoted and discarded captures and archived tasks. Human
+    /// output also unfolds finished phases and lists the Inbox, Notes and
+    /// Releases sections.
     #[arg(long)]
     pub all: bool,
     /// Draw human output with ASCII characters only, status marks included.
@@ -978,6 +1007,9 @@ pub struct ListArgs {
     /// Restrict tasks to those claimed by one assignee.
     #[arg(long, value_name = "NAME")]
     pub assignee: Option<String>,
+    /// Include archived tasks.
+    #[arg(long)]
+    pub all: bool,
 }
 
 /// Filters accepted by ready-work and next-work queries.

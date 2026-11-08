@@ -18,7 +18,8 @@ use arcl_repo::{
     workspace::{Change, RecordSource, RecordStatusKind, WorkspaceStatus},
 };
 use arcl_store::{
-    CheckReport, PlanApplyResult, PlanDiff, PlanningCompletion, PlanningContext, PlanningTaskView, PlanningWork,
+    CheckReport, Compaction, PlanApplyResult, PlanDiff, PlanningCompletion, PlanningContext, PlanningTaskView,
+    PlanningWork,
 };
 
 pub use arcl_store::{TREE_SECTIONS, TreeStatus, tree_section};
@@ -639,6 +640,31 @@ impl Renderer {
                     unblocked: unblocked.iter().map(|ready| ready.id.to_string()).collect(),
                 },
             })?,
+            OutputMode::Quiet => return Ok(None),
+        };
+        Ok(Some(self.style(message)))
+    }
+
+    /// Render what `arcl compact` archived, or would archive on a dry run.
+    /// Human output names each phase, its note and its tasks by short ID;
+    /// plain output prints a `phase` line with the full phase and note IDs
+    /// and whether the note is `created` or `appended`, then a `task` line
+    /// per task. A dry run's new note has `-` for its ID.
+    pub fn render_compaction(&self, compaction: &Compaction, ids: &ShortIds) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human => human_compaction(compaction, ids),
+            OutputMode::Plain => compaction
+                .phases
+                .iter()
+                .flat_map(|phase| {
+                    let note = phase.note_id.map_or_else(|| "-".to_owned(), |id| id.to_string());
+                    let change = if phase.note_created { "created" } else { "appended" };
+                    std::iter::once(format!("phase\t{}\t{note}\t{change}", phase.phase_id))
+                        .chain(phase.tasks.iter().map(|task| format!("task\t{}", task.id)))
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            OutputMode::Json => serde_json::to_string(&Envelope { format_version: FORMAT_VERSION, data: compaction })?,
             OutputMode::Quiet => return Ok(None),
         };
         Ok(Some(self.style(message)))
@@ -1916,15 +1942,26 @@ pub struct ConnectedTreeNode {
     pub blocked_by: Vec<String>,
     /// Child records in the planning hierarchy.
     pub children: Vec<ConnectedTreeNode>,
+    /// How many archived tasks the tree left out directly below this node,
+    /// counting their subtasks. They count as done. JSON leaves it out at 0.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub archived_tasks: usize,
 }
 
 impl ConnectedTreeNode {
+    /// The completed tasks and all tasks below this node, at any depth,
+    /// leaving out cancelled tasks and counting archived ones as done.
+    pub fn progress(&self) -> (usize, usize) {
+        let (done, total) = task_progress(&self.children);
+        (done + self.archived_tasks, total + self.archived_tasks)
+    }
+
     /// The human line for this record: its mark and title, a phase's
     /// done/total task count, and a task's open blockers.
     fn human_line(&self, view: TreeView) -> String {
         let mut line = format!("{} {}", view.mark(self.mark), human_escape(&self.title));
         if self.kind == "phase" {
-            let (done, total) = task_progress(&self.children);
+            let (done, total) = self.progress();
             if total > 0 {
                 line.push_str(&format!("  {done}/{total}"));
             }
@@ -2195,7 +2232,7 @@ fn is_finished_phase(node: &ConnectedTreeNode) -> bool {
     if node.kind != "phase" || node.mark != StatusMark::Done {
         return false;
     }
-    let (done, total) = task_progress(&node.children);
+    let (done, total) = node.progress();
     done == total
 }
 
@@ -2206,7 +2243,7 @@ fn is_finished_phase(node: &ConnectedTreeNode) -> bool {
 /// phases otherwise.
 fn folded_line(run: &[&ConnectedTreeNode], view: TreeView) -> String {
     let chars = view.chars();
-    let tasks = run.iter().map(|phase| task_progress(&phase.children).1).sum::<usize>();
+    let tasks = run.iter().map(|phase| phase.progress().1).sum::<usize>();
     let label = match run {
         [phase] => human_escape(&phase.title).into_owned(),
         _ => folded_range(run, chars.dash).unwrap_or_else(|| format!("{} phases", run.len())),
@@ -2248,10 +2285,11 @@ fn numbered_title(title: &str) -> Option<(&str, u64)> {
 }
 
 /// Counts the completed tasks and all tasks at any depth in `nodes`,
-/// leaving out cancelled tasks.
+/// leaving out cancelled tasks and counting archived ones below them as
+/// done.
 fn task_progress(nodes: &[ConnectedTreeNode]) -> (usize, usize) {
     nodes.iter().fold((0, 0), |(done, total), node| {
-        let (child_done, child_total) = task_progress(&node.children);
+        let (child_done, child_total) = node.progress();
         let (own_done, own_total) = match node.mark {
             _ if node.kind != "task" => (0, 0),
             StatusMark::Cancelled => (0, 0),
@@ -2716,6 +2754,42 @@ fn push_human_escaped(out: &mut String, character: char) {
     }
 }
 
+/// The human report of [`Renderer::render_compaction`].
+fn human_compaction(compaction: &Compaction, ids: &ShortIds) -> String {
+    let count = compaction.phases.iter().map(|phase| phase.tasks.len()).sum::<usize>();
+    if count == 0 {
+        return "No completed tasks to archive.".to_owned();
+    }
+    let tasks = if count == 1 { "task" } else { "tasks" };
+    let phases = if compaction.phases.len() == 1 { "phase" } else { "phases" };
+    let mut lines = vec![if compaction.dry_run {
+        format!(
+            "Would archive {count} {tasks} in {} {phases}. Nothing was written.",
+            compaction.phases.len()
+        )
+    } else {
+        format!("Archived {count} {tasks} in {} {phases}.", compaction.phases.len())
+    }];
+    for phase in &compaction.phases {
+        let note = match (phase.note_id, phase.note_created, compaction.dry_run) {
+            (Some(id), false, true) => format!("would append to note `{}`", ids.short(&id.to_string())),
+            (Some(id), false, false) => format!("appended to note `{}`", ids.short(&id.to_string())),
+            (Some(id), true, _) => format!("created note `{}`", ids.short(&id.to_string())),
+            (None, _, _) => "would create a note".to_owned(),
+        };
+        lines.push(format!(
+            "Phase `{}` {}: {note} {}",
+            ids.short(&phase.phase_id.to_string()),
+            phase.phase_title,
+            phase.note_title
+        ));
+        for task in &phase.tasks {
+            lines.push(format!("  `{}` {}", ids.short(&task.id.to_string()), task.title));
+        }
+    }
+    lines.join("\n")
+}
+
 fn plain_escape(value: &str) -> String {
     value.replace('\\', "\\\\").replace('\t', "\\t").replace('\n', "\\n")
 }
@@ -3043,7 +3117,9 @@ mod tests {
                 mark: StatusMark::Ready,
                 blocked_by: vec!["arcl-t-2".to_owned()],
                 children: Vec::new(),
+                archived_tasks: 0,
             }],
+            archived_tasks: 0,
         };
         let nodes = [node];
         let render = |mode| {
@@ -3087,6 +3163,7 @@ mod tests {
             mark,
             blocked_by: Vec::new(),
             children,
+            archived_tasks: 0,
         }
     }
 

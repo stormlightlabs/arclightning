@@ -842,7 +842,9 @@ mod tests {
             .complete_planning_task(task.id, arcl_store::OpenSubtasks::Refuse, None)
             .expect("task completes");
         project.sync().expect("sync succeeds");
-        assert_eq!(project.read(&manifest), "format-version = 3\n");
+        // Completing the task records its completion time, which version 6
+        // carries.
+        assert_eq!(project.read(&manifest), "format-version = 6\n");
         assert_eq!(project.database.task_notes(task.id).expect("notes read").len(), 3);
         assert!(project.sync().expect("repeat sync succeeds").is_empty());
     }
