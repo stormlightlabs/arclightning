@@ -193,6 +193,20 @@ pub struct ListInput {
     /// Only records in one of these statuses. Each must apply to `kind`.
     #[serde(default)]
     pub status: Vec<RecordStatus>,
+    /// Only tasks with one of these priorities. Needs `kind` unset or `task`.
+    #[serde(default)]
+    pub priority: Vec<TaskPriority>,
+    /// Only this release, `arcl-r-…`, and the specs, plans, tasks and notes
+    /// in it.
+    pub release: Option<String>,
+    /// Only this spec, `arcl-s-…`, and the plans and tasks under it.
+    pub spec: Option<String>,
+    /// Only this plan, `arcl-pl-…`, and the phases and tasks under it.
+    pub plan: Option<String>,
+    /// Only this phase, `arcl-ph-…`, and the tasks under it.
+    pub phase: Option<String>,
+    /// Only direct subtasks of this task, `arcl-t-…`.
+    pub parent: Option<String>,
     /// The most records to return, from 1 to 200. Defaults to 50.
     #[schemars(range(min = 1, max = 200))]
     pub limit: Option<u32>,

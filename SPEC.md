@@ -327,6 +327,10 @@ The MCP server exposes the same application operations that make sense for an
 agent. It returns typed records and errors instead of parsing CLI presentation
 text.
 
+The MCP `list` tool and `arcl list` build and apply their record filter
+through one store code path. Both take the kind, status, priority, release,
+spec, plan, phase and parent filters.
+
 `arcl context` is the focused task handoff for command-line agents. It
 includes the task, relevant ancestors, spec and plan context, direct blockers,
 latest handoff, and relevant evidence without returning the whole project. It

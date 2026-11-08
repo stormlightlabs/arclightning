@@ -34,7 +34,8 @@ pub enum TreeStatus {
 pub struct RecordFilter {
     /// One of [`RECORD_KINDS`].
     pub kind: Option<String>,
-    /// Stored statuses, such as `pending`; a note's status is `available`.
+    /// Stored statuses, such as `pending`. Notes have none, so a list with a
+    /// status filter leaves them out.
     pub statuses: Vec<String>,
     /// Task priorities. Only tasks carry one.
     pub priorities: Vec<TaskPriority>,
@@ -111,6 +112,77 @@ impl RecordFilter {
     }
 }
 
+/// The filters of `arcl list` as a caller receives them, before any is
+/// checked: a kind and status names, priority names, full or short record
+/// IDs, an assignee, and whether to include archived tasks. The CLI and the
+/// MCP `list` tool both build their [`RecordFilter`] with [`Self::resolve`].
+#[derive(Clone, Debug, Default)]
+pub struct RecordFilterArgs {
+    /// One of [`RECORD_KINDS`].
+    pub kind: Option<String>,
+    /// Stored statuses, such as `pending`.
+    pub statuses: Vec<String>,
+    /// Task priority names, such as `high`.
+    pub priorities: Vec<String>,
+    /// A release ID, full or short.
+    pub release: Option<String>,
+    /// A spec ID, full or short.
+    pub spec: Option<String>,
+    /// A plan ID, full or short.
+    pub plan: Option<String>,
+    /// A phase ID, full or short.
+    pub phase: Option<String>,
+    /// A task ID, full or short, whose direct subtasks to list.
+    pub parent: Option<String>,
+    /// A claim name; surrounding whitespace is trimmed.
+    pub assignee: Option<String>,
+    /// Include archived tasks.
+    pub all: bool,
+}
+
+impl RecordFilterArgs {
+    /// Check the arguments and build the [`RecordFilter`] they name.
+    ///
+    /// The checks run in a fixed order: the kind, then the priorities, then
+    /// the statuses and what the kind allows, then the release, spec, plan,
+    /// phase and parent IDs. A refused kind, status or combination fails with
+    /// [`StorageError::InvalidFilter`], and a priority or ID that does not
+    /// parse with a [`DomainError`].
+    ///
+    /// `resolve` takes an ID argument and the full-ID prefix of the kind it
+    /// must name, such as `arcl-s-`, and returns a full ID: a full ID as it
+    /// is, a short ID resolved among records of that kind first. An ID of
+    /// another kind then fails to parse. [`list_records`] refuses an ID that
+    /// names no record.
+    pub fn resolve<E>(
+        self, mut resolve: impl FnMut(&str, &'static str) -> std::result::Result<String, E>,
+    ) -> std::result::Result<RecordFilter, E>
+    where
+        E: From<DomainError> + From<StorageError>,
+    {
+        RecordFilter { kind: self.kind.clone(), ..RecordFilter::default() }.validate()?;
+        let mut filter = RecordFilter {
+            priorities: self
+                .priorities
+                .iter()
+                .map(|value| TaskPriority::parse(value))
+                .collect::<std::result::Result<Vec<_>, _>>()?,
+            assignee: self.assignee.map(|name| name.trim().to_owned()),
+            kind: self.kind,
+            statuses: self.statuses,
+            archived: self.all,
+            ..RecordFilter::default()
+        };
+        filter.validate()?;
+        filter.release_id = filter_id(self.release, &mut resolve)?;
+        filter.spec_id = filter_id(self.spec, &mut resolve)?;
+        filter.plan_id = filter_id(self.plan, &mut resolve)?;
+        filter.phase_id = filter_id(self.phase, &mut resolve)?;
+        filter.parent_id = filter_id(self.parent, &mut resolve)?;
+        Ok(filter)
+    }
+}
+
 /// One record in a list: its kind, ID, title and status.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RecordSummary {
@@ -155,7 +227,8 @@ pub struct RecordTreeNode {
 }
 
 /// The records `filter` matches, sorted by kind, then ID. A filter that names
-/// a missing record fails with its not-found error.
+/// a missing record fails with its not-found error. Notes have no stored
+/// status, so a status filter leaves them out.
 pub fn list_records(graph: &ConnectedGraph, filter: &RecordFilter) -> Result<Vec<RecordSummary>> {
     filter.validate()?;
     validate_list_targets(graph, filter)?;
@@ -250,21 +323,29 @@ pub fn list_records(graph: &ConnectedGraph, filter: &RecordFilter) -> Result<Vec
             ));
         }
     }
-    for task in &graph.tasks {
+    // Ancestry walks the parent chain, so only a spec, plan or phase filter
+    // reads it, and only for a task every other filter matches.
+    let ancestry_matches = |task: &PlanningTask| -> Result<bool> {
+        if filter.spec_id.is_none() && filter.plan_id.is_none() && filter.phase_id.is_none() {
+            return Ok(true);
+        }
         let ancestry = task_ancestry(graph, task.id)?;
+        Ok(filter.spec_id.is_none_or(|id| ancestry.0 == Some(id))
+            && filter.plan_id.is_none_or(|id| ancestry.1 == Some(id))
+            && filter.phase_id.is_none_or(|id| ancestry.2 == Some(id)))
+    };
+    for task in &graph.tasks {
         let task_matches = filter.kind.as_deref().is_none_or(|kind| kind == "task")
             && (filter.archived || task.archived_at.is_none())
             && status_matches(&filter.statuses, task.status.as_str())
             && (filter.priorities.is_empty() || filter.priorities.contains(&task.priority))
-            && filter.spec_id.is_none_or(|id| ancestry.0 == Some(id))
-            && filter.plan_id.is_none_or(|id| ancestry.1 == Some(id))
-            && filter.phase_id.is_none_or(|id| ancestry.2 == Some(id))
             && filter.parent_id.is_none_or(|id| task.parent_id == Some(id))
             && filter
                 .assignee
                 .as_ref()
                 .is_none_or(|name| task.assignee.as_ref() == Some(name))
-            && release_member_matches(graph, "task", &task.id.to_string(), filter.release_id);
+            && release_member_matches(graph, "task", &task.id.to_string(), filter.release_id)
+            && ancestry_matches(task)?;
         if task_matches {
             records.push(RecordSummary::new(
                 "task",
@@ -276,6 +357,7 @@ pub fn list_records(graph: &ConnectedGraph, filter: &RecordFilter) -> Result<Vec
     }
     for note in &graph.notes {
         if filter.kind.as_deref().is_none_or(|kind| kind == "note")
+            && filter.statuses.is_empty()
             && filter.spec_id.is_none()
             && filter.plan_id.is_none()
             && filter.phase_id.is_none()
@@ -718,6 +800,259 @@ fn validate_list_targets(graph: &ConnectedGraph, filter: &RecordFilter) -> Resul
     Ok(())
 }
 
+/// The ID of kind `T` that `value` names, through `resolve`, or none when
+/// `value` is none.
+fn filter_id<T, E>(
+    value: Option<String>, resolve: &mut impl FnMut(&str, &'static str) -> std::result::Result<String, E>,
+) -> std::result::Result<Option<T>, E>
+where
+    T: PrefixedId,
+    E: From<DomainError>,
+{
+    value
+        .map(|value| {
+            let id = resolve(&value, T::PREFIX)?;
+            T::parse(&id).map_err(|error| E::from(DomainError::InvalidId(error)))
+        })
+        .transpose()
+}
+
 fn status_matches(statuses: &[String], status: &str) -> bool {
     statuses.is_empty() || statuses.iter().any(|candidate| candidate == status)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RecordFilter, RecordFilterArgs, StorageError, list_records};
+    use crate::{Database, PlanningTaskCreate};
+    use arcl_core::domain::*;
+
+    /// A refused [`RecordFilterArgs`], as a caller's error type wraps it.
+    #[derive(Debug)]
+    enum Refused {
+        Domain(DomainError),
+        Storage(StorageError),
+    }
+
+    impl From<DomainError> for Refused {
+        fn from(error: DomainError) -> Self {
+            Self::Domain(error)
+        }
+    }
+
+    impl From<StorageError> for Refused {
+        fn from(error: StorageError) -> Self {
+            Self::Storage(error)
+        }
+    }
+
+    fn full(value: &str, _prefix: &'static str) -> Result<String, Refused> {
+        Ok(value.to_owned())
+    }
+
+    fn refused_filter(args: RecordFilterArgs) -> String {
+        match args.resolve(full) {
+            Err(Refused::Storage(StorageError::InvalidFilter { message })) => message,
+            other => panic!("expected an invalid filter, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_kind_is_checked_before_priorities_and_statuses() {
+        let message = refused_filter(RecordFilterArgs {
+            kind: Some("epic".to_owned()),
+            priorities: vec!["urgent".to_owned()],
+            statuses: vec!["nope".to_owned()],
+            ..RecordFilterArgs::default()
+        });
+        assert!(message.starts_with("unknown kind `epic`"), "{message}");
+    }
+
+    #[test]
+    fn priorities_are_parsed_before_statuses_are_checked() {
+        let error = RecordFilterArgs {
+            kind: Some("spec".to_owned()),
+            priorities: vec!["urgent".to_owned()],
+            statuses: vec!["pending".to_owned()],
+            ..RecordFilterArgs::default()
+        }
+        .resolve(full)
+        .expect_err("an unknown priority refuses");
+        assert!(matches!(error, Refused::Domain(_)), "{error:?}");
+    }
+
+    #[test]
+    fn statuses_and_task_only_filters_must_fit_the_kind() {
+        let status = refused_filter(RecordFilterArgs {
+            kind: Some("capture".to_owned()),
+            statuses: vec!["pending".to_owned()],
+            ..RecordFilterArgs::default()
+        });
+        assert_eq!(status, "status `pending` does not apply to capture records");
+        let priority = refused_filter(RecordFilterArgs {
+            kind: Some("plan".to_owned()),
+            priorities: vec!["high".to_owned()],
+            ..RecordFilterArgs::default()
+        });
+        assert_eq!(priority, "priority filters apply only to tasks");
+    }
+
+    #[test]
+    fn ids_resolve_in_order_with_the_prefix_of_their_kind() {
+        let (release, spec, plan, phase, parent) = (
+            ReleaseId::new(),
+            SpecId::new(),
+            PlanId::new(),
+            PhaseId::new(),
+            TaskId::new(),
+        );
+        let mut asked = Vec::new();
+        let filter = RecordFilterArgs {
+            kind: Some("task".to_owned()),
+            statuses: vec!["pending".to_owned()],
+            priorities: vec!["high".to_owned(), "low".to_owned()],
+            release: Some(release.to_string()),
+            spec: Some(spec.to_string()),
+            plan: Some(plan.to_string()),
+            phase: Some(phase.to_string()),
+            parent: Some(parent.to_string()),
+            assignee: Some("  storm ".to_owned()),
+            all: true,
+        }
+        .resolve(|value, prefix| {
+            asked.push(prefix);
+            full(value, prefix)
+        })
+        .expect("filter resolves");
+        assert_eq!(
+            asked,
+            [
+                ReleaseId::PREFIX,
+                SpecId::PREFIX,
+                PlanId::PREFIX,
+                PhaseId::PREFIX,
+                TaskId::PREFIX
+            ]
+        );
+        assert_eq!(filter.kind.as_deref(), Some("task"));
+        assert_eq!(filter.statuses, ["pending"]);
+        assert_eq!(filter.priorities, [TaskPriority::High, TaskPriority::Low]);
+        assert_eq!(
+            (
+                filter.release_id,
+                filter.spec_id,
+                filter.plan_id,
+                filter.phase_id,
+                filter.parent_id
+            ),
+            (Some(release), Some(spec), Some(plan), Some(phase), Some(parent))
+        );
+        assert_eq!(filter.assignee.as_deref(), Some("storm"));
+        assert!(filter.archived);
+    }
+
+    #[test]
+    fn a_refused_name_resolves_no_id() {
+        let error = RecordFilterArgs {
+            kind: Some("note".to_owned()),
+            statuses: vec!["open".to_owned()],
+            spec: Some("anything".to_owned()),
+            ..RecordFilterArgs::default()
+        }
+        .resolve(|_, _| -> Result<String, Refused> { panic!("no ID resolves after a refused status") })
+        .expect_err("notes have no status");
+        assert!(
+            matches!(error, Refused::Storage(StorageError::InvalidFilter { .. })),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn an_id_of_another_kind_fails_to_parse() {
+        let error = RecordFilterArgs { spec: Some(TaskId::new().to_string()), ..RecordFilterArgs::default() }
+            .resolve(full)
+            .expect_err("a task ID is not a spec ID");
+        assert!(matches!(error, Refused::Domain(DomainError::InvalidId(_))), "{error:?}");
+    }
+
+    #[test]
+    fn short_ids_resolve_and_unknown_ids_fail_when_listed() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let spec = database
+            .create_spec("Feature".to_owned(), String::new(), String::new())
+            .expect("spec creates");
+        let plan = database
+            .create_plan(spec.id, "Roadmap".to_owned(), String::new())
+            .expect("plan creates");
+        let resolve =
+            |value: &str, prefix: &'static str| database.resolve_record_id(value, Some(prefix)).map_err(Refused::from);
+        let full_id = spec.id.to_string();
+        let short = &full_id[full_id.len() - 8..];
+        let filter = RecordFilterArgs { spec: Some(short.to_owned()), ..RecordFilterArgs::default() }
+            .resolve(resolve)
+            .expect("a short spec ID resolves");
+        assert_eq!(filter.spec_id, Some(spec.id));
+        let listed = database.list_records(&filter).expect("records list");
+        let ids = listed.iter().map(|record| record.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids, [plan.id.to_string(), spec.id.to_string()]);
+
+        let unknown = RecordFilterArgs { spec: Some(SpecId::new().to_string()), ..RecordFilterArgs::default() }
+            .resolve(resolve)
+            .expect("a full ID resolves as it is");
+        let error = database.list_records(&unknown).expect_err("no such spec");
+        assert!(matches!(error, StorageError::SpecNotFound { .. }), "{error:?}");
+    }
+
+    #[test]
+    fn a_broken_task_ancestry_fails_only_lists_that_read_it() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project_id = database.project().expect("project reads").id;
+        let spec = database
+            .create_spec("Feature".to_owned(), String::new(), String::new())
+            .expect("spec creates");
+        let capture = database
+            .create_capture("Idea".to_owned(), String::new())
+            .expect("capture creates");
+        let task = database
+            .create_planning_task(PlanningTaskCreate {
+                project_id,
+                spec_id: None,
+                plan_id: None,
+                phase_id: None,
+                parent_id: None,
+                title: "Orphan".to_owned(),
+                body: String::new(),
+                priority: TaskPriority::Normal,
+                position: 0,
+            })
+            .expect("task creates");
+        let mut graph = database.connected_graph().expect("graph reads");
+        let missing = TaskId::new();
+        graph.tasks[0].parent_id = Some(missing);
+
+        let captures = list_records(
+            &graph,
+            &RecordFilter { kind: Some("capture".to_owned()), ..RecordFilter::default() },
+        )
+        .expect("captures list");
+        let ids = captures.iter().map(|record| record.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids, [capture.id.to_string()]);
+        let tasks = list_records(
+            &graph,
+            &RecordFilter { kind: Some("task".to_owned()), ..RecordFilter::default() },
+        )
+        .expect("tasks list without an ancestry filter");
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].id, task.id.to_string());
+
+        let error = list_records(
+            &graph,
+            &RecordFilter { spec_id: Some(spec.id), ..RecordFilter::default() },
+        )
+        .expect_err("a spec filter reads the broken ancestry");
+        assert!(
+            matches!(&error, StorageError::PlanningTaskNotFound { id } if *id == missing.to_string()),
+            "{error:?}"
+        );
+    }
 }

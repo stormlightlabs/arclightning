@@ -19,6 +19,6 @@ pub mod prelude {
         PlanApplyResult, PlanChange, PlanDependencyDiff, PlanDiff, PlanDiffItem, PlanUpdate, PlanningBlockerView,
         PlanningCompletion, PlanningContext, PlanningData, PlanningReadiness, PlanningReadyFilter, PlanningTaskCreate,
         PlanningTaskUpdate, PlanningTaskView, PlanningWork, ReadinessReason, ReadinessReasonKind, RecordFilter,
-        RecordTreeNode, SpecUpdate, StorageError, TreeStatus, WorkspaceBaseFile,
+        RecordFilterArgs, RecordTreeNode, SpecUpdate, StorageError, TreeStatus, WorkspaceBaseFile,
     };
 }

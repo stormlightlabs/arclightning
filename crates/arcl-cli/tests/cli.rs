@@ -6701,6 +6701,22 @@ fn list_filters_tasks_by_assignee() {
 }
 
 #[test]
+fn list_leaves_notes_out_under_a_status_filter() {
+    let directory = initialized_directory();
+    let task = create_task(directory.path(), "Pending", None);
+    run_json(directory.path(), ["--json", "note", "create", "Finding"].as_ref());
+
+    let listed = run_json(directory.path(), ["--json", "list", "--status", "pending"].as_ref());
+    let ids: Vec<&str> = listed["data"]["records"]
+        .as_array()
+        .expect("records")
+        .iter()
+        .map(|record| record["id"].as_str().expect("record ID"))
+        .collect();
+    assert_eq!(ids, vec![task.as_str()]);
+}
+
+#[test]
 fn list_reports_an_unknown_kind_before_other_filter_errors() {
     let directory = initialized_directory();
     for extra in [
