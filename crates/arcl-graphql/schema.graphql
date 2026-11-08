@@ -284,9 +284,15 @@ type Query {
 	): [TreeNode!]!
 	"""
 	Every task with its readiness and effective phase, and every phase,
-	as the web app's Work list reads them.
+	as the web app's Work list reads them. Archived tasks appear only
+	with `all`.
 	"""
-	work: Work!
+	work(
+		"""
+		Include archived tasks.
+		"""
+		all: Boolean! = false
+	): Work!
 	"""
 	The context packet of the task `task` names, as `arcl context` prints it.
 	"""

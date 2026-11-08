@@ -330,6 +330,13 @@ Completing a task records when, as `completed_at` in JSON and `completed-at` in
 its workspace file. Subtasks that `--with-subtasks` completes get the same
 time. A task completed before arcl recorded completion times has none.
 
+Only arcl commands set `completed-at`. A task file whose `status` is set to
+`completed` by hand imports with no completion time, since sync cannot tell
+when the work was done or tell that file from one written before completion
+times. `compact` skips such a task unless `--include-undated` is given. To
+reopen a task by hand, set its `status` and delete `completed-at`, and
+`archived-at` if it has one; sync refuses an open task that carries either.
+
 `complete` refuses a task with open descendants. `--allow-open-children`
 completes only the task. `--with-subtasks` also completes its pending and
 in-progress descendants in one write, and refuses, writing nothing, while a
@@ -357,7 +364,9 @@ A task is archived when all of these hold:
 - every subtask it has is archived in the same run or already.
 
 Pending, in-progress, parked and cancelled tasks are never archived, so a
-parent with a cancelled subtask stays. A completed task with no completion
+parent with a cancelled subtask stays. A task with no phase, on itself or an
+ancestor task, is never archived, since its evidence has no phase note to go
+to. A completed task with no completion
 time stays unless `--include-undated` is given, which treats it as completed
 before any date.
 
@@ -372,8 +381,9 @@ its completion time and its evidence. A later run appends new sections to the
 same note. Archived tasks are never selected again, so running the same
 command twice changes nothing the second time.
 
-`list`, `tree` and `context` leave archived tasks out; `--all` shows them.
-`show` always shows a task. `tree`, `roadmap` and the web app count archived
+`list`, `task list`, `tree` and `context` leave archived tasks out; `--all`
+shows them. `show` always shows a task. The web app's Work list and board
+leave them out too. `tree`, `roadmap` and the web app count archived
 tasks as done in phase progress, so a phase keeps its totals after compaction.
 `prime`, `ready` and `next` list only open tasks, so archived tasks never show
 there.
@@ -540,8 +550,8 @@ same order. Both print every record and ignore `--ascii`, `--depth` and
 Human output draws a box-drawing tree. Each line holds a status mark and the
 record's title, with no ID. A phase adds its completed and total task counts,
 such as `7/12`, counting subtasks and archived tasks and leaving out cancelled
-tasks. A task with
-unfinished direct blockers ends with `blocked by` and their short IDs.
+tasks. A task with unfinished direct blockers ends with `blocked by` and their
+short IDs.
 
 Each run of consecutive completed phases folds into one line. A completed
 phase with an unfinished task does not fold, so that task still shows. A run of
@@ -558,7 +568,7 @@ parts, and an empty project prints none.
 
 | Flag              | Human output                                                                                                                      |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `--all`           | Unfolds every phase, shows archived tasks, and lists captures, notes and releases under `Inbox`, `Notes` and `Releases` headings in place of the footer. |
+| `--all`           | Unfolds every phase, shows archived tasks, and lists captures, notes and releases under `Inbox`, `Notes` and `Releases` headings. |
 | `--ascii`         | Draws with `\|--`, `` `-- `` and `\|`, as GNU `tree -A` does, and uses each mark's ASCII form.                                    |
 | `--depth N`       | Stops after `N` levels of records, counting top-level records as `1`.                                                             |
 | `--style <STYLE>` | Lays the tree out as `folded`, the default, `full` or `outline`.                                                                  |
@@ -803,10 +813,14 @@ closes after the reply. It keeps at most
 `/api/records` and `/api/ready` take the command's flags as query parameters,
 such as `?kind=task&status=pending&status=parked`. `/api/tree` takes none and
 returns the tree of every record. `/api/work` takes none and
-returns the Work list in one request: every task with the readiness
-`arcl explain` reports and its phase ID, inherited from an ancestor where the
-task has none, and every phase. Its envelope is
+returns the Work list in one request: every task that is not archived, with
+the readiness `arcl explain` reports and its phase ID, inherited from an
+ancestor where the task has none, and every phase. Its envelope is
 `{"format_version": 2, "data": {"tasks": [{"task", "readiness", "phase_id"}], "phases": [...]}}`.
+
+`/api/records`, `/api/tree` and `/api/tasks/<id>/context` leave archived tasks
+out as the CLI does without `--all`, so the web app's Work list, board and
+Planning view never show them.
 
 Each `GET /api` read runs one named query against the schema `arcl query`
 uses and maps the result into its envelope. These reads have no limit on the

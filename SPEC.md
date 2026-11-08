@@ -232,11 +232,12 @@ phase. A task with no completion time, completed before arcl recorded one,
 is archived only with `--include-undated`. Open and cancelled tasks are never
 archived, and neither is a task that blocks an open task or has a subtask
 that stays. An archived task keeps status `completed` and gains an archive
-time; it stays in the workspace files. `list`, `tree` and `context` leave it
-out unless `--all` is given, `show` always shows it, and phase progress in
-`tree`, `roadmap` and the web app counts it as done. GraphQL `records`,
-`tree` and `context`, the REST reads built on them, and the MCP `list` and
-`context` tools leave it out the same way. Archived tasks are never selected
+time; it stays in the workspace files. `list`, `task list`, `tree` and
+`context` leave it out unless `--all` is given, `show` always shows it, and
+phase progress in `tree`, `roadmap` and the web app counts it as done.
+GraphQL `records`, `work`, `tree` and `context`, the REST reads built on
+them, and the MCP `list` and `context` tools leave it out the same way, so
+the web app's Work list and board never show it. Archived tasks are never selected
 again, so repeating a compaction changes nothing, and `--dry-run` writes
 nothing.
 
@@ -375,11 +376,11 @@ version 5 when a capture file names its source task, version 4 when a task
 file carries a gate, version 3 when one carries a note, version 2 when one
 carries an `assignee`, and otherwise keeps the version the workspace already
 has. A new workspace starts at version 1, so a workspace without claims,
-notes, gates, capture sources or completed tasks stays there. A workspace never moves back to an older
-version on its own. An arcl that reads only older versions checks the
-manifest before any record is read or written. It refuses a newer workspace
-with an error that names the manifest's version and the newest version it
-reads, and says to upgrade arcl.
+notes, gates, capture sources or completed tasks stays there. A workspace
+never moves back to an older version on its own. An arcl that reads only
+older versions checks the manifest before any record is read or written. It
+refuses a newer workspace with an error that names the manifest's version and
+the newest version it reads, and says to upgrade arcl.
 
 Synchronization uses a three-state comparison: compare
 the last common files, current database projection, and current workspace. Arc

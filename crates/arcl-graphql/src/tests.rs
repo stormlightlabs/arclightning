@@ -744,3 +744,110 @@ fn an_unbounded_query_resolves_past_the_node_limit() {
     assert!(unbounded.errors.is_empty(), "{:?}", unbounded.errors);
     assert!(NODES.with(Cell::get) > MAX_NODES);
 }
+
+#[test]
+fn archived_tasks_are_left_out_unless_all_is_given() {
+    let mut fixture = Fixture::new();
+    let project_id = fixture.database.project().expect("project reads").id;
+    let second = fixture
+        .database
+        .create_phase(fixture.phase.plan_id, "Second".to_owned(), String::new(), 2)
+        .expect("phase creates");
+    let mut done = |title: &str, phase: PhaseId| {
+        let task = fixture
+            .database
+            .create_planning_task(PlanningTaskCreate {
+                project_id,
+                spec_id: None,
+                plan_id: None,
+                phase_id: Some(phase),
+                parent_id: None,
+                title: title.to_owned(),
+                body: String::new(),
+                priority: TaskPriority::Normal,
+                position: 3,
+            })
+            .expect("task creates");
+        fixture
+            .database
+            .complete_planning_task(task.id, OpenSubtasks::Refuse, Some(format!("{title} evidence")))
+            .expect("task completes");
+        task.id
+    };
+    let shipped = done("Shipped", fixture.phase.id);
+    // `follow` sits in the second phase, which the compaction leaves out.
+    let follow = done("Follow", second.id);
+    fixture
+        .database
+        .add_planning_dependency(follow, shipped)
+        .expect("dependency adds");
+    let (shipped, follow) = (shipped.to_string(), follow.to_string());
+    let compaction = fixture
+        .database
+        .compact(&CompactionRequest {
+            before: "2999-01-01".to_owned(),
+            phase_id: Some(fixture.phase.id),
+            include_undated: false,
+            dry_run: false,
+        })
+        .expect("compaction runs");
+    assert_eq!(compaction.phases.len(), 1);
+
+    let phase = fixture.phase.id.to_string();
+    let data = fixture.data(&format!(
+        r#"{{
+            records(kind: "task") {{ id }}
+            allRecords: records(kind: "task", all: true) {{ id }}
+            work {{ tasks {{ task {{ id }} }} }}
+            allWork: work(all: true) {{ tasks {{ task {{ id }} }} }}
+            context(task: "{follow}") {{ blockers {{ task {{ id }} }} completionEvidence {{ task {{ id }} }} }}
+            allContext: context(task: "{follow}", all: true) {{
+                blockers {{ task {{ id }} }} completionEvidence {{ task {{ id }} }}
+            }}
+            tree(root: "{phase}") {{ archivedTasks children {{ id status }} }}
+            allTree: tree(root: "{phase}", all: true) {{ archivedTasks children {{ id status }} }}
+        }}"#
+    ));
+    let ids = |value: &Value, path: &[&str]| {
+        value
+            .as_array()
+            .expect("array")
+            .iter()
+            .map(|item| {
+                path.iter()
+                    .fold(item, |item, key| &item[key])
+                    .as_str()
+                    .expect("id")
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+    };
+    assert!(!ids(&data["records"], &["id"]).contains(&shipped));
+    assert!(ids(&data["records"], &["id"]).contains(&follow));
+    assert!(ids(&data["allRecords"], &["id"]).contains(&shipped));
+    assert!(!ids(&data["work"]["tasks"], &["task", "id"]).contains(&shipped));
+    assert!(ids(&data["work"]["tasks"], &["task", "id"]).contains(&follow));
+    assert!(ids(&data["allWork"]["tasks"], &["task", "id"]).contains(&shipped));
+
+    assert_eq!(data["context"]["blockers"], json!([]));
+    assert_eq!(data["context"]["completionEvidence"], json!([]));
+    let expected = json!([{ "task": { "id": shipped } }]);
+    assert_eq!(data["allContext"]["blockers"], expected);
+    assert_eq!(data["allContext"]["completionEvidence"], expected);
+
+    // The phase's done and total counts are the same either way.
+    let progress = |root: &Value| {
+        let children = root["children"].as_array().expect("children");
+        let archived = root["archivedTasks"].as_u64().expect("count") as usize;
+        let done = children.iter().filter(|child| child["status"] == "completed").count();
+        (done + archived, children.len() + archived)
+    };
+    let tree = &data["tree"][0];
+    assert_eq!(tree["archivedTasks"], json!(1));
+    assert!(!ids(&tree["children"], &["id"]).contains(&shipped));
+    let all = &data["allTree"][0];
+    assert_eq!(all["archivedTasks"], json!(0));
+    assert!(ids(&all["children"], &["id"]).contains(&shipped));
+    assert_eq!(progress(tree), progress(all));
+    assert_eq!(progress(tree), (1, 3));
+}

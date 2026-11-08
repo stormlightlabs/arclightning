@@ -530,11 +530,13 @@ pub(super) fn run_task(command: TaskCommand, renderer: &Renderer) -> Result<Opti
                 ),
             )
         }
-        TaskCommand::List => {
+        TaskCommand::List { all } => {
             let database = open_database().map_err(ApplicationError::from_command)?;
-            render_output(
-                renderer.render_planning_tasks(&database.planning_tasks().map_err(ApplicationError::from_command)?),
-            )
+            let mut tasks = database.planning_tasks().map_err(ApplicationError::from_command)?;
+            if !all {
+                tasks.retain(|task| task.archived_at.is_none());
+            }
+            render_output(renderer.render_planning_tasks(&tasks))
         }
         TaskCommand::Update {
             id,

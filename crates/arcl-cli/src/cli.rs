@@ -633,7 +633,11 @@ pub enum TaskCommand {
         id: String,
     },
     /// List tasks.
-    List,
+    List {
+        /// Include archived tasks.
+        #[arg(long)]
+        all: bool,
+    },
     /// Update task metadata, Markdown, or ancestry.
     Update {
         /// The task ID to update.

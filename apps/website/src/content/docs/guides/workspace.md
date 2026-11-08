@@ -192,9 +192,10 @@ or archive time, version 5 once a capture file names its source task,
 version 4 once a task file carries a gate, version 3 once one carries a note,
 version 2 once one carries an `assignee`, and otherwise keeps the version the
 manifest has. A new workspace starts at version 1, so a workspace without
-claims, notes, gates, capture sources or completed tasks stays there. Releasing every claim leaves it at 2. An arcl that reads only
-older versions refuses a newer workspace before it reads or writes any file,
-with an error that names both versions and says to upgrade arcl.
+claims, notes, gates, capture sources or completed tasks stays there.
+Releasing every claim leaves it at 2. An arcl that reads only older versions
+refuses a newer workspace before it reads or writes any file, with an error
+that names both versions and says to upgrade arcl.
 
 A completed task file carries `completed-at`, when the task was completed,
 and `archived-at` once `arcl compact` archived it:

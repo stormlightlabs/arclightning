@@ -174,11 +174,18 @@ impl QueryRoot {
     }
 
     /// Every task with its readiness and effective phase, and every phase,
-    /// as the web app's Work list reads them.
-    async fn work(&self, ctx: &Context<'_>) -> async_graphql::Result<WorkNode> {
+    /// as the web app's Work list reads them. Archived tasks appear only
+    /// with `all`.
+    async fn work(
+        &self, ctx: &Context<'_>, #[graphql(default, desc = "Include archived tasks.")] all: bool,
+    ) -> async_graphql::Result<WorkNode> {
         let reader = reader(ctx);
         reader.admit(1)?;
-        Ok(WorkNode(reader.read(Database::planning_work)?))
+        let mut work = reader.read(Database::planning_work)?;
+        if !all {
+            work.tasks.retain(|item| item.task.archived_at.is_none());
+        }
+        Ok(WorkNode(work))
     }
 
     /// The context packet of the task `task` names, as `arcl context` prints it.

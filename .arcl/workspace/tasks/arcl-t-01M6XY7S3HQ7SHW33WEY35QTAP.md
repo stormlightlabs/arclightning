@@ -1,7 +1,7 @@
 +++
 id = "arcl-t-01M6XY7S3HQ7SHW33WEY35QTAP"
 phase = "arcl-ph-01M5YRFB35TZ51QW4AG1A8MS5B"
-title = "Backfill task completion times from git history"
+title = "Backfill task completion times from Git history"
 status = "pending"
 priority = "normal"
 position = 15

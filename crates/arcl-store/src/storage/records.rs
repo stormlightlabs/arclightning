@@ -409,7 +409,7 @@ pub fn record_tree(
     };
     let mut node = node.clone();
     if !all && !archived.contains(&node.id) {
-        hide_archived(&mut node.children, &archived);
+        hide_archived_below(&mut node, &archived);
     }
     Ok(vec![node])
 }
@@ -417,15 +417,29 @@ pub fn record_tree(
 /// Remove the nodes of `archived` tasks from `nodes` and every subtree, and
 /// count each removed task and its subtasks on the node it sat below.
 fn hide_archived(nodes: &mut Vec<RecordTreeNode>, archived: &HashSet<String>) {
-    nodes.retain(|node| !(node.kind == "task" && archived.contains(&node.id)));
+    nodes.retain(|node| !is_archived_task(node, archived));
     for node in nodes {
-        let (hidden, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut node.children)
-            .into_iter()
-            .partition(|child| child.kind == "task" && archived.contains(&child.id));
-        node.archived_tasks += hidden.iter().map(count_tasks).sum::<usize>();
-        node.children = kept;
-        hide_archived(&mut node.children, archived);
+        hide_archived_below(node, archived);
     }
+}
+
+/// Remove the nodes of `archived` tasks below `node`, at any depth, and count
+/// each removed task and its subtasks on the node it sat below, `node`
+/// included.
+fn hide_archived_below(node: &mut RecordTreeNode, archived: &HashSet<String>) {
+    let (hidden, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut node.children)
+        .into_iter()
+        .partition(|child| is_archived_task(child, archived));
+    node.archived_tasks += hidden.iter().map(count_tasks).sum::<usize>();
+    node.children = kept;
+    for child in &mut node.children {
+        hide_archived_below(child, archived);
+    }
+}
+
+/// Whether `node` is the node of a task in `archived`.
+fn is_archived_task(node: &RecordTreeNode, archived: &HashSet<String>) -> bool {
+    node.kind == "task" && archived.contains(&node.id)
 }
 
 /// How many task nodes `node`'s subtree holds, counting `node`.

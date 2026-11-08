@@ -531,3 +531,97 @@ fn a_workspace_written_before_completion_times_imports() {
     assert_eq!(shown["data"]["task"]["evidence"], "Shipped alpha");
     assert!(shown["data"]["task"].get("completed_at").is_none(), "{shown}");
 }
+
+#[test]
+fn a_rooted_tree_counts_the_archived_tasks_below_its_root() {
+    let project = Project::new();
+    project.done("Alpha", &project.first, "Shipped alpha");
+    let parent = project.task("Parent", &project.first, None);
+    project.task("Child", &project.first, Some(&parent));
+    project.json(&[
+        "task",
+        "complete",
+        &parent,
+        "--with-subtasks",
+        "--evidence",
+        "Parent done",
+    ]);
+    let pending = project.task("Pending", &project.first, None);
+    project.compact(&["--before", LATER]);
+
+    let rooted = project.stdout(&["tree", &project.first]);
+    assert!(!rooted.contains("Alpha") && rooted.contains("Pending"), "{rooted}");
+    assert!(rooted.contains("Milestone 1  3/4"), "{rooted}");
+    let all = project.stdout(&["tree", &project.first, "--all"]);
+    assert!(all.contains("Alpha") && all.contains("Child"), "{all}");
+    assert!(all.contains("Milestone 1  3/4"), "{all}");
+
+    let root = project.json(&["tree", &project.first])["data"]["nodes"][0].clone();
+    assert_eq!(root["id"], project.first.as_str(), "{root}");
+    assert_eq!(root["archived_tasks"], 3, "{root}");
+    let children = root["children"].as_array().expect("children array");
+    assert_eq!(children.len(), 1, "{root}");
+    assert_eq!(children[0]["id"], pending.as_str());
+    let root = project.json(&["tree", &project.first, "--all"])["data"]["nodes"][0].clone();
+    assert!(root.get("archived_tasks").is_none(), "{root}");
+    assert_eq!(root["children"].as_array().expect("children array").len(), 3, "{root}");
+}
+
+#[test]
+fn task_list_hides_archived_tasks_unless_all_is_given() {
+    let project = Project::new();
+    let alpha = project.done("Alpha", &project.first, "Shipped alpha");
+    let pending = project.task("Pending", &project.first, None);
+    project.compact(&["--before", LATER]);
+
+    let listed = |args: &[&str]| {
+        let mut all = vec!["task", "list"];
+        all.extend(args);
+        project.json(&all)["data"]["tasks"]
+            .as_array()
+            .expect("tasks array")
+            .iter()
+            .map(|task| task["id"].as_str().expect("task ID").to_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(listed(&[]), vec![pending.clone()]);
+    assert_eq!(sorted(listed(&["--all"])), sorted(vec![alpha.clone(), pending.clone()]));
+    let human = project.stdout(&["task", "list"]);
+    assert!(!human.contains("Alpha") && human.contains("Pending"), "{human}");
+}
+
+#[test]
+fn subtasks_completed_with_their_parent_share_its_completion_time() {
+    let project = Project::new();
+    let parent = project.task("Parent", &project.first, None);
+    let first = project.task("First", &project.first, Some(&parent));
+    let second = project.task("Second", &project.first, Some(&parent));
+    project.json(&["task", "complete", &parent, "--with-subtasks", "--evidence", "All done"]);
+
+    let completed_at = project.show(&parent)["completed_at"].clone();
+    assert!(completed_at.is_string(), "{completed_at}");
+    for task in [&first, &second] {
+        assert_eq!(project.show(task)["completed_at"], completed_at, "{task}");
+        let file = fs::read_to_string(project.record_path("tasks", task)).expect("task file reads");
+        let line = format!("completed-at = {completed_at}\n");
+        assert!(file.contains(&line), "{file}");
+    }
+}
+
+#[test]
+fn a_task_with_no_phase_is_never_archived() {
+    let project = Project::new();
+    let loose = project.id(&["task", "create", "Loose"], "task");
+    let child = project.task("Loose child", &project.first, Some(&loose));
+    project.json(&["task", "complete", &loose, "--with-subtasks", "--evidence", "Done"]);
+    let phased = project.done("Phased", &project.first, "Shipped");
+
+    let compaction = project.compact(&["--before", LATER]);
+    let phases = compaction["phases"].as_array().expect("phases array");
+    assert_eq!(phases.len(), 1, "{compaction}");
+    assert_eq!(archived_ids(&phases[0]), vec![phased.clone()]);
+    for task in [&loose, &child] {
+        assert!(project.show(task).get("archived_at").is_none(), "{task}");
+    }
+    assert!(project.listed("task", &[]).contains(&loose));
+}
