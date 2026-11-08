@@ -131,12 +131,6 @@ impl ProjectError {
             other => other,
         }
     }
-
-    /// Whether an operation cannot go on even as a read: the lock wait ran
-    /// out or the caller cancelled.
-    pub const fn stops_reads(&self) -> bool {
-        matches!(self, Self::SyncLockBusy { .. } | Self::Cancelled)
-    }
 }
 
 impl From<WorkspaceSyncError> for ProjectError {
@@ -284,7 +278,8 @@ impl Workspace {
             }
             LockWait::Within { timeout, cancelled } => (timeout, cancelled),
         };
-        let deadline = Instant::now() + wait;
+        // A timeout too large to add to now has no deadline.
+        let deadline = Instant::now().checked_add(wait);
         loop {
             if cancelled() {
                 return Err(ProjectError::Cancelled);
@@ -292,7 +287,7 @@ impl Workspace {
             match file.try_lock() {
                 Ok(()) => return Ok(SyncLock { _file: file }),
                 Err(TryLockError::Error(source)) => return Err(ProjectError::SyncLock { path, source }),
-                Err(TryLockError::WouldBlock) if Instant::now() >= deadline => {
+                Err(TryLockError::WouldBlock) if deadline.is_some_and(|deadline| Instant::now() >= deadline) => {
                     return Err(ProjectError::SyncLockBusy { path, waited: wait });
                 }
                 Err(TryLockError::WouldBlock) => thread::sleep(LOCK_POLL),
@@ -570,7 +565,6 @@ mod tests {
         assert!(synced.locked.is_none());
         let error = synced.result.expect_err("the lock is busy");
         assert!(matches!(error, ProjectError::SyncLockBusy { .. }), "{error}");
-        assert!(error.stops_reads());
         assert_eq!(error.exit_code(), 1);
         assert!(error.to_string().contains(SYNC_LOCK_FILE), "{error}");
 
@@ -595,7 +589,6 @@ mod tests {
         let locked = synced.locked.expect("the lock is held after a failed sync");
         let error = synced.result.expect_err("the sync stops");
         assert!(matches!(error, ProjectError::Sync(_)), "{error}");
-        assert!(!error.stops_reads());
 
         let warning = Warning::unsynced_read(&error);
         assert_eq!(warning.code, WORKSPACE_SYNC_WARNING);

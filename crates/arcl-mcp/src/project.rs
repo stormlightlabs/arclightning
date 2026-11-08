@@ -57,7 +57,7 @@ pub fn run<T>(
     let mut warnings = Vec::new();
     match result {
         Ok(found) => warnings.extend(Warning::blocker_edges(found)),
-        Err(error) if error.stops_reads() || access == Access::Write => return Err(error.before_write().into()),
+        Err(error) if stops_reads(&error) || access == Access::Write => return Err(error.before_write().into()),
         Err(error) => warnings.push(Warning::unsynced_read(&error)),
     }
 
@@ -74,4 +74,11 @@ pub fn run<T>(
         locked.export_after_write(&mut warnings);
     }
     Ok((value, warnings))
+}
+
+/// Whether a failure before the call stops it even as a read. The MCP server
+/// fails a read when the lock wait ran out or the client cancelled; the CLI
+/// warns and reads instead.
+const fn stops_reads(error: &ProjectError) -> bool {
+    matches!(error, ProjectError::SyncLockBusy { .. } | ProjectError::Cancelled)
 }
