@@ -791,6 +791,11 @@ async fn a_failed_sync_warns_reads_and_refuses_writes() {
             .contains("the workspace must sync before this change"),
         "{refused}"
     );
+    // The CLI's wording, with the hint on its own line.
+    assert!(
+        refused.to_string().contains("\nRun `arcl workspace status` to see why"),
+        "{refused}"
+    );
     assert!(!refused.to_string().contains("workspace resolve"), "{refused}");
     let database = Database::open(project.path().join(".arcl/arcl.db")).expect("open database");
     assert!(database.captures().expect("captures").is_empty());
@@ -943,6 +948,68 @@ async fn an_invalid_workspace_path_is_not_a_sync_refusal() {
         "{refused}"
     );
     assert!(!refused.to_string().contains("must sync"), "{refused}");
+
+    // A read warns with the configuration error as the CLI words it, without
+    // the `invalid project or record:` prefix of an exit 3 failure.
+    let read = server
+        .ready(Parameters::from(ReadyInput::default()), CancellationToken::new())
+        .await
+        .expect("a read goes on")
+        .0;
+    let warning = serde_json::to_value(&read.warnings).expect("warnings serialize");
+    assert_eq!(warning[0]["code"], json!("workspace_sync"));
+    let message = warning[0]["message"].as_str().expect("message");
+    assert!(
+        message.starts_with("the workspace did not sync, so this shows the database as it is: project configuration"),
+        "{message}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_config_path_that_cannot_be_checked_fails_as_in_the_cli() {
+    let outer = project(false);
+    let inner = outer.path().join("inner");
+    fs::create_dir_all(inner.join(".arcl")).expect("create the inner .arcl");
+    // A link to itself cannot be checked, so the search stops here rather
+    // than going on to the outer project.
+    let config = inner.join(".arcl/config.toml");
+    std::os::unix::fs::symlink(&config, &config).expect("symlink the config");
+    let server = ArclServer::new(inner);
+
+    let error = server
+        .ready(Parameters::from(ReadyInput::default()), CancellationToken::new())
+        .await
+        .err()
+        .expect("the config cannot be checked");
+    assert_eq!((error.code(), error.exit_code()), ("application_error", 1));
+    assert!(
+        error.to_string().starts_with("could not read project configuration"),
+        "{error}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_database_path_that_cannot_be_checked_fails_as_in_the_cli() {
+    let directory = project(false);
+    // A link to itself cannot be checked. A missing database, or a directory
+    // in its place, is not initialized instead.
+    let database = directory.path().join(".arcl/arcl.db");
+    fs::remove_file(&database).expect("remove the database");
+    std::os::unix::fs::symlink(&database, &database).expect("symlink the database");
+    let server = ArclServer::new(directory.path().to_owned());
+
+    let error = server
+        .ready(Parameters::from(ReadyInput::default()), CancellationToken::new())
+        .await
+        .err()
+        .expect("the database cannot be checked");
+    assert_eq!((error.code(), error.exit_code()), ("application_error", 1));
+    assert!(
+        error.to_string().starts_with("could not open Arc Lightning database"),
+        "{error}"
+    );
 }
 
 #[test]

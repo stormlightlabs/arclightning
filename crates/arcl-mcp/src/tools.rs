@@ -11,9 +11,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use arcl_core::prelude::*;
+use arcl_repo::prelude::Warning;
 use arcl_store::prelude::*;
-
-use crate::project::Warning;
 
 /// The `format_version` of every envelope whose shape the readiness change
 /// left alone.

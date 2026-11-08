@@ -1,4 +1,4 @@
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -7,6 +7,7 @@ use anyhow::Context;
 use thiserror::Error;
 
 use arcl_core::domain::*;
+use arcl_repo::prelude::*;
 use arcl_repo::vcs::{GixVcs, Vcs, VcsError};
 use arcl_repo::workspace::*;
 use arcl_store::{
@@ -17,9 +18,6 @@ use arcl_store::{
 
 use crate::{cli::*, output::*};
 
-const ARCL_DIRECTORY: &str = ".arcl";
-const CONFIG_FILE: &str = "config.toml";
-const DATABASE_FILE: &str = "arcl.db";
 const GITIGNORE_FILE: &str = ".gitignore";
 const REQUIRED_GITIGNORE_ENTRIES: &[&str] = &["/arcl.db", "/arcl.db-*", "/*.tmp", "/conflicts/"];
 const WORKSPACE_DIRECTORIES: &[&str] = &["captures", "releases", "specs", "plans", "phases", "tasks", "notes"];
@@ -58,36 +56,7 @@ use support::{RecordScope, open_database, write_output};
 use web::exec_web;
 use workspace::exec_workspace;
 
-use auto_sync::{
-    Access, auto_sync, command_access, export_after_write, refuse_write, synced, synced_write, workspace_roots,
-};
-
-/// One warning for stderr. `code` names its kind under `--json`.
-struct Warning {
-    code: &'static str,
-    message: String,
-}
-
-impl Warning {
-    /// A sync or export that did not run, while the command went on.
-    fn workspace_sync(message: String) -> Self {
-        Self { code: "workspace_sync", message }
-    }
-
-    /// A `capture create` without `--from` whose `ARCL_AGENT` holds several
-    /// in-progress claims, so the capture has no source.
-    fn capture_source(message: String) -> Self {
-        Self { code: "capture_source", message }
-    }
-
-    /// A blocker rule violation a workspace import loaded because it did not
-    /// introduce it.
-    fn blocker_edges(messages: Vec<String>) -> impl Iterator<Item = Self> {
-        messages
-            .into_iter()
-            .map(|message| Self { code: "blocker_edge", message })
-    }
-}
+use auto_sync::{Access, command_access, current_workspace, synced, synced_write};
 
 /// Run one parsed CLI invocation at the application boundary.
 pub fn run(cli: Cli) -> anyhow::Result<()> {
@@ -110,33 +79,32 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
     // and, failing that, shows the database without a sync.
     let prime = matches!(cli.command, Some(Command::Prime));
     // The lock is held from the first sync until `run` returns.
-    let (roots, synced, _lock) = match access {
-        Access::Untracked => (None, Ok(Vec::new()), None),
-        _ => match workspace_roots() {
-            Ok(Some(roots)) => match if prime { roots.lock_within(PRIME_LOCK_WAIT) } else { roots.lock() } {
-                Ok(lock) => {
-                    let synced = auto_sync(&roots);
-                    (Some(roots), synced, Some(lock))
-                }
-                Err(error) => (None, Err(error), None),
-            },
-            Ok(None) => (None, Ok(Vec::new()), None),
-            Err(error) => (None, Err(error), None),
-        },
+    let SyncBefore { locked, result } = match access {
+        Access::Untracked => SyncBefore { locked: None, result: Ok(Vec::new()) },
+        _ => {
+            let wait = if prime {
+                LockWait::Within { timeout: PRIME_LOCK_WAIT, cancelled: &|| false }
+            } else {
+                LockWait::Unbounded
+            };
+            sync_before(current_workspace(), wait)
+        }
     };
     let mut warnings = Vec::new();
-    match synced {
+    match result {
         Ok(found) => warnings.extend(Warning::blocker_edges(found)),
         // A missing database is the command's own error to report, once.
-        Err(CommandError::NotInitialized { .. }) => {}
-        Err(error) if matches!(cli.command, Some(Command::Check)) => return fail_unsynced_check(error, &renderer),
-        Err(error) if access == Access::Write => return Err(refuse_write(error).into()),
-        Err(error) if needs_sync => {
-            return Err(ApplicationError::from_command(CommandError::ExportSync(Box::new(error))).into());
+        Err(ProjectError::NotInitialized { .. }) => {}
+        Err(error) if matches!(cli.command, Some(Command::Check)) => {
+            return fail_unsynced_check(error.into(), &renderer);
         }
-        Err(error) => warnings.push(Warning::workspace_sync(format!(
-            "the workspace did not sync, so this shows the database as it is: {error}"
-        ))),
+        Err(error) if access == Access::Write => {
+            return Err(ApplicationError::from_command(error.before_write()).into());
+        }
+        Err(error) if needs_sync => {
+            return Err(ApplicationError::from_command(CommandError::ExportSync(Box::new(error.into()))).into());
+        }
+        Err(error) => warnings.push(Warning::unsynced_read(&error)),
     }
     // Under `--json` warnings wait for the command to succeed, so stderr
     // holds at most one JSON value.
@@ -147,9 +115,9 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
     dispatch(cli.command, &renderer, &mut warnings)?;
 
     if access == Access::Write
-        && let Some(roots) = &roots
+        && let Some(locked) = &locked
     {
-        export_after_write(roots, &mut warnings);
+        locked.export_after_write(&mut warnings);
     }
     write_warnings(mode, warnings);
     Ok(())

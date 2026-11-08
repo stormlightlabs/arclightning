@@ -19,6 +19,7 @@ use rmcp::{
 use tokio_util::sync::CancellationToken;
 
 use arcl_core::prelude::*;
+use arcl_repo::prelude::Warning;
 use arcl_store::prelude::*;
 
 use crate::error::ToolError;
@@ -96,7 +97,7 @@ impl ArclServer {
     /// is dropped, as a client-side timeout does.
     async fn run<T, F>(
         &self, access: Access, cancelled: CancellationToken, operation: F,
-    ) -> Result<(T, Vec<project::Warning>), ToolError>
+    ) -> Result<(T, Vec<Warning>), ToolError>
     where
         T: Send + 'static,
         F: FnOnce(&mut Database) -> Result<T, ToolError> + Send + 'static,

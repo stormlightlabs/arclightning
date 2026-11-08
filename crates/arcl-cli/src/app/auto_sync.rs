@@ -10,23 +10,10 @@
 //! project with the workspace on run one at a time. A command waits for the
 //! lock as long as it takes. `arcl serve` waits a bounded time instead, so a
 //! long command cannot hold up the server, and so does `arcl prime`, which
-//! then shows the database without a sync.
+//! then shows the database without a sync. The lock and the syncs come from
+//! [`arcl_repo::project`], which the MCP server uses too.
 
-use std::fs::TryLockError;
-use std::thread;
-use std::time::Instant;
-
-use super::support::*;
-use super::workspace::{as_dyn, discover_vcs};
 use super::*;
-
-/// The lock file, under `.arcl/`, that serializes syncs in one project. The
-/// `/arcl.db-*` entry in `.arcl/.gitignore` keeps it out of Git.
-const SYNC_LOCK_FILE: &str = "arcl.db-sync.lock";
-
-/// How often [`lock_project_within`] tries the lock again while another
-/// process holds it.
-const LOCK_POLL: Duration = Duration::from_millis(25);
 
 /// How a command touches project records.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -38,25 +25,6 @@ pub(super) enum Access {
     Read,
     /// The command may change records.
     Write,
-}
-
-/// The project root and workspace root of a project with the workspace on.
-pub(super) struct WorkspaceRoots {
-    worktree_root: PathBuf,
-    workspace_root: PathBuf,
-}
-
-impl WorkspaceRoots {
-    /// Take the project's sync lock. See [`lock_project`].
-    pub(super) fn lock(&self) -> CResult<File> {
-        lock_project(&self.worktree_root)
-    }
-
-    /// Take the project's sync lock, waiting at most `wait`. See
-    /// [`lock_project_within`].
-    pub(super) fn lock_within(&self, wait: Duration) -> CResult<File> {
-        lock_project_within(&self.worktree_root, wait)
-    }
 }
 
 /// Classify a parsed command by how it touches records.
@@ -125,23 +93,16 @@ pub(super) fn command_access(command: Option<&Command>) -> Access {
     }
 }
 
-/// Return the roots to sync, or `None` when there is no project or its
-/// workspace is off. Any other configuration error, such as a symlinked
-/// workspace, is returned so the caller treats it as a failed sync.
-pub(super) fn workspace_roots() -> CResult<Option<WorkspaceRoots>> {
-    match workspace_paths() {
-        Ok((worktree_root, workspace_root)) => Ok(Some(WorkspaceRoots { worktree_root, workspace_root })),
-        Err(CommandError::WorkspaceDisabled | CommandError::NotInitialized { .. }) => Ok(None),
+/// The workspace of the project that holds the current directory, or `None`
+/// when there is no project or its workspace is off. Any other configuration
+/// error, such as a symlinked workspace, is returned so the caller treats it
+/// as a failed sync.
+pub(super) fn current_workspace() -> Result<Option<Workspace>, ProjectError> {
+    match ProjectDir::discover_current() {
+        Ok(project) => project.workspace(),
+        Err(ProjectError::NotInitialized { .. }) => Ok(None),
         Err(error) => Err(error),
     }
-}
-
-/// Sync the database and the workspace once, and return the sync's warnings.
-pub(super) fn auto_sync(roots: &WorkspaceRoots) -> CResult<Vec<String>> {
-    let mut database = open_database()?;
-    let vcs = discover_vcs(&roots.worktree_root)?;
-    let outcome = sync_workspace(&roots.workspace_root, &roots.worktree_root, &mut database, as_dyn(&vcs))?;
-    Ok(outcome.warnings)
 }
 
 /// Run `write` as `arcl` runs a write command: under the sync lock, after a
@@ -169,91 +130,20 @@ pub(super) fn synced_write<T>(
 pub(super) fn synced<T>(
     lock_wait: Option<Duration>, export: bool, operation: impl FnOnce() -> Result<T, ApplicationError>,
 ) -> Result<(T, Vec<Warning>), ApplicationError> {
-    let roots = match workspace_roots() {
-        Ok(Some(roots)) => roots,
-        // A missing database is the operation's own error to report.
-        Ok(None) | Err(CommandError::NotInitialized { .. }) => return operation().map(|value| (value, Vec::new())),
-        Err(error) => return Err(refuse_write(error)),
-    };
-    let _lock = match lock_wait {
-        Some(wait) => roots.lock_within(wait),
-        None => roots.lock(),
-    }
-    .map_err(refuse_write)?;
-    let mut warnings = match auto_sync(&roots) {
+    let wait = lock_wait.map_or(LockWait::Unbounded, |timeout| LockWait::Within {
+        timeout,
+        cancelled: &|| false,
+    });
+    let SyncBefore { locked, result } = sync_before(current_workspace(), wait);
+    let mut warnings = match result {
         Ok(found) => Warning::blocker_edges(found).collect(),
-        Err(CommandError::NotInitialized { .. }) => Vec::new(),
-        Err(error) => return Err(refuse_write(error)),
+        // A missing database is the operation's own error to report.
+        Err(ProjectError::NotInitialized { .. }) => Vec::new(),
+        Err(error) => return Err(ApplicationError::from_command(error.before_write())),
     };
     let value = operation()?;
-    if export {
-        export_after_write(&roots, &mut warnings);
+    if export && let Some(locked) = &locked {
+        locked.export_after_write(&mut warnings);
     }
     Ok((value, warnings))
-}
-
-/// The error a write returns when the sync before it fails. A sync that
-/// stopped says the write did not run, except when the database changed
-/// while it read, which keeps its own error.
-pub(super) fn refuse_write(error: CommandError) -> ApplicationError {
-    let error = match error {
-        CommandError::WorkspaceSync(error)
-            if !matches!(*error, WorkspaceSyncError::Storage(StorageError::ChangedSinceRead)) =>
-        {
-            CommandError::AutoSync(error)
-        }
-        other => other,
-    };
-    ApplicationError::from_command(error)
-}
-
-/// Sync after a committed write to export it, adding a warning when the
-/// export fails, since the change is saved either way.
-pub(super) fn export_after_write(roots: &WorkspaceRoots, warnings: &mut Vec<Warning>) {
-    match auto_sync(roots) {
-        Ok(found) => warnings.extend(Warning::blocker_edges(found)),
-        Err(error) => warnings.push(Warning::workspace_sync(format!(
-            "the change is saved, but the workspace was not updated: {error}; the next command updates it"
-        ))),
-    }
-}
-
-/// Take an exclusive lock on `.arcl/arcl.db-sync.lock` under `project_root`,
-/// creating the file if it is missing. Blocks until no other arcl process
-/// holds it. The lock is held until the returned file drops, so a caller
-/// keeps it across a sync, the command and the sync after it.
-pub(super) fn lock_project(project_root: &Path) -> CResult<File> {
-    let (path, file) = open_lock_file(project_root)?;
-    file.lock().map_err(|source| CommandError::SyncLock { path, source })?;
-    Ok(file)
-}
-
-/// Take the lock [`lock_project`] takes, trying again every [`LOCK_POLL`]
-/// while another process holds it, and fail with
-/// [`CommandError::SyncLockBusy`] once `wait` passes.
-fn lock_project_within(project_root: &Path, wait: Duration) -> CResult<File> {
-    let (path, file) = open_lock_file(project_root)?;
-    let deadline = Instant::now() + wait;
-    loop {
-        match file.try_lock() {
-            Ok(()) => return Ok(file),
-            Err(TryLockError::Error(source)) => return Err(CommandError::SyncLock { path, source }),
-            Err(TryLockError::WouldBlock) if Instant::now() >= deadline => {
-                return Err(CommandError::SyncLockBusy { path, waited: wait });
-            }
-            Err(TryLockError::WouldBlock) => thread::sleep(LOCK_POLL),
-        }
-    }
-}
-
-/// Open, creating it if missing, the sync lock file under `project_root`.
-fn open_lock_file(project_root: &Path) -> CResult<(PathBuf, File)> {
-    let path = project_root.join(ARCL_DIRECTORY).join(SYNC_LOCK_FILE);
-    let file = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(&path)
-        .map_err(|source| CommandError::SyncLock { path: path.clone(), source })?;
-    Ok((path, file))
 }

@@ -110,8 +110,8 @@ pub(super) fn exec_roadmap(output: Option<&Path>, renderer: &Renderer) -> anyhow
     let Some(path) = output else {
         return write_output(renderer.render_roadmap(&roadmap)?);
     };
-    let (root, _) = project_root_config().map_err(ApplicationError::from_command)?;
-    let target = roadmap_target(path, &root).map_err(ApplicationError::from_command)?;
+    let project = ProjectDir::discover_current().map_err(ApplicationError::from_command)?;
+    let target = roadmap_target(path, project.root()).map_err(ApplicationError::from_command)?;
     write_replacing(&target, &format!("{}\n", roadmap.markdown())).map_err(ApplicationError::from_command)?;
     write_output(renderer.render_roadmap_written(path)?)
 }
@@ -134,7 +134,7 @@ fn roadmap_target(path: &Path, root: &Path) -> CResult<PathBuf> {
         Err(error) if absent(&error) => {}
         Err(source) => return Err(CommandError::WriteSkill { path: path.to_owned(), source }),
     }
-    let current = std::env::current_dir().map_err(|source| CommandError::CurrentDirectory { source })?;
+    let current = std::env::current_dir().map_err(|source| ProjectError::CurrentDirectory { source })?;
     let mut target = current.join(path);
     let mut followed = 0;
     loop {

@@ -102,7 +102,7 @@ impl ApplicationError {
     {
         let error: CommandError = error.into();
         let exit_code = error.exit_code();
-        let lock_busy = matches!(error, CommandError::SyncLockBusy { .. });
+        let lock_busy = matches!(error, CommandError::Project(ProjectError::SyncLockBusy { .. }));
         // A sync that stopped `arcl check` names its own cause, which is not
         // an invalid record when it exits 3; a removed file, for example.
         let labelled = exit_code == 3 && !matches!(error, CommandError::CheckSync(_));
@@ -159,22 +159,11 @@ impl InitError {
 pub(super) enum CommandError {
     #[error(transparent)]
     Vcs(#[from] VcsError),
-    /// No project or no database. `workspace` is the workspace directory when
-    /// the project has one that the next command after `arcl init` imports.
-    #[error("{}", not_initialized_message(root, workspace.as_deref()))]
-    NotInitialized { root: PathBuf, workspace: Option<PathBuf> },
-    #[error("could not read project configuration `{path}`: {source}")]
-    ReadConfig { path: PathBuf, source: io::Error },
-    #[error("could not determine the current directory: {source}")]
-    CurrentDirectory { source: io::Error },
-    #[error("project configuration `{path}` is invalid: {source}")]
-    InvalidConfig { path: PathBuf, source: WorkspaceError },
-    #[error("could not open Arc Lightning database `{path}`: {source}")]
-    OpenDatabase { path: PathBuf, source: StorageError },
-    #[error("could not open Arc Lightning database `{path}`: {source}")]
-    ProbeDatabase { path: PathBuf, source: io::Error },
-    #[error("workspace support is disabled; run `arcl init --workspace` first")]
-    WorkspaceDisabled,
+    /// Finding, opening or syncing the project failed. A sync error is
+    /// [`CommandError::WorkspaceSync`] and a Git error [`CommandError::Vcs`]
+    /// instead; see the `From<ProjectError>` impl.
+    #[error(transparent)]
+    Project(ProjectError),
     #[error(transparent)]
     WorkspaceExport(Box<WorkspaceExportError>),
     #[error(transparent)]
@@ -185,11 +174,6 @@ pub(super) enum CommandError {
     WorkspaceStatus(Box<WorkspaceStatusError>),
     #[error(transparent)]
     RecordEdit(Box<RecordEditError>),
-    #[error(
-        "the workspace must sync before this change, and the sync stopped: {0}\nRun `arcl workspace status` to see why{hint}",
-        hint = .0.resolve_hint()
-    )]
-    AutoSync(Box<WorkspaceSyncError>),
     /// The sync before `arcl check` stopped on something other than
     /// workspace content arcl cannot read or accept, such as a removed file
     /// or a divergence.
@@ -198,13 +182,6 @@ pub(super) enum CommandError {
         hint = .0.resolve_hint()
     )]
     CheckSync(Box<WorkspaceSyncError>),
-    #[error("could not lock `{path}`: {source}")]
-    SyncLock { path: PathBuf, source: io::Error },
-    #[error(
-        "another `arcl` command held the sync lock `{path}` for more than {} s; try again when it finishes",
-        waited.as_secs_f64()
-    )]
-    SyncLockBusy { path: PathBuf, waited: Duration },
     #[error(transparent)]
     Domain(#[from] DomainError),
     #[error(transparent)]
@@ -284,6 +261,16 @@ pub(super) enum CommandError {
     ExportSync(Box<CommandError>),
 }
 
+impl From<ProjectError> for CommandError {
+    fn from(error: ProjectError) -> Self {
+        match error {
+            ProjectError::Sync(error) => Self::WorkspaceSync(error),
+            ProjectError::Vcs(error) => Self::Vcs(error),
+            other => Self::Project(other),
+        }
+    }
+}
+
 impl From<WorkspaceExportError> for CommandError {
     fn from(error: WorkspaceExportError) -> Self {
         Self::WorkspaceExport(Box::new(error))
@@ -318,7 +305,8 @@ impl CommandError {
     fn exit_code(&self) -> u8 {
         match self {
             Self::Vcs(error) => error.exit_code(),
-            Self::NotInitialized { .. } | Self::InvalidConfig { .. } | Self::WorkspaceDisabled | Self::Domain(_) => 3,
+            Self::Project(error) => error.exit_code(),
+            Self::Domain(_) => 3,
             Self::WorkspaceExport(error) => match error.as_ref() {
                 WorkspaceExportError::Conflict { .. } => 4,
                 WorkspaceExportError::NewerWorkspace { .. } => 3,
@@ -328,17 +316,11 @@ impl CommandError {
             Self::WorkspaceSync(error) => error.exit_code(),
             Self::WorkspaceStatus(_) => 1,
             Self::RecordEdit(error) => error.exit_code(),
-            Self::AutoSync(error) | Self::CheckSync(error) => error.exit_code(),
+            Self::CheckSync(error) => error.exit_code(),
             Self::ExportSync(error) => error.exit_code(),
-            Self::ReadConfig { .. }
-            | Self::ReadMarkdown { .. }
+            Self::ReadMarkdown { .. }
             | Self::ReadQuery { .. }
             | Self::ReadStdin { .. }
-            | Self::OpenDatabase { source: StorageError::Sqlite(_), .. }
-            | Self::ProbeDatabase { .. }
-            | Self::CurrentDirectory { .. }
-            | Self::SyncLock { .. }
-            | Self::SyncLockBusy { .. }
             | Self::ReadSkill { .. }
             | Self::WriteSkill { .. }
             | Self::ReadWebFile { .. }
@@ -346,7 +328,6 @@ impl CommandError {
             | Self::WebExport { .. }
             | Self::SetupDeclined => 1,
             Self::SkillDrift { .. } | Self::SetupNeedsConfirmation { .. } | Self::SetupFileChanged { .. } => 4,
-            Self::OpenDatabase { source, .. } => source.exit_code(),
             Self::Storage(error) => error.exit_code(),
             Self::InvalidMarkdown { .. }
             | Self::InvalidStdin
