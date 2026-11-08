@@ -17,7 +17,7 @@
 		document.documentElement.dataset.arclTheme = theme;
 		document
 			.querySelector('meta[name="theme-color"]')
-			?.setAttribute('content', theme === 'dark' ? '#081a30' : '#f5f8fc');
+			?.setAttribute('content', theme === 'dark' ? '#09090b' : '#f4f5f7');
 		try {
 			localStorage.setItem(storageKey, theme);
 		} catch {

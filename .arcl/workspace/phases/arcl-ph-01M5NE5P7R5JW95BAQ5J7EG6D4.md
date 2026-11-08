@@ -13,7 +13,7 @@ Deliverables:
 
 - a product landing page built with the shared UI package
 - migrated documentation in a house-style shell implemented in `apps/website`
-- navy/sky blue surfaces with gold/amber/yellow accents
+- the shared grey and blue theme tokens from `packages/ui`
 - search, syntax highlighting, copy controls, metadata, sitemap, `llms.txt`, and
   static deployment output
 - redirects or preserved URLs for useful existing documentation paths

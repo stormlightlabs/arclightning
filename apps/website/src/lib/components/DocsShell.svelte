@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { docs, getAdjacentDocs, type Doc } from '$lib/content';
+	import { absoluteUrl, site } from '$lib/site';
 	import CopyCode from './CopyCode.svelte';
 	import CopyMarkdown from './CopyMarkdown.svelte';
 	import PageNavigation from './PageNavigation.svelte';
@@ -11,6 +12,7 @@
 
 	let { doc, content }: { doc: Doc; content: Snippet } = $props();
 	const adjacent = $derived(getAdjacentDocs(doc.slug));
+	const url = $derived(absoluteUrl(`/${doc.slug}/`));
 </script>
 
 <svelte:head>
@@ -19,9 +21,11 @@
 	<meta property="og:title" content={`${doc.title} · Arc Lightning docs`} />
 	<meta property="og:description" content={doc.description} />
 	<meta property="og:type" content="article" />
-	<meta property="og:image" content="https://arclightning.stormlightlabs.org/social-card.svg" />
+	<meta property="og:url" content={url} />
+	<meta property="og:site_name" content={site.name} />
+	<meta property="og:image" content={absoluteUrl('/social-card.svg')} />
 	<meta name="twitter:card" content="summary_large_image" />
-	<link rel="canonical" href={`https://arclightning.stormlightlabs.org/${doc.slug}/`} />
+	<link rel="canonical" href={url} />
 </svelte:head>
 
 <SiteHeader {docs} currentSlug={doc.slug} />

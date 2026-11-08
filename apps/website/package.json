@@ -5,19 +5,28 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",
-		"build": "vite build && pagefind --site build --output-path static/pagefind --quiet && vite build",
+		"build": "pnpm --filter @arclightning/ui exec svelte-kit sync && vite build && pagefind --site build --output-path static/pagefind --quiet && vite build",
 		"preview": "vite preview",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"lint": "prettier --check .",
-		"format": "prettier --write ."
+		"format": "prettier --write .",
+		"test": "vitest run",
+		"test:unit": "vitest run --project unit",
+		"test:browser": "vitest run --project browser",
+		"test:e2e": "pnpm build && playwright test --project e2e",
+		"test:visual": "pnpm build && playwright test --project visual",
+		"test:visual:update": "pnpm build && playwright test --project visual --update-snapshots"
 	},
 	"dependencies": {
 		"@arclightning/ui": "workspace:*"
 	},
 	"devDependencies": {
+		"@playwright/test": "catalog:",
 		"@sveltejs/adapter-static": "catalog:",
 		"@sveltejs/kit": "catalog:",
 		"@sveltejs/vite-plugin-svelte": "catalog:",
+		"@vitest/browser-playwright": "catalog:",
+		"axe-core": "4.13.0",
 		"mdsvex": "^0.12.7",
 		"pagefind": "^1.5.2",
 		"prettier": "catalog:",
@@ -27,6 +36,8 @@
 		"svelte": "catalog:",
 		"svelte-check": "catalog:",
 		"typescript": "catalog:",
-		"vite": "catalog:"
+		"vite": "catalog:",
+		"vitest": "catalog:",
+		"vitest-browser-svelte": "catalog:"
 	}
 }

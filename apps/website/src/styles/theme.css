@@ -1,21 +1,9 @@
 @import '@arclightning/ui/styles.css';
 
+/* Every color comes from the shared tokens in packages/ui. */
 :root {
-	--site-header: rgb(245 248 252 / 94%);
-	--code-surface: #071729;
-	--code-border: #385572;
-	--code-text: #e7eff7;
-	--shadow: 0 18px 50px rgb(16 40 66 / 15%);
-}
-[data-arcl-theme='dark'] {
-	--site-header: rgb(8 26 48 / 94%);
-	--shadow: 0 22px 60px rgb(0 0 0 / 38%);
-}
-@media (prefers-color-scheme: dark) {
-	:root:not([data-arcl-theme]) {
-		--site-header: rgb(8 26 48 / 94%);
-		--shadow: 0 22px 60px rgb(0 0 0 / 38%);
-	}
+	--site-header: color-mix(in srgb, var(--arcl-canvas) 94%, transparent);
+	--shadow: var(--arcl-shadow-overlay);
 }
 
 html {
@@ -30,7 +18,8 @@ a {
 	text-underline-offset: 0.16em;
 }
 a:hover {
-	color: var(--arcl-warning);
+	color: var(--arcl-accent-hover);
+	text-decoration-thickness: 0.14em;
 }
 h1,
 h2,
@@ -54,7 +43,7 @@ h3 {
 }
 .eyebrow {
 	margin: 0 0 0.85rem;
-	color: var(--arcl-warning);
+	color: var(--arcl-link);
 	font: 650 var(--arcl-type-xs)/1 var(--arcl-font-code);
 	letter-spacing: 0.07em;
 	text-transform: uppercase;
@@ -421,10 +410,10 @@ html:not(.js) .search-trigger {
 	min-width: 0;
 	margin: 0;
 	overflow: hidden;
-	border: 1px solid var(--code-border);
+	border: 1px solid var(--arcl-border);
 	border-radius: var(--arcl-radius-lg);
-	color: var(--code-text);
-	background: var(--code-surface);
+	color: var(--arcl-text);
+	background: var(--arcl-surface);
 	box-shadow:
 		0.45rem 0.45rem 0 var(--arcl-accent),
 		var(--shadow);
@@ -435,8 +424,8 @@ html:not(.js) .search-trigger {
 	min-height: 2.75rem;
 	align-items: center;
 	padding: 0 1rem;
-	border-bottom: 1px solid var(--code-border);
-	color: #b8c8d8;
+	border-bottom: 1px solid var(--arcl-border);
+	color: var(--arcl-text-muted);
 	font: 0.72rem/1 var(--arcl-font-code);
 	text-align: center;
 }
@@ -451,10 +440,10 @@ html:not(.js) .search-trigger {
 	background: var(--arcl-accent);
 }
 .terminal__dots i:nth-child(2) {
-	background: #78c7ff;
+	background: var(--arcl-border-strong);
 }
 .terminal__dots i:nth-child(3) {
-	background: #6684a1;
+	background: var(--arcl-border);
 }
 .terminal pre {
 	margin: 0;
@@ -464,13 +453,13 @@ html:not(.js) .search-trigger {
 }
 .terminal .prompt,
 .terminal .accent {
-	color: #78c7ff;
+	color: var(--arcl-link);
 }
 .terminal .success {
-	color: #83d7aa;
+	color: var(--arcl-success);
 }
 .terminal .meta {
-	color: #ffd36a;
+	color: var(--arcl-text-muted);
 }
 .workflow {
 	padding-block: clamp(4rem, 8vw, 6rem);
@@ -501,7 +490,7 @@ html:not(.js) .search-trigger {
 }
 .workflow li > span,
 .doc-number {
-	color: var(--arcl-warning);
+	color: var(--arcl-link);
 	font: 650 var(--arcl-type-xs)/1.4 var(--arcl-font-code);
 	text-transform: uppercase;
 }
@@ -658,7 +647,7 @@ html:not(.js) .search-trigger {
 .sidebar__kicker,
 .toc > p {
 	margin: 0 0 0.85rem;
-	color: var(--arcl-warning);
+	color: var(--arcl-link);
 	font: 650 var(--arcl-type-xs)/1 var(--arcl-font-code);
 	letter-spacing: 0.06em;
 	text-transform: uppercase;
@@ -780,7 +769,7 @@ html:not(.js) .search-trigger {
 	margin-top: 0.4rem;
 }
 .doc-content li::marker {
-	color: var(--arcl-warning);
+	color: var(--arcl-text-muted);
 }
 .doc-content code {
 	font-family: var(--arcl-font-code);
@@ -799,10 +788,10 @@ html:not(.js) .search-trigger {
 	margin: 1.5rem 0;
 	padding: 1.15rem 5rem 1.15rem 1.25rem;
 	overflow-x: auto;
-	border: 1px solid var(--code-border);
+	border: 1px solid var(--arcl-border);
 	border-radius: var(--arcl-radius-sm);
-	color: var(--code-text);
-	background: var(--code-surface);
+	color: var(--arcl-text);
+	background: var(--arcl-surface);
 	box-shadow: 0.35rem 0.35rem 0 var(--arcl-accent);
 }
 .doc-content pre code {
@@ -813,8 +802,17 @@ html:not(.js) .search-trigger {
 	font-size: 0.84rem;
 	line-height: 1.65;
 }
+/* Shiki writes both themes' colors; the page theme picks one. */
 .doc-content .shiki code span {
+	color: var(--shiki-light);
+}
+[data-arcl-theme='dark'] .doc-content .shiki code span {
 	color: var(--shiki-dark);
+}
+@media (prefers-color-scheme: dark) {
+	:root:not([data-arcl-theme]) .doc-content .shiki code span {
+		color: var(--shiki-dark);
+	}
 }
 .copy-code {
 	position: absolute;
@@ -822,10 +820,10 @@ html:not(.js) .search-trigger {
 	right: 0.55rem;
 	min-height: 2.75rem;
 	padding: 0.35rem 0.6rem;
-	border: 1px solid var(--code-border);
+	border: 1px solid var(--arcl-border);
 	border-radius: 0.25rem;
-	color: var(--code-text);
-	background: var(--code-surface);
+	color: var(--arcl-text);
+	background: var(--arcl-surface-subtle);
 	font: 650 0.72rem/1 var(--arcl-font-body);
 	cursor: pointer;
 }
@@ -836,7 +834,7 @@ html:not(.js) .search-trigger {
 	margin: 1.5rem 0;
 	padding: 0.8rem 1.1rem;
 	border-left: 4px solid var(--arcl-accent);
-	background: var(--arcl-warning-surface);
+	background: var(--arcl-info-surface);
 }
 .doc-content blockquote p:last-child {
 	margin-bottom: 0;

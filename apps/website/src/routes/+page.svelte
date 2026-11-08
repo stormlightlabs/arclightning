@@ -3,6 +3,7 @@
 	import SiteFooter from '$lib/components/SiteFooter.svelte';
 	import SiteHeader from '$lib/components/SiteHeader.svelte';
 	import { docs } from '$lib/content';
+	import { absoluteUrl, site } from '$lib/site';
 
 	const entryPoints = [
 		{ number: '01', label: 'Get started', title: 'Install and initialize', href: '/quick-start/' },
@@ -12,15 +13,16 @@
 </script>
 
 <svelte:head>
-	<title>Arc Lightning · Connected planning for developers and agents</title>
-	<meta
-		name="description"
-		content="A local-first project planning and execution system for developers and software agents." />
-	<meta property="og:title" content="Arc Lightning" />
+	<title>{site.title}</title>
+	<meta name="description" content={site.description} />
+	<meta property="og:title" content={site.name} />
 	<meta property="og:description" content="Connected, local-first planning for developers and software agents." />
-	<meta property="og:image" content="https://arclightning.stormlightlabs.org/social-card.svg" />
+	<meta property="og:type" content="website" />
+	<meta property="og:url" content={absoluteUrl('/')} />
+	<meta property="og:site_name" content={site.name} />
+	<meta property="og:image" content={absoluteUrl('/social-card.svg')} />
 	<meta name="twitter:card" content="summary_large_image" />
-	<link rel="canonical" href="https://arclightning.stormlightlabs.org/" />
+	<link rel="canonical" href={absoluteUrl('/')} />
 </svelte:head>
 
 <SiteHeader {docs} />
