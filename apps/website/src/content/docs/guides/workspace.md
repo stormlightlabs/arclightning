@@ -30,6 +30,8 @@ record file, pull, or switch branches, and the next `arcl` command picks it up.
 If that first sync stops, a command that changes records refuses with the sync's
 status code and names the files, before it changes anything. A command that only
 reads records still runs, shows the database as it is, and prints a warning.
+`arcl check` fails with status code `3`, so a file that does not parse
+fails a CI gate that runs it.
 Under `--json`, a command's warnings go to stderr as one line of JSON whose
 `warnings` array holds a `code` and a `message` for each; `--quiet` prints none.
 If the export after a change fails, the change is saved and the next command

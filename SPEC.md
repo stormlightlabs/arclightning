@@ -362,6 +362,8 @@ Synchronization uses a three-state comparison: compare
 the last common files, current database projection, and current workspace. Arc
 Lightning imports or exports one-sided changes and stops on different changes
 to both sides. It never resolves a conflict by silently choosing a side.
+When the sync before `arcl check` fails, the check fails with the sync error
+and does not check the stale database.
 
 ## Architecture and repository shape
 

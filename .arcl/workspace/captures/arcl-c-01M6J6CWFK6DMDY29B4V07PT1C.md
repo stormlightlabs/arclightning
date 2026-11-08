@@ -1,8 +1,12 @@
 +++
 id = "arcl-c-01M6J6CWFK6DMDY29B4V07PT1C"
 title = "Fail arcl check when a workspace file does not parse"
-status = "captured"
+status = "promoted"
 created-at = "2026-11-04T02:32:19.699Z"
+
+[promoted-to]
+kind = "task"
+id = "arcl-t-01M6WMXT66D818D93G0SNWT0H3"
 +++
 
 In arcl 0.3.0, `arcl check` exits 0 and prints `Check passed.` when a file

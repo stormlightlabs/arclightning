@@ -11,6 +11,8 @@ pub struct ApplicationError {
     exit_code: u8,
     /// Whether another process held the project's sync lock past the wait.
     lock_busy: bool,
+    /// The JSON `code`, when the exit code alone does not name the failure.
+    code: Option<&'static str>,
 }
 
 impl ApplicationError {
@@ -30,12 +32,12 @@ impl ApplicationError {
         serde_json::json!({
             "format_version": 1,
             "error": {
-                "code": match self.exit_code {
+                "code": self.code.unwrap_or(match self.exit_code {
                     3 => "invalid_request",
                     4 => "conflict",
                     5 => "not_found",
                     _ => "application_error",
-                },
+                }),
                 "message": self.message,
                 "exit_code": self.exit_code,
             }
@@ -46,7 +48,7 @@ impl ApplicationError {
     pub(super) fn from_init(error: InitError) -> Self {
         let exit_code = error.exit_code();
         let message = if exit_code == 3 { format!("invalid project: {error}") } else { error.to_string() };
-        Self { message, exit_code, lock_busy: false }
+        Self { message, exit_code, lock_busy: false, code: None }
     }
 
     /// A GraphQL response with `count` errors, which stdout already holds.
@@ -57,6 +59,18 @@ impl ApplicationError {
             message: format!("the query returned {count} GraphQL {errors}; see `errors` on stdout"),
             exit_code: 3,
             lock_busy: false,
+            code: None,
+        }
+    }
+
+    /// An `arcl check` whose workspace did not sync, from the sync's
+    /// `error`. It exits 3 with the JSON code `workspace_invalid`.
+    pub(super) fn workspace_invalid(error: &CommandError) -> Self {
+        Self {
+            message: format!("invalid project: the workspace did not sync: {error}"),
+            exit_code: 3,
+            lock_busy: false,
+            code: Some("workspace_invalid"),
         }
     }
 
@@ -71,7 +85,7 @@ impl ApplicationError {
             _ => 1,
         };
         let message = if exit_code == 3 { format!("invalid project or record: {message}") } else { message.to_owned() };
-        Self { message, exit_code, lock_busy: false }
+        Self { message, exit_code, lock_busy: false, code: None }
     }
 
     pub(super) fn from_command<E>(error: E) -> Self
@@ -82,7 +96,7 @@ impl ApplicationError {
         let exit_code = error.exit_code();
         let lock_busy = matches!(error, CommandError::SyncLockBusy { .. });
         let message = if exit_code == 3 { format!("invalid project or record: {error}") } else { error.to_string() };
-        Self { message, exit_code, lock_busy }
+        Self { message, exit_code, lock_busy, code: None }
     }
 }
 
