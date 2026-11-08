@@ -363,7 +363,9 @@ the last common files, current database projection, and current workspace. Arc
 Lightning imports or exports one-sided changes and stops on different changes
 to both sides. It never resolves a conflict by silently choosing a side.
 When the sync before `arcl check` fails, the check fails with the sync error
-and does not check the stale database.
+and does not check the stale database. A workspace file arcl cannot read fails
+it with exit `3` and the code `workspace_invalid`; other sync failures keep
+their usual exit codes.
 
 ## Architecture and repository shape
 

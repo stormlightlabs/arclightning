@@ -415,12 +415,14 @@ and when it was created. Plain output prints the gate's `gate` line, then
 | `arcl next --start [--claim [<NAME>]]`                               | Start the first actionable task, claiming it with `--claim`.       |
 | `arcl prime`                                                         | Print the agent loop, open work, and the first ready tasks.        |
 
-`check` syncs the workspace first. When the sync fails, such as on a
-workspace file that does not parse, `check` fails with exit `3` and skips the
-database checks, since the database lacks what the workspace holds. The report
-has `valid: false` and the sync error, which names the file, as its one entry
-in `errors`. Under `--json` the error on stderr has the code
-`workspace_invalid`. Other commands that only read records warn and still run.
+`check` syncs the workspace first. When the sync fails, `check` fails and
+skips the database checks. A workspace file arcl cannot read, such as one that
+does not parse, fails it with exit `3`: the report has `valid: false` and the
+sync error as its one entry in `errors`, and under `--json` the error on stderr
+has the code `workspace_invalid`. Other sync failures, such as files the
+database and the workspace changed differently, keep their usual exit code and
+error code, and print no report. Other commands that only read records warn and
+still run.
 
 `list` accepts `--kind`, `--status`, `--priority`, `--release`, `--epic`,
 `--milestone`, and `--parent`. `ready` and `next` accept the same priority and

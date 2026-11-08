@@ -143,9 +143,10 @@ arcl check
 
 `check` validates database and graph invariants and reports duplicate sibling
 positions as warnings. It exits successfully when no errors are found.
-With the workspace on, it syncs first. A workspace file that does not parse
-fails the check with exit `3` and the file's parse error, and the database
-checks do not run.
+With the workspace on, it syncs first, and a failed sync fails the check
+before the database checks run. A workspace file that does not parse fails it
+with exit `3` and the parse error. Other sync failures keep their usual exit
+codes.
 
 A database can hold blocker edges that `dependency add` refuses, for example
 ones edited in by hand. `check` reports each one as an error:

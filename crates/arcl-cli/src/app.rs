@@ -129,7 +129,7 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
         Ok(found) => warnings.extend(Warning::blocker_edges(found)),
         // A missing database is the command's own error to report, once.
         Err(CommandError::NotInitialized { .. }) => {}
-        Err(error) if matches!(cli.command, Some(Command::Check)) => return fail_unsynced_check(&error, &renderer),
+        Err(error) if matches!(cli.command, Some(Command::Check)) => return fail_unsynced_check(error, &renderer),
         Err(error) if access == Access::Write => return Err(refuse_write(error).into()),
         Err(error) if needs_sync => {
             return Err(ApplicationError::from_command(CommandError::ExportSync(Box::new(error))).into());
@@ -155,14 +155,25 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Fail `arcl check` because the workspace did not sync, with the sync
-/// `error` as the report's one error. The database checks do not run: the
-/// database lacks what the workspace holds, so passing them would say
-/// nothing about the project that git tracks.
-fn fail_unsynced_check(error: &CommandError, renderer: &Renderer) -> anyhow::Result<()> {
-    let report = CheckReport { valid: false, errors: vec![format!("the workspace did not sync: {error}")] };
-    write_output(renderer.render_check(&report)?)?;
-    Err(ApplicationError::workspace_invalid(error).into())
+/// Fail `arcl check` because the workspace did not sync, without running
+/// the database checks. When the sync stopped on workspace content arcl
+/// cannot read or accept, which exits 3, the check prints a failing report
+/// whose one error is the sync `error`, and fails with the code
+/// `workspace_invalid`. Any other failure, such as a divergence or a
+/// database arcl cannot open, fails with that error's own exit code, JSON
+/// code and message, and prints no report.
+fn fail_unsynced_check(error: CommandError, renderer: &Renderer) -> anyhow::Result<()> {
+    let error = match error {
+        CommandError::WorkspaceSync(error) if error.exit_code() == 3 => {
+            let error = CommandError::WorkspaceSync(error);
+            let report = CheckReport { valid: false, errors: vec![format!("the workspace did not sync: {error}")] };
+            write_output(renderer.render_check(&report)?)?;
+            return Err(ApplicationError::workspace_invalid(&error).into());
+        }
+        CommandError::WorkspaceSync(error) => CommandError::CheckSync(error),
+        other => other,
+    };
+    Err(ApplicationError::from_command(error).into())
 }
 
 /// Write warnings to stderr: one plain line each, a single one-line JSON

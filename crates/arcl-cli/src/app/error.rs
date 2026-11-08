@@ -179,6 +179,13 @@ pub(super) enum CommandError {
         hint = .0.resolve_hint()
     )]
     AutoSync(Box<WorkspaceSyncError>),
+    /// The sync before `arcl check` stopped on something other than
+    /// workspace content arcl cannot read.
+    #[error(
+        "the workspace did not sync, so `arcl check` did not run: {0}\nRun `arcl workspace status` to see why{hint}",
+        hint = .0.resolve_hint()
+    )]
+    CheckSync(Box<WorkspaceSyncError>),
     #[error("could not lock `{path}`: {source}")]
     SyncLock { path: PathBuf, source: io::Error },
     #[error(
@@ -301,7 +308,7 @@ impl CommandError {
             Self::WorkspaceSync(error) => error.exit_code(),
             Self::WorkspaceStatus(_) => 1,
             Self::RecordEdit(error) => error.exit_code(),
-            Self::AutoSync(error) => error.exit_code(),
+            Self::AutoSync(error) | Self::CheckSync(error) => error.exit_code(),
             Self::ExportSync(error) => error.exit_code(),
             Self::ReadConfig { .. }
             | Self::ReadMarkdown { .. }

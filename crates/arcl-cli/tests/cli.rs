@@ -847,6 +847,62 @@ fn check_fails_when_a_workspace_file_stops_parsing_after_an_import() {
 }
 
 #[test]
+fn check_on_a_divergent_workspace_reports_the_conflict() {
+    let directory = tempdir().expect("temporary directory can be created");
+    let path = directory.path();
+    run_json(path, ["--json", "init", "--workspace"].as_ref());
+    let task = create_task(path, "Original", None);
+    let record_path = path.join(format!(".arcl/workspace/tasks/{task}.md"));
+    let record = fs::read_to_string(&record_path).expect("task file reads");
+    fs::write(&record_path, record.replace("Original", "File side")).expect("task file writes");
+    with_workspace_off(path, || {
+        run_json(
+            path,
+            ["--json", "task", "update", &task, "--title", "Database side"].as_ref(),
+        )
+    });
+
+    let output = arcl_in(path).args(["--json", "check"]).output().expect("check runs");
+    assert_eq!(output.status.code(), Some(4));
+    assert!(
+        output.stdout.is_empty(),
+        "no report: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr: Value = serde_json::from_slice(&output.stderr).expect("stderr is one JSON value");
+    assert_eq!(stderr["error"]["code"], "conflict");
+    assert_eq!(stderr["error"]["exit_code"], 4);
+    let message = stderr["error"]["message"].as_str().expect("error message");
+    assert!(message.contains(&format!("tasks/{task}.md")), "{message}");
+    assert!(message.contains("arcl workspace resolve"), "{message}");
+
+    let output = arcl_in(path).args(["check"]).output().expect("check runs");
+    assert_eq!(output.status.code(), Some(4));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("Check passed."));
+}
+
+#[test]
+fn check_on_a_database_from_a_newer_arcl_is_an_invalid_request() {
+    let directory = tempdir().expect("temporary directory can be created");
+    run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
+    stamp_newer_database(directory.path());
+
+    let output = arcl_in(directory.path())
+        .args(["--json", "check"])
+        .output()
+        .expect("check runs");
+    assert_eq!(output.status.code(), Some(3));
+    assert!(
+        output.stdout.is_empty(),
+        "no report: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr: Value = serde_json::from_slice(&output.stderr).expect("stderr is one JSON value");
+    assert_eq!(stderr["error"]["code"], "invalid_request");
+    assert_newer_database_message(stderr["error"]["message"].as_str().expect("error message"));
+}
+
+#[test]
 fn a_database_from_a_newer_arcl_is_refused_by_reads_writes_and_sync() {
     let directory = tempdir().expect("temporary directory can be created");
     run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
