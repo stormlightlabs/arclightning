@@ -77,6 +77,7 @@ pub(super) fn command_access(command: Option<&Command>) -> Access {
             Command::Show { .. }
             | Command::List { .. }
             | Command::Tree { .. }
+            | Command::Roadmap { .. }
             | Command::Explain { .. }
             | Command::Context { .. }
             | Command::Prime

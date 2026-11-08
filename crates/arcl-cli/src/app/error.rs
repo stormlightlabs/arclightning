@@ -239,6 +239,14 @@ pub(super) enum CommandError {
     SkillNotFile { path: PathBuf },
     #[error("`{path}` is not a directory")]
     SkillNotDirectory { path: PathBuf },
+    #[error("`{path}` is not a file; `--output` needs the path of a file to write")]
+    OutputNotFile { path: PathBuf },
+    #[error("`{path}` links to `{target}`, outside the project root `{root}`; nothing was written")]
+    OutputLinkOutside {
+        path: PathBuf,
+        target: PathBuf,
+        root: PathBuf,
+    },
     #[error("`{path}` resolves outside the project root `{root}`")]
     SkillOutsideProject { path: PathBuf, root: PathBuf },
     #[error("{count} skill file(s) are missing or differ from this arcl; run `arcl skill install`")]
@@ -350,6 +358,8 @@ impl CommandError {
             | Self::SkillSymlink { .. }
             | Self::SkillNotFile { .. }
             | Self::SkillNotDirectory { .. }
+            | Self::OutputNotFile { .. }
+            | Self::OutputLinkOutside { .. }
             | Self::SkillOutsideProject { .. }
             | Self::InvalidSetupJson { .. }
             | Self::UnclosedSetupBlock { .. }

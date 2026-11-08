@@ -251,6 +251,10 @@ The `arcl` CLI is a primary interface. Its vocabulary uses `capture`,
 Read commands support stable JSON. Mutations use the same validation and
 transactions as the web app, desktop app, and MCP server.
 
+`arcl roadmap` prints specs, plans, phases and releases with their task
+progress as one Markdown page, for a README or a docs site. The same records
+give the same page, and `--output` writes it to a file.
+
 ### Local web app
 
 `arcl serve` runs the planning and execution workflow in the browser. It binds

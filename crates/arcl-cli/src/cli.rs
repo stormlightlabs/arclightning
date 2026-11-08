@@ -143,6 +143,13 @@ pub enum Command {
         #[command(flatten)]
         options: TreeArgs,
     },
+    /// Print specs, plans and phases with their progress, then releases, as
+    /// one Markdown page.
+    Roadmap {
+        /// Write the page to this file instead of printing it.
+        #[arg(long, short = 'o', value_name = "PATH")]
+        output: Option<PathBuf>,
+    },
     /// Explain every condition affecting a task's readiness.
     Explain {
         /// The task identifier.

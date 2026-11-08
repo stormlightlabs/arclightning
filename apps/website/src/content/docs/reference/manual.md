@@ -407,6 +407,7 @@ and when it was created. Plain output prints the gate's `gate` line, then
 | `arcl show <id>`                                                     | Show one record by its full or short ID.                           |
 | `arcl list`                                                          | List records using kind, state, priority, and association filters. |
 | `arcl tree [<id>] [--all] [--ascii] [--depth <N>] [--style <STYLE>]` | Show the complete hierarchy or one rooted subtree.                 |
+| `arcl roadmap [--output <PATH>]`                                     | Print specs, plans, phases and releases as one Markdown page.      |
 | `arcl explain <task-id>`                                             | Report every condition affecting task readiness.                   |
 | `arcl context <task-id>`                                             | Return the bounded context needed to work on a task.               |
 | `arcl check`                                                         | Sync the workspace, then validate database and graph invariants.   |
@@ -543,6 +544,86 @@ Colour appears only when stdout is a terminal and `NO_COLOR` is unset.
 check.
 
 See [Inspecting Work](/guides/inspect-work/) for the query workflow and context contents.
+
+### Roadmap
+
+`arcl roadmap` prints one Markdown page for a README or a docs site: each
+spec with its plans and their phases, then the releases.
+
+```markdown
+# Roadmap
+
+## Arc Lightning first release
+
+`arcl-s-01M6WRBXQY9HXH7F0VJNRYZYPW` · in progress · 3/5 tasks
+
+### Roadmap
+
+`arcl-pl-01M6WRC4JVC8QDEQ7HVTR5W1K4` · in progress · 3/5 tasks
+
+| Phase | Status | Tasks |
+| --- | --- | --- |
+| Blocking for automation | done | 2/2 |
+| Project hub | planned | 0/1 |
+| *Tasks outside phases* | in progress | 1/2 |
+
+## Releases
+
+| Release | Status | Tasks |
+| --- | --- | --- |
+| v0.3.0 | done | 1/1 |
+```
+
+Task counts match `arcl tree`: completed tasks over all tasks at any depth,
+with cancelled tasks left out. A spec or plan counts every task below it. A
+release counts the tasks it holds and the tasks under the specs and plans it
+holds, each task once. `no tasks` stands in for `0/0`.
+
+Tasks directly under a spec get a `*Tasks outside plans*` line below the
+spec's status line. Tasks directly under a plan get a `*Tasks outside
+phases*` row after its phases. Each counts those tasks and the tasks below
+them, so a spec's plans and its line add up to the spec's total, and a plan's
+rows add up to the plan's total. The line or row is `done` when every counted
+task is completed, `cancelled` when every task is cancelled, `in progress`
+once one is in progress or completed, and `planned` before that.
+
+The status is `done` for a completed record and `cancelled` for a cancelled
+one. An open record is `in progress` once a task below it is in progress or
+completed, and `planned` before that. Completed specs, plans and phases stay
+on the page. A cancelled spec lists no plans or tasks, and a cancelled plan
+lists no phases or tasks.
+
+Specs, plans and releases print in ID order, and phases by position, then ID.
+The page has no timestamp, so the same records give the same bytes. It leaves
+out captures, notes and tasks outside any spec. IDs print as code with no
+links. Titles escape Markdown: `|`, `` ` ``, `*`, `_`, `[`, `]`, `<`, `>`,
+`~`, `&` and `\` anywhere, a leading `#`, `-`, `+` or `=`, and a trailing run
+of `#` after a space, so `Plan ##` keeps its `##`.
+
+`--output <PATH>` (`-o`) writes the page to a file instead, through a
+temporary file renamed into place, and creates missing parent directories. The
+file holds the bytes `arcl roadmap` prints. The rename gives the file a new
+inode owned by the user running `arcl`, so other hard links to it keep the old
+page. A `PATH` with no symbolic link in it may name any file, such as
+`../site/roadmap.md`. When `PATH` goes through a symbolic link, the page goes
+to the file the link points to, and the link stays. That file must be under
+the project root: a link to a file outside it, existing or not, exits 3 with
+`` `<PATH>` links to `<TARGET>`, outside the project root `<ROOT>`; nothing was written ``,
+so a link in a cloned repository cannot aim the write at a file such as
+`~/.bashrc`. A `PATH` that is a directory, a pipe, a device such as
+`/dev/stdout`, or has no file name such as `.`, exits 3 with
+`` `<PATH>` is not a file; `--output` needs the path of a file to write ``.
+Human output prints `` Wrote the roadmap to `<PATH>`. ``, `--plain` prints the
+path, and `--json` returns `{path}`.
+
+`--plain` prints the same page as human output. `--json` without `--output`
+returns the page's data: `specs`, each with `plans` and `tasks_outside_plans`,
+each plan with `phases` and `tasks_outside_phases`, and `releases`. Each
+record has `id`, `title`, the stored `status`, `state` (`done`, `cancelled`,
+`in_progress` or `planned`) and `progress` with `done` and `total`.
+`tasks_outside_plans` and `tasks_outside_phases` have `state` and `progress`,
+or are `null` when there are no such tasks. `--quiet` prints nothing, and with
+`--output` still writes the file.
 
 ## GraphQL queries
 

@@ -7,7 +7,8 @@
 //! compares the bytes each read returns with the files in
 //! `fixtures/rest/golden`. Set `ARCL_BLESS=1` to rewrite those files. Each
 //! read the CLI also makes with `--json` must print the same bytes as
-//! `arcl serve` returns.
+//! `arcl serve` returns. `arcl roadmap` prints the page in
+//! `fixtures/rest/golden/roadmap.md`.
 
 use std::{
     fs,
@@ -370,6 +371,218 @@ fn web_export_writes_the_golden_documents() {
     collect_files(&golden_dir().join("export"), &golden_dir().join("export"), &mut golden);
     golden.sort();
     assert_eq!(files, golden, "the export writes the golden set of documents");
+}
+
+/// Run `arcl roadmap` with `args` in `directory` and return its stdout.
+fn roadmap(directory: &Path, args: &[&str]) -> Vec<u8> {
+    let output = arcl(directory).args(args).output().expect("arcl roadmap runs");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    output.stdout
+}
+
+#[test]
+fn roadmap_prints_the_golden_page_the_same_way_each_time() {
+    let project = fixture_project();
+    let first = roadmap(project.path(), &["roadmap"]);
+    let page = String::from_utf8(first.clone()).expect("the page is UTF-8");
+    assert!(
+        matches_golden(&golden_dir().join("roadmap.md"), &page),
+        "`arcl roadmap` differs from roadmap.md:\n{page}"
+    );
+    assert_eq!(
+        roadmap(project.path(), &["roadmap"]),
+        first,
+        "a second run prints the same bytes"
+    );
+    assert_eq!(
+        roadmap(project.path(), &["--plain", "roadmap"]),
+        first,
+        "--plain prints the same page"
+    );
+}
+
+#[test]
+fn roadmap_output_writes_the_bytes_it_prints() {
+    let project = fixture_project();
+    let printed = roadmap(project.path(), &["roadmap"]);
+    let confirmation = roadmap(project.path(), &["roadmap", "--output", "docs/roadmap.md"]);
+    assert_eq!(
+        String::from_utf8_lossy(&confirmation),
+        "Wrote the roadmap to `docs/roadmap.md`.\n"
+    );
+    let path = project.path().join("docs/roadmap.md");
+    assert_eq!(fs::read(&path).expect("the roadmap file reads"), printed);
+
+    // A second write replaces the file whole and leaves no temporary file.
+    fs::write(&path, "stale and longer than nothing").expect("the file writes");
+    let confirmation = roadmap(project.path(), &["--json", "roadmap", "-o", "docs/roadmap.md"]);
+    let value: serde_json::Value = serde_json::from_slice(&confirmation).expect("JSON");
+    assert_eq!(
+        value,
+        serde_json::json!({ "format_version": 1, "data": { "path": "docs/roadmap.md" } })
+    );
+    assert_eq!(fs::read(&path).expect("the roadmap file reads"), printed);
+    let mut files = Vec::new();
+    collect_files(&project.path().join("docs"), &project.path().join("docs"), &mut files);
+    assert_eq!(files, ["roadmap.md"]);
+}
+
+#[test]
+fn roadmap_output_refuses_a_path_that_is_not_a_file() {
+    let project = fixture_project();
+    fs::create_dir(project.path().join("docs")).expect("the directory is created");
+    for path in [".", "docs"] {
+        let output = arcl(project.path())
+            .args(["roadmap", "--output", path])
+            .output()
+            .expect("arcl roadmap runs");
+        assert_eq!(output.status.code(), Some(3));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(&format!(
+                "`{path}` is not a file; `--output` needs the path of a file to write"
+            )),
+            "{stderr}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn roadmap_output_writes_through_a_symbolic_link() {
+    let project = fixture_project();
+    let printed = roadmap(project.path(), &["roadmap"]);
+    let site = project.path().join("site");
+    fs::create_dir(&site).expect("the directory is created");
+    fs::write(site.join("roadmap.md"), "old").expect("the target writes");
+    std::os::unix::fs::symlink("site/roadmap.md", project.path().join("link.md")).expect("the link is created");
+    // A link to a file that does not exist yet creates that file.
+    std::os::unix::fs::symlink("site/new.md", project.path().join("dangling.md")).expect("the link is created");
+
+    for (link, target) in [("link.md", "roadmap.md"), ("dangling.md", "new.md")] {
+        roadmap(project.path(), &["roadmap", "-o", link]);
+        let metadata = fs::symlink_metadata(project.path().join(link)).expect("the link stays");
+        assert!(metadata.file_type().is_symlink(), "{link} is still a link");
+        assert_eq!(fs::read(site.join(target)).expect("the target reads"), printed);
+    }
+    let mut files = Vec::new();
+    collect_files(&site, &site, &mut files);
+    files.sort();
+    assert_eq!(files, ["new.md", "roadmap.md"]);
+}
+
+/// Run `arcl roadmap -o <link>` in `project`, assert that it exits 3 naming
+/// the link and the project root, and return its stderr.
+#[cfg(unix)]
+fn roadmap_refused(project: &Path, link: &str) -> String {
+    let output = arcl(project)
+        .args(["roadmap", "-o", link])
+        .output()
+        .expect("arcl roadmap runs");
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains(&format!("`{link}` links to `")), "{stderr}");
+    assert!(stderr.contains("outside the project root"), "{stderr}");
+    stderr
+}
+
+#[cfg(unix)]
+#[test]
+fn roadmap_output_refuses_a_link_out_of_the_project() {
+    let project = fixture_project();
+    let outside = tempdir().expect("a directory outside the project");
+    let bashrc = outside.path().join("bashrc");
+    fs::write(&bashrc, "keep me").expect("the outside file writes");
+    std::os::unix::fs::symlink(&bashrc, project.path().join("README.md")).expect("the link is created");
+    // A relative link that climbs out, and a directory link with the file below it.
+    std::os::unix::fs::symlink(outside.path(), project.path().join("docs")).expect("the link is created");
+
+    let stderr = roadmap_refused(project.path(), "README.md");
+    let canonical = fs::canonicalize(&bashrc).expect("the outside file resolves");
+    assert!(stderr.contains(&canonical.display().to_string()), "{stderr}");
+    roadmap_refused(project.path(), "docs/bashrc");
+    assert_eq!(fs::read_to_string(&bashrc).expect("the outside file reads"), "keep me");
+    let mut files = Vec::new();
+    collect_files(outside.path(), outside.path(), &mut files);
+    assert_eq!(files, ["bashrc"], "nothing else is written outside");
+}
+
+#[cfg(unix)]
+#[test]
+fn roadmap_output_refuses_a_dangling_link_out_of_the_project() {
+    let project = fixture_project();
+    let outside = tempdir().expect("a directory outside the project");
+    let target = outside.path().join("made/by/arcl/roadmap.md");
+    std::os::unix::fs::symlink(&target, project.path().join("roadmap.md")).expect("the link is created");
+
+    roadmap_refused(project.path(), "roadmap.md");
+    assert!(
+        fs::read_dir(outside.path())
+            .expect("the outside directory reads")
+            .next()
+            .is_none(),
+        "no directory or file is created outside"
+    );
+}
+
+#[test]
+fn roadmap_output_writes_a_path_outside_the_project_with_no_link() {
+    let project = fixture_project();
+    let name = project
+        .path()
+        .file_name()
+        .expect("the project has a name")
+        .to_string_lossy();
+    let site = project.path().with_file_name(format!("{name}-site"));
+    let printed = roadmap(project.path(), &["roadmap"]);
+    let output = format!("../{name}-site/roadmap.md");
+    roadmap(project.path(), &["roadmap", "-o", &output]);
+    let written = fs::read(site.join("roadmap.md"));
+    fs::remove_dir_all(&site).expect("the site directory is removed");
+    assert_eq!(written.expect("the page reads"), printed);
+}
+
+#[cfg(unix)]
+#[test]
+fn roadmap_output_refuses_a_pipe() {
+    let project = fixture_project();
+    let fifo = project.path().join("roadmap.fifo");
+    let status = Command::new("mkfifo").arg(&fifo).status().expect("mkfifo runs");
+    assert!(status.success(), "mkfifo makes the pipe");
+    std::os::unix::fs::symlink("roadmap.fifo", project.path().join("pipe.md")).expect("the link is created");
+    // `arcl` runs with standard output on a pipe, so `/dev/stdout` names one.
+    for path in ["roadmap.fifo", "pipe.md", "/dev/stdout"] {
+        let output = arcl(project.path())
+            .args(["roadmap", "-o", path])
+            .output()
+            .expect("arcl roadmap runs");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(3), "{stderr}");
+        assert!(
+            stderr.contains(&format!(
+                "`{path}` is not a file; `--output` needs the path of a file to write"
+            )),
+            "{stderr}"
+        );
+    }
+    let metadata = fs::symlink_metadata(&fifo).expect("the pipe stays");
+    assert!(!metadata.is_file(), "the pipe is not replaced by a file");
+}
+
+#[test]
+fn roadmap_json_carries_the_page_data() {
+    let project = fixture_project();
+    let value: serde_json::Value =
+        serde_json::from_slice(&roadmap(project.path(), &["--json", "roadmap"])).expect("JSON");
+    assert_eq!(value["format_version"], 1);
+    let spec = &value["data"]["specs"][0];
+    assert_eq!(spec["id"], SPEC);
+    assert_eq!(spec["plans"][0]["id"], PLAN);
+    assert_eq!(spec["plans"][0]["phases"][0]["id"], PHASE);
+    assert!(spec["plans"][0]["tasks_outside_phases"].is_null());
+    assert!(spec["tasks_outside_plans"].is_null());
+    assert_eq!(value["data"]["releases"][0]["id"], RELEASE);
+    assert!(value["data"].get("captures").is_none() && value["data"].get("notes").is_none());
 }
 
 /// `text` with the value of its top-level `synced_at` replaced by

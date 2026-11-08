@@ -50,7 +50,7 @@ use graphql::{QueryInput, exec_query};
 use init::initialize;
 use prime::{PRIME_LOCK_WAIT, read_prime};
 use query::resolve_ready_filter;
-use reads::{read_context, read_explain, read_list, read_ready, read_show, read_tree};
+use reads::{exec_roadmap, read_context, read_explain, read_list, read_ready, read_show, read_tree};
 use serve::exec_serve;
 use setup::exec_setup;
 use skill::exec_skill;
@@ -237,6 +237,7 @@ fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Wa
         Some(Command::Show { id }) => write_output(read_show(&id, renderer)?),
         Some(Command::List { filters }) => write_output(read_list(filters, renderer)?),
         Some(Command::Tree { id, options }) => write_output(read_tree(id.as_deref(), options, renderer)?),
+        Some(Command::Roadmap { output }) => exec_roadmap(output.as_deref(), renderer),
         Some(Command::Explain { task_id }) => write_output(read_explain(&task_id, renderer)?),
         Some(Command::Context { task_id }) => write_output(read_context(&task_id, renderer)?),
         Some(Command::Prime) => write_output(read_prime(renderer)?),
