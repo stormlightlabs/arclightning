@@ -42,7 +42,7 @@ pub use error::ApplicationError;
 use error::{CResult, CommandError};
 use graphql::{QueryInput, exec_query};
 use init::initialize;
-use prime::{PRIME_LOCK_WAIT, read_prime};
+use prime::read_prime;
 use query::resolve_ready_filter;
 use reads::{exec_compact, exec_roadmap, read_context, read_explain, read_list, read_ready, read_show, read_tree};
 use serve::exec_serve;

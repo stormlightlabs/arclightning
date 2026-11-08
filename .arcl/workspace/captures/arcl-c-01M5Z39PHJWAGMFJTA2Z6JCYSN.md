@@ -7,4 +7,4 @@ created-at = "2026-10-27T16:32:35.378Z"
 
 arcl prime has no arcl-mcp tool. MCP clients get the loop from the server instructions and the state from ready, list and context. A prime tool would need the primer built in a crate both arcl-cli and arcl-mcp use, since arcl-mcp does not depend on arcl-cli.
 
-Fixed in this PR.
+Fixed in #94: arcl_repo::prime builds the primer for the CLI and the MCP `prime` tool.

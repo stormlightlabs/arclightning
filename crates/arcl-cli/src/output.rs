@@ -13,7 +13,6 @@ use arcl_core::domain::{
 };
 use arcl_repo::{
     gate::{GH_MISSING, GateCheckReport},
-    prime::human_escape,
     vcs::{HeadState, PathState},
     workspace::{Change, RecordSource, RecordStatusKind, WorkspaceStatus},
 };
@@ -48,6 +47,12 @@ const FORMAT_VERSION: u8 = 1;
 /// and `task complete` envelopes. Version 2 made readiness reasons typed
 /// objects and added `unblocked` to completion.
 const READINESS_FORMAT_VERSION: u8 = 2;
+
+/// The most bytes of a title or handoff line human `arcl prime` output keeps.
+const PRIME_TEXT_BYTES: usize = 80;
+
+/// The most bytes of an assignee human `arcl prime` output keeps.
+const PRIME_ASSIGNEE_BYTES: usize = 40;
 
 /// The output format for a command result.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -827,7 +832,7 @@ impl Renderer {
     /// full IDs.
     pub fn render_primer(&self, primer: &Primer) -> Result<Option<String>, OutputError> {
         Ok(match self.mode {
-            OutputMode::Human | OutputMode::Plain => Some(primer.text()),
+            OutputMode::Human | OutputMode::Plain => Some(human_primer(primer)),
             OutputMode::Json => Some(serde_json::to_string(&Envelope {
                 format_version: FORMAT_VERSION,
                 data: primer,
@@ -2470,6 +2475,22 @@ fn format_change(change: arcl_store::PlanChange) -> &'static str {
     }
 }
 
+/// `value` with each control character written out visibly, as `\n`, `\t`,
+/// `\r`, `\x1b` or `\u{85}`, for human tree output. A title holding a
+/// newline would otherwise start a fake row, and one holding an escape
+/// sequence would reach the terminal. Other text, backslashes included, is
+/// left as it is.
+fn human_escape(value: &str) -> Cow<'_, str> {
+    if !value.chars().any(char::is_control) {
+        return Cow::Borrowed(value);
+    }
+    let mut escaped = String::with_capacity(value.len() + 4);
+    for character in value.chars() {
+        push_human_escaped(&mut escaped, character);
+    }
+    Cow::Owned(escaped)
+}
+
 /// A task note as a human line, `Note: <created-at> [<kind>] <text>`, with
 /// the kind left out when the note has none. Later lines of the text are
 /// indented as [`indent_continuation`] does.
@@ -2533,6 +2554,20 @@ fn plain_task_note(note: &TaskNote) -> String {
         note.kind.map(|kind| kind.as_str()).unwrap_or_default(),
         plain_escape(&note.text)
     )
+}
+
+/// Push `character` to `out` as [`human_escape`] writes it.
+fn push_human_escaped(out: &mut String, character: char) {
+    match character {
+        '\n' => out.push_str("\\n"),
+        '\t' => out.push_str("\\t"),
+        '\r' => out.push_str("\\r"),
+        control if u32::from(control) < 0x80 && control.is_control() => {
+            out.push_str(&format!("\\x{:02x}", u32::from(control)));
+        }
+        control if control.is_control() => out.push_str(&format!("\\u{{{:x}}}", u32::from(control))),
+        other => out.push(other),
+    }
 }
 
 /// The human report of [`Renderer::render_compaction`].
@@ -2681,6 +2716,121 @@ fn head_text(head: &HeadState) -> String {
     }
 }
 
+/// `text` escaped as [`human_escape`] does, within `limit` bytes. Text that
+/// is longer, or that `cut` says continues, ends with `…` inside the limit.
+/// The cut falls between escaped characters, never inside an escape.
+fn clip_escaped(text: &str, limit: usize, cut: bool) -> String {
+    let escaped = human_escape(text);
+    if !cut && escaped.len() <= limit {
+        return escaped.into_owned();
+    }
+    let budget = limit - '…'.len_utf8();
+    let mut clipped = String::with_capacity(limit);
+    let mut piece = String::new();
+    for character in text.chars() {
+        piece.clear();
+        push_human_escaped(&mut piece, character);
+        if clipped.len() + piece.len() > budget {
+            break;
+        }
+        clipped.push_str(&piece);
+    }
+    clipped.push('…');
+    clipped
+}
+
+/// Human `arcl prime` output: a heading, the loop, both lists and a pointer
+/// to `arcl context`.
+fn human_primer(primer: &Primer) -> String {
+    let mut lines = vec![
+        "Arc Lightning tracks this project's tasks. Work the loop:".to_owned(),
+        String::new(),
+    ];
+    lines.extend(primer.work_loop.lines().map(str::to_owned));
+    lines.push(String::new());
+    lines.extend(human_prime_list(
+        &primer.open,
+        "Open work",
+        "arcl list --kind task --status in_progress parked",
+        human_open_task,
+    ));
+    lines.push(String::new());
+    lines.extend(human_prime_list(&primer.ready, "Ready", "arcl ready", human_ready_task));
+    lines.push(String::new());
+    lines.push("`arcl context <id>` shows a task's criteria, blockers and full handoff.".to_owned());
+    lines.join("\n")
+}
+
+/// The heading, then each task's lines, then where to find the rest.
+fn human_prime_list(list: &PrimeList, heading: &str, rest: &str, line: fn(&PrimeTask) -> String) -> Vec<String> {
+    if list.tasks.is_empty() {
+        return vec![format!("{heading}: none.")];
+    }
+    let mut lines = vec![format!("{heading}:")];
+    for task in &list.tasks {
+        lines.push(line(task));
+        if let Some(handoff) = prime_handoff(task) {
+            lines.push(format!("  Handoff: {handoff}"));
+        }
+    }
+    if list.more > 0 {
+        lines.push(format!("  and {} more: {rest}", list.more));
+    }
+    lines
+}
+
+/// `- <id> <status> (<assignee>) [<n> open gate(s)]: <title>`, with the gate
+/// count only when the task has an open gate.
+fn human_open_task(task: &PrimeTask) -> String {
+    let gates = match task.open_gates {
+        0 => String::new(),
+        1 => " [1 open gate]".to_owned(),
+        count => format!(" [{count} open gates]"),
+    };
+    format!(
+        "- {} {}{}{gates}: {}",
+        task.id,
+        task.status.as_str(),
+        prime_claim(task),
+        prime_title(task)
+    )
+}
+
+/// `- <id> [<priority>] (<assignee>): <title>`.
+fn human_ready_task(task: &PrimeTask) -> String {
+    format!(
+        "- {} [{}]{}: {}",
+        task.id,
+        task.priority.as_str(),
+        prime_claim(task),
+        prime_title(task)
+    )
+}
+
+/// ` (<assignee>)`, clipped, or nothing when no one claimed the task.
+fn prime_claim(task: &PrimeTask) -> String {
+    task.assignee
+        .as_deref()
+        .map(|assignee| format!(" ({})", clip_escaped(assignee, PRIME_ASSIGNEE_BYTES, false)))
+        .unwrap_or_default()
+}
+
+/// The title's first line with control characters escaped, clipped, with `…`
+/// when more follows.
+fn prime_title(task: &PrimeTask) -> String {
+    let mut lines = task.title.lines();
+    let first = lines.next().unwrap_or_default();
+    clip_escaped(first, PRIME_TEXT_BYTES, lines.next().is_some())
+}
+
+/// The handoff's first non-blank line with control characters escaped,
+/// clipped, with `…` when more follows.
+fn prime_handoff(task: &PrimeTask) -> Option<String> {
+    let mut lines = task.handoff.lines().map(str::trim).filter(|line| !line.is_empty());
+    let first = lines.next()?;
+    Some(clip_escaped(first, PRIME_TEXT_BYTES, lines.next().is_some()))
+}
+
 fn short(commit: &str) -> &str {
     commit.get(..7).unwrap_or(commit)
 }
@@ -2733,6 +2883,24 @@ const fn path_state_slug(state: PathState) -> &'static str {
 mod tests {
     use super::*;
     use crate::cli::ColorChoice;
+
+    #[test]
+    fn clip_escaped_cuts_between_escapes() {
+        let run = "a".repeat(76);
+        for control in ['\u{1b}', '\u{85}'] {
+            let title = format!("{run}{control}b");
+            let clipped = clip_escaped(&title, PRIME_TEXT_BYTES, false);
+            assert_eq!(clipped, format!("{run}…"), "{control:?}");
+            assert!(clipped.len() <= PRIME_TEXT_BYTES);
+        }
+        // An escape that fits is kept whole.
+        let title = format!("{}\u{1b}b", "a".repeat(70));
+        assert_eq!(
+            clip_escaped(&title, PRIME_TEXT_BYTES, true),
+            format!("{}\\x1bb…", "a".repeat(70))
+        );
+        assert_eq!(clip_escaped("short\u{85}", PRIME_TEXT_BYTES, false), "short\\u{85}");
+    }
 
     #[test]
     fn plain_output_is_stable_and_unstyled() {

@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use arcl_cli::cli::ColorChoice;
 use arcl_cli::output::{OutputMode, Renderer};
@@ -18,7 +18,7 @@ use arcl_core::prelude::*;
 use arcl_mcp::{error::ToolError, server::ArclServer, tools::*};
 // The MCP input enum, which the store prelude's `OpenSubtasks` would otherwise make ambiguous.
 use arcl_mcp::tools::OpenSubtasks;
-use arcl_repo::prelude::{PRIME_LIST_LIMIT, PRIME_MAX_BYTES, PRIME_MAX_LINES, Primer};
+use arcl_repo::prelude::{PRIME_LIST_LIMIT, PRIME_LOCK_WAIT, PRIME_MAX_BYTES, PRIME_MAX_LINES, Primer};
 use arcl_repo::workspace::{ProjectConfig, WorkspaceManifest, encode_manifest};
 use arcl_store::prelude::*;
 
@@ -1995,7 +1995,10 @@ async fn prime_returns_what_arcl_prime_json_prints() {
             .all(|task| task.id != archived),
         "an archived task is listed"
     );
-    let text = data.text();
+    let text = Renderer::new(OutputMode::Plain, ColorChoice::Never)
+        .render_primer(data)
+        .expect("render")
+        .expect("plain output");
     assert!(text.lines().count() <= PRIME_MAX_LINES, "{text}");
     assert!(text.len() <= PRIME_MAX_BYTES, "{} bytes", text.len());
 }
@@ -2032,6 +2035,91 @@ async fn prime_reads_unsynced_when_the_sync_lock_stays_held() {
         .err()
         .expect("a cancelled call fails");
     assert!(error.to_string().contains("cancelled"), "{error}");
+    drop(lock);
+}
+
+#[tokio::test]
+async fn prime_returns_the_fixture_as_written_out() {
+    let project = project(false);
+    let server = ArclServer::new(project.path().to_owned());
+    let ready = create_task(&server, "Ready", &[]).await;
+    let started = create_task(&server, "Started", &[]).await;
+    let mut database = Database::open(project.path().join(".arcl/arcl.db")).expect("database opens");
+    let started_id = TaskId::parse(&started).expect("task ID parses");
+    database
+        .claim_planning_task(started_id, false, "agent")
+        .expect("task claims");
+    database
+        .add_gate(started_id, GateKind::Date, "2999-01-01")
+        .expect("gate adds");
+    drop(database);
+
+    let primed = server
+        .prime(Parameters::from(PrimeInput::default()), CancellationToken::new())
+        .await
+        .expect("prime")
+        .0;
+    let mut json = to_json(&primed);
+    let work_loop = json["data"]
+        .as_object_mut()
+        .and_then(|data| data.remove("loop"))
+        .expect("data.loop");
+    assert!(
+        work_loop
+            .as_str()
+            .is_some_and(|text| text.starts_with("1. ") && text.contains("arcl task handoff")),
+        "{work_loop}"
+    );
+    assert_eq!(
+        json,
+        json!({
+            "format_version": 1,
+            "data": {
+                "initialized": true,
+                "open": {
+                    "tasks": [{
+                        "id": started,
+                        "title": "Started",
+                        "status": "in_progress",
+                        "priority": "normal",
+                        "assignee": "agent",
+                        "handoff": "",
+                        "open_gates": 1,
+                    }],
+                    "more": 0,
+                },
+                "ready": {
+                    "tasks": [{
+                        "id": ready,
+                        "title": "Ready",
+                        "status": "pending",
+                        "priority": "normal",
+                        "handoff": "",
+                    }],
+                    "more": 0,
+                },
+            },
+        })
+    );
+}
+
+#[tokio::test]
+async fn prime_waits_for_the_lock_as_long_as_arcl_prime() {
+    let project = project(true);
+    let server = ArclServer::new(project.path().to_owned());
+    create_task(&server, "Ready", &[]).await;
+    let lock = hold_sync_lock(project.path());
+
+    let started = Instant::now();
+    let primed = server
+        .prime(Parameters::from(PrimeInput::default()), CancellationToken::new())
+        .await
+        .expect("prime reads past a held lock")
+        .0;
+    let waited = started.elapsed();
+    assert!(waited >= PRIME_LOCK_WAIT, "waited {waited:?}");
+    assert!(waited < arcl_mcp::project::LOCK_WAIT, "waited {waited:?}");
+    assert_eq!(primed.warnings.len(), 1);
     drop(lock);
 }
 

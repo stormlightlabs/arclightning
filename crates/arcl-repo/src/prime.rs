@@ -4,15 +4,15 @@
 //!
 //! The loop is the block of `skills/arclightning/SKILL.md` between
 //! [`LOOP_BEGIN`] and [`LOOP_END`], so the primer and the skill print the same
-//! steps. The text form stays within [`PRIME_MAX_LINES`] and
-//! [`PRIME_MAX_BYTES`]: each list keeps [`PRIME_LIST_LIMIT`] tasks and each
-//! line is clipped.
+//! steps. Each list keeps [`PRIME_LIST_LIMIT`] tasks, so `arcl prime` can
+//! print the primer within [`PRIME_MAX_LINES`] and [`PRIME_MAX_BYTES`].
 //!
-//! Building the primer only reads the database. Each adapter decides what to
-//! do when the sync before it cannot run.
+//! Building the primer only reads the database. Both adapters wait at most
+//! [`PRIME_LOCK_WAIT`] for the sync lock, then read the database as it is
+//! with a warning, so a stuck command cannot stall a session start.
 
-use std::borrow::Cow;
 use std::collections::HashMap;
+use std::time::Duration;
 
 use serde::Serialize;
 
@@ -22,11 +22,14 @@ use arcl_store::prelude::*;
 /// The most tasks each primer list shows. The rest are counted in
 /// [`PrimeList::more`].
 pub const PRIME_LIST_LIMIT: usize = 5;
-/// The most lines the primer's text prints. The size budget the manual
-/// documents.
+/// The most lines human `arcl prime` output prints. The size budget the
+/// manual documents.
 pub const PRIME_MAX_LINES: usize = 40;
-/// The most bytes the primer's text prints.
+/// The most bytes human `arcl prime` output prints.
 pub const PRIME_MAX_BYTES: usize = 4096;
+/// How long `arcl prime` and the MCP `prime` tool wait for the sync lock
+/// before they read the database without a sync.
+pub const PRIME_LOCK_WAIT: Duration = Duration::from_secs(2);
 /// `skills/arclightning/SKILL.md`, the Arc Lightning skill. The primer prints
 /// the loop it marks.
 pub const SKILL_MARKDOWN: &str = include_str!(concat!(
@@ -37,10 +40,6 @@ pub const SKILL_MARKDOWN: &str = include_str!(concat!(
 const LOOP_BEGIN: &str = "<!-- arcl-prime:begin -->";
 /// The line that closes the loop block in `SKILL.md`.
 const LOOP_END: &str = "<!-- arcl-prime:end -->";
-/// The most bytes of a title or handoff line the primer's text keeps.
-const PRIME_TEXT_BYTES: usize = 80;
-/// The most bytes of an assignee the primer's text keeps.
-const PRIME_ASSIGNEE_BYTES: usize = 40;
 
 /// The primer: the skill's working loop, open work and ready work.
 #[derive(Debug, Serialize)]
@@ -83,28 +82,6 @@ impl Primer {
             ready: PrimeList::new(ready.iter(), ids, &open_gates),
         })
     }
-
-    /// The text `arcl prime` prints: a heading, the loop, both lists and a
-    /// pointer to `arcl context`, unstyled, within [`PRIME_MAX_LINES`] and
-    /// [`PRIME_MAX_BYTES`].
-    pub fn text(&self) -> String {
-        let mut lines = vec![
-            "Arc Lightning tracks this project's tasks. Work the loop:".to_owned(),
-            String::new(),
-        ];
-        lines.extend(self.work_loop.lines().map(str::to_owned));
-        lines.push(String::new());
-        lines.extend(self.open.text_lines(
-            "Open work",
-            "arcl list --kind task --status in_progress parked",
-            PrimeTask::open_line,
-        ));
-        lines.push(String::new());
-        lines.extend(self.ready.text_lines("Ready", "arcl ready", PrimeTask::ready_line));
-        lines.push(String::new());
-        lines.push("`arcl context <id>` shows a task's criteria, blockers and full handoff.".to_owned());
-        lines.join("\n")
-    }
 }
 
 /// One primer list: at most [`PRIME_LIST_LIMIT`] tasks, and how many more
@@ -135,24 +112,6 @@ impl PrimeList {
             }
         }
         list
-    }
-
-    /// The heading, then each task's lines, then where to find the rest.
-    fn text_lines(&self, heading: &str, rest: &str, line: fn(&PrimeTask) -> String) -> Vec<String> {
-        if self.tasks.is_empty() {
-            return vec![format!("{heading}: none.")];
-        }
-        let mut lines = vec![format!("{heading}:")];
-        for task in &self.tasks {
-            lines.push(line(task));
-            if let Some(handoff) = task.handoff_line() {
-                lines.push(format!("  Handoff: {handoff}"));
-            }
-        }
-        if self.more > 0 {
-            lines.push(format!("  and {} more: {rest}", self.more));
-        }
-        lines
     }
 }
 
@@ -192,72 +151,6 @@ impl PrimeTask {
             open_gates,
         }
     }
-
-    /// `- <id> <status> (<assignee>) [<n> open gate(s)]: <title>`, with the
-    /// gate count only when the task has an open gate.
-    fn open_line(&self) -> String {
-        let gates = match self.open_gates {
-            0 => String::new(),
-            1 => " [1 open gate]".to_owned(),
-            count => format!(" [{count} open gates]"),
-        };
-        format!(
-            "- {} {}{}{gates}: {}",
-            self.id,
-            self.status.as_str(),
-            self.claim(),
-            self.clipped_title()
-        )
-    }
-
-    /// `- <id> [<priority>] (<assignee>): <title>`.
-    fn ready_line(&self) -> String {
-        format!(
-            "- {} [{}]{}: {}",
-            self.id,
-            self.priority.as_str(),
-            self.claim(),
-            self.clipped_title()
-        )
-    }
-
-    fn claim(&self) -> String {
-        self.assignee
-            .as_deref()
-            .map(|assignee| format!(" ({})", clip_escaped(assignee, PRIME_ASSIGNEE_BYTES, false)))
-            .unwrap_or_default()
-    }
-
-    /// The title's first line with control characters escaped, clipped, with
-    /// `…` when more follows.
-    fn clipped_title(&self) -> String {
-        let mut lines = self.title.lines();
-        let first = lines.next().unwrap_or_default();
-        clip_escaped(first, PRIME_TEXT_BYTES, lines.next().is_some())
-    }
-
-    /// The handoff's first non-blank line with control characters escaped,
-    /// clipped, with `…` when more follows.
-    fn handoff_line(&self) -> Option<String> {
-        let mut lines = self.handoff.lines().map(str::trim).filter(|line| !line.is_empty());
-        let first = lines.next()?;
-        Some(clip_escaped(first, PRIME_TEXT_BYTES, lines.next().is_some()))
-    }
-}
-
-/// `value` with each control character written out visibly, as `\n`, `\t`,
-/// `\r`, `\x1b` or `\u{85}`, for human output. A title holding a newline
-/// would otherwise start a fake row, and one holding an escape sequence would
-/// reach the terminal. Other text, backslashes included, is left as it is.
-pub fn human_escape(value: &str) -> Cow<'_, str> {
-    if !value.chars().any(char::is_control) {
-        return Cow::Borrowed(value);
-    }
-    let mut escaped = String::with_capacity(value.len() + 4);
-    for character in value.chars() {
-        push_human_escaped(&mut escaped, character);
-    }
-    Cow::Owned(escaped)
 }
 
 /// The loop block of `SKILL.md`, without its marker lines. The
@@ -267,43 +160,6 @@ fn primer_loop() -> &'static str {
         .split_once(LOOP_BEGIN)
         .and_then(|(_, rest)| rest.split_once(LOOP_END))
         .map_or("", |(block, _)| block.trim())
-}
-
-/// Push `character` onto `out`, escaped as [`human_escape`] does.
-fn push_human_escaped(out: &mut String, character: char) {
-    match character {
-        '\n' => out.push_str("\\n"),
-        '\t' => out.push_str("\\t"),
-        '\r' => out.push_str("\\r"),
-        control if u32::from(control) < 0x80 && control.is_control() => {
-            out.push_str(&format!("\\x{:02x}", u32::from(control)));
-        }
-        control if control.is_control() => out.push_str(&format!("\\u{{{:x}}}", u32::from(control))),
-        other => out.push(other),
-    }
-}
-
-/// `text` escaped as [`human_escape`] does, within `limit` bytes. Text that
-/// is longer, or that `cut` says continues, ends with `…` inside the limit.
-/// The cut falls between escaped characters, never inside an escape.
-fn clip_escaped(text: &str, limit: usize, cut: bool) -> String {
-    let escaped = human_escape(text);
-    if !cut && escaped.len() <= limit {
-        return escaped.into_owned();
-    }
-    let budget = limit - '…'.len_utf8();
-    let mut clipped = String::with_capacity(limit);
-    let mut piece = String::new();
-    for character in text.chars() {
-        piece.clear();
-        push_human_escaped(&mut piece, character);
-        if clipped.len() + piece.len() > budget {
-            break;
-        }
-        clipped.push_str(&piece);
-    }
-    clipped.push('…');
-    clipped
 }
 
 fn is_zero(value: &usize) -> bool {
@@ -347,24 +203,6 @@ mod tests {
     }
 
     #[test]
-    fn clip_escaped_cuts_between_escapes() {
-        let run = "a".repeat(76);
-        for control in ['\u{1b}', '\u{85}'] {
-            let title = format!("{run}{control}b");
-            let clipped = clip_escaped(&title, PRIME_TEXT_BYTES, false);
-            assert_eq!(clipped, format!("{run}…"), "{control:?}");
-            assert!(clipped.len() <= PRIME_TEXT_BYTES);
-        }
-        // An escape that fits is kept whole.
-        let title = format!("{}\u{1b}b", "a".repeat(70));
-        assert_eq!(
-            clip_escaped(&title, PRIME_TEXT_BYTES, true),
-            format!("{}\\x1bb…", "a".repeat(70))
-        );
-        assert_eq!(clip_escaped("short\u{85}", PRIME_TEXT_BYTES, false), "short\\u{85}");
-    }
-
-    #[test]
     fn a_primer_lists_in_progress_then_parked_then_ready_with_gate_counts() {
         let mut database = Database::open_in_memory().expect("database opens");
         let parked = create_task(&mut database, "Parked", None);
@@ -391,17 +229,6 @@ mod tests {
         assert_eq!(primer.open.tasks[0].open_gates, 2);
         assert_eq!(primer.open.tasks[1].handoff, "Waiting on review.\nMore detail.");
 
-        let text = primer.text();
-        assert!(
-            text.contains(&format!("- {started} in_progress [2 open gates]: Started")),
-            "{text}"
-        );
-        assert!(
-            text.contains(&format!("- {parked} parked: Parked\n  Handoff: Waiting on review.…")),
-            "{text}"
-        );
-        assert!(text.contains(&format!("Ready:\n- {ready} [normal]: Ready")), "{text}");
-
         let json = serde_json::to_value(&primer).expect("primer serializes");
         assert_eq!(json["loop"], primer_loop());
         assert_eq!(json["open"]["tasks"][0]["open_gates"], 2);
@@ -421,7 +248,7 @@ mod tests {
     }
 
     #[test]
-    fn a_full_primer_stays_within_its_size_budget() {
+    fn a_full_primer_caps_each_list() {
         let mut database = Database::open_in_memory().expect("database opens");
         let long = format!("{}\nsecond line", "\u{1b}x".repeat(200));
         for index in 0..8 {
@@ -436,11 +263,9 @@ mod tests {
         let primer = Primer::read(&database, &ShortIds::default()).expect("primer reads");
         assert_eq!((primer.open.tasks.len(), primer.open.more), (PRIME_LIST_LIMIT, 3));
         assert_eq!((primer.ready.tasks.len(), primer.ready.more), (PRIME_LIST_LIMIT, 3));
-        let text = primer.text();
-        assert!(text.lines().count() <= PRIME_MAX_LINES, "{text}");
-        assert!(text.len() <= PRIME_MAX_BYTES, "{} bytes", text.len());
-        assert!(!text.contains('\u{1b}'));
-        assert!(text.contains("  and 3 more: arcl ready"), "{text}");
+        // Each task keeps its full title and handoff; `arcl prime` clips them.
+        assert_eq!(primer.ready.tasks[0].title, format!("Ready 0 {long}"));
+        assert_eq!(primer.open.tasks[0].handoff, long);
     }
 
     #[test]
@@ -473,6 +298,5 @@ mod tests {
         let primer = Primer::read(&database, &ShortIds::default()).expect("primer reads");
         assert_eq!(ids(&primer.ready), [next.to_string()]);
         assert!(primer.open.tasks.is_empty());
-        assert!(!primer.text().contains("Shipped"));
     }
 }

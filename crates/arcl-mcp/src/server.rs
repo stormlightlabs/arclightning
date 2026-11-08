@@ -69,7 +69,8 @@ impl ArclServer {
     }
 
     /// The same server with calls waiting at most `lock_wait` for the sync
-    /// lock instead of [`project::LOCK_WAIT`].
+    /// lock instead of [`project::LOCK_WAIT`]. `prime` waits the shorter of
+    /// this and [`arcl_repo::prime::PRIME_LOCK_WAIT`].
     pub fn with_lock_wait(mut self, lock_wait: Duration) -> Self {
         self.lock_wait = lock_wait;
         self

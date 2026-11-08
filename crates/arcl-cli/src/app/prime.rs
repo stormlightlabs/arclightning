@@ -6,10 +6,6 @@
 use super::support::{display_ids, open_database};
 use super::*;
 
-/// How long `arcl prime` waits for the sync lock before it shows the database
-/// without a sync, so a stuck command cannot stall a session start.
-pub(super) const PRIME_LOCK_WAIT: Duration = Duration::from_secs(2);
-
 /// `arcl prime`. Outside an initialized project it says to run `arcl init`
 /// and succeeds, so a session-start hook does not fail in a fresh clone.
 pub(super) fn read_prime(renderer: &Renderer) -> anyhow::Result<Option<String>> {

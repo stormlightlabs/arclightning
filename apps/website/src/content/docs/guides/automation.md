@@ -190,9 +190,10 @@ imports workspace changes into the database and exports the result.
 
 A call waits up to 10 seconds for an `arcl` command in the same project to
 finish, then fails with `application_error` (exit code `1`) naming the
-`.arcl/arcl.db-sync.lock` file. `prime` is the exception: it returns the
-database as it is with a `workspace_sync` warning, as `arcl prime` does. A call the client cancels while it waits
-changes nothing. Once its operation starts, a write runs to the end.
+`.arcl/arcl.db-sync.lock` file. `prime` is the exception: after 2 seconds it
+returns the database as it is with a `workspace_sync` warning, as `arcl prime`
+does. A call the client cancels while it waits changes nothing. Once its
+operation starts, a write runs to the end.
 
 | Tool              | Command           | `format_version`              |
 | ----------------- | ----------------- | ----------------------------- |

@@ -9,8 +9,8 @@
 //! there is a warning, since the change is saved. A call waits at most
 //! [`LOCK_WAIT`] for the lock, then fails with `application_error`, the code
 //! the CLI gives a lock failure, whether it reads or writes. The exception is
-//! [`Access::Prime`], which reads the database as it is with a warning, as
-//! `arcl prime` does.
+//! [`Access::Prime`], which waits at most [`PRIME_LOCK_WAIT`] and then reads
+//! the database as it is with a warning, as `arcl prime` does.
 //!
 //! A cancelled call stops while it waits for the lock, and checks once more
 //! before its operation starts. Once the operation starts it runs to the end:
@@ -35,9 +35,9 @@ pub const LOCK_WAIT: Duration = Duration::from_secs(10);
 pub enum Access {
     /// The operation only reads records.
     Read,
-    /// The operation only reads records, and when the lock wait runs out it
-    /// reads the database as it is with a `workspace_sync` warning instead of
-    /// failing. `prime` reads this way, as `arcl prime` does, so an agent
+    /// The operation only reads records. It waits at most [`PRIME_LOCK_WAIT`]
+    /// for the lock, then reads the database as it is with a
+    /// `workspace_sync` warning instead of failing. `prime` reads this way, as `arcl prime` does, so an agent
     /// starting a session still gets its loop and its work.
     Prime,
     /// The operation may change records.
@@ -48,7 +48,8 @@ pub enum Access {
 /// workspace around it as the CLI does. Returns the operation's value and the
 /// warnings the call collected.
 ///
-/// The call waits at most `lock_wait` for the sync lock. Once `cancelled`
+/// The call waits at most `lock_wait` for the sync lock, or at most
+/// [`PRIME_LOCK_WAIT`] for [`Access::Prime`]. Once `cancelled`
 /// fires, the call stops before `operation` starts; after that it runs to the
 /// end.
 pub fn run<T>(
@@ -58,6 +59,10 @@ pub fn run<T>(
     let project = ProjectDir::discover(start)?;
     project.require_database()?;
 
+    let lock_wait = match access {
+        Access::Prime => lock_wait.min(PRIME_LOCK_WAIT),
+        Access::Read | Access::Write => lock_wait,
+    };
     let is_cancelled = || cancelled.is_cancelled();
     let wait = LockWait::Within { timeout: lock_wait, cancelled: &is_cancelled };
     let SyncBefore { locked, result } = sync_before(project.workspace(), wait);
