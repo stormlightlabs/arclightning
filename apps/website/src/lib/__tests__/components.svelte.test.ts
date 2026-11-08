@@ -1,6 +1,7 @@
 import { page as screen, userEvent } from 'vitest/browser';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
+import '@arclightning/ui/tokens.css';
 import CopyMarkdown from '../components/CopyMarkdown.svelte';
 import ThemeToggle from '../components/ThemeToggle.svelte';
 import CopyCodeHarness from './CopyCodeHarness.svelte';
@@ -44,6 +45,7 @@ describe('ThemeToggle', () => {
 		await expect.element(screen.getByRole('button', { name: 'Switch to dark mode' })).toBeVisible();
 		expect(document.documentElement.dataset.arclTheme).toBe('light');
 		expect(localStorage.getItem('arcl-theme')).toBe('light');
+		expect(document.querySelector('meta[name="theme-color"]')?.getAttribute('content')).toBe('#f4f5f7');
 	});
 
 	it('starts from the stored theme', async () => {
