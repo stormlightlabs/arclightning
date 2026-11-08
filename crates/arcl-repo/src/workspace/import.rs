@@ -107,6 +107,33 @@ impl WorkspaceImportError {
             Self::Conflict { .. } | Self::Unmerged { .. } => 4,
         }
     }
+
+    /// Whether this failure is workspace content arcl cannot read or accept:
+    /// a missing or broken manifest, a stray entry or bad file name, an entry
+    /// of the wrong type, a file that is not UTF-8 or does not parse, a field
+    /// or relationship the merged graph refuses, or a newer workspace format.
+    /// A removed record, a conflict, and I/O, Git or storage failures are not.
+    pub const fn is_invalid_content(&self) -> bool {
+        match self {
+            Self::MissingManifest { .. }
+            | Self::UnknownEntry { .. }
+            | Self::WrongEntryType { .. }
+            | Self::NonUtf8 { .. }
+            | Self::Manifest { .. }
+            | Self::Record { .. }
+            | Self::Field { .. }
+            | Self::Relationship { .. }
+            | Self::Export(super::WorkspaceExportError::NewerWorkspace { .. }) => true,
+            Self::ReadDirectory { .. }
+            | Self::InspectEntry { .. }
+            | Self::Unmerged { .. }
+            | Self::Vcs(_)
+            | Self::ExistingRecordRemoved { .. }
+            | Self::Conflict { .. }
+            | Self::Export(_)
+            | Self::Storage(_) => false,
+        }
+    }
 }
 
 /// What a workspace import wrote and what it loaded despite the rules.

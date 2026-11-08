@@ -11,6 +11,11 @@ pub struct ApplicationError {
     exit_code: u8,
     /// Whether another process held the project's sync lock past the wait.
     lock_busy: bool,
+    /// The JSON `code`, when the exit code alone does not name the failure.
+    code: Option<&'static str>,
+    /// The JSON `message`, when the plain message points at a report stdout
+    /// already holds.
+    json_message: Option<String>,
 }
 
 impl ApplicationError {
@@ -30,13 +35,13 @@ impl ApplicationError {
         serde_json::json!({
             "format_version": 1,
             "error": {
-                "code": match self.exit_code {
+                "code": self.code.unwrap_or(match self.exit_code {
                     3 => "invalid_request",
                     4 => "conflict",
                     5 => "not_found",
                     _ => "application_error",
-                },
-                "message": self.message,
+                }),
+                "message": self.json_message.as_ref().unwrap_or(&self.message),
                 "exit_code": self.exit_code,
             }
         })
@@ -46,7 +51,7 @@ impl ApplicationError {
     pub(super) fn from_init(error: InitError) -> Self {
         let exit_code = error.exit_code();
         let message = if exit_code == 3 { format!("invalid project: {error}") } else { error.to_string() };
-        Self { message, exit_code, lock_busy: false }
+        Self { message, exit_code, lock_busy: false, code: None, json_message: None }
     }
 
     /// A GraphQL response with `count` errors, which stdout already holds.
@@ -57,7 +62,24 @@ impl ApplicationError {
             message: format!("the query returned {count} GraphQL {errors}; see `errors` on stdout"),
             exit_code: 3,
             lock_busy: false,
+            code: None,
+            json_message: None,
         }
+    }
+
+    /// An `arcl check` whose workspace did not sync on content arcl cannot
+    /// read or accept, with the sync error as `detail`. It exits 3 with the
+    /// JSON code `workspace_invalid` and `detail` in the JSON message. When
+    /// stdout `reported` the check report, which holds `detail`, the plain
+    /// message points at it instead of repeating it.
+    pub(super) fn workspace_invalid(detail: String, reported: bool) -> Self {
+        let full = format!("invalid project or record: {detail}");
+        let message = if reported {
+            "invalid project or record: the workspace did not sync; see the check report above".to_owned()
+        } else {
+            full.clone()
+        };
+        Self { message, exit_code: 3, lock_busy: false, code: Some("workspace_invalid"), json_message: Some(full) }
     }
 
     /// A failed GraphQL read, from the `extensions.code` and message of its
@@ -71,7 +93,7 @@ impl ApplicationError {
             _ => 1,
         };
         let message = if exit_code == 3 { format!("invalid project or record: {message}") } else { message.to_owned() };
-        Self { message, exit_code, lock_busy: false }
+        Self { message, exit_code, lock_busy: false, code: None, json_message: None }
     }
 
     pub(super) fn from_command<E>(error: E) -> Self
@@ -81,8 +103,11 @@ impl ApplicationError {
         let error: CommandError = error.into();
         let exit_code = error.exit_code();
         let lock_busy = matches!(error, CommandError::SyncLockBusy { .. });
-        let message = if exit_code == 3 { format!("invalid project or record: {error}") } else { error.to_string() };
-        Self { message, exit_code, lock_busy }
+        // A sync that stopped `arcl check` names its own cause, which is not
+        // an invalid record when it exits 3; a removed file, for example.
+        let labelled = exit_code == 3 && !matches!(error, CommandError::CheckSync(_));
+        let message = if labelled { format!("invalid project or record: {error}") } else { error.to_string() };
+        Self { message, exit_code, lock_busy, code: None, json_message: None }
     }
 }
 
@@ -165,6 +190,14 @@ pub(super) enum CommandError {
         hint = .0.resolve_hint()
     )]
     AutoSync(Box<WorkspaceSyncError>),
+    /// The sync before `arcl check` stopped on something other than
+    /// workspace content arcl cannot read or accept, such as a removed file
+    /// or a divergence.
+    #[error(
+        "the workspace did not sync, so `arcl check` did not run: {0}\nRun `arcl workspace status` to see why{hint}",
+        hint = .0.resolve_hint()
+    )]
+    CheckSync(Box<WorkspaceSyncError>),
     #[error("could not lock `{path}`: {source}")]
     SyncLock { path: PathBuf, source: io::Error },
     #[error(
@@ -287,7 +320,7 @@ impl CommandError {
             Self::WorkspaceSync(error) => error.exit_code(),
             Self::WorkspaceStatus(_) => 1,
             Self::RecordEdit(error) => error.exit_code(),
-            Self::AutoSync(error) => error.exit_code(),
+            Self::AutoSync(error) | Self::CheckSync(error) => error.exit_code(),
             Self::ExportSync(error) => error.exit_code(),
             Self::ReadConfig { .. }
             | Self::ReadMarkdown { .. }

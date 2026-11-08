@@ -143,6 +143,13 @@ arcl check
 
 `check` validates database and graph invariants and reports duplicate sibling
 positions as warnings. It exits successfully when no errors are found.
+With the workspace on, it syncs first, and a failed sync fails the check
+before the database checks run. Workspace content arcl cannot read or accept
+fails it with exit `3` and the sync error: a missing or broken manifest, a
+stray entry or bad file name, an entry of the wrong type, a file that is not
+UTF-8 or does not parse, a field or relationship the merged graph refuses, or a
+newer workspace format. Other sync failures, such as a file removed by a branch
+switch, keep their usual exit codes.
 
 A database can hold blocker edges that `dependency add` refuses, for example
 ones edited in by hand. `check` reports each one as an error:

@@ -30,6 +30,11 @@ record file, pull, or switch branches, and the next `arcl` command picks it up.
 If that first sync stops, a command that changes records refuses with the sync's
 status code and names the files, before it changes anything. A command that only
 reads records still runs, shows the database as it is, and prints a warning.
+`arcl check` fails too. Workspace content arcl cannot read or accept fails a
+CI gate that runs it with status code `3`: a missing or broken manifest, a
+stray entry or bad file name, an entry of the wrong type, a file that is not
+UTF-8 or does not parse, a field or relationship the merged graph refuses, or a
+newer workspace format. Other sync failures keep their usual status codes.
 Under `--json`, a command's warnings go to stderr as one line of JSON whose
 `warnings` array holds a `code` and a `message` for each; `--quiet` prints none.
 If the export after a change fails, the change is saved and the next command

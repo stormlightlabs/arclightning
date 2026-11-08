@@ -758,6 +758,259 @@ fn a_missing_database_beside_a_workspace_says_init_imports_it() {
     assert_eq!(tasks["data"]["tasks"][0]["title"], "Kept");
 }
 
+/// Give the task file for `task` a status arcl does not accept.
+fn break_task_file(directory: &Path, task: &str) {
+    let path = directory.join(format!(".arcl/workspace/tasks/{task}.md"));
+    let record = fs::read_to_string(&path).expect("task file reads");
+    let broken = record
+        .lines()
+        .map(|line| if line.starts_with("status = ") { "status = \"nonsense\"" } else { line })
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(&path, broken + "\n").expect("task file writes");
+}
+
+/// Run `arcl check` on a workspace with a file that does not parse, and
+/// assert that it fails with the parse error and names the file.
+fn assert_check_fails_on_unparsed_file(directory: &Path, task: &str) {
+    let file = format!("tasks/{task}.md");
+    let output = arcl_in(directory).args(["check"]).output().expect("check runs");
+    assert_eq!(output.status.code(), Some(3));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("Check passed."), "stdout: {stdout}");
+    assert!(stdout.contains("Check failed."), "stdout: {stdout}");
+    assert!(
+        stdout.contains(&file) && stdout.contains("nonsense"),
+        "stdout: {stdout}"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("warning"), "stderr: {stderr}");
+    assert_eq!(
+        stderr.trim_end(),
+        "error: invalid project or record: the workspace did not sync; see the check report above"
+    );
+
+    let output = arcl_in(directory)
+        .args(["--json", "check"])
+        .output()
+        .expect("check runs");
+    assert_eq!(output.status.code(), Some(3));
+    let report = json(&output.stdout);
+    assert_eq!(report["data"]["valid"], false);
+    let errors = report["data"]["errors"].as_array().expect("error array");
+    assert_eq!(errors.len(), 1, "errors: {errors:?}");
+    let error = errors[0].as_str().expect("error text");
+    assert!(
+        error.contains(&file) && error.contains("unknown variant `nonsense`"),
+        "error: {error}"
+    );
+    let stderr: Value = serde_json::from_slice(&output.stderr).expect("stderr is one JSON value");
+    assert_eq!(stderr["error"]["code"], "workspace_invalid");
+    assert_eq!(stderr["error"]["exit_code"], 3);
+    let message = stderr["error"]["message"].as_str().expect("error message");
+    assert!(message.starts_with("invalid project or record: "), "{message}");
+    assert!(message.contains("unknown variant `nonsense`"), "{message}");
+    assert!(stderr.get("warnings").is_none(), "stderr: {stderr}");
+}
+
+#[test]
+fn check_fails_when_a_workspace_file_does_not_parse_on_a_fresh_database() {
+    let directory = tempdir().expect("temporary directory can be created");
+    let path = directory.path();
+    run_json(path, ["--json", "init", "--workspace"].as_ref());
+    let task = create_task(path, "Broken", None);
+    break_task_file(path, &task);
+    for file in ["arcl.db", "arcl.db-wal", "arcl.db-shm"] {
+        let _ = fs::remove_file(path.join(".arcl").join(file));
+    }
+    run_json(path, ["--json", "init"].as_ref());
+
+    assert_check_fails_on_unparsed_file(path, &task);
+}
+
+#[test]
+fn check_fails_when_a_workspace_file_stops_parsing_after_an_import() {
+    let directory = tempdir().expect("temporary directory can be created");
+    let path = directory.path();
+    run_json(path, ["--json", "init", "--workspace"].as_ref());
+    let task = create_task(path, "Broken", None);
+    let clean = run_json(path, ["--json", "check"].as_ref());
+    assert_eq!(clean["data"]["valid"], true, "a clean tree passes");
+    assert_eq!(clean["data"]["errors"], Value::Array(Vec::new()));
+    let output = arcl_in(path).args(["check"]).output().expect("check runs");
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Check passed."));
+
+    break_task_file(path, &task);
+    assert_check_fails_on_unparsed_file(path, &task);
+
+    let read = arcl_in(path)
+        .args(["--json", "task", "list"])
+        .output()
+        .expect("list runs");
+    assert!(read.status.success(), "other commands keep the warning");
+    let stderr: Value = serde_json::from_slice(&read.stderr).expect("stderr is one JSON value");
+    assert_eq!(stderr["warnings"][0]["code"], "workspace_sync");
+}
+
+/// One way to break a workspace, applied to a project holding the task,
+/// note and capture IDs it is given.
+type BreakWorkspace = fn(&Path, &str, &str, &str);
+
+#[test]
+fn check_fails_with_workspace_invalid_on_each_kind_of_broken_workspace() {
+    let cases: &[(&str, &str, BreakWorkspace)] = &[
+        (
+            "a task file that is not UTF-8",
+            "not valid UTF-8",
+            |root, task, _, _| {
+                fs::write(root.join(format!("tasks/{task}.md")), b"+++\ntitle = \"\xff\"\n+++\n").expect("task writes");
+            },
+        ),
+        ("a broken manifest", "`manifest.toml`", |root, _, _, _| {
+            fs::write(root.join("manifest.toml"), "format-version = [\n").expect("manifest writes");
+        }),
+        ("a bad file name", "tasks/not-a-record-id.md", |root, task, _, _| {
+            fs::copy(
+                root.join(format!("tasks/{task}.md")),
+                root.join("tasks/not-a-record-id.md"),
+            )
+            .expect("copy");
+        }),
+        ("a stray entry", "`stray.txt`", |root, _, _, _| {
+            fs::write(root.join("stray.txt"), "stray\n").expect("stray entry writes");
+        }),
+        ("a broken note", "`notes/", |root, _, note, _| {
+            fs::write(root.join(format!("notes/{note}.md")), "not a record\n").expect("note writes");
+        }),
+        ("a broken capture", "`captures/", |root, _, _, capture| {
+            fs::write(root.join(format!("captures/{capture}.md")), "+++\nstatus = 7\n+++\n").expect("capture writes");
+        }),
+    ];
+    for (case, expected, break_workspace) in cases {
+        let directory = tempdir().expect("temporary directory can be created");
+        let path = directory.path();
+        run_json(path, ["--json", "init", "--workspace"].as_ref());
+        let task = create_task(path, "Task", None);
+        let note = run_json(path, ["--json", "note", "create", "Note"].as_ref())["data"]["note"]["id"]
+            .as_str()
+            .expect("note ID")
+            .to_owned();
+        let capture = create_capture(path, "Capture", "Body");
+        for file in ["arcl.db", "arcl.db-wal", "arcl.db-shm"] {
+            let _ = fs::remove_file(path.join(".arcl").join(file));
+        }
+        run_json(path, ["--json", "init"].as_ref());
+        break_workspace(&path.join(".arcl/workspace"), &task, &note, &capture);
+
+        let output = arcl_in(path).args(["--json", "check"]).output().expect("check runs");
+        assert_eq!(output.status.code(), Some(3), "{case}");
+        let report = json(&output.stdout);
+        assert_eq!(report["data"]["valid"], false, "{case}");
+        let stderr: Value = serde_json::from_slice(&output.stderr).expect("stderr is one JSON value");
+        assert_eq!(stderr["error"]["code"], "workspace_invalid", "{case}: {stderr}");
+        assert_eq!(stderr["error"]["exit_code"], 3, "{case}");
+        let error = report["data"]["errors"][0].as_str().expect("error text");
+        assert!(error.contains(expected), "{case}: {error}");
+        let message = stderr["error"]["message"].as_str().expect("error message");
+        assert!(message.contains(expected), "{case}: {message}");
+    }
+}
+
+#[test]
+fn check_after_a_branch_switch_removes_a_file_reports_the_removal() {
+    let directory = git_project();
+    let path = directory.path();
+    commit_all(path, "base");
+    git(path, &["checkout", "-q", "-b", "feat"]);
+    let task = create_task(path, "On feat", None);
+    commit_all(path, "feat");
+    git(path, &["checkout", "-q", "main"]);
+    let record = format!("tasks/{task}.md");
+
+    let output = arcl_in(path).args(["--json", "check"]).output().expect("check runs");
+    assert_eq!(output.status.code(), Some(3));
+    assert!(
+        output.stdout.is_empty(),
+        "no report: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr: Value = serde_json::from_slice(&output.stderr).expect("stderr is one JSON value");
+    assert_eq!(stderr["error"]["code"], "invalid_request");
+    let message = stderr["error"]["message"].as_str().expect("error message");
+    assert!(
+        message.contains(&record) && message.contains("was removed"),
+        "{message}"
+    );
+    assert!(message.contains("arcl workspace status"), "{message}");
+    assert!(!message.contains("invalid project"), "{message}");
+
+    let output = arcl_in(path).args(["check"]).output().expect("check runs");
+    assert_eq!(output.status.code(), Some(3));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("was removed") && !stderr.contains("invalid project"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
+fn check_on_a_divergent_workspace_reports_the_conflict() {
+    let directory = tempdir().expect("temporary directory can be created");
+    let path = directory.path();
+    run_json(path, ["--json", "init", "--workspace"].as_ref());
+    let task = create_task(path, "Original", None);
+    let record_path = path.join(format!(".arcl/workspace/tasks/{task}.md"));
+    let record = fs::read_to_string(&record_path).expect("task file reads");
+    fs::write(&record_path, record.replace("Original", "File side")).expect("task file writes");
+    with_workspace_off(path, || {
+        run_json(
+            path,
+            ["--json", "task", "update", &task, "--title", "Database side"].as_ref(),
+        )
+    });
+
+    let output = arcl_in(path).args(["--json", "check"]).output().expect("check runs");
+    assert_eq!(output.status.code(), Some(4));
+    assert!(
+        output.stdout.is_empty(),
+        "no report: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr: Value = serde_json::from_slice(&output.stderr).expect("stderr is one JSON value");
+    assert_eq!(stderr["error"]["code"], "conflict");
+    assert_eq!(stderr["error"]["exit_code"], 4);
+    let message = stderr["error"]["message"].as_str().expect("error message");
+    assert!(message.contains(&format!("tasks/{task}.md")), "{message}");
+    assert!(message.contains("arcl workspace resolve"), "{message}");
+
+    let output = arcl_in(path).args(["check"]).output().expect("check runs");
+    assert_eq!(output.status.code(), Some(4));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("Check passed."));
+}
+
+#[test]
+fn check_on_a_database_from_a_newer_arcl_is_an_invalid_request() {
+    let directory = tempdir().expect("temporary directory can be created");
+    run_json(directory.path(), ["--json", "init", "--workspace"].as_ref());
+    stamp_newer_database(directory.path());
+
+    let output = arcl_in(directory.path())
+        .args(["--json", "check"])
+        .output()
+        .expect("check runs");
+    assert_eq!(output.status.code(), Some(3));
+    assert!(
+        output.stdout.is_empty(),
+        "no report: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr: Value = serde_json::from_slice(&output.stderr).expect("stderr is one JSON value");
+    assert_eq!(stderr["error"]["code"], "invalid_request");
+    assert_newer_database_message(stderr["error"]["message"].as_str().expect("error message"));
+}
+
 #[test]
 fn a_database_from_a_newer_arcl_is_refused_by_reads_writes_and_sync() {
     let directory = tempdir().expect("temporary directory can be created");

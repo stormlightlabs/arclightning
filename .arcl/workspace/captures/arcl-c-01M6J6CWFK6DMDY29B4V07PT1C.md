@@ -1,7 +1,7 @@
 +++
 id = "arcl-c-01M6J6CWFK6DMDY29B4V07PT1C"
 title = "Fail arcl check when a workspace file does not parse"
-status = "captured"
+status = "discarded"
 created-at = "2026-11-04T02:32:19.699Z"
 +++
 
@@ -60,3 +60,5 @@ stack's `justfile` runs `arcl workspace import --quiet` before `arcl check`.
 
 cloud (`scripts/check-tools.sh`) gates on `arcl check` and picks up the fix
 with the next arcl release it pins.
+
+Fixed in #89: `arcl check` fails with exit 3 and `workspace_invalid` when a workspace file does not parse.

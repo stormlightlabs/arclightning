@@ -362,6 +362,13 @@ Synchronization uses a three-state comparison: compare
 the last common files, current database projection, and current workspace. Arc
 Lightning imports or exports one-sided changes and stops on different changes
 to both sides. It never resolves a conflict by silently choosing a side.
+When the sync before `arcl check` fails, the check fails with the sync error
+and does not check the stale database. Workspace content arcl cannot read or
+accept fails it with exit `3` and the code `workspace_invalid`: a missing or
+broken manifest, a stray entry or bad file name, an entry of the wrong type, a
+file that is not UTF-8 or does not parse, a field or relationship the merged
+graph refuses, or a newer workspace format. Other sync failures, such as a
+removed file or a divergence, keep their usual exit and error codes.
 
 ## Architecture and repository shape
 
