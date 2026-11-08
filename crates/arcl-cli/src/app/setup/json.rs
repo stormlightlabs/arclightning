@@ -72,13 +72,17 @@ pub(super) fn with_hook(before: Option<&str>, matcher: Option<&str>, path: &Path
         )));
     };
     let entries = events.elements();
-    for (index, existing) in entries.iter().filter_map(CstNode::as_object).enumerate() {
+    for (index, existing) in entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, node)| node.as_object().map(|object| (index, object)))
+    {
         let prefix = format!("hooks.SessionStart[{index}].");
         unique_keys(&existing, &prefix, path)?;
         for (inner, hook) in array(&existing, "hooks")
             .iter()
-            .filter_map(CstNode::as_object)
             .enumerate()
+            .filter_map(|(inner, node)| node.as_object().map(|object| (inner, object)))
         {
             unique_keys(&hook, &format!("{prefix}hooks[{inner}]."), path)?;
         }
@@ -96,11 +100,12 @@ pub(super) fn with_hook(before: Option<&str>, matcher: Option<&str>, path: &Path
 /// `text` as a syntax tree, after serde_json accepts it as strict JSON.
 /// serde_json refuses what `jsonc-parser` would let through, such as
 /// comments, trailing commas, control characters in strings and whitespace
-/// outside JSON's four, and it reports the line and column. It also bounds
-/// the nesting depth before `jsonc-parser`'s recursive parser walks it.
+/// outside JSON's four, and it reports the line and column. Parsing into a
+/// [`serde_json::Value`] also stops at 128 levels of nesting, before
+/// `jsonc-parser`'s recursive parser walks the text.
 fn parse(text: &str) -> Result<CstRootNode, String> {
     if !text.is_empty() {
-        serde_json::from_str::<serde::de::IgnoredAny>(text).map_err(|error| error.to_string())?;
+        serde_json::from_str::<serde_json::Value>(text).map_err(|error| error.to_string())?;
     }
     let strict = ParseOptions {
         allow_comments: false,
@@ -120,19 +125,14 @@ fn parse(text: &str) -> Result<CstRootNode, String> {
 /// Fail when `object` has a key more than once. `prefix` is the path to
 /// `object`, for the message.
 fn unique_keys(object: &CstObject, prefix: &str, path: &Path) -> CResult<()> {
-    let names = object
+    let mut seen = std::collections::HashSet::new();
+    let repeated = object
         .properties()
         .iter()
         .filter_map(|prop| prop.decoded_name())
-        .collect::<Vec<_>>();
-    match names
-        .iter()
-        .enumerate()
-        .find(|(index, name)| names[..*index].contains(name))
-    {
-        Some((_, key)) => {
-            Err(CommandError::DuplicateSetupJsonKey { path: path.to_owned(), key: format!("{prefix}{key}") })
-        }
+        .find(|name| !seen.insert(name.clone()));
+    match repeated {
+        Some(key) => Err(CommandError::DuplicateSetupJsonKey { path: path.to_owned(), key: format!("{prefix}{key}") }),
         None => Ok(()),
     }
 }
@@ -298,7 +298,11 @@ mod tests {
                 r#"{"hooks": {"SessionStart": [{"hooks": [{"command": "a", "command": "b"}]}]}}"#,
                 "`hooks.SessionStart[0].hooks[0].command`",
             ),
-            (r#"{"hooks": {}, "hooks": {}}"#, "`hooks`"),
+            (r#"{"hooks": {}, "\u0068ooks": {}}"#, "`hooks`"),
+            (
+                r#"{"hooks": {"SessionStart": [1, {"hooks": [], "hooks": []}]}}"#,
+                "`hooks.SessionStart[1].hooks`",
+            ),
         ] {
             let error = with_hook(Some(text), None, &path()).expect_err(text);
             assert!(matches!(error, CommandError::DuplicateSetupJsonKey { .. }), "{text}");
