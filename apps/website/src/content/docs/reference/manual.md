@@ -81,7 +81,17 @@ database schema version 9 was written by a newer arcl; this arcl supports schema
 The CLI, `arcl serve` and the `arcl-mcp` server all run this check, and
 leave the database as it was. A workspace whose `manifest.toml` has a newer
 `format-version` is refused the same way before any workspace file is read
-or written.
+or written:
+
+```text
+workspace format version 7 was written by a newer arcl; this arcl supports workspace format versions up to 6. Upgrade arcl to use this workspace
+```
+
+arcl 0.3.0 reads only workspace format 1, and refuses any later version with
+`unsupported configuration format version 6; expected 1`. The first
+`task complete` in a workspace writes format 6, since the task file gains
+`completed-at`. After that, teammates and CI on arcl 0.3.0 cannot read the
+workspace until they upgrade to the release after 0.3.0.
 
 ### `arcl skill install`
 
@@ -373,13 +383,31 @@ before any date.
 An archived task keeps its status, `completed`, and gets `archived_at` in JSON
 and `archived-at` in its workspace file. It stays in the workspace files.
 
-Each phase's tasks go into its compaction note: the note linked to the phase
-whose title starts with `Compacted work`. A phase without one gets a new note
-titled `Compacted work: <phase title>`, linked to the phase. The note holds a
-section per task, oldest completion first, with its title as a heading, its ID,
-its completion time and its evidence. A later run appends new sections to the
-same note. Archived tasks are never selected again, so running the same
-command twice changes nothing the second time.
+Each phase's tasks go into its compaction note, titled `Compacted work: <phase
+title>` and linked to the phase. Its ID comes from the phase's ID, so every
+clone writes the same `notes/<id>.md` file for a phase. Other notes linked to
+the phase are left alone, whatever their title. The note holds a section per
+task, oldest completion first, with its title as a heading, its ID, its
+completion time and its evidence. A later run appends new sections to the same
+note. A task reopened by hand and compacted again gets its section replaced in
+place. Archived tasks are never selected again, so running the same command
+twice changes nothing the second time.
+
+Compact on one branch. Two clones that compact the same tasks set different
+`archived-at` times, and two that compact different tasks of a phase write
+different versions of its note, so merging them conflicts in git on those
+files.
+
+An archived task takes no new work. `task create` with `--parent` or
+`--blocked-by`, `task update --parent`, `dependency add`, the MCP
+`task_create` tool and a raw edit in the web app refuse a task under an archived task, and a dependency to or on one, with exit
+code `3`:
+
+```text
+task `arcl-t-…` is archived; a task cannot be created or moved under an archived task
+```
+
+`gate add` already refuses a completed task.
 
 `list`, `task list`, `tree` and `context` leave archived tasks out; `--all`
 shows them. `show` always shows a task. The web app's Work list and board

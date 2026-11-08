@@ -10,8 +10,8 @@ use super::{ConnectedGraph, Result, StorageError, graph};
 use crate::storage::task_ancestry;
 use arcl_core::domain::*;
 
-/// Every compaction note's title starts with this. A note linked to a phase
-/// whose title starts with it is that phase's compaction note.
+/// Every compaction note's title starts with this, followed by `: ` and the
+/// phase title.
 pub const COMPACTION_TITLE_PREFIX: &str = "Compacted work";
 
 /// The line a new compaction note's body starts with.
@@ -71,11 +71,14 @@ pub struct PhaseCompaction {
 /// every subtask it has is archived too. Cancelled and open tasks are never
 /// archived, so a parent with one stays.
 ///
-/// Each phase's tasks go into the note linked to the phase whose title
-/// starts with [`COMPACTION_TITLE_PREFIX`], appended in a section per task.
-/// A phase with no such note gets a new one, titled `Compacted work: <phase
-/// title>` and linked to the phase. Archived tasks are never selected again,
-/// so running the same request twice changes nothing the second time.
+/// Each phase's tasks go into its compaction note, whose ID
+/// [`compaction_note_id`] derives from the phase's, in a section per task. A
+/// task whose section the note has already, as after a task was reopened by
+/// hand and compacted again, gets that section replaced in place; the rest
+/// are appended. A phase with no such note gets a new one, titled
+/// `Compacted work: <phase title>` and linked to the phase. Archived tasks
+/// are never selected again, so running the same request twice changes
+/// nothing the second time.
 pub fn compact(connection: &mut Connection, project_id: ProjectId, request: &CompactionRequest) -> Result<Compaction> {
     if !is_calendar_date(&request.before) {
         return Err(StorageError::InvalidCompactDate { value: request.before.clone() });
@@ -107,23 +110,27 @@ pub fn compact(connection: &mut Connection, project_id: ProjectId, request: &Com
         let Some(tasks) = selected.get(&phase.id) else { continue };
         let mut tasks = tasks.clone();
         tasks.sort_by(|left, right| (&left.completed_at, left.id).cmp(&(&right.completed_at, right.id)));
-        let sections = tasks.iter().map(section).collect::<Vec<_>>().join("\n\n");
-        let existing = compaction_note(&graph, phase.id);
+        let sections = tasks.iter().map(|task| (task.id, section(task))).collect::<Vec<_>>();
+        let note_id = compaction_note_id(phase.id);
+        let existing = graph.notes.iter().find(|note| note.id == note_id);
         let (note_id, note_title, note_created) = match existing {
             Some(note) => {
                 if !request.dry_run {
-                    let body = format!("{}\n\n{sections}", note.body.trim_end());
                     tx.execute(
                         "UPDATE notes SET body = ?1 WHERE id = ?2",
-                        params![body, note.id.to_string()],
+                        params![merge_sections(&note.body, &sections), note.id.to_string()],
                     )?;
+                    if !links_to(&graph, note.id, phase.id) {
+                        link(&tx, project_id, note.id, phase.id)?;
+                    }
                 }
                 (Some(note.id), note.title.clone(), false)
             }
             None => {
                 let title = format!("{COMPACTION_TITLE_PREFIX}: {}", phase.title);
-                let note = Note::new(project_id, title, format!("{COMPACTION_INTRO}\n\n{sections}"))
+                let mut note = Note::new(project_id, title, merge_sections(COMPACTION_INTRO, &sections))
                     .map_err(StorageError::InvalidNote)?;
+                note.id = note_id;
                 if request.dry_run {
                     (None, note.title, true)
                 } else {
@@ -131,11 +138,7 @@ pub fn compact(connection: &mut Connection, project_id: ProjectId, request: &Com
                         "INSERT INTO notes (id, project_id, title, body) VALUES (?1, ?2, ?3, ?4)",
                         params![note.id.to_string(), project_id.to_string(), note.title, note.body],
                     )?;
-                    tx.execute(
-                        "INSERT INTO record_links (project_id, source_kind, source_id, target_kind, target_id)
-                         VALUES (?1, 'note', ?2, 'phase', ?3)",
-                        params![project_id.to_string(), note.id.to_string(), phase.id.to_string()],
-                    )?;
+                    link(&tx, project_id, note.id, phase.id)?;
                     (Some(note.id), note.title, true)
                 }
             }
@@ -244,25 +247,72 @@ fn eligible(
     result
 }
 
-/// The note linked to `phase` whose title starts with
-/// [`COMPACTION_TITLE_PREFIX`], the lowest ID first.
-fn compaction_note(graph: &ConnectedGraph, phase: PhaseId) -> Option<&Note> {
-    let phase = phase.to_string();
-    let linked = graph
-        .links
-        .iter()
-        .filter(|link| {
-            link.source_kind == LinkedRecordKind::Note
-                && link.target_kind == LinkedRecordKind::Phase
-                && link.target_id == phase
-        })
-        .map(|link| link.source_id.as_str())
-        .collect::<HashSet<_>>();
-    graph
-        .notes
-        .iter()
-        .filter(|note| linked.contains(note.id.to_string().as_str()) && note.title.starts_with(COMPACTION_TITLE_PREFIX))
-        .min_by_key(|note| note.id)
+/// Whether `graph` links note `note` to `phase`.
+fn links_to(graph: &ConnectedGraph, note: NoteId, phase: PhaseId) -> bool {
+    let (note, phase) = (note.to_string(), phase.to_string());
+    graph.links.iter().any(|link| {
+        link.source_kind == LinkedRecordKind::Note
+            && link.source_id == note
+            && link.target_kind == LinkedRecordKind::Phase
+            && link.target_id == phase
+    })
+}
+
+/// Link note `note` to `phase`.
+fn link(tx: &Connection, project_id: ProjectId, note: NoteId, phase: PhaseId) -> Result<()> {
+    tx.execute(
+        "INSERT INTO record_links (project_id, source_kind, source_id, target_kind, target_id)
+         VALUES (?1, 'note', ?2, 'phase', ?3)",
+        params![project_id.to_string(), note.to_string(), phase.to_string()],
+    )?;
+    Ok(())
+}
+
+/// `body` with each of `sections` in it: a task's section replaces the one
+/// `body` has for that task, in place, and the others are appended in order.
+///
+/// A task's section in `body` starts at a `## ` line whose line two below
+/// starts with the task ID in backticks and ` · `, as [`section`] writes it,
+/// and runs to the next such section or the end of the body.
+fn merge_sections(body: &str, sections: &[(TaskId, String)]) -> String {
+    let lines = body.trim_end().lines().collect::<Vec<_>>();
+    let task_at = |index: usize| -> Option<&str> {
+        if !lines[index].starts_with("## ") || lines.get(index + 1).is_none_or(|line| !line.is_empty()) {
+            return None;
+        }
+        let line = lines.get(index + 2)?;
+        let id = line.strip_prefix('`')?.split_once("` · ")?.0;
+        TaskId::parse(id).is_ok().then_some(id)
+    };
+    let starts = (0..lines.len())
+        .filter_map(|index| Some((index, task_at(index)?)))
+        .collect::<Vec<_>>();
+    let mut parts = Vec::<(Option<String>, String)>::new();
+    let preamble_end = starts.first().map_or(lines.len(), |(index, _)| *index);
+    parts.push((None, lines[..preamble_end].join("\n").trim_end().to_owned()));
+    for (position, (index, id)) in starts.iter().enumerate() {
+        let end = starts.get(position + 1).map_or(lines.len(), |(next, _)| *next);
+        parts.push((
+            Some((*id).to_owned()),
+            lines[*index..end].join("\n").trim_end().to_owned(),
+        ));
+    }
+    for (id, text) in sections {
+        let id = id.to_string();
+        match parts
+            .iter_mut()
+            .find(|(existing, _)| existing.as_deref() == Some(id.as_str()))
+        {
+            Some(part) => part.1.clone_from(text),
+            None => parts.push((Some(id), text.clone())),
+        }
+    }
+    parts
+        .into_iter()
+        .map(|(_, text)| text)
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 /// The note section for one archived task: its title, ID, completion time
@@ -275,4 +325,38 @@ fn section(task: &PlanningTask) -> String {
     let evidence = task.evidence.trim();
     let evidence = if evidence.is_empty() { "No evidence recorded." } else { evidence };
     format!("## {}\n\n`{}` · {completed}\n\n{evidence}", task.title.trim(), task.id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FIRST: &str = "arcl-t-01M6XY7S3HQ7SHW33WEY35QTAP";
+    const SECOND: &str = "arcl-t-01M6XY7S3HQ7SHW33WEY35QTAQ";
+
+    fn id(value: &str) -> TaskId {
+        TaskId::parse(value).expect("ID parses")
+    }
+
+    #[test]
+    fn merging_appends_new_sections_after_the_intro() {
+        let body = merge_sections(
+            "Intro.",
+            &[(id(FIRST), format!("## A\n\n`{FIRST}` · completed x\n\nOne"))],
+        );
+        assert_eq!(body, format!("Intro.\n\n## A\n\n`{FIRST}` · completed x\n\nOne"));
+    }
+
+    #[test]
+    fn merging_replaces_a_task_section_in_place() {
+        let body = format!(
+            "Intro.\n\n## A\n\n`{FIRST}` · completed x\n\nOld\n\n## Heading in evidence\n\nMore\n\n## B\n\n`{SECOND}` · completed y\n\nTwo\n"
+        );
+        let merged = merge_sections(&body, &[(id(FIRST), format!("## A\n\n`{FIRST}` · completed z\n\nNew"))]);
+        assert_eq!(
+            merged,
+            format!("Intro.\n\n## A\n\n`{FIRST}` · completed z\n\nNew\n\n## B\n\n`{SECOND}` · completed y\n\nTwo")
+        );
+        assert_eq!(merge_sections(&merged, &[]), merged);
+    }
 }

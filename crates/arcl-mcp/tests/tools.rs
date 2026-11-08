@@ -1387,4 +1387,30 @@ async fn list_and_context_leave_out_archived_tasks() {
         "{:?}",
         context.completion_evidence
     );
+
+    for (parent, blocked_by) in [(Some(shipped.clone()), Vec::new()), (None, vec![shipped.clone()])] {
+        let refused = server
+            .task_create(
+                Parameters::from(TaskCreateInput {
+                    title: "Late".to_owned(),
+                    body: String::new(),
+                    spec: None,
+                    plan: None,
+                    phase: parent.is_none().then(|| first.id.to_string()),
+                    parent,
+                    priority: TaskPriority::Normal,
+                    position: 0,
+                    blocked_by,
+                }),
+                CancellationToken::new(),
+            )
+            .await
+            .err()
+            .expect("an archived task takes no subtask or dependent");
+        assert_eq!((refused.code(), refused.exit_code()), ("invalid_request", 3));
+        assert!(
+            refused.to_string().contains(&format!("task `{shipped}` is archived")),
+            "{refused}"
+        );
+    }
 }

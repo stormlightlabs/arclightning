@@ -766,6 +766,7 @@ pub fn create_planning_task_with_dependencies(
     for blocker_id in blockers {
         let dependency = TaskDependency::new(task.id, *blocker_id).map_err(StorageError::InvalidPlanningDependency)?;
         ensure_task(&tx, create.project_id, *blocker_id)?;
+        ensure_unarchived(&tx, *blocker_id)?;
         tx.execute(
             "INSERT INTO planning_task_dependencies (project_id, task_id, blocker_id) VALUES (?1, ?2, ?3)",
             params![
@@ -944,9 +945,11 @@ pub fn add_planning_dependencies(
     ensure_project(connection, project_id)?;
     let tx = connection.transaction()?;
     ensure_task(&tx, project_id, task_id)?;
+    ensure_unarchived(&tx, task_id)?;
     for dependency in &dependencies {
         let blocker_id = dependency.blocker_id;
         ensure_task(&tx, project_id, blocker_id)?;
+        ensure_unarchived(&tx, blocker_id)?;
         let duplicate: bool = tx.query_row(
             "SELECT EXISTS (SELECT 1 FROM planning_task_dependencies WHERE project_id = ?1 AND task_id = ?2 AND blocker_id = ?3)",
             params![project_id.to_string(), task_id.to_string(), blocker_id.to_string()],
@@ -1572,6 +1575,20 @@ fn ensure_task(c: &Connection, p: ProjectId, id: TaskId) -> Result<()> {
         &id.to_string(),
         StorageError::PlanningTaskNotFound { id: id.to_string() },
     )
+}
+/// Refuse a new dependency to or on task `id` once `arcl compact` archived
+/// it. Compaction archives no task that blocks open work, and the default
+/// views leave an archived task out of the blockers they show.
+fn ensure_unarchived(c: &Connection, id: TaskId) -> Result<()> {
+    let archived: bool = c.query_row(
+        "SELECT archived_at IS NOT NULL FROM planning_tasks WHERE id = ?1",
+        [id.to_string()],
+        |row| row.get(0),
+    )?;
+    if archived {
+        return Err(StorageError::ArchivedDependency { id: id.to_string() });
+    }
+    Ok(())
 }
 fn ensure_note(c: &Connection, p: ProjectId, id: NoteId) -> Result<()> {
     ensure_record(

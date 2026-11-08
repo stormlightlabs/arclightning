@@ -825,11 +825,26 @@ pub(super) fn validate_task_graph_candidates(
 ) -> Result<()> {
     ensure_project(connection, project_id)?;
     let mut data = load_data(connection, project_id)?;
+    let mut moved = Vec::new();
     for candidate in candidates {
         ensure_project_task(candidate, project_id)?;
-        data.tasks.insert(candidate.id, candidate.clone());
+        let previous = data.tasks.insert(candidate.id, candidate.clone());
+        if let Some(parent_id) = candidate.parent_id
+            && previous.is_none_or(|previous| previous.parent_id != Some(parent_id))
+        {
+            moved.push(parent_id);
+        }
     }
     data.children = index_children(&data.tasks);
+    // A task created or moved under an archived task would be open work the
+    // tree, the roadmap and the web app count as done.
+    if let Some(parent_id) = moved.into_iter().find(|parent_id| {
+        data.tasks
+            .get(parent_id)
+            .is_some_and(|parent| parent.archived_at.is_some())
+    }) {
+        return Err(StorageError::ArchivedParent { id: parent_id.to_string() });
+    }
 
     // Validate every candidate reference before evaluating effective ancestry. In
     // particular, this preserves a cross-project error instead of turning it into

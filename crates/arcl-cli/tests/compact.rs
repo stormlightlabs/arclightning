@@ -625,3 +625,154 @@ fn a_task_with_no_phase_is_never_archived() {
     }
     assert!(project.listed("task", &[]).contains(&loose));
 }
+
+/// Run `arcl <args>` in `project`, require exit code 3, and return stderr.
+fn refused(project: &Project, args: &[&str]) -> String {
+    let output = project.arcl().args(args).output().expect("arcl runs");
+    assert_eq!(output.status.code(), Some(3), "arcl {} did not exit 3", args.join(" "));
+    String::from_utf8(output.stderr).expect("stderr is UTF-8")
+}
+
+#[test]
+fn an_archived_task_takes_no_subtask_dependency_or_gate() {
+    let project = Project::new();
+    let alpha = project.done("Alpha", &project.first, "Shipped alpha");
+    project.compact(&["--before", LATER]);
+    let open = project.task("Open", &project.first, None);
+    let before = project.files();
+
+    for args in [
+        vec!["task", "create", "Child", "--parent", &alpha],
+        vec!["task", "update", &open, "--parent", &alpha],
+    ] {
+        let stderr = refused(&project, &args);
+        assert!(stderr.contains(&format!("task `{alpha}` is archived")), "{stderr}");
+        assert!(stderr.contains("under an archived task"), "{stderr}");
+    }
+    for args in [
+        vec![
+            "task",
+            "create",
+            "Waiting",
+            "--phase",
+            &project.first,
+            "--blocked-by",
+            &alpha,
+        ],
+        vec!["dependency", "add", &open, "--blocked-by", &alpha],
+        vec!["dependency", "add", &alpha, "--blocked-by", &open],
+    ] {
+        let stderr = refused(&project, &args);
+        assert!(stderr.contains(&format!("task `{alpha}` is archived")), "{stderr}");
+        assert!(stderr.contains("dependency cannot be added"), "{stderr}");
+    }
+    refused(&project, &["gate", "add", &alpha, "--until", LATER]);
+    assert!(project.files() == before, "a refused write changed a file");
+
+    let progress = project.stdout(&["tree", &project.first]);
+    assert!(progress.contains("Milestone 1  1/2"), "{progress}");
+}
+
+#[test]
+fn two_clones_compacting_the_same_phase_write_the_same_note_file() {
+    let project = Project::new();
+    project.done("Alpha", &project.first, "Shipped alpha");
+    let clone = tempdir().expect("clone directory creates");
+    let home = tempdir().expect("home directory creates");
+    let run = |args: &[&str]| {
+        let output = arcl_in(clone.path(), home.path())
+            .args(args)
+            .output()
+            .expect("arcl runs");
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        output.stdout
+    };
+    run(&["init", "--workspace"]);
+    let source = project.root().join(".arcl/workspace");
+    for (path, content) in tree_files(&source) {
+        let relative = path.strip_prefix(&source).expect("path is under the workspace");
+        let destination = clone.path().join(".arcl/workspace").join(relative);
+        fs::create_dir_all(destination.parent().expect("parent")).expect("directory creates");
+        fs::write(destination, content).expect("file writes");
+    }
+    run(&["workspace", "import"]);
+
+    let here = project.compact(&["--before", LATER])["phases"][0]["note_id"].clone();
+    let there = serde_json::from_slice::<Value>(&run(&["--json", "compact", "--before", LATER])).expect("JSON parses")
+        ["data"]["phases"][0]["note_id"]
+        .clone();
+    let note = here.as_str().expect("note ID");
+    assert_eq!(there, here);
+    assert_ne!(note, project.first.replace("arcl-ph-", "arcl-n-"));
+    assert!(project.record_path("notes", note).is_file());
+    assert!(
+        clone
+            .path()
+            .join(".arcl/workspace/notes")
+            .join(format!("{note}.md"))
+            .is_file()
+    );
+}
+
+#[test]
+fn a_user_note_linked_to_the_phase_is_not_the_compaction_note() {
+    let project = Project::new();
+    let ideas = project.id(
+        &["note", "create", "Compacted workflow ideas", "--body", "Keep me."],
+        "note",
+    );
+    project.json(&[
+        "note",
+        "link",
+        "add",
+        &ideas,
+        "--kind",
+        "phase",
+        "--record-id",
+        &project.first,
+    ]);
+    project.done("Alpha", &project.first, "Shipped alpha");
+
+    let compaction = project.compact(&["--before", LATER]);
+    assert_eq!(compaction["phases"][0]["note_created"], true);
+    assert_ne!(compaction["phases"][0]["note_id"], ideas.as_str());
+    let body = project.json(&["note", "show", &ideas])["data"]["note"]["body"].clone();
+    assert_eq!(body, "Keep me.");
+}
+
+#[test]
+fn a_task_reopened_by_hand_and_compacted_again_replaces_its_section() {
+    let project = Project::new();
+    let alpha = project.done("Alpha", &project.first, "Shipped alpha");
+    project.done("Beta", &project.first, "Shipped beta");
+    let note = project.compact(&["--before", LATER])["phases"][0]["note_id"]
+        .as_str()
+        .expect("note ID")
+        .to_owned();
+
+    let path = project.record_path("tasks", &alpha);
+    let file = fs::read_to_string(&path).expect("task file reads");
+    let reopened = file
+        .lines()
+        .filter(|line| !line.starts_with("completed-at = ") && !line.starts_with("archived-at = "))
+        .map(|line| if line.starts_with("status = ") { "status = \"pending\"" } else { line })
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(&path, format!("{reopened}\n")).expect("task file writes");
+    project.stdout(&["workspace", "sync"]);
+    assert_eq!(project.show(&alpha)["status"], "pending");
+    project.json(&["task", "complete", &alpha, "--evidence", "Shipped alpha again"]);
+
+    let again = project.compact(&["--before", LATER]);
+    assert_eq!(again["phases"][0]["note_id"], note.as_str());
+    let body = project.json(&["note", "show", &note])["data"]["note"]["body"]
+        .as_str()
+        .expect("note body")
+        .to_owned();
+    assert_eq!(body.matches("## Alpha").count(), 1, "{body}");
+    assert!(body.contains("Shipped alpha again"), "{body}");
+    assert!(!body.contains("Shipped alpha\n"), "{body}");
+    let alpha_at = body.find("## Alpha").expect("Alpha section");
+    let beta_at = body.find("## Beta").expect("Beta section");
+    assert!(alpha_at < beta_at, "the replaced section moved: {body}");
+}

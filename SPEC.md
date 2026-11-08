@@ -226,13 +226,15 @@ shows a gate by its ID.
 
 `arcl compact --before <date> [--phase <id>]` keeps long-lived projects'
 reads small. It archives completed tasks whose completion time is before the
-start of the date in UTC, and appends each archived task's title, ID,
+start of the date in UTC, and writes each archived task's title, ID,
 completion time and evidence to one compaction note per phase, linked to the
-phase. A task with no completion time, completed before arcl recorded one,
+phase. The note's ID is derived from the phase's, so clones write the same
+note file, and a task compacted again replaces its section. A task with no completion time, completed before arcl recorded one,
 is archived only with `--include-undated`. Open and cancelled tasks are never
 archived, and neither is a task that blocks an open task or has a subtask
 that stays. An archived task keeps status `completed` and gains an archive
-time; it stays in the workspace files. `list`, `task list`, `tree` and
+time; it stays in the workspace files. No write puts a task under an
+archived task or adds a dependency to or on one. `list`, `task list`, `tree` and
 `context` leave it out unless `--all` is given, `show` always shows it, and
 phase progress in `tree`, `roadmap` and the web app counts it as done.
 GraphQL `records`, `work`, `tree` and `context`, the REST reads built on

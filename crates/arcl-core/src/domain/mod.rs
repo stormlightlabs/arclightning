@@ -30,7 +30,7 @@ pub use membership::{
     CapturePromotion, CapturePromotionKind, CapturePromotionTarget, LinkedRecordKind, NoteLink, RecordLink,
     ReleaseMemberId, ReleaseMemberKind, ReleaseMembership,
 };
-pub use note::Note;
+pub use note::{Note, compaction_note_id};
 pub use phase::Phase;
 pub use plan::Plan;
 pub use planning_task::PlanningTask;

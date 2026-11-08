@@ -146,6 +146,12 @@ pub enum StorageError {
     /// A `--before` value for `arcl compact` that is not a `YYYY-MM-DD` date.
     #[error("invalid compaction date `{value}`; use a YYYY-MM-DD date")]
     InvalidCompactDate { value: String },
+    /// A task created or moved under a task `arcl compact` archived.
+    #[error("task `{id}` is archived; a task cannot be created or moved under an archived task")]
+    ArchivedParent { id: String },
+    /// A dependency added to or on a task `arcl compact` archived.
+    #[error("task `{id}` is archived; a dependency cannot be added to or on an archived task")]
+    ArchivedDependency { id: String },
 }
 
 impl StorageError {
@@ -189,6 +195,8 @@ impl StorageError {
             | Self::GateOnClosedTask { .. }
             | Self::InvalidFilter { .. }
             | Self::InvalidCompactDate { .. }
+            | Self::ArchivedParent { .. }
+            | Self::ArchivedDependency { .. }
             | Self::NewerDatabase { .. }
             | Self::MigrationGap { .. } => 3,
             Self::ShortId(error) => {

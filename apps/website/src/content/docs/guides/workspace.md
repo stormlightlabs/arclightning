@@ -197,6 +197,11 @@ Releasing every claim leaves it at 2. An arcl that reads only older versions
 refuses a newer workspace before it reads or writes any file, with an error
 that names both versions and says to upgrade arcl.
 
+The first `task complete` writes version 6, so upgrade every clone and CI job
+before anyone completes a task. arcl 0.3.0 reads only version 1. It refuses
+the workspace with `unsupported configuration format version 6; expected 1`,
+which does not say to upgrade; releases after 0.3.0 read version 6.
+
 A completed task file carries `completed-at`, when the task was completed,
 and `archived-at` once `arcl compact` archived it:
 
