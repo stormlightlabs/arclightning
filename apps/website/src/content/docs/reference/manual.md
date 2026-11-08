@@ -553,26 +553,25 @@ spec with its plans and their phases, then the releases.
 ```markdown
 # Roadmap
 
-## Arc Lightning first release and desktop app
+## Arc Lightning first release
 
-`arcl-s-01M5NE5NZPWXPVWMZA5CJBD6MY` · in progress · 70/86 tasks
+`arcl-s-01M6WRBXQY9HXH7F0VJNRYZYPW` · in progress · 3/5 tasks
 
 ### Roadmap
 
-`arcl-pl-01M5NE5P0CWMJNP2A7B0ZQW6XC` · in progress · 70/86 tasks
+`arcl-pl-01M6WRC4JVC8QDEQ7HVTR5W1K4` · in progress · 3/5 tasks
 
 | Phase | Status | Tasks |
 | --- | --- | --- |
-| Blocking for automation | done | 11/11 |
-| Integrated release | in progress | 2/3 |
-| Project hub | planned | 0/6 |
-| *Tasks outside phases* | done | 57/66 |
+| Blocking for automation | done | 2/2 |
+| Project hub | planned | 0/1 |
+| *Tasks outside phases* | in progress | 1/2 |
 
 ## Releases
 
 | Release | Status | Tasks |
 | --- | --- | --- |
-| v0.3.0 | done | 8/8 |
+| v0.3.0 | done | 1/1 |
 ```
 
 Task counts match `arcl tree`: completed tasks over all tasks at any depth,
@@ -603,9 +602,16 @@ of `#` after a space, so `Plan ##` keeps its `##`.
 
 `--output <PATH>` (`-o`) writes the page to a file instead, through a
 temporary file renamed into place, and creates missing parent directories. The
-file holds the bytes `arcl roadmap` prints. When `PATH` is a symbolic link,
-the page goes to the file the link points to, and the link stays. A `PATH`
-that is a directory, or has no file name such as `.`, exits 3 with
+file holds the bytes `arcl roadmap` prints. The rename gives the file a new
+inode owned by the user running `arcl`, so other hard links to it keep the old
+page. A `PATH` with no symbolic link in it may name any file, such as
+`../site/roadmap.md`. When `PATH` goes through a symbolic link, the page goes
+to the file the link points to, and the link stays. That file must be under
+the project root: a link to a file outside it, existing or not, exits 3 with
+`` `<PATH>` links to `<TARGET>`, outside the project root `<ROOT>`; nothing was written ``,
+so a link in a cloned repository cannot aim the write at a file such as
+`~/.bashrc`. A `PATH` that is a directory, a pipe, a device such as
+`/dev/stdout`, or has no file name such as `.`, exits 3 with
 `` `<PATH>` is not a file; `--output` needs the path of a file to write ``.
 Human output prints `` Wrote the roadmap to `<PATH>`. ``, `--plain` prints the
 path, and `--json` returns `{path}`.

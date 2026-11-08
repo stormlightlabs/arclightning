@@ -76,8 +76,9 @@ pub(super) fn read_tree(root: Option<&str>, options: TreeArgs, renderer: &Render
 /// `arcl roadmap`: print the roadmap page, or with `output` write it to that
 /// file, replacing it whole, and print a confirmation. The file holds the
 /// same bytes the command prints without `output` and without `--json`. When
-/// `output` is a symbolic link, the page goes to the file it points to and
-/// the link stays.
+/// `output` goes through a symbolic link, the page goes to the file the link
+/// points to and the link stays, as long as that file is under the project
+/// root.
 pub(super) fn exec_roadmap(output: Option<&Path>, renderer: &Renderer) -> anyhow::Result<()> {
     let database = open_database().map_err(ApplicationError::from_command)?;
     let nodes = connected_tree(&database, None, TreeArgs::default()).map_err(ApplicationError::from_command)?;
@@ -86,38 +87,112 @@ pub(super) fn exec_roadmap(output: Option<&Path>, renderer: &Renderer) -> anyhow
     let Some(path) = output else {
         return write_output(renderer.render_roadmap(&roadmap)?);
     };
-    let target = roadmap_target(path).map_err(ApplicationError::from_command)?;
+    let (root, _) = project_root_config().map_err(ApplicationError::from_command)?;
+    let target = roadmap_target(path, &root).map_err(ApplicationError::from_command)?;
     write_replacing(&target, &format!("{}\n", roadmap.markdown())).map_err(ApplicationError::from_command)?;
     write_output(renderer.render_roadmap_written(path)?)
 }
 
-/// The file `arcl roadmap --output <path>` writes: `path`, or the file at the
-/// end of the symbolic links starting at `path`. Fails when that is a
-/// directory or another non-file, or when the path has no file name.
-fn roadmap_target(path: &Path) -> CResult<PathBuf> {
+/// The file `arcl roadmap --output <path>` writes, with every symbolic link
+/// in `path` resolved. A path with no link in it may name any file. A path
+/// that goes through a link must resolve under `root`, even when the file at
+/// the end does not exist yet, so a link a cloned repository carries cannot
+/// aim the write at a file outside it. Fails when the file is a directory or
+/// another non-file, or when the path has no file name.
+fn roadmap_target(path: &Path, root: &Path) -> CResult<PathBuf> {
     /// The most symbolic links followed, as Linux allows.
     const MAX_LINKS: usize = 40;
     let not_file = || CommandError::OutputNotFile { path: path.to_owned() };
-    let mut target = path.to_owned();
-    for _ in 0..MAX_LINKS {
+    // `metadata` follows every link, including kernel links such as
+    // `/dev/stdout` that name no path, so a pipe or device is refused here.
+    match fs::metadata(path) {
+        Ok(metadata) if !metadata.is_file() => return Err(not_file()),
+        Ok(_) => {}
+        Err(error) if absent(&error) => {}
+        Err(source) => return Err(CommandError::WriteSkill { path: path.to_owned(), source }),
+    }
+    let current = std::env::current_dir().map_err(|source| CommandError::CurrentDirectory { source })?;
+    let mut target = current.join(path);
+    let mut followed = 0;
+    loop {
         match fs::symlink_metadata(&target) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
+                followed += 1;
+                if followed > MAX_LINKS {
+                    return Err(CommandError::WriteSkill {
+                        path: path.to_owned(),
+                        source: std::io::Error::other(format!("more than {MAX_LINKS} symbolic links")),
+                    });
+                }
                 let link = fs::read_link(&target)
                     .map_err(|source| CommandError::ReadSkill { path: target.clone(), source })?;
                 target = target
                     .parent()
                     .map_or_else(|| link.clone(), |parent| parent.join(&link));
             }
-            Ok(metadata) if metadata.is_file() => return Ok(target),
+            Ok(metadata) if metadata.is_file() => break,
             Ok(_) => return Err(not_file()),
-            Err(error) if absent(&error) => return target.file_name().map(|_| target.clone()).ok_or_else(not_file),
+            Err(error) if absent(&error) && target.file_name().is_some() => break,
+            Err(error) if absent(&error) => return Err(not_file()),
             Err(source) => return Err(CommandError::WriteSkill { path: target, source }),
         }
     }
-    Err(CommandError::WriteSkill {
-        path: path.to_owned(),
-        source: std::io::Error::other(format!("more than {MAX_LINKS} symbolic links")),
-    })
+    let resolved = resolved_location(&target)?;
+    if resolved != lexical(&current.join(path)) {
+        let canonical_root =
+            fs::canonicalize(root).map_err(|source| CommandError::ReadSkill { path: root.to_owned(), source })?;
+        if !resolved.starts_with(&canonical_root) {
+            return Err(CommandError::OutputLinkOutside {
+                path: path.to_owned(),
+                target: resolved,
+                root: canonical_root,
+            });
+        }
+    }
+    Ok(resolved)
+}
+
+/// Where the absolute `path` lands with every symbolic link in it resolved:
+/// the canonical form of its nearest existing ancestor, followed by the names
+/// that do not exist yet. Those names hold no links, so `..` among them
+/// drops the name before it.
+fn resolved_location(path: &Path) -> CResult<PathBuf> {
+    let mut existing = path;
+    let mut missing = Vec::new();
+    loop {
+        match fs::symlink_metadata(existing) {
+            Ok(_) => {
+                let mut resolved = fs::canonicalize(existing)
+                    .map_err(|source| CommandError::ReadSkill { path: existing.to_owned(), source })?;
+                resolved.extend(missing.iter().rev());
+                return Ok(lexical(&resolved));
+            }
+            Err(error) if absent(&error) => {
+                let (Some(name), Some(up)) = (existing.components().next_back(), existing.parent()) else {
+                    return Err(CommandError::ReadSkill { path: existing.to_owned(), source: error });
+                };
+                missing.push(name.as_os_str());
+                existing = up;
+            }
+            Err(source) => return Err(CommandError::ReadSkill { path: existing.to_owned(), source }),
+        }
+    }
+}
+
+/// `path` with `.` dropped and each `..` removing the name before it,
+/// without reading the file system.
+fn lexical(path: &Path) -> PathBuf {
+    let mut normal = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normal.pop();
+            }
+            other => normal.push(other),
+        }
+    }
+    normal
 }
 
 /// Replace each node's ID, and each blocker ID, with its short ID.

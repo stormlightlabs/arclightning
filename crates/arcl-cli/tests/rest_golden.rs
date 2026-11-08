@@ -471,6 +471,104 @@ fn roadmap_output_writes_through_a_symbolic_link() {
     assert_eq!(files, ["new.md", "roadmap.md"]);
 }
 
+/// Run `arcl roadmap -o <link>` in `project`, assert that it exits 3 naming
+/// the link and the project root, and return its stderr.
+#[cfg(unix)]
+fn roadmap_refused(project: &Path, link: &str) -> String {
+    let output = arcl(project)
+        .args(["roadmap", "-o", link])
+        .output()
+        .expect("arcl roadmap runs");
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains(&format!("`{link}` links to `")), "{stderr}");
+    assert!(stderr.contains("outside the project root"), "{stderr}");
+    stderr
+}
+
+#[cfg(unix)]
+#[test]
+fn roadmap_output_refuses_a_link_out_of_the_project() {
+    let project = fixture_project();
+    let outside = tempdir().expect("a directory outside the project");
+    let bashrc = outside.path().join("bashrc");
+    fs::write(&bashrc, "keep me").expect("the outside file writes");
+    std::os::unix::fs::symlink(&bashrc, project.path().join("README.md")).expect("the link is created");
+    // A relative link that climbs out, and a directory link with the file below it.
+    std::os::unix::fs::symlink(outside.path(), project.path().join("docs")).expect("the link is created");
+
+    let stderr = roadmap_refused(project.path(), "README.md");
+    let canonical = fs::canonicalize(&bashrc).expect("the outside file resolves");
+    assert!(stderr.contains(&canonical.display().to_string()), "{stderr}");
+    roadmap_refused(project.path(), "docs/bashrc");
+    assert_eq!(fs::read_to_string(&bashrc).expect("the outside file reads"), "keep me");
+    let mut files = Vec::new();
+    collect_files(outside.path(), outside.path(), &mut files);
+    assert_eq!(files, ["bashrc"], "nothing else is written outside");
+}
+
+#[cfg(unix)]
+#[test]
+fn roadmap_output_refuses_a_dangling_link_out_of_the_project() {
+    let project = fixture_project();
+    let outside = tempdir().expect("a directory outside the project");
+    let target = outside.path().join("made/by/arcl/roadmap.md");
+    std::os::unix::fs::symlink(&target, project.path().join("roadmap.md")).expect("the link is created");
+
+    roadmap_refused(project.path(), "roadmap.md");
+    assert!(
+        fs::read_dir(outside.path())
+            .expect("the outside directory reads")
+            .next()
+            .is_none(),
+        "no directory or file is created outside"
+    );
+}
+
+#[test]
+fn roadmap_output_writes_a_path_outside_the_project_with_no_link() {
+    let project = fixture_project();
+    let name = project
+        .path()
+        .file_name()
+        .expect("the project has a name")
+        .to_string_lossy();
+    let site = project.path().with_file_name(format!("{name}-site"));
+    let printed = roadmap(project.path(), &["roadmap"]);
+    let output = format!("../{name}-site/roadmap.md");
+    roadmap(project.path(), &["roadmap", "-o", &output]);
+    let written = fs::read(site.join("roadmap.md"));
+    fs::remove_dir_all(&site).expect("the site directory is removed");
+    assert_eq!(written.expect("the page reads"), printed);
+}
+
+#[cfg(unix)]
+#[test]
+fn roadmap_output_refuses_a_pipe() {
+    let project = fixture_project();
+    let fifo = project.path().join("roadmap.fifo");
+    let status = Command::new("mkfifo").arg(&fifo).status().expect("mkfifo runs");
+    assert!(status.success(), "mkfifo makes the pipe");
+    std::os::unix::fs::symlink("roadmap.fifo", project.path().join("pipe.md")).expect("the link is created");
+    // `arcl` runs with standard output on a pipe, so `/dev/stdout` names one.
+    for path in ["roadmap.fifo", "pipe.md", "/dev/stdout"] {
+        let output = arcl(project.path())
+            .args(["roadmap", "-o", path])
+            .output()
+            .expect("arcl roadmap runs");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(3), "{stderr}");
+        assert!(
+            stderr.contains(&format!(
+                "`{path}` is not a file; `--output` needs the path of a file to write"
+            )),
+            "{stderr}"
+        );
+    }
+    let metadata = fs::symlink_metadata(&fifo).expect("the pipe stays");
+    assert!(!metadata.is_file(), "the pipe is not replaced by a file");
+}
+
 #[test]
 fn roadmap_json_carries_the_page_data() {
     let project = fixture_project();
