@@ -1,8 +1,5 @@
+use super::error::{IResult, InitError};
 use super::*;
-use super::{
-    error::{IResult, InitError},
-    support::nearest_project_root,
-};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct Initialization {

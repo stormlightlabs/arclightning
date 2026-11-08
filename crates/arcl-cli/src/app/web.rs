@@ -33,8 +33,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::serve::ServeApp;
-use super::support::{project_root_config, read_stdin, write_output};
-use super::workspace::discover_vcs;
+use super::support::{read_stdin, write_output};
 use super::*;
 
 /// The largest document body `export` writes whole. The artifact database
@@ -373,8 +372,8 @@ fn write_file(path: &Path, bytes: &[u8]) -> CResult<()> {
 
 /// The commit HEAD names, when the project is in a Git worktree with commits.
 fn head_commit() -> Option<String> {
-    let (root, _) = project_root_config().ok()?;
-    discover_vcs(&root).ok().flatten()?.head_id().ok().flatten()
+    let project = ProjectDir::discover_current().ok()?;
+    discover_vcs(project.root()).ok().flatten()?.head_id().ok().flatten()
 }
 
 /// The current time in UTC as RFC 3339, to the second.

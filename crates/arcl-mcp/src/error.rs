@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use thiserror::Error;
 
 use arcl_core::prelude::*;
+use arcl_repo::prelude::*;
 use arcl_repo::{vcs::VcsError, workspace::WorkspaceSyncError};
 use arcl_store::prelude::*;
 
@@ -93,6 +94,12 @@ impl From<WorkspaceSyncError> for ToolError {
 
 impl From<VcsError> for ToolError {
     fn from(error: VcsError) -> Self {
+        Self::new(error.exit_code(), error)
+    }
+}
+
+impl From<ProjectError> for ToolError {
+    fn from(error: ProjectError) -> Self {
         Self::new(error.exit_code(), error)
     }
 }

@@ -4,7 +4,7 @@
 //! the one source directory, so an installed copy always matches the
 //! repository copy the binary was built from.
 
-use super::support::{nearest_project_root, write_output};
+use super::support::write_output;
 use super::*;
 
 /// `skills/arclightning/SKILL.md`. `arcl prime` prints the loop it marks.
@@ -62,10 +62,10 @@ pub(super) fn exec_skill(command: SkillCommand, renderer: &Renderer) -> anyhow::
 
 /// The root of the initialized project that holds the current directory.
 pub(super) fn current_project_root() -> CResult<PathBuf> {
-    let start = std::env::current_dir().map_err(|source| CommandError::CurrentDirectory { source })?;
-    match nearest_project_root(&start).map_err(|(path, source)| CommandError::ReadConfig { path, source })? {
+    let start = std::env::current_dir().map_err(|source| ProjectError::CurrentDirectory { source })?;
+    match nearest_project_root(&start).map_err(|(path, source)| ProjectError::ReadConfig { path, source })? {
         Some(root) => Ok(root),
-        None => Err(CommandError::NotInitialized { root: start, workspace: None }),
+        None => Err(ProjectError::NotInitialized { root: start, workspace: None }.into()),
     }
 }
 

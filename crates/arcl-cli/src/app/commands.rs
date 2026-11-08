@@ -144,11 +144,14 @@ pub(super) fn default_capture_source(command: CaptureCommand, warnings: &mut Vec
         [] => None,
         [task] => Some(task.clone()),
         tasks => {
-            warnings.push(Warning::capture_source(format!(
-                "`{agent}` has {} tasks in progress ({}), so the capture has no source; pass --from <task>",
-                tasks.len(),
-                tasks.join(", ")
-            )));
+            warnings.push(Warning::new(
+                "capture_source",
+                format!(
+                    "`{agent}` has {} tasks in progress ({}), so the capture has no source; pass --from <task>",
+                    tasks.len(),
+                    tasks.join(", ")
+                ),
+            ));
             None
         }
     };

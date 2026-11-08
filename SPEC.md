@@ -406,7 +406,7 @@ arclightning/
 |-- crates/
 |   |-- arcl-core/          # domain rules and application operations
 |   |-- arcl-store/         # SQLite and migrations
-|   |-- arcl-repo/          # portable files and Git-aware reconciliation
+|   |-- arcl-repo/          # project discovery, portable files and Git-aware reconciliation
 |   |-- arcl-cli/
 |   |-- arcl-mcp/
 |   `-- arcl-server/        # loopback HTTP adapter for the web app
