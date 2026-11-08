@@ -5,7 +5,7 @@ title = "Render a roadmap with arcl roadmap"
 status = "completed"
 priority = "normal"
 position = 8
-evidence = "Done in this PR at c8b943f: `arcl roadmap` prints specs, plans and milestones with task progress, then releases, as Markdown. Golden test on the REST fixture (roadmap.md), a repeat-run byte check, and an `--output` test that the file matches stdout. Gates pass."
+evidence = "Done in this PR at c8b943f: `arcl roadmap` prints specs, plans and phases with task progress, then releases, as Markdown. Golden test on the REST fixture (roadmap.md), a repeat-run byte check, and an `--output` test that the file matches stdout. Gates pass."
 +++
 
 Render specs, plans, milestones and releases as one Markdown page, for a

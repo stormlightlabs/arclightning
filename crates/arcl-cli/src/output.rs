@@ -22,7 +22,9 @@ use arcl_store::{
 };
 
 pub use arcl_store::{TREE_SECTIONS, TreeStatus, tree_section};
-pub use roadmap::{Roadmap, RoadmapItem, RoadmapPlan, RoadmapProgress, RoadmapSpec, RoadmapState, escape_markdown};
+pub use roadmap::{
+    Roadmap, RoadmapItem, RoadmapPlan, RoadmapProgress, RoadmapSpec, RoadmapState, RoadmapTasks, escape_markdown,
+};
 
 mod roadmap;
 

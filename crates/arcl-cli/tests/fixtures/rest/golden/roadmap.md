@@ -8,7 +8,7 @@
 
 `arcl-pl-01M6ESM3K3C7SKW1SCDMMXY8CZ` · in progress · 1/4 tasks
 
-| Milestone | Status | Tasks |
+| Phase | Status | Tasks |
 | --- | --- | --- |
 | Build | in progress | 1/3 |
 | Ship | planned | 0/1 |

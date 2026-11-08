@@ -428,6 +428,50 @@ fn roadmap_output_writes_the_bytes_it_prints() {
 }
 
 #[test]
+fn roadmap_output_refuses_a_path_that_is_not_a_file() {
+    let project = fixture_project();
+    fs::create_dir(project.path().join("docs")).expect("the directory is created");
+    for path in [".", "docs"] {
+        let output = arcl(project.path())
+            .args(["roadmap", "--output", path])
+            .output()
+            .expect("arcl roadmap runs");
+        assert_eq!(output.status.code(), Some(3));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(&format!(
+                "`{path}` is not a file; `--output` needs the path of a file to write"
+            )),
+            "{stderr}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn roadmap_output_writes_through_a_symbolic_link() {
+    let project = fixture_project();
+    let printed = roadmap(project.path(), &["roadmap"]);
+    let site = project.path().join("site");
+    fs::create_dir(&site).expect("the directory is created");
+    fs::write(site.join("roadmap.md"), "old").expect("the target writes");
+    std::os::unix::fs::symlink("site/roadmap.md", project.path().join("link.md")).expect("the link is created");
+    // A link to a file that does not exist yet creates that file.
+    std::os::unix::fs::symlink("site/new.md", project.path().join("dangling.md")).expect("the link is created");
+
+    for (link, target) in [("link.md", "roadmap.md"), ("dangling.md", "new.md")] {
+        roadmap(project.path(), &["roadmap", "-o", link]);
+        let metadata = fs::symlink_metadata(project.path().join(link)).expect("the link stays");
+        assert!(metadata.file_type().is_symlink(), "{link} is still a link");
+        assert_eq!(fs::read(site.join(target)).expect("the target reads"), printed);
+    }
+    let mut files = Vec::new();
+    collect_files(&site, &site, &mut files);
+    files.sort();
+    assert_eq!(files, ["new.md", "roadmap.md"]);
+}
+
+#[test]
 fn roadmap_json_carries_the_page_data() {
     let project = fixture_project();
     let value: serde_json::Value =
@@ -436,7 +480,9 @@ fn roadmap_json_carries_the_page_data() {
     let spec = &value["data"]["specs"][0];
     assert_eq!(spec["id"], SPEC);
     assert_eq!(spec["plans"][0]["id"], PLAN);
-    assert_eq!(spec["plans"][0]["milestones"][0]["id"], PHASE);
+    assert_eq!(spec["plans"][0]["phases"][0]["id"], PHASE);
+    assert!(spec["plans"][0]["tasks_outside_phases"].is_null());
+    assert!(spec["tasks_outside_plans"].is_null());
     assert_eq!(value["data"]["releases"][0]["id"], RELEASE);
     assert!(value["data"].get("captures").is_none() && value["data"].get("notes").is_none());
 }

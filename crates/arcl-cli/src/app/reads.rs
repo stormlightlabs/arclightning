@@ -2,7 +2,7 @@
 //! GraphQL, in [`super::rest`], with the same envelopes and errors.
 
 use super::query::{connected_tree, list_connected, resolve_ready_filter, show_record};
-use super::skill::write_replacing;
+use super::skill::{absent, write_replacing};
 use super::support::*;
 use super::*;
 
@@ -75,7 +75,9 @@ pub(super) fn read_tree(root: Option<&str>, options: TreeArgs, renderer: &Render
 
 /// `arcl roadmap`: print the roadmap page, or with `output` write it to that
 /// file, replacing it whole, and print a confirmation. The file holds the
-/// same bytes the command prints without `output` and without `--json`.
+/// same bytes the command prints without `output` and without `--json`. When
+/// `output` is a symbolic link, the page goes to the file it points to and
+/// the link stays.
 pub(super) fn exec_roadmap(output: Option<&Path>, renderer: &Renderer) -> anyhow::Result<()> {
     let database = open_database().map_err(ApplicationError::from_command)?;
     let nodes = connected_tree(&database, None, TreeArgs::default()).map_err(ApplicationError::from_command)?;
@@ -84,8 +86,38 @@ pub(super) fn exec_roadmap(output: Option<&Path>, renderer: &Renderer) -> anyhow
     let Some(path) = output else {
         return write_output(renderer.render_roadmap(&roadmap)?);
     };
-    write_replacing(path, &format!("{}\n", roadmap.markdown())).map_err(ApplicationError::from_command)?;
+    let target = roadmap_target(path).map_err(ApplicationError::from_command)?;
+    write_replacing(&target, &format!("{}\n", roadmap.markdown())).map_err(ApplicationError::from_command)?;
     write_output(renderer.render_roadmap_written(path)?)
+}
+
+/// The file `arcl roadmap --output <path>` writes: `path`, or the file at the
+/// end of the symbolic links starting at `path`. Fails when that is a
+/// directory or another non-file, or when the path has no file name.
+fn roadmap_target(path: &Path) -> CResult<PathBuf> {
+    /// The most symbolic links followed, as Linux allows.
+    const MAX_LINKS: usize = 40;
+    let not_file = || CommandError::OutputNotFile { path: path.to_owned() };
+    let mut target = path.to_owned();
+    for _ in 0..MAX_LINKS {
+        match fs::symlink_metadata(&target) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                let link = fs::read_link(&target)
+                    .map_err(|source| CommandError::ReadSkill { path: target.clone(), source })?;
+                target = target
+                    .parent()
+                    .map_or_else(|| link.clone(), |parent| parent.join(&link));
+            }
+            Ok(metadata) if metadata.is_file() => return Ok(target),
+            Ok(_) => return Err(not_file()),
+            Err(error) if absent(&error) => return target.file_name().map(|_| target.clone()).ok_or_else(not_file),
+            Err(source) => return Err(CommandError::WriteSkill { path: target, source }),
+        }
+    }
+    Err(CommandError::WriteSkill {
+        path: path.to_owned(),
+        source: std::io::Error::other(format!("more than {MAX_LINKS} symbolic links")),
+    })
 }
 
 /// Replace each node's ID, and each blocker ID, with its short ID.
