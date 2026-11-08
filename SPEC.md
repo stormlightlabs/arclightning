@@ -341,8 +341,11 @@ it leaves out, and every gate on the task.
 loop, open work with handoffs and open gate counts, and the first ready tasks,
 within 40 lines and 4 KiB, and points to `arcl context` for the rest. The
 MCP `prime` tool returns the same primer as `arcl --json prime`, built in
-`arcl_repo::prime`. When another command holds the sync lock, both return the
-database as it is with a warning instead of failing.
+`arcl_repo::prime` from one read transaction, with titles and handoffs cut
+to per-field caps. Outside an initialized project both return
+the same setup object, which says to run `arcl init`. When another command
+holds the sync lock, both return the database as it is with a warning instead
+of failing.
 
 `arcl setup claude|codex|pi|other` writes what an agent needs to use arcl:
 the skill, a marked block in `CLAUDE.md` or `AGENTS.md`, and for `claude`,

@@ -10,7 +10,9 @@
 //! [`LOCK_WAIT`] for the lock, then fails with `application_error`, the code
 //! the CLI gives a lock failure, whether it reads or writes. The exception is
 //! [`Access::Prime`], which waits at most [`PRIME_LOCK_WAIT`] and then reads
-//! the database as it is with a warning, as `arcl prime` does.
+//! the database as it is with a warning, as `arcl prime` does. [`prime`]
+//! also answers outside an initialized project, with the [`PrimeSetup`]
+//! `arcl --json prime` prints there.
 //!
 //! A cancelled call stops while it waits for the lock, and checks once more
 //! before its operation starts. Once the operation starts it runs to the end:
@@ -21,6 +23,7 @@ use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 
+use arcl_core::prelude::*;
 use arcl_repo::prelude::*;
 use arcl_store::prelude::*;
 
@@ -58,7 +61,31 @@ pub fn run<T>(
 ) -> Result<(T, Vec<Warning>), ToolError> {
     let project = ProjectDir::discover(start)?;
     project.require_database()?;
+    run_in(&project, access, lock_wait, cancelled, operation)
+}
 
+/// Read the session primer for the project that holds `start`, as [`run`]
+/// does with [`Access::Prime`]. Where `start` is in no project, or in one
+/// without a database, return the [`PrimeSetup`] that says to run
+/// `arcl init`, with no warnings, as `arcl --json prime` does.
+pub fn prime(
+    start: &Path, lock_wait: Duration, cancelled: &CancellationToken,
+) -> Result<(Prime, Vec<Warning>), ToolError> {
+    let found = ProjectDir::discover(start).and_then(|project| project.require_database().map(|_| project));
+    let project = match found {
+        Ok(project) => project,
+        Err(error) => return Ok((Prime::Setup(PrimeSetup::from_error(error)?), Vec::new())),
+    };
+    run_in(&project, Access::Prime, lock_wait, cancelled, |database| {
+        Ok(Prime::Primer(Primer::read(database, &ShortIds::default())?))
+    })
+}
+
+/// [`run`] against `project`, whose database exists.
+fn run_in<T>(
+    project: &ProjectDir, access: Access, lock_wait: Duration, cancelled: &CancellationToken,
+    operation: impl FnOnce(&mut Database) -> Result<T, ToolError>,
+) -> Result<(T, Vec<Warning>), ToolError> {
     let lock_wait = match access {
         Access::Prime => lock_wait.min(PRIME_LOCK_WAIT),
         Access::Read | Access::Write => lock_wait,

@@ -230,8 +230,12 @@ structured content is the version 1 failure object above.
 
 `prime` takes no arguments and returns what `arcl --json prime` prints: the
 working loop as Markdown in `data.loop`, then `data.open` and `data.ready`,
-each with up to 5 tasks and a `more` count. The server's instructions tell
-clients to call it at the start of a session.
+each with up to 5 tasks and a `more` count. Titles are cut to 200 bytes and
+handoffs to 400, each ending with `… [truncated]` when cut, so the result
+stays near 10 KiB. Outside an initialized project it
+succeeds with `data.initialized` false, `data.root` and a `data.message` that
+says to run `arcl init`. The server's instructions tell clients to call it at
+the start of a session.
 
 `list` and `ready` return at most `limit` records, from 1 to 200 and 50 by
 default. While more remain, `data.next_cursor` holds the `cursor` for the next

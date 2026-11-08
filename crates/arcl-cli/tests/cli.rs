@@ -7133,6 +7133,40 @@ fn prime_json_returns_the_loop_and_capped_lists_with_full_ids() {
 }
 
 #[test]
+fn prime_json_matches_the_primer_the_mcp_tool_returns() {
+    use arcl_core::prelude::ShortIds;
+    use arcl_repo::prelude::{PRIME_HANDOFF_BYTES, PRIME_TITLE_BYTES, PRIME_TRUNCATED, Prime, Primer};
+    use arcl_store::prelude::Database;
+
+    let (directory, [claimed, ..]) = prime_fixture();
+    let dir = directory.path();
+    // A handoff and a title far over their caps.
+    let huge = "handoff ".repeat(6_400);
+    let task = create_task(dir, &"title ".repeat(100), None);
+    run_json(dir, ["--json", "task", "start", &task].as_ref());
+    run_json(dir, ["--json", "task", "handoff", &task, "--note", &huge].as_ref());
+
+    let cli = run_json(dir, ["--json", "prime"].as_ref());
+    let database = Database::open(dir.join(".arcl").join("arcl.db")).expect("database opens");
+    let primer = Primer::read(&database, &ShortIds::default()).expect("primer reads");
+    // The MCP `prime` tool returns this envelope with no warnings.
+    let mcp = serde_json::json!({ "format_version": 1, "data": Prime::Primer(primer) });
+    assert_eq!(cli, mcp);
+
+    let open = cli["data"]["open"]["tasks"].as_array().expect("open tasks");
+    assert_eq!(open[0]["id"], claimed);
+    let cut = open
+        .iter()
+        .find(|listed| listed["id"] == task)
+        .expect("the huge task is listed");
+    let title = cut["title"].as_str().expect("title");
+    let handoff = cut["handoff"].as_str().expect("handoff");
+    assert!(title.ends_with(PRIME_TRUNCATED) && title.len() <= PRIME_TITLE_BYTES + PRIME_TRUNCATED.len());
+    assert!(handoff.ends_with(PRIME_TRUNCATED) && handoff.len() <= PRIME_HANDOFF_BYTES + PRIME_TRUNCATED.len());
+    assert!(cli.to_string().len() < 10 * 1024, "{} bytes", cli.to_string().len());
+}
+
+#[test]
 fn prime_stays_within_its_size_budget() {
     use arcl_cli::output::{PRIME_MAX_BYTES, PRIME_MAX_LINES};
     let directory = initialized_directory();

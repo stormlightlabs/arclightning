@@ -252,6 +252,16 @@ impl Database {
             .pragma_query_value(None, "user_version", |row| row.get(0))?)
     }
 
+    /// Run `read` inside one read transaction, so every query it makes sees
+    /// the same committed state and a commit from another connection cannot
+    /// land between them. `read` must not write or start a transaction.
+    pub fn read_snapshot<T>(&self, read: impl FnOnce(&Self) -> Result<T>) -> Result<T> {
+        let transaction = self.connection.unchecked_transaction()?;
+        let value = read(self)?;
+        transaction.commit()?;
+        Ok(value)
+    }
+
     /// Read the data version that guards a later graph replacement.
     pub fn data_version(&self) -> Result<DataVersion> {
         Ok(DataVersion(self.connection.pragma_query_value(
@@ -1249,6 +1259,38 @@ mod tests {
             .replace_graph_and_workspace_base(&graph, &[], read)
             .expect("current replacement succeeds");
         assert_eq!(reader.captures().expect("captures load").len(), 2);
+    }
+
+    #[test]
+    fn a_read_snapshot_does_not_see_a_commit_made_between_its_queries() {
+        let directory = tempfile::tempdir().expect("directory creates");
+        let path = directory.path().join("arcl.db");
+        let reader = Database::open(&path).expect("reader opens");
+        let writer = rusqlite::Connection::open(&path).expect("writer opens");
+        writer.busy_timeout(std::time::Duration::ZERO).expect("timeout sets");
+        writer
+            .execute_batch("CREATE TABLE probe (value INTEGER)")
+            .expect("probe table creates");
+        let count = |database: &Database| -> Result<i64, StorageError> {
+            Ok(database
+                .connection
+                .query_row("SELECT count(*) FROM probe", [], |row| row.get(0))?)
+        };
+
+        let (first, second) = reader
+            .read_snapshot(|database| {
+                let first = count(database)?;
+                // Under the snapshot the insert either waits on the reader and
+                // fails, or commits where the reader cannot see it.
+                let _ = writer.execute("INSERT INTO probe (value) VALUES (1)", []);
+                Ok((first, count(database)?))
+            })
+            .expect("snapshot reads");
+        assert_eq!(first, second);
+        writer
+            .execute("INSERT INTO probe (value) VALUES (2)", [])
+            .expect("insert after the snapshot commits");
+        assert!(count(&reader).expect("count reads") > second);
     }
 
     #[test]

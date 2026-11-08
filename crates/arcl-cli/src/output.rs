@@ -21,7 +21,9 @@ use arcl_store::{
     PlanningWork,
 };
 
-pub use arcl_repo::prime::{PRIME_LIST_LIMIT, PRIME_MAX_BYTES, PRIME_MAX_LINES, PrimeList, PrimeTask, Primer};
+pub use arcl_repo::prime::{
+    PRIME_LIST_LIMIT, PRIME_MAX_BYTES, PRIME_MAX_LINES, PrimeList, PrimeSetup, PrimeTask, Primer,
+};
 pub use arcl_store::{TREE_SECTIONS, TreeStatus, tree_section};
 pub use roadmap::{
     Roadmap, RoadmapItem, RoadmapPlan, RoadmapProgress, RoadmapSpec, RoadmapState, RoadmapTasks, escape_markdown,
@@ -1616,18 +1618,6 @@ pub struct SetupReport {
     /// What the agent needs before it reads the files, such as trusting the
     /// project.
     pub notes: Vec<&'static str>,
-}
-
-/// What `arcl prime` prints where the directory is not in an initialized
-/// project, so a session-start hook succeeds in a fresh clone.
-#[derive(Debug, Serialize)]
-pub struct PrimeSetup {
-    /// Always false; [`Primer`] carries true.
-    pub initialized: bool,
-    /// The project directory, or the current directory outside any project.
-    pub root: String,
-    /// The line human output prints, which says to run `arcl init`.
-    pub message: String,
 }
 
 /// The manifest `web export` writes beside the documents, and reads back on

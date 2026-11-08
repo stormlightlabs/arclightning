@@ -16,7 +16,8 @@ pub mod workspace;
 /// in [`workspace`] and Git inspection in [`vcs`].
 pub mod prelude {
     pub use crate::prime::{
-        PRIME_LIST_LIMIT, PRIME_LOCK_WAIT, PRIME_MAX_BYTES, PRIME_MAX_LINES, PrimeList, PrimeTask, Primer,
+        PRIME_HANDOFF_BYTES, PRIME_LIST_LIMIT, PRIME_LOCK_WAIT, PRIME_MAX_BYTES, PRIME_MAX_LINES, PRIME_TITLE_BYTES,
+        PRIME_TRUNCATED, Prime, PrimeList, PrimeSetup, PrimeTask, Primer,
     };
     pub use crate::project::{
         ARCL_DIRECTORY, CONFIG_FILE, DATABASE_FILE, LockWait, LockedWorkspace, ProjectDir, ProjectError, SyncBefore,

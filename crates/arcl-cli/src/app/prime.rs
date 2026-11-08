@@ -11,10 +11,9 @@ use super::*;
 pub(super) fn read_prime(renderer: &Renderer) -> anyhow::Result<Option<String>> {
     let database = match open_database() {
         Ok(database) => database,
-        Err(CommandError::Project(ProjectError::NotInitialized { root, workspace })) => {
-            let display = root.display().to_string();
-            let message = ProjectError::NotInitialized { root, workspace }.to_string();
-            let setup = PrimeSetup { initialized: false, root: display, message };
+        Err(CommandError::Project(error @ ProjectError::NotInitialized { .. })) => {
+            let setup = PrimeSetup::from_error(error)
+                .map_err(|error| ApplicationError::from_command(CommandError::Project(error)))?;
             return Ok(renderer.render_prime_not_initialized(&setup)?);
         }
         Err(error) => return Err(ApplicationError::from_command(error).into()),

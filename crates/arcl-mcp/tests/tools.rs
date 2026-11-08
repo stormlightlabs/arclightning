@@ -18,7 +18,9 @@ use arcl_core::prelude::*;
 use arcl_mcp::{error::ToolError, server::ArclServer, tools::*};
 // The MCP input enum, which the store prelude's `OpenSubtasks` would otherwise make ambiguous.
 use arcl_mcp::tools::OpenSubtasks;
-use arcl_repo::prelude::{PRIME_LIST_LIMIT, PRIME_LOCK_WAIT, PRIME_MAX_BYTES, PRIME_MAX_LINES, Primer};
+use arcl_repo::prelude::{
+    PRIME_LIST_LIMIT, PRIME_LOCK_WAIT, PRIME_MAX_BYTES, PRIME_MAX_LINES, Prime, PrimeSetup, Primer, ProjectError,
+};
 use arcl_repo::workspace::{ProjectConfig, WorkspaceManifest, encode_manifest};
 use arcl_store::prelude::*;
 
@@ -1982,7 +1984,7 @@ async fn prime_returns_what_arcl_prime_json_prints() {
         .collect::<Vec<_>>();
     assert!(errors.is_empty(), "{errors:?}");
 
-    let data = &primed.data;
+    let data = primer(&primed.data);
     assert_eq!((data.open.tasks.len(), data.open.more), (PRIME_LIST_LIMIT, 2));
     assert_eq!((data.ready.tasks.len(), data.ready.more), (PRIME_LIST_LIMIT, 2));
     assert_eq!(data.open.tasks[0].open_gates, 1);
@@ -2015,7 +2017,7 @@ async fn prime_reads_unsynced_when_the_sync_lock_stays_held() {
         .await
         .expect("prime reads past a held lock")
         .0;
-    assert_eq!(primed.data.ready.tasks[0].id, id);
+    assert_eq!(primer(&primed.data).ready.tasks[0].id, id);
     assert_eq!(primed.warnings.len(), 1);
     let warning = to_json(&primed.warnings[0]);
     assert_eq!(warning["code"], json!("workspace_sync"));
@@ -2136,4 +2138,59 @@ async fn prime_refuses_arguments() {
         .err()
         .expect("prime takes no arguments");
     assert_eq!((refused.code(), refused.exit_code()), ("invalid_request", 3));
+}
+
+#[tokio::test]
+async fn prime_returns_the_setup_step_where_arcl_init_has_not_run() {
+    // A project with a configuration and no database, then a directory in
+    // no project at all.
+    let project = project(false);
+    fs::remove_file(project.path().join(".arcl/arcl.db")).expect("remove database");
+    let empty = TempDir::new().expect("temp dir");
+    for root in [project.path(), empty.path()] {
+        let server = ArclServer::new(root.to_owned());
+        let primed = server
+            .prime(Parameters::from(PrimeInput::default()), CancellationToken::new())
+            .await
+            .expect("prime succeeds without a project")
+            .0;
+        assert!(primed.warnings.is_empty(), "{:?}", primed.warnings);
+        let json = to_json(&primed);
+        assert_eq!(json["data"]["initialized"], json!(false), "{json}");
+        assert_eq!(json["data"]["root"], json!(root.display().to_string()), "{json}");
+        assert!(
+            json["data"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("arcl init")),
+            "{json}"
+        );
+
+        // `arcl --json prime` prints the same envelope there.
+        let error = ProjectError::NotInitialized { root: root.to_owned(), workspace: None };
+        let setup = PrimeSetup::from_error(error).expect("setup builds");
+        let cli = Renderer::new(OutputMode::Json, ColorChoice::Never)
+            .render_prime_not_initialized(&setup)
+            .expect("render")
+            .expect("JSON output");
+        let cli: Value = serde_json::from_str(&cli).expect("CLI JSON");
+        assert_eq!(json, cli);
+
+        let tools = server.tools();
+        let tool = tools.iter().find(|tool| tool.name == "prime").expect("prime is listed");
+        let schema = Value::Object((**tool.output_schema.as_ref().expect("output schema")).clone());
+        let validator = jsonschema::validator_for(&schema).expect("output schema compiles");
+        let errors = validator
+            .iter_errors(&json)
+            .map(|error| error.to_string())
+            .collect::<Vec<_>>();
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+}
+
+/// The primer in a `prime` result from an initialized project.
+fn primer(prime: &Prime) -> &Primer {
+    match prime {
+        Prime::Primer(primer) => primer,
+        Prime::Setup(setup) => panic!("no primer: {}", setup.message),
+    }
 }

@@ -555,8 +555,10 @@ An open task with open gates shows their count after its assignee, as
 `--plain` prints the same text with full IDs. `--json` returns `initialized`
 as `true`, `loop`, the loop as Markdown, and `open` and `ready`, each with
 `tasks` and `more`. Each task has `id`, `title`, `status`, `priority`,
-`assignee` when set, the full `handoff`, all unescaped, and `open_gates` when
-it has any.
+`assignee` when set, `handoff`, all unescaped, and `open_gates` when it has
+any. JSON keeps up to 200 bytes of a title and 400 of a handoff; a longer
+field is cut there and ends with `… [truncated]`, so the envelope stays near
+10 KiB. `arcl context <id>` shows the full handoff.
 
 Outside an initialized project, or where `.arcl/arcl.db` is missing, `prime`
 prints the one-line message other commands fail with there, which says to run

@@ -7,7 +7,7 @@
 //! returns version 2 for a task and 1 for any other record, as the CLI does.
 
 use std::cell::OnceCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use rmcp::{
@@ -19,7 +19,7 @@ use rmcp::{
 use tokio_util::sync::CancellationToken;
 
 use arcl_core::prelude::*;
-use arcl_repo::prelude::{Primer, Warning};
+use arcl_repo::prelude::{Prime, Warning};
 use arcl_store::prelude::*;
 
 use crate::error::ToolError;
@@ -104,11 +104,25 @@ impl ArclServer {
         T: Send + 'static,
         F: FnOnce(&mut Database) -> Result<T, ToolError> + Send + 'static,
     {
+        self.spawn(cancelled, move |start, lock_wait, token| {
+            project::run(start, access, lock_wait, token, operation)
+        })
+        .await
+    }
+
+    /// Run `task` on a blocking thread with the server's directory and lock
+    /// wait. `task`'s token fires when the client cancels the request or this
+    /// future is dropped.
+    async fn spawn<T, F>(&self, cancelled: CancellationToken, task: F) -> Result<(T, Vec<Warning>), ToolError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Path, Duration, &CancellationToken) -> Result<(T, Vec<Warning>), ToolError> + Send + 'static,
+    {
         let start = self.start.clone();
         let lock_wait = self.lock_wait;
         let token = cancelled.child_token();
         let _cancel_on_drop = token.clone().drop_guard();
-        tokio::task::spawn_blocking(move || project::run(&start, access, lock_wait, &token, operation))
+        tokio::task::spawn_blocking(move || task(&start, lock_wait, &token))
             .await
             .map_err(|error| ToolError::new(1, format!("the tool call stopped: {error}")))?
     }
@@ -128,12 +142,10 @@ impl ArclServer {
     )]
     pub async fn prime(
         &self, Parameters(input): Parameters<PrimeInput>, cancelled: CancellationToken,
-    ) -> Result<Json<Envelope<Primer>>, ToolError> {
+    ) -> Result<Json<Envelope<Prime>>, ToolError> {
         input?;
-        self.call(Access::Prime, FORMAT_VERSION, cancelled, |database| {
-            Ok(Primer::read(database, &ShortIds::default())?)
-        })
-        .await
+        let (data, warnings) = self.spawn(cancelled, project::prime).await?;
+        Ok(Json(Envelope { format_version: FORMAT_VERSION, data, warnings }))
     }
 
     /// Show one record by ID, like `arcl show`.
