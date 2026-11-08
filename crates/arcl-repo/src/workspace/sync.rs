@@ -120,6 +120,24 @@ impl WorkspaceSyncError {
         }
     }
 
+    /// Whether this failure is workspace content arcl cannot read or accept,
+    /// as [`WorkspaceImportError::is_invalid_content`] lists, including a
+    /// newer workspace format. A removed file, a path with nothing to
+    /// resolve, a divergence, an unmerged file, and export or storage
+    /// failures are not.
+    pub fn is_invalid_content(&self) -> bool {
+        match self {
+            Self::Import(error) => error.is_invalid_content(),
+            Self::Export(WorkspaceExportError::NewerWorkspace { .. }) => true,
+            Self::Unmerged { .. }
+            | Self::Divergent { .. }
+            | Self::NothingToResolve { .. }
+            | Self::Removed { .. }
+            | Self::Export(_)
+            | Self::Storage(_) => false,
+        }
+    }
+
     /// The hint to add when this failure stops a change: `arcl workspace
     /// resolve` only for files the database and the workspace changed
     /// differently, which it settles, and empty otherwise. A file removed from

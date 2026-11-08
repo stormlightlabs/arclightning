@@ -156,19 +156,27 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
 }
 
 /// Fail `arcl check` because the workspace did not sync, without running
-/// the database checks. When the sync stopped on workspace content arcl
-/// cannot read or accept, which exits 3, the check prints a failing report
-/// whose one error is the sync `error`, and fails with the code
-/// `workspace_invalid`. Any other failure, such as a divergence or a
-/// database arcl cannot open, fails with that error's own exit code, JSON
-/// code and message, and prints no report.
+/// the database checks.
+///
+/// When the sync stopped on workspace content arcl cannot read or accept, as
+/// [`WorkspaceSyncError::is_invalid_content`] lists (a missing or broken
+/// manifest, a stray entry or bad file name, an entry of the wrong type, a
+/// file that is not UTF-8 or does not parse, a field or relationship the
+/// merged graph refuses, or a newer workspace format), the check prints a
+/// failing report whose one error is the sync error and fails with exit 3
+/// and the code `workspace_invalid`. Any other failure, such as a file
+/// removed from the workspace, a divergence or a database arcl cannot open,
+/// fails with that error's own exit code, JSON code and message, and prints
+/// no report.
 fn fail_unsynced_check(error: CommandError, renderer: &Renderer) -> anyhow::Result<()> {
     let error = match error {
-        CommandError::WorkspaceSync(error) if error.exit_code() == 3 => {
-            let error = CommandError::WorkspaceSync(error);
-            let report = CheckReport { valid: false, errors: vec![format!("the workspace did not sync: {error}")] };
-            write_output(renderer.render_check(&report)?)?;
-            return Err(ApplicationError::workspace_invalid(&error).into());
+        CommandError::WorkspaceSync(error) if error.is_invalid_content() => {
+            let detail = format!("the workspace did not sync: {error}");
+            let report = CheckReport { valid: false, errors: vec![detail.clone()] };
+            let rendered = renderer.render_check(&report)?;
+            let reported = rendered.is_some();
+            write_output(rendered)?;
+            return Err(ApplicationError::workspace_invalid(detail, reported).into());
         }
         CommandError::WorkspaceSync(error) => CommandError::CheckSync(error),
         other => other,

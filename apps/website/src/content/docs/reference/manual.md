@@ -416,12 +416,23 @@ and when it was created. Plain output prints the gate's `gate` line, then
 | `arcl prime`                                                         | Print the agent loop, open work, and the first ready tasks.        |
 
 `check` syncs the workspace first. When the sync fails, `check` fails and
-skips the database checks. A workspace file arcl cannot read, such as one that
-does not parse, fails it with exit `3`: the report has `valid: false` and the
-sync error as its one entry in `errors`, and under `--json` the error on stderr
-has the code `workspace_invalid`. Other sync failures, such as files the
-database and the workspace changed differently, keep their usual exit code and
-error code, and print no report. Other commands that only read records warn and
+skips the database checks. Workspace content arcl cannot read or accept fails
+it with exit `3`:
+
+- a missing or broken `manifest.toml`;
+- a stray entry or a bad file name;
+- an entry of the wrong type;
+- a file that is not UTF-8 or does not parse;
+- a field or relationship the merged graph refuses;
+- a newer workspace format.
+
+The report then has `valid: false` and the sync error as its one entry in
+`errors`. Human output ends with a short error that points at the report.
+Under `--json`, the error on stderr has the code `workspace_invalid` and the
+full sync error. Other sync failures keep their usual exit code, error code and
+message, and print no report. These include a file removed from one side, for
+example by a branch switch (exit `3`), and files the database and the workspace
+changed differently (exit `4`). Other commands that only read records warn and
 still run.
 
 `list` accepts `--kind`, `--status`, `--priority`, `--release`, `--epic`,
