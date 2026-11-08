@@ -226,7 +226,8 @@ pub struct RecordTreeNode {
 }
 
 /// The records `filter` matches, sorted by kind, then ID. A filter that names
-/// a missing record fails with its not-found error.
+/// a missing record fails with its not-found error. Notes have no stored
+/// status, so a status filter leaves them out.
 pub fn list_records(graph: &ConnectedGraph, filter: &RecordFilter) -> Result<Vec<RecordSummary>> {
     filter.validate()?;
     validate_list_targets(graph, filter)?;
@@ -347,6 +348,7 @@ pub fn list_records(graph: &ConnectedGraph, filter: &RecordFilter) -> Result<Vec
     }
     for note in &graph.notes {
         if filter.kind.as_deref().is_none_or(|kind| kind == "note")
+            && filter.statuses.is_empty()
             && filter.spec_id.is_none()
             && filter.plan_id.is_none()
             && filter.phase_id.is_none()

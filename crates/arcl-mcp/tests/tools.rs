@@ -470,6 +470,14 @@ async fn list_filters_by_ancestry_release_and_priority_like_the_cli() {
             ListInput { priority: vec![TaskPriority::Critical, TaskPriority::High], ..ListInput::default() },
             vec![high, loose],
         ),
+        (
+            ListInput { status: vec![RecordStatus::Pending], ..ListInput::default() },
+            vec![high, low, child, loose],
+        ),
+        (
+            ListInput { status: vec![RecordStatus::Open], ..ListInput::default() },
+            vec![release, spec, plan, first, second],
+        ),
     ];
     for (input, expected) in cases {
         let described = format!("{input:?}");

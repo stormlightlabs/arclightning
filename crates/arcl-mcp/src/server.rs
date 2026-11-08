@@ -781,7 +781,7 @@ fn record_id<T: PrefixedId>(database: &Database, input: &str) -> Result<T, ToolE
 fn list_records(database: &mut Database, input: ListInput) -> Result<ListData, ToolError> {
     let limit = page_limit(input.limit)?;
     let after = input.cursor.as_deref().map(list_cursor).transpose()?;
-    let records = Records::default();
+    let refs = Records::default();
     let filter = RecordFilterArgs {
         kind: input.kind.map(|kind| kind.as_str().to_owned()),
         statuses: input.status.iter().map(|status| status.as_str().to_owned()).collect(),
@@ -798,7 +798,7 @@ fn list_records(database: &mut Database, input: ListInput) -> Result<ListData, T
         assignee: None,
         all: input.all,
     }
-    .resolve(|value, prefix| records.resolve(database, value, prefix))?;
+    .resolve(|value, prefix| refs.resolve(database, value, prefix))?;
     let mut records = database
         .list_records(&filter)?
         .into_iter()

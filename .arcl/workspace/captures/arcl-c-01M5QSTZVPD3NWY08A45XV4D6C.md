@@ -7,4 +7,4 @@ created-at = "2026-10-24T20:32:35.190Z"
 
 The MCP `list` tool filters by kind and status only. `arcl list` also takes --spec, --plan, --phase, --parent, --release and --priority, with ancestry logic that lives in crates/arcl-cli/src/app/query.rs. Move that filter into the shared layer and expose it on the tool. Found in T10.3.
 
-Fixed in this PR: `arcl_store::RecordFilterArgs::resolve` builds the record filter for both `arcl list` and the MCP `list` tool, which now takes `priority`, `release`, `spec`, `plan`, `phase` and `parent`.
+Fixed in #93: `arcl_store::RecordFilterArgs::resolve` builds the record filter for both `arcl list` and the MCP `list` tool, which now takes `priority`, `release`, `spec`, `plan`, `phase` and `parent`.

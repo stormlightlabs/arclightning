@@ -10,11 +10,7 @@ use arcl_core::domain::*;
 use arcl_repo::prelude::*;
 use arcl_repo::vcs::{GixVcs, Vcs, VcsError};
 use arcl_repo::workspace::*;
-use arcl_store::{
-    CaptureTaskPromotion, CaptureUpdate, CheckReport, Database, NoteUpdate, PhaseUpdate, PlanUpdate,
-    PlanningReadyFilter, PlanningTaskCreate, PlanningTaskUpdate, RecordFilterArgs, RecordTreeNode, SpecUpdate,
-    StorageError,
-};
+use arcl_store::prelude::*;
 
 use crate::{cli::*, output::*};
 
