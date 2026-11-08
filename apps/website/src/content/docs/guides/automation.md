@@ -115,8 +115,10 @@ work in its context. The [manual](/reference/manual/#inspection) describes the
 output.
 
 `arcl setup claude`, `arcl setup codex` and `arcl setup pi` write the skill,
-the instruction lines and the hook below in one step. The
-[manual](/reference/manual/#arcl-setup) lists what each writes.
+the instruction lines and the hook below in one step. For any other agent,
+`arcl setup` writes the skill to `.agents/skills/` and the lines to
+`AGENTS.md`, with no hook; have the agent run `arcl prime` when a session
+starts. The [manual](/reference/manual/#arcl-setup) lists what each writes.
 
 The hooks below run `arcl prime` only when `arcl` is installed, so a teammate
 without it starts a session with no hook error. In a directory with no

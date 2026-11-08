@@ -115,9 +115,12 @@ is reported as `unchanged`.
 ### `arcl setup`
 
 Write the files a coding agent needs to use arcl: the skill, the arcl lines in
-its instruction file, and a hook that runs `arcl prime` when a session starts.
+its instruction file, and, where the agent can run one, a hook that runs
+`arcl prime` when a session starts. With no agent named, `arcl setup` runs
+`arcl setup other`.
 
 ```sh
+arcl setup
 arcl setup claude
 arcl setup codex --dry-run
 arcl setup pi --yes
@@ -128,15 +131,25 @@ arcl setup pi --yes
 | `claude` | `CLAUDE.md`      | `SessionStart` command in `.claude/settings.json`           |
 | `codex`  | `AGENTS.md`      | `SessionStart` command in `.codex/hooks.json`               |
 | `pi`     | `AGENTS.md`      | `session_start` extension in `.pi/extensions/arcl-prime.ts` |
+| `other`  | `AGENTS.md`      | None                                                        |
 
-Every agent gets the skill as `arcl skill install` writes it. The instruction
+Every agent gets the skill as `arcl skill install` writes it, in
+`.claude/skills/` and `.agents/skills/`. `other` is for agents that read
+`AGENTS.md` and `.agents/skills/`; it writes no hook, so have the agent run
+`arcl prime` when a session starts. The instruction
 lines sit between `<!-- arcl-setup:begin -->` and `<!-- arcl-setup:end -->`,
 each on a line of its own. A marker inside a line of text does not count. A
 later run replaces that block and leaves the rest of the file alone. The hooks
 run `if command -v arcl >/dev/null; then arcl prime; fi`. A settings file
 whose `SessionStart` hooks already run exactly that command, with no matcher
 or a matcher that covers `startup`, is left as it is. Otherwise the hook is
-added and every other byte of the file stays as it was. Pi has no command hooks, so it gets an extension that runs
+added and every other byte of the file stays as it was, apart from the line
+breaks a one-line `hooks` or `SessionStart` container gains to hold it. New
+lines take the file's indentation and line ending, and a new settings file is
+indented by two spaces. Both settings files must be strict JSON: a comment, a
+trailing comma or other JSONC syntax exits with status code `3`, since Claude
+Code and Codex read them as JSON. Pi has no command hooks, so it gets an
+extension that runs
 `arcl prime` on `session_start` and adds the output to the next prompt. A
 symbolic link, such as `CLAUDE.md` pointing at `AGENTS.md`, is followed to its
 file under the project root.
@@ -154,14 +167,15 @@ as a unified diff. Each file is `created`, `updated`, or `unchanged`, and a
 second run reports every file as `unchanged` and writes nothing. `--plain` prints `<status>\t<path>` per file.
 `--json` prints `action` (`applied`, or `planned` under `--dry-run`), `agent`,
 `agent_name`, `root`, `notes`, and a `files` array of `path`, `status` and,
-under `--dry-run`, `diff`. A settings file that is not a JSON object or
+under `--dry-run`, `diff`. A settings file that is not strict JSON, is not a JSON object, or
 repeats a key on the path to the hook, such as two `hooks` keys, exits with
 status code `3`. So does an instruction file with a begin marker and no end
 marker, or with two begin markers.
 
 Codex runs project hooks only in a trusted project, after you trust the hook
 in `/hooks`. Pi loads `.pi/extensions/` and `.agents/skills/` only after you
-trust the project. The command prints these as notes.
+trust the project. `other` notes that it wrote no start-up hook. The command
+prints these as notes.
 
 ## Workspace
 

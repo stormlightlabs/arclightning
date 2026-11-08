@@ -52,6 +52,9 @@ pub enum SetupAgent {
     Codex,
     /// Pi: `AGENTS.md` and an extension in `.pi/extensions/`.
     Pi,
+    /// Any other agent: `AGENTS.md` and the skill in `.agents/skills/`, with
+    /// no hook.
+    Other,
 }
 
 /// Arc Lightning commands.
@@ -109,10 +112,12 @@ pub enum Command {
         command: SkillCommand,
     },
     /// Set up a coding agent: the skill, the arcl lines in its instruction
-    /// file, and a session-start hook that runs `arcl prime`.
+    /// file, and for Claude Code, Codex and Pi a session-start hook that runs
+    /// `arcl prime`.
     Setup {
-        /// The agent to set up.
-        #[arg(value_enum)]
+        /// The agent to set up. `other` writes `AGENTS.md` and the skill with
+        /// no hook.
+        #[arg(value_enum, default_value_t = SetupAgent::Other)]
         agent: SetupAgent,
         /// Change existing files without asking.
         #[arg(long)]

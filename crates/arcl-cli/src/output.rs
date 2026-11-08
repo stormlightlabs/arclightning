@@ -1253,7 +1253,7 @@ impl Renderer {
                     .collect::<Vec<_>>();
                 let (name, root) = (report.agent_name, &report.root);
                 let heading = match (report.action, changed.is_empty()) {
-                    (_, true) => format!("{name} is already set up in `{root}`."),
+                    (_, true) => format!("Already set up for {name} in `{root}`."),
                     (SetupAction::Applied, false) => format!("Set up {name} in `{root}`:"),
                     (SetupAction::Planned, false) => {
                         format!("Setting up {name} in `{root}` would change these files (dry run, nothing written):")
@@ -1559,13 +1559,15 @@ pub struct SetupFile {
 pub struct SetupReport {
     /// `applied`, or `planned` under `--dry-run`.
     pub action: SetupAction,
-    /// The agent name as the command takes it: `claude`, `codex` or `pi`.
+    /// The agent name as the command takes it: `claude`, `codex`, `pi` or
+    /// `other`.
     pub agent: &'static str,
     /// The agent's display name, such as `Claude Code`.
     pub agent_name: &'static str,
     /// The project root the paths are relative to.
     pub root: String,
-    /// The skill files, then the instruction file, then the hook file.
+    /// The skill files, then the instruction file, then the hook file when
+    /// the agent has one.
     pub files: Vec<SetupFile>,
     /// What the agent needs before it reads the files, such as trusting the
     /// project.

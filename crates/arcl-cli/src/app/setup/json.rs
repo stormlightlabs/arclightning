@@ -1,345 +1,192 @@
-//! JSON editing for `arcl setup` that keeps a settings file's own text.
+//! The `SessionStart` hook `arcl setup` adds to a JSON settings file.
 //!
-//! [`parse`] records where each value sits in the source, and [`insert_last`]
-//! adds one value to an object or array by splicing new text in. Every byte
-//! outside the insertion is copied as it was, so numbers, key order, escapes
-//! and spacing in keys `setup` never touches survive a rewrite exactly.
-//! [`Json`] builds the new value.
+//! `jsonc-parser`'s concrete syntax tree holds every byte of the file, so an
+//! insert changes only the containers on the path to the hook. Numbers, key
+//! order, escapes and spacing elsewhere survive a rewrite exactly. New text
+//! takes the file's indentation and line ending.
+//!
+//! `.claude/settings.json` and `.codex/hooks.json` are strict JSON, so
+//! comments, trailing commas and other JSONC syntax are refused rather than
+//! kept: Claude Code and Codex would fail to read the result.
 
-use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
+use jsonc_parser::ParseOptions;
+use jsonc_parser::cst::{CstArray, CstInputValue, CstNode, CstObject, CstRootNode};
 
-/// A value `setup` adds to a settings file. Objects keep their entries in
-/// the order given.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Json {
-    String(String),
-    Array(Vec<Json>),
-    Object(Vec<(String, Json)>),
-}
+use super::*;
 
-impl Json {
-    /// The value as compact JSON, or as pretty JSON indented by `unit`.
-    pub(crate) fn render(&self, unit: Option<&str>) -> String {
-        let mut out = Vec::new();
-        let written = match unit {
-            Some(unit) => {
-                let formatter = serde_json::ser::PrettyFormatter::with_indent(unit.as_bytes());
-                self.serialize(&mut serde_json::Serializer::with_formatter(&mut out, formatter))
-            }
-            None => self.serialize(&mut serde_json::Serializer::new(&mut out)),
-        };
-        // Strings, arrays and objects of strings always serialize.
-        written.expect("a setup value serializes");
-        String::from_utf8(out).expect("serde_json writes UTF-8")
+/// The settings file with a `SessionStart` hook that runs [`HOOK_COMMAND`],
+/// unless [`has_hook`] finds one. An empty or missing file becomes a new
+/// object with two-space indentation. A repeated key on the path to the hook
+/// is an error: JSON readers keep the last one, and the hook could land in a
+/// copy the agent ignores.
+pub(super) fn with_hook(before: Option<&str>, matcher: Option<&str>, path: &Path) -> CResult<String> {
+    let invalid = |message: String| CommandError::InvalidSetupJson { path: path.to_owned(), message };
+    let text = before.unwrap_or("");
+    let mut entry = Vec::new();
+    if let Some(matcher) = matcher {
+        entry.push(("matcher".to_owned(), CstInputValue::String(matcher.to_owned())));
     }
-}
+    let command = CstInputValue::Object(vec![
+        ("type".to_owned(), CstInputValue::String("command".to_owned())),
+        ("command".to_owned(), CstInputValue::String(HOOK_COMMAND.to_owned())),
+    ]);
+    entry.push(("hooks".to_owned(), CstInputValue::Array(vec![command])));
+    let entry = CstInputValue::Object(entry);
+    let session_start = || {
+        CstInputValue::Object(vec![(
+            "SessionStart".to_owned(),
+            CstInputValue::Array(vec![entry.clone()]),
+        )])
+    };
 
-impl Serialize for Json {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        match self {
-            Self::String(value) => serializer.serialize_str(value),
-            Self::Array(values) => {
-                let mut seq = serializer.serialize_seq(Some(values.len()))?;
-                for value in values {
-                    seq.serialize_element(value)?;
-                }
-                seq.end()
-            }
-            Self::Object(entries) => {
-                let mut map = serializer.serialize_map(Some(entries.len()))?;
-                for (key, value) in entries {
-                    map.serialize_entry(key, value)?;
-                }
-                map.end()
-            }
-        }
+    if text.trim().is_empty() {
+        let root = parse("").map_err(invalid)?;
+        root.set_value(CstInputValue::Object(vec![("hooks".to_owned(), session_start())]));
+        return Ok(root.to_string());
     }
-}
-
-/// One value in a parsed file, with the byte range of its source text.
-#[derive(Debug)]
-pub(crate) struct Node {
-    /// The offset of the value's first byte.
-    pub(crate) start: usize,
-    /// The offset just past the value's last byte.
-    pub(crate) end: usize,
-    pub(crate) value: Value,
-}
-
-impl Node {
-    /// The value under `key`, when this is an object that has one. With a
-    /// repeated key this is the first, so callers check
-    /// [`Node::duplicate_key`] before relying on it.
-    pub(crate) fn get(&self, key: &str) -> Option<&Node> {
-        match &self.value {
-            Value::Object(members) => members
-                .iter()
-                .find(|member| member.key == key)
-                .map(|member| &member.value),
-            _ => None,
-        }
-    }
-
-    /// The first key that appears more than once, when this is an object.
-    pub(crate) fn duplicate_key(&self) -> Option<&str> {
-        let Value::Object(members) = &self.value else {
-            return None;
-        };
-        members
+    let root = parse(text).map_err(invalid)?;
+    let Some(settings) = root.object_value() else {
+        let kind = root.value().map_or("nothing", |value| kind(&value));
+        return Err(invalid(format!("the file holds {kind}, not an object")));
+    };
+    unique_keys(&settings, "", path)?;
+    let Some(hooks) = settings.get("hooks").and_then(|prop| prop.value()) else {
+        settings.ensure_multiline();
+        settings.append("hooks", session_start());
+        return Ok(root.to_string());
+    };
+    let Some(hooks) = hooks.as_object() else {
+        return Err(invalid(format!("`hooks` is {}, not an object", kind(&hooks))));
+    };
+    unique_keys(&hooks, "hooks.", path)?;
+    let Some(events) = hooks.get("SessionStart").and_then(|prop| prop.value()) else {
+        settings.ensure_multiline();
+        hooks.ensure_multiline();
+        hooks.append("SessionStart", CstInputValue::Array(vec![entry]));
+        return Ok(root.to_string());
+    };
+    let Some(events) = events.as_array() else {
+        return Err(invalid(format!(
+            "`hooks.SessionStart` is {}, not an array",
+            kind(&events)
+        )));
+    };
+    let entries = events.elements();
+    for (index, existing) in entries.iter().filter_map(CstNode::as_object).enumerate() {
+        let prefix = format!("hooks.SessionStart[{index}].");
+        unique_keys(&existing, &prefix, path)?;
+        for (inner, hook) in array(&existing, "hooks")
             .iter()
+            .filter_map(CstNode::as_object)
             .enumerate()
-            .find(|(index, member)| members[..*index].iter().any(|earlier| earlier.key == member.key))
-            .map(|(_, member)| member.key.as_str())
-    }
-
-    /// The string, when this is one.
-    pub(crate) fn as_str(&self) -> Option<&str> {
-        match &self.value {
-            Value::String(value) => Some(value),
-            _ => None,
+        {
+            unique_keys(&hook, &format!("{prefix}hooks[{inner}]."), path)?;
         }
     }
-
-    /// The elements, when this is an array.
-    pub(crate) fn as_array(&self) -> Option<&[Node]> {
-        match &self.value {
-            Value::Array(values) => Some(values),
-            _ => None,
-        }
+    if has_hook(&entries) {
+        return Ok(text.to_owned());
     }
+    settings.ensure_multiline();
+    hooks.ensure_multiline();
+    events.ensure_multiline();
+    events.append(entry);
+    Ok(root.to_string())
+}
 
-    /// A short name for the value's type, for error messages.
-    pub(crate) const fn kind(&self) -> &'static str {
-        match self.value {
-            Value::Scalar => "a number, boolean or null",
-            Value::String(_) => "a string",
-            Value::Array(_) => "an array",
-            Value::Object(_) => "an object",
-        }
+/// `text` as a syntax tree, after serde_json accepts it as strict JSON.
+/// serde_json refuses what `jsonc-parser` would let through, such as
+/// comments, trailing commas, control characters in strings and whitespace
+/// outside JSON's four, and it reports the line and column. It also bounds
+/// the nesting depth before `jsonc-parser`'s recursive parser walks it.
+fn parse(text: &str) -> Result<CstRootNode, String> {
+    if !text.is_empty() {
+        serde_json::from_str::<serde::de::IgnoredAny>(text).map_err(|error| error.to_string())?;
     }
-}
-
-/// What a [`Node`] holds. Numbers, booleans and null stay as source text.
-#[derive(Debug)]
-pub(crate) enum Value {
-    Scalar,
-    String(String),
-    Array(Vec<Node>),
-    Object(Vec<Member>),
-}
-
-/// One `"key": value` pair in an object.
-#[derive(Debug)]
-pub(crate) struct Member {
-    /// The offset of the key's opening quote.
-    pub(crate) key_start: usize,
-    pub(crate) key: String,
-    pub(crate) value: Node,
-}
-
-/// Parse `text` as one JSON value, keeping where each value sits.
-pub(crate) fn parse(text: &str) -> Result<Node, String> {
-    // serde_json reports syntax errors with a line and column, and bounds the
-    // nesting depth the recursive parser below then walks.
-    serde_json::from_str::<serde::de::IgnoredAny>(text).map_err(|error| error.to_string())?;
-    let mut parser = Parser { text, pos: 0 };
-    let node = parser.value()?;
-    parser.skip_whitespace();
-    if parser.pos == text.len() { Ok(node) } else { Err(parser.unexpected()) }
-}
-
-/// `text` with `value` added as the last entry of `container`, an object
-/// (`key` is `Some`) or an array (`key` is `None`). The new text follows the
-/// container's layout: compact when the file is one line or the container
-/// has entries on one line, otherwise one entry per line, indented like its
-/// siblings or by `unit` past the container's own line.
-pub(crate) fn insert_last(text: &str, container: &Node, key: Option<&str>, value: &Json, unit: &str) -> String {
-    let eol = line_ending(text);
-    let entry = |rendered: String| match key {
-        Some(key) => format!("{}: {rendered}", Json::String(key.to_owned()).render(None)),
-        None => rendered,
+    let strict = ParseOptions {
+        allow_comments: false,
+        allow_loose_object_property_names: false,
+        allow_trailing_commas: false,
+        allow_missing_commas: false,
+        allow_single_quoted_strings: false,
+        allow_hexadecimal_numbers: false,
+        allow_unary_plus_numbers: false,
+        allow_bare_decimal_point_numbers: false,
+        allow_non_finite_numbers: false,
+        allow_extended_string_escapes: false,
     };
-    let last = match &container.value {
-        Value::Object(members) => members.last().map(|member| (member.key_start, member.value.end)),
-        Value::Array(values) => values.last().map(|value| (value.start, value.end)),
-        _ => None,
-    };
-    let source = &text[container.start..container.end];
-    let compact = !text.trim().contains('\n') || (last.is_some() && !source.contains('\n'));
-    if compact {
-        let entry = entry(value.render(None));
-        return match last {
-            Some((_, end)) => format!("{}, {entry}{}", &text[..end], &text[end..]),
-            None => format!("{}{entry}{}", &text[..=container.start], &text[container.end - 1..]),
-        };
-    }
-    let pretty = |indent: &str| {
-        entry(value.render(Some(unit)))
-            .split('\n')
-            .collect::<Vec<_>>()
-            .join(&format!("{eol}{indent}"))
-    };
-    match last {
-        Some((start, end)) => {
-            let indent = line_indent(text, start);
-            format!("{},{eol}{indent}{}{}", &text[..end], pretty(indent), &text[end..])
+    CstRootNode::parse(text, &strict).map_err(|error| error.to_string())
+}
+
+/// Fail when `object` has a key more than once. `prefix` is the path to
+/// `object`, for the message.
+fn unique_keys(object: &CstObject, prefix: &str, path: &Path) -> CResult<()> {
+    let names = object
+        .properties()
+        .iter()
+        .filter_map(|prop| prop.decoded_name())
+        .collect::<Vec<_>>();
+    match names
+        .iter()
+        .enumerate()
+        .find(|(index, name)| names[..*index].contains(name))
+    {
+        Some((_, key)) => {
+            Err(CommandError::DuplicateSetupJsonKey { path: path.to_owned(), key: format!("{prefix}{key}") })
         }
-        None => {
-            let base = line_indent(text, container.start);
-            let indent = format!("{base}{unit}");
-            format!(
-                "{}{eol}{indent}{}{eol}{base}{}",
-                &text[..=container.start],
-                pretty(&indent),
-                &text[container.end - 1..]
-            )
-        }
+        None => Ok(()),
     }
 }
 
-/// `"\r\n"` when the first line of `text` ends with it, otherwise `"\n"`.
-pub(crate) fn line_ending(text: &str) -> &'static str {
-    match text.find('\n') {
-        Some(index) if text[..index].ends_with('\r') => "\r\n",
-        _ => "\n",
-    }
+/// Whether a `SessionStart` entry already runs [`HOOK_COMMAND`] when a
+/// session starts: its command is exactly that, and its matcher, if any,
+/// covers `startup`.
+fn has_hook(entries: &[CstNode]) -> bool {
+    entries
+        .iter()
+        .filter_map(CstNode::as_object)
+        .filter(|entry| match entry.get("matcher").and_then(|prop| prop.value()) {
+            None => true,
+            Some(matcher) => string(&matcher).is_some_and(|matcher| covers_startup(&matcher)),
+        })
+        .flat_map(|entry| array(&entry, "hooks"))
+        .filter_map(|hook| hook.as_object()?.get("command")?.value())
+        .filter_map(|command| string(&command))
+        .any(|command| command.trim() == HOOK_COMMAND)
 }
 
-/// The spaces and tabs that open the line holding byte `offset`.
-fn line_indent(text: &str, offset: usize) -> &str {
-    let line_start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
-    let line = &text[line_start..offset];
-    &line[..line.len() - line.trim_start_matches([' ', '\t']).len()]
+/// Whether a `SessionStart` matcher selects sessions that start fresh: an
+/// empty matcher, `*`, or a `|` list that names `startup`.
+fn covers_startup(matcher: &str) -> bool {
+    let matcher = matcher.trim();
+    matcher.is_empty() || matcher == "*" || matcher.split('|').any(|part| part.trim() == "startup")
 }
 
-/// A recursive-descent reader over text serde_json has already accepted.
-struct Parser<'a> {
-    text: &'a str,
-    pos: usize,
+/// The elements of the array under `key` in `object`, or none when it is
+/// missing or not an array.
+fn array(object: &CstObject, key: &str) -> Vec<CstNode> {
+    object
+        .get(key)
+        .and_then(|prop| prop.value())
+        .and_then(|value| value.as_array())
+        .as_ref()
+        .map_or_else(Vec::new, CstArray::elements)
 }
 
-impl Parser<'_> {
-    /// The byte at the cursor, if any.
-    fn peek(&self) -> Option<u8> {
-        self.text.as_bytes().get(self.pos).copied()
-    }
+/// The decoded string, when `node` is one.
+fn string(node: &CstNode) -> Option<String> {
+    node.as_string_lit()?.decoded_value().ok()
+}
 
-    /// Move past spaces, tabs and line breaks.
-    fn skip_whitespace(&mut self) {
-        while matches!(self.peek(), Some(b' ' | b'\t' | b'\n' | b'\r')) {
-            self.pos += 1;
-        }
-    }
-
-    /// Move past `byte` after any whitespace, or fail.
-    fn expect(&mut self, byte: u8) -> Result<(), String> {
-        self.skip_whitespace();
-        if self.peek() == Some(byte) {
-            self.pos += 1;
-            Ok(())
-        } else {
-            Err(self.unexpected())
-        }
-    }
-
-    /// An error naming the cursor's offset.
-    fn unexpected(&self) -> String {
-        format!("unexpected input at byte {}", self.pos)
-    }
-
-    /// Read one value after any whitespace.
-    fn value(&mut self) -> Result<Node, String> {
-        self.skip_whitespace();
-        let start = self.pos;
-        let value = match self.peek() {
-            Some(b'{') => Value::Object(self.object()?),
-            Some(b'[') => Value::Array(self.array()?),
-            Some(b'"') => Value::String(self.string()?),
-            Some(_) => {
-                while !matches!(
-                    self.peek(),
-                    None | Some(b',' | b']' | b'}' | b' ' | b'\t' | b'\n' | b'\r')
-                ) {
-                    self.pos += 1;
-                }
-                if self.pos == start {
-                    return Err(self.unexpected());
-                }
-                Value::Scalar
-            }
-            None => return Err(self.unexpected()),
-        };
-        Ok(Node { start, end: self.pos, value })
-    }
-
-    /// Read a string token from its opening quote and decode it.
-    fn string(&mut self) -> Result<String, String> {
-        let start = self.pos;
-        self.pos += 1;
-        loop {
-            match self.peek() {
-                Some(b'\\') => self.pos += 2,
-                Some(b'"') => break,
-                Some(_) => self.pos += 1,
-                None => return Err(self.unexpected()),
-            }
-        }
-        self.pos += 1;
-        serde_json::from_str(&self.text[start..self.pos]).map_err(|error| error.to_string())
-    }
-
-    /// Read an array from its `[`.
-    fn array(&mut self) -> Result<Vec<Node>, String> {
-        self.pos += 1;
-        let mut values = Vec::new();
-        self.skip_whitespace();
-        if self.peek() == Some(b']') {
-            self.pos += 1;
-            return Ok(values);
-        }
-        loop {
-            values.push(self.value()?);
-            self.skip_whitespace();
-            match self.peek() {
-                Some(b',') => self.pos += 1,
-                Some(b']') => {
-                    self.pos += 1;
-                    return Ok(values);
-                }
-                _ => return Err(self.unexpected()),
-            }
-        }
-    }
-
-    /// Read an object from its `{`.
-    fn object(&mut self) -> Result<Vec<Member>, String> {
-        self.pos += 1;
-        let mut members = Vec::new();
-        self.skip_whitespace();
-        if self.peek() == Some(b'}') {
-            self.pos += 1;
-            return Ok(members);
-        }
-        loop {
-            self.skip_whitespace();
-            if self.peek() != Some(b'"') {
-                return Err(self.unexpected());
-            }
-            let key_start = self.pos;
-            let key = self.string()?;
-            self.expect(b':')?;
-            let value = self.value()?;
-            members.push(Member { key_start, key, value });
-            self.skip_whitespace();
-            match self.peek() {
-                Some(b',') => self.pos += 1,
-                Some(b'}') => {
-                    self.pos += 1;
-                    return Ok(members);
-                }
-                _ => return Err(self.unexpected()),
-            }
-        }
+/// A short name for the type of `node`, for error messages.
+fn kind(node: &CstNode) -> &'static str {
+    if node.as_object().is_some() {
+        "an object"
+    } else if node.as_array().is_some() {
+        "an array"
+    } else if node.as_string_lit().is_some() {
+        "a string"
+    } else {
+        "a number, boolean or null"
     }
 }
 
@@ -347,75 +194,209 @@ impl Parser<'_> {
 mod tests {
     use super::*;
 
-    fn entry() -> Json {
-        Json::Object(vec![("a".to_owned(), Json::Array(vec![Json::String("b".to_owned())]))])
+    fn path() -> PathBuf {
+        PathBuf::from("settings.json")
+    }
+
+    /// The hook entry as `with_hook` writes it for a pretty file indented by
+    /// `unit`, opening at `depth` levels.
+    fn added(unit: &str, depth: usize, eol: &str) -> String {
+        let lines = [
+            "{",
+            "\t\"hooks\": [",
+            "\t\t{",
+            "\t\t\t\"type\": \"command\",",
+            "\t\t\t\"command\": \"if command -v arcl >/dev/null; then arcl prime; fi\"",
+            "\t\t}",
+            "\t]",
+            "}",
+        ];
+        let indent = unit.repeat(depth);
+        lines
+            .iter()
+            .enumerate()
+            .map(|(index, line)| {
+                let line = line.replace('\t', unit);
+                if index == 0 { line } else { format!("{indent}{line}") }
+            })
+            .collect::<Vec<_>>()
+            .join(eol)
     }
 
     #[test]
-    fn values_keep_their_source_ranges() {
-        let text = r#" {"zeta": 1E5, "alpha": {"b": [true, null, "x\"y"]}} "#;
-        let root = parse(text).expect("parses");
-        let zeta = root.get("zeta").expect("zeta");
-        assert_eq!(&text[zeta.start..zeta.end], "1E5");
-        let b = root.get("alpha").and_then(|alpha| alpha.get("b")).expect("b");
-        let values = b.as_array().expect("array");
-        assert_eq!(values.len(), 3);
-        assert_eq!(values[2].as_str(), Some("x\"y"));
+    fn the_hook_merges_into_existing_settings_in_key_order() {
+        let before = "{\n  \"permissions\": {\"allow\": [\"Bash(ls)\"]},\n  \"hooks\": {\"Stop\": []}\n}\n";
+        let after = with_hook(Some(before), None, &path()).expect("merges");
+        assert!(
+            after.starts_with("{\n  \"permissions\": {\"allow\": [\"Bash(ls)\"]},\n  \"hooks\": {\n    \"Stop\": [],\n    \"SessionStart\": ["),
+            "{after}"
+        );
+        assert_eq!(with_hook(Some(&after), None, &path()).expect("second run"), after);
     }
 
     #[test]
-    fn invalid_json_is_an_error() {
-        for text in ["{", "{\"a\": 1,}", "[1] 2", ""] {
-            assert!(parse(text).is_err(), "{text}");
+    fn a_new_file_is_an_object_with_the_hook() {
+        for before in [None, Some(""), Some(" \n")] {
+            let after = with_hook(before, None, &path()).expect("creates");
+            let expected = format!(
+                "{{\n  \"hooks\": {{\n    \"SessionStart\": [\n      {}\n    ]\n  }}\n}}\n",
+                added("  ", 3, "\n")
+            );
+            assert_eq!(after, expected);
         }
     }
 
     #[test]
-    fn a_repeated_key_is_found() {
-        let root = parse(r#"{"a": 1, "b": 2, "a": 3}"#).expect("parses");
-        assert_eq!(root.duplicate_key(), Some("a"));
-        assert_eq!(parse(r#"{"a": 1}"#).expect("parses").duplicate_key(), None);
+    fn a_settings_file_that_is_not_an_object_is_an_error() {
+        for text in ["[]", "1", "{\"hooks\": []}", "{\"hooks\": {\"SessionStart\": {}}}", "{"] {
+            let error = with_hook(Some(text), None, &path()).expect_err(text);
+            assert!(matches!(error, CommandError::InvalidSetupJson { .. }), "{text}");
+        }
     }
 
     #[test]
-    fn an_insert_copies_every_other_byte() {
-        let text = "{\n  \"big\": 12345678901234567890123,\n  \"e\": 1E5\n}\n";
-        let root = parse(text).expect("parses");
-        let after = insert_last(text, &root, Some("new"), &entry(), "  ");
+    fn comments_trailing_commas_and_other_jsonc_are_refused() {
+        for text in [
+            "{\n  // a comment\n  \"model\": \"x\"\n}\n",
+            "{\"model\": \"x\" /* a comment */}",
+            "{\"model\": \"x\",}",
+            "{\"list\": [1,]}",
+            "{model: \"x\"}",
+            "{'model': 'x'}",
+            "{\"model\": \"x\" \"other\": 1}",
+            "{\"n\": 0x1F}",
+            "{\"n\": .5}",
+            "{\"n\": NaN}",
+            "{\"s\": \"tab\there\"}",
+            "{\u{a0}\"model\": \"x\"}",
+            "\u{feff}{}",
+        ] {
+            let error = with_hook(Some(text), None, &path()).expect_err(text);
+            assert!(matches!(error, CommandError::InvalidSetupJson { .. }), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn an_invalid_file_names_the_line_and_column() {
+        let error = with_hook(Some("{\n  \"a\": 1,\n}\n"), None, &path()).expect_err("refuses");
+        assert!(error.to_string().contains("line 3 column 1"), "{error}");
+    }
+
+    #[test]
+    fn a_repeated_key_on_the_hook_path_is_an_error() {
+        for (text, key) in [
+            (r#"{"hooks": {}, "hooks": {"Stop": []}}"#, "`hooks`"),
+            (
+                r#"{"hooks": {"SessionStart": [], "SessionStart": []}}"#,
+                "`hooks.SessionStart`",
+            ),
+            (
+                r#"{"hooks": {"SessionStart": [{"hooks": [], "hooks": []}]}}"#,
+                "`hooks.SessionStart[0].hooks`",
+            ),
+            (
+                r#"{"hooks": {"SessionStart": [{"hooks": [{"command": "a", "command": "b"}]}]}}"#,
+                "`hooks.SessionStart[0].hooks[0].command`",
+            ),
+            (r#"{"hooks": {}, "hooks": {}}"#, "`hooks`"),
+        ] {
+            let error = with_hook(Some(text), None, &path()).expect_err(text);
+            assert!(matches!(error, CommandError::DuplicateSetupJsonKey { .. }), "{text}");
+            let message = error.to_string();
+            assert!(message.contains("settings.json") && message.contains(key), "{message}");
+        }
+    }
+
+    #[test]
+    fn numbers_setup_does_not_touch_keep_their_text() {
+        let before = "{\n  \"big\": 12345678901234567890123,\n  \"small\": 1E5\n}\n";
+        let after = with_hook(Some(before), None, &path()).expect("merges");
+        assert!(
+            after.starts_with("{\n  \"big\": 12345678901234567890123,\n  \"small\": 1E5,\n  \"hooks\": {"),
+            "{after}"
+        );
+        assert_eq!(with_hook(Some(&after), None, &path()).expect("second run"), after);
+    }
+
+    #[test]
+    fn every_byte_outside_the_insert_is_kept() {
+        let before = "{\n  \"e\": \"\\u00e9\\/\",  \"n\": -0.0e-0 ,\n\n  \"hooks\" :  {\n    \"Stop\": [ ]\n  }\n}";
+        let after = with_hook(Some(before), None, &path()).expect("merges");
+        let expected = format!(
+            "{{\n  \"e\": \"\\u00e9\\/\",  \"n\": -0.0e-0 ,\n\n  \"hooks\" :  {{\n    \"Stop\": [ ],\n    \"SessionStart\": [\n      {}\n    ]\n  }}\n}}",
+            added("  ", 3, "\n")
+        );
+        assert_eq!(after, expected);
+    }
+
+    #[test]
+    fn the_hook_takes_the_file_indentation() {
+        for unit in ["\t", "    "] {
+            let before = format!("{{\n{unit}\"hooks\": {{\n{unit}{unit}\"SessionStart\": []\n{unit}}}\n}}\n");
+            let after = with_hook(Some(&before), Some("startup"), &path()).expect("merges");
+            let entry =
+                added(unit, 3, "\n").replacen("{\n", &format!("{{\n{}\"matcher\": \"startup\",\n", unit.repeat(4)), 1);
+            let expected = format!(
+                "{{\n{unit}\"hooks\": {{\n{unit}{unit}\"SessionStart\": [\n{}{entry}\n{unit}{unit}]\n{unit}}}\n}}\n",
+                unit.repeat(3)
+            );
+            assert_eq!(after, expected, "{unit:?}");
+        }
+    }
+
+    #[test]
+    fn the_hook_keeps_crlf_line_endings() {
+        let before = "{\r\n  \"a\": 1\r\n}\r\n";
+        let after = with_hook(Some(before), None, &path()).expect("merges");
+        assert_eq!(after.matches('\n').count(), after.matches("\r\n").count(), "{after:?}");
+        assert!(after.starts_with("{\r\n  \"a\": 1,\r\n  \"hooks\": {\r\n"), "{after:?}");
+        assert_eq!(with_hook(Some(&after), None, &path()).expect("second run"), after);
+    }
+
+    #[test]
+    fn a_one_line_file_spreads_the_containers_on_the_hook_path() {
+        let before = r#"{"model": "x", "hooks": {"SessionStart": [{"hooks": []}]}}"#;
+        let after = with_hook(Some(before), Some("startup"), &path()).expect("merges");
+        let entry = added("  ", 3, "\n").replacen("{\n", "{\n        \"matcher\": \"startup\",\n", 1);
         assert_eq!(
             after,
-            "{\n  \"big\": 12345678901234567890123,\n  \"e\": 1E5,\n  \"new\": {\n    \"a\": [\n      \"b\"\n    ]\n  }\n}\n"
+            format!(
+                "{{\n  \"model\": \"x\",\n  \"hooks\": {{\n    \"SessionStart\": [\n      {{\"hooks\": []}},\n      {entry}\n    ]\n  }}\n}}"
+            )
         );
     }
 
     #[test]
-    fn an_insert_into_an_empty_container_indents_past_its_line() {
-        let text = "{\n\t\"list\": []\n}";
-        let root = parse(text).expect("parses");
-        let list = root.get("list").expect("list");
-        let after = insert_last(text, list, None, &Json::String("x".to_owned()), "\t");
-        assert_eq!(after, "{\n\t\"list\": [\n\t\t\"x\"\n\t]\n}");
-    }
-
-    #[test]
-    fn an_insert_on_one_line_stays_on_one_line() {
-        let text = "{\n  \"hooks\": {\"Stop\": []}\n}\n";
-        let root = parse(text).expect("parses");
-        let hooks = root.get("hooks").expect("hooks");
-        let after = insert_last(text, hooks, Some("new"), &entry(), "  ");
-        assert_eq!(after, "{\n  \"hooks\": {\"Stop\": [], \"new\": {\"a\":[\"b\"]}}\n}\n");
-
-        let text = "{}";
-        let after = insert_last(text, &parse(text).expect("parses"), Some("new"), &entry(), "\t");
-        assert_eq!(after, "{\"new\": {\"a\":[\"b\"]}}");
-    }
-
-    #[test]
-    fn an_insert_keeps_crlf_line_endings() {
-        let text = "{\r\n  \"a\": 1\r\n}\r\n";
-        let root = parse(text).expect("parses");
-        let after = insert_last(text, &root, Some("b"), &entry(), "  ");
-        assert_eq!(after.matches('\n').count(), after.matches("\r\n").count(), "{after:?}");
-        assert!(after.starts_with("{\r\n  \"a\": 1,\r\n  \"b\": {\r\n"), "{after:?}");
+    fn only_the_exact_command_with_a_startup_matcher_counts_as_the_hook() {
+        let settings = |matcher: &str, command: &str| {
+            format!(
+                r#"{{"hooks": {{"SessionStart": [{{{matcher}"hooks": [{{"type": "command", "command": {command:?}}}]}}]}}}}"#
+            )
+        };
+        let present = [
+            settings("", HOOK_COMMAND),
+            settings(r#""matcher": "startup|resume", "#, &format!(" {HOOK_COMMAND} ")),
+            settings(r#""matcher": "*", "#, HOOK_COMMAND),
+        ];
+        for text in present {
+            assert_eq!(
+                with_hook(Some(&text), Some("startup|resume"), &path()).expect("reads"),
+                text
+            );
+        }
+        let absent = [
+            settings("", "echo \"run arcl prime\""),
+            settings(r#""matcher": "compact", "#, HOOK_COMMAND),
+            settings(r#""matcher": 1, "#, HOOK_COMMAND),
+        ];
+        for text in absent {
+            let after = with_hook(Some(&text), Some("startup|resume"), &path()).expect("adds");
+            assert_ne!(after, text);
+            assert_eq!(
+                after.matches(HOOK_COMMAND).count(),
+                1 + text.matches(HOOK_COMMAND).count(),
+                "{after}"
+            );
+        }
     }
 }

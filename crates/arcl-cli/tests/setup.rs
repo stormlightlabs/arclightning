@@ -1,4 +1,5 @@
-//! CLI tests for `arcl setup claude|codex|pi`, each in a scratch project.
+//! CLI tests for `arcl setup claude|codex|pi|other`, each in a scratch
+//! project.
 
 use std::{
     collections::BTreeMap,
@@ -11,7 +12,7 @@ use serde_json::Value;
 use tempfile::{TempDir, tempdir};
 
 /// The agents `arcl setup` takes.
-const AGENTS: [&str; 3] = ["claude", "codex", "pi"];
+const AGENTS: [&str; 4] = ["claude", "codex", "pi", "other"];
 
 /// The skill paths every agent gets.
 const SKILL_PATHS: [&str; 2] = [
@@ -22,12 +23,14 @@ const SKILL_PATHS: [&str; 2] = [
 /// The command each hook runs.
 const HOOK_COMMAND: &str = "if command -v arcl >/dev/null; then arcl prime; fi";
 
-/// The instruction file and the hook file `arcl setup <agent>` writes.
-fn agent_paths(agent: &str) -> (&'static str, &'static str) {
+/// The instruction file and the hook file `arcl setup <agent>` writes;
+/// `other` writes no hook.
+fn agent_paths(agent: &str) -> (&'static str, Option<&'static str>) {
     match agent {
-        "claude" => ("CLAUDE.md", ".claude/settings.json"),
-        "codex" => ("AGENTS.md", ".codex/hooks.json"),
-        "pi" => ("AGENTS.md", ".pi/extensions/arcl-prime.ts"),
+        "claude" => ("CLAUDE.md", Some(".claude/settings.json")),
+        "codex" => ("AGENTS.md", Some(".codex/hooks.json")),
+        "pi" => ("AGENTS.md", Some(".pi/extensions/arcl-prime.ts")),
+        "other" => ("AGENTS.md", None),
         _ => unreachable!("unknown agent {agent}"),
     }
 }
@@ -147,8 +150,10 @@ fn report_paths(agent: &str) -> Vec<String> {
     let (instructions, hook) = agent_paths(agent);
     SKILL_PATHS
         .iter()
-        .chain([instructions, hook].iter())
-        .map(|path| (*path).to_owned())
+        .copied()
+        .chain([instructions])
+        .chain(hook)
+        .map(str::to_owned)
         .collect()
 }
 
@@ -160,9 +165,15 @@ fn all(agent: &str, status: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Assert the hook file runs `arcl prime` once.
+/// Assert the hook file runs `arcl prime` once, or for `other` that no hook
+/// file was written.
 fn assert_hook(project: &Project, agent: &str) {
-    let (_, hook) = agent_paths(agent);
+    let Some(hook) = agent_paths(agent).1 else {
+        for path in [".claude/settings.json", ".codex/hooks.json", ".pi"] {
+            assert!(!project.path().join(path).exists(), "other wrote {path}");
+        }
+        return;
+    };
     let text = project.read(hook);
     if agent == "pi" {
         assert!(text.contains("pi.exec(\"arcl\", [\"prime\"]"), "{text}");
@@ -211,17 +222,20 @@ fn setup_with_yes_changes_existing_files_and_keeps_their_content() {
         let project = Project::new();
         let (instructions, hook) = agent_paths(agent);
         project.write(instructions, "# Rules\n\nKeep this line.\n");
-        let existing_hook = if agent == "pi" {
-            "// an older extension\n"
-        } else {
-            "{\n  \"model\": \"x\",\n  \"hooks\": {\n    \"Stop\": []\n  }\n}\n"
-        };
-        project.write(hook, existing_hook);
+        if let Some(hook) = hook {
+            let existing_hook = if agent == "pi" {
+                "// an older extension\n"
+            } else {
+                "{\n  \"model\": \"x\",\n  \"hooks\": {\n    \"Stop\": []\n  }\n}\n"
+            };
+            project.write(hook, existing_hook);
+        }
 
         let report = project.setup_json(&[agent, "--yes"]);
         let mut expected = all(agent, "created");
-        expected[2].1 = "updated".to_owned();
-        expected[3].1 = "updated".to_owned();
+        for file in &mut expected[2..] {
+            file.1 = "updated".to_owned();
+        }
         assert_eq!(statuses(&report), expected, "{agent}");
 
         let text = project.read(instructions);
@@ -230,7 +244,7 @@ fn setup_with_yes_changes_existing_files_and_keeps_their_content() {
             "{agent}: {text}"
         );
         assert_hook(&project, agent);
-        if agent != "pi" {
+        if let Some(hook) = hook.filter(|_| agent != "pi") {
             let settings = project.read(hook);
             assert!(
                 settings.starts_with("{\n  \"model\": \"x\",\n  \"hooks\": {\n    \"Stop\": [],"),
@@ -427,5 +441,30 @@ fn setup_refuses_a_settings_file_with_a_repeated_hooks_key() {
     assert!(
         !project.path().join("CLAUDE.md").exists(),
         "setup wrote files before failing"
+    );
+}
+
+#[test]
+fn setup_with_no_agent_writes_agents_md_and_the_skill_with_no_hook() {
+    let project = Project::new();
+    let report = project.setup_json(&[]);
+    assert_eq!(report["data"]["agent"], "other");
+    assert_eq!(statuses(&report), all("other", "created"));
+    assert!(project.read("AGENTS.md").starts_with("<!-- arcl-setup:begin -->\n"));
+    assert!(
+        project
+            .read(".agents/skills/arclightning/SKILL.md")
+            .starts_with("---\nname: arclightning\n")
+    );
+    assert_hook(&project, "other");
+
+    let project = Project::new();
+    let human = project.arcl(&["setup"]).output().expect("setup runs");
+    assert!(human.status.success());
+    let text = String::from_utf8_lossy(&human.stdout);
+    assert!(text.contains("Set up other agents in"), "{text}");
+    assert!(
+        text.contains("No start-up hook is written") && text.contains("`arcl prime`"),
+        "{text}"
     );
 }

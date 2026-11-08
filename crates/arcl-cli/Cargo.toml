@@ -19,6 +19,7 @@ arcl-repo = { path = "../arcl-repo" }
 arcl-serve = { path = "../arcl-serve" }
 arcl-store = { path = "../arcl-store" }
 clap.workspace = true
+jsonc-parser.workspace = true
 owo-colors.workspace = true
 serde.workspace = true
 serde_json.workspace = true

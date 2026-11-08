@@ -313,9 +313,12 @@ it leaves out, and every gate on the task.
 loop, open work with handoffs and open gate counts, and the first ready tasks,
 within 40 lines and 4 KiB, and points to `arcl context` for the rest.
 
-`arcl setup claude|codex|pi` writes what an agent needs to use arcl: the
-skill, a marked block in `CLAUDE.md` or `AGENTS.md`, and a session-start hook
-that runs `arcl prime`. It asks before changing an existing file, takes
+`arcl setup claude|codex|pi|other` writes what an agent needs to use arcl:
+the skill, a marked block in `CLAUDE.md` or `AGENTS.md`, and for `claude`,
+`codex` and `pi` a session-start hook that runs `arcl prime`. `other`, the
+default when no agent is named, writes the skill and `AGENTS.md` with no hook.
+Settings files must be strict JSON; the hook is inserted with `jsonc-parser`'s
+syntax tree, so the rest of the file keeps its bytes. It asks before changing an existing file, takes
 `--yes` to skip the question and `--dry-run` to write nothing, and a second
 run changes nothing.
 

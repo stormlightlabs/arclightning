@@ -1,14 +1,15 @@
-//! `arcl setup <agent>`: write the files a coding agent needs to use arcl.
+//! `arcl setup [agent]`: write the files a coding agent needs to use arcl.
 //!
-//! Each agent gets the skill from `arcl skill install`, a marked block of
-//! arcl lines in its instruction file, and a hook that runs `arcl prime` when
-//! a session starts. A missing file is created. An existing file changes only
+//! Each agent gets the skill from `arcl skill install` and a marked block of
+//! arcl lines in its instruction file. Claude Code, Codex and Pi also get a
+//! hook that runs `arcl prime` when a session starts; `other`, the default,
+//! gets no hook. A missing file is created. An existing file changes only
 //! after the person confirms at a terminal or passes `--yes`, and a second
 //! run with nothing to change writes nothing.
 
 mod json;
 
-use json::{Json, Node, Value, insert_last, line_ending};
+use json::with_hook;
 
 use super::skill::{SKILL_FILES, absent, check_target, current_project_root, install_skill, write_replacing};
 use super::support::write_output;
@@ -38,31 +39,7 @@ prints the working loop and the open work. A fresh clone or worktree needs
 /// extension runs `arcl prime` on `session_start` and adds its output to the
 /// next prompt. The type import is erased when Pi loads the file, so it needs
 /// no package installed.
-const PI_EXTENSION: &str = r#"// Written by `arcl setup pi`. Runs `arcl prime` when a session starts and
-// adds its output to the next prompt.
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
-export default function arclPrime(pi: ExtensionAPI) {
-	let primer: string | undefined;
-
-	pi.on("session_start", async (_event, ctx) => {
-		primer = undefined;
-		try {
-			const result = await pi.exec("arcl", ["prime"], { cwd: ctx.cwd, timeout: 10_000 });
-			if (result.code === 0 && result.stdout.trim()) primer = result.stdout.trim();
-		} catch {
-			// arcl is not installed; start without the primer.
-		}
-	});
-
-	pi.on("before_agent_start", async () => {
-		if (!primer) return;
-		const content = primer;
-		primer = undefined;
-		return { message: { customType: "arcl-prime", content, display: false } };
-	});
-}
-"#;
+const PI_EXTENSION: &str = include_str!("setup/arcl-prime.ts");
 
 /// How an agent runs `arcl prime` at session start.
 enum Hook {
@@ -84,7 +61,8 @@ struct AgentFiles {
     name: &'static str,
     /// The instruction file, relative to the project root.
     instructions: &'static str,
-    hook: Hook,
+    /// The start-up hook, if the agent has a way to run one.
+    hook: Option<Hook>,
     /// What the agent needs before it reads the files.
     notes: &'static [&'static str],
 }
@@ -97,22 +75,29 @@ impl AgentFiles {
                 agent: "claude",
                 name: "Claude Code",
                 instructions: "CLAUDE.md",
-                hook: Hook::Json { path: ".claude/settings.json", matcher: None },
+                hook: Some(Hook::Json { path: ".claude/settings.json", matcher: None }),
                 notes: &[],
             },
             SetupAgent::Codex => Self {
                 agent: "codex",
                 name: "Codex",
                 instructions: "AGENTS.md",
-                hook: Hook::Json { path: ".codex/hooks.json", matcher: Some("startup|resume") },
+                hook: Some(Hook::Json { path: ".codex/hooks.json", matcher: Some("startup|resume") }),
                 notes: &["Codex runs project hooks only in a trusted project, after you trust the hook in `/hooks`."],
             },
             SetupAgent::Pi => Self {
                 agent: "pi",
                 name: "Pi",
                 instructions: "AGENTS.md",
-                hook: Hook::File { path: ".pi/extensions/arcl-prime.ts", content: PI_EXTENSION },
+                hook: Some(Hook::File { path: ".pi/extensions/arcl-prime.ts", content: PI_EXTENSION }),
                 notes: &["Pi loads `.pi/extensions/` and `.agents/skills/` only after you trust the project."],
+            },
+            SetupAgent::Other => Self {
+                agent: "other",
+                name: "other agents",
+                instructions: "AGENTS.md",
+                hook: None,
+                notes: &["No start-up hook is written. Have the agent run `arcl prime` when a session starts."],
             },
         }
     }
@@ -214,13 +199,14 @@ fn plan(root: &Path, files: &AgentFiles) -> CResult<Vec<PlannedFile>> {
     ));
 
     let (relative, path, before, after) = match files.hook {
-        Hook::Json { path: relative, matcher } => {
+        None => return Ok(planned),
+        Some(Hook::Json { path: relative, matcher }) => {
             let path = resolve(root, &canonical_root, relative)?;
             let before = read_optional(&path)?;
             let after = with_hook(before.as_deref(), matcher, &path)?;
             (relative, path, before, after)
         }
-        Hook::File { path: relative, content } => {
+        Some(Hook::File { path: relative, content }) => {
             let path = resolve(root, &canonical_root, relative)?;
             (relative, path.clone(), read_optional(&path)?, content.to_owned())
         }
@@ -361,112 +347,12 @@ fn with_block(text: &str, path: &Path) -> CResult<String> {
     Ok(format!("{}{block}{}", &text[..start], &text[end..]))
 }
 
-/// The settings file with a `SessionStart` hook that runs [`HOOK_COMMAND`],
-/// unless [`has_hook`] finds one. The hook is spliced into the existing text,
-/// so every other byte of the file stays as it was. A repeated key on the
-/// path to the hook is an error: JSON readers keep the last one, and the
-/// hook could land in a copy the agent ignores.
-fn with_hook(before: Option<&str>, matcher: Option<&str>, path: &Path) -> CResult<String> {
-    let invalid = |message: String| CommandError::InvalidSetupJson { path: path.to_owned(), message };
-    let text = before.unwrap_or("");
-    let mut entry = Vec::new();
-    if let Some(matcher) = matcher {
-        entry.push(("matcher".to_owned(), Json::String(matcher.to_owned())));
+/// `"\r\n"` when the first line of `text` ends with it, otherwise `"\n"`.
+fn line_ending(text: &str) -> &'static str {
+    match text.find('\n') {
+        Some(index) if text[..index].ends_with('\r') => "\r\n",
+        _ => "\n",
     }
-    let command = Json::Object(vec![
-        ("type".to_owned(), Json::String("command".to_owned())),
-        ("command".to_owned(), Json::String(HOOK_COMMAND.to_owned())),
-    ]);
-    entry.push(("hooks".to_owned(), Json::Array(vec![command])));
-    let entry = Json::Object(entry);
-    let session_start = || Json::Object(vec![("SessionStart".to_owned(), Json::Array(vec![entry.clone()]))]);
-
-    if text.trim().is_empty() {
-        let settings = Json::Object(vec![("hooks".to_owned(), session_start())]);
-        return Ok(settings.render(Some("\t")) + "\n");
-    }
-    let root = json::parse(text).map_err(invalid)?;
-    if !matches!(root.value, Value::Object(_)) {
-        return Err(invalid(format!("the file holds {}, not an object", root.kind())));
-    }
-    unique_keys(&root, "", path)?;
-    let unit = indentation(text);
-    let Some(hooks) = root.get("hooks") else {
-        return Ok(insert_last(text, &root, Some("hooks"), &session_start(), &unit));
-    };
-    if !matches!(hooks.value, Value::Object(_)) {
-        return Err(invalid(format!("`hooks` is {}, not an object", hooks.kind())));
-    }
-    unique_keys(hooks, "hooks.", path)?;
-    let Some(events) = hooks.get("SessionStart") else {
-        let events = Json::Array(vec![entry]);
-        return Ok(insert_last(text, hooks, Some("SessionStart"), &events, &unit));
-    };
-    let Some(entries) = events.as_array() else {
-        return Err(invalid(format!(
-            "`hooks.SessionStart` is {}, not an array",
-            events.kind()
-        )));
-    };
-    for (index, existing) in entries.iter().enumerate() {
-        let prefix = format!("hooks.SessionStart[{index}].");
-        unique_keys(existing, &prefix, path)?;
-        for (inner, hook) in existing
-            .get("hooks")
-            .and_then(Node::as_array)
-            .unwrap_or_default()
-            .iter()
-            .enumerate()
-        {
-            unique_keys(hook, &format!("{prefix}hooks[{inner}]."), path)?;
-        }
-    }
-    if has_hook(entries) {
-        return Ok(text.to_owned());
-    }
-    Ok(insert_last(text, events, None, &entry, &unit))
-}
-
-/// Fail when `node` is an object with a key more than once. `prefix` is the
-/// path to `node`, for the message.
-fn unique_keys(node: &Node, prefix: &str, path: &Path) -> CResult<()> {
-    match node.duplicate_key() {
-        Some(key) => Err(CommandError::DuplicateSetupJsonKey { path: path.to_owned(), key: format!("{prefix}{key}") }),
-        None => Ok(()),
-    }
-}
-
-/// Whether a `SessionStart` entry already runs [`HOOK_COMMAND`] when a
-/// session starts: its command is exactly that, and its matcher, if any,
-/// covers `startup`.
-fn has_hook(entries: &[Node]) -> bool {
-    entries
-        .iter()
-        .filter(|entry| {
-            entry
-                .get("matcher")
-                .is_none_or(|matcher| matcher.as_str().is_some_and(covers_startup))
-        })
-        .filter_map(|entry| entry.get("hooks").and_then(Node::as_array))
-        .flatten()
-        .filter_map(|hook| hook.get("command").and_then(Node::as_str))
-        .any(|command| command.trim() == HOOK_COMMAND)
-}
-
-/// Whether a `SessionStart` matcher selects sessions that start fresh: an
-/// empty matcher, `*`, or a `|` list that names `startup`.
-fn covers_startup(matcher: &str) -> bool {
-    let matcher = matcher.trim();
-    matcher.is_empty() || matcher == "*" || matcher.split('|').any(|part| part.trim() == "startup")
-}
-
-/// The indentation of the first indented line of `text`, or a tab.
-fn indentation(text: &str) -> String {
-    text.lines()
-        .map(|line| &line[..line.len() - line.trim_start().len()])
-        .find(|indent| !indent.is_empty())
-        .unwrap_or("\t")
-        .to_owned()
 }
 
 #[cfg(test)]
@@ -523,31 +409,6 @@ mod tests {
     }
 
     #[test]
-    fn the_hook_merges_into_existing_settings_in_key_order() {
-        let before = "{\n  \"permissions\": {\"allow\": [\"Bash(ls)\"]},\n  \"hooks\": {\"Stop\": []}\n}\n";
-        let after = with_hook(Some(before), None, &path()).expect("merges");
-        let keys = [
-            "\"permissions\"",
-            "\"allow\"",
-            "\"hooks\"",
-            "\"Stop\"",
-            "\"SessionStart\"",
-        ]
-        .map(|key| after.find(key).expect("key kept"));
-        assert!(keys.windows(2).all(|pair| pair[0] < pair[1]), "{after}");
-        assert!(after.contains("\n  \"hooks\""), "kept two-space indentation: {after}");
-        assert_eq!(with_hook(Some(&after), None, &path()).expect("second run"), after);
-    }
-
-    #[test]
-    fn a_settings_file_that_is_not_an_object_is_an_error() {
-        for text in ["[]", "{\"hooks\": []}", "{\"hooks\": {\"SessionStart\": {}}}", "{"] {
-            let error = with_hook(Some(text), None, &path()).expect_err(text);
-            assert!(matches!(error, CommandError::InvalidSetupJson { .. }), "{text}");
-        }
-    }
-
-    #[test]
     fn markers_named_inside_a_line_are_left_alone() {
         let text = "Wrap it in `<!-- arcl-setup:begin -->` and `<!-- arcl-setup:end -->`.\nKeep this.\n";
         let once = with_block(text, &path()).expect("appends");
@@ -564,71 +425,6 @@ mod tests {
         let indented = once.replace(&format!("\n{BLOCK_BEGIN}\n"), &format!("\n  {BLOCK_BEGIN}\t\n"));
         assert_ne!(indented, once);
         assert_eq!(with_block(&indented, &path()).expect("replaces"), once);
-    }
-
-    #[test]
-    fn a_repeated_key_on_the_hook_path_is_an_error() {
-        for (text, key) in [
-            (r#"{"hooks": {}, "hooks": {"Stop": []}}"#, "`hooks`"),
-            (
-                r#"{"hooks": {"SessionStart": [], "SessionStart": []}}"#,
-                "`hooks.SessionStart`",
-            ),
-            (
-                r#"{"hooks": {"SessionStart": [{"hooks": [], "hooks": []}]}}"#,
-                "`hooks.SessionStart[0].hooks`",
-            ),
-        ] {
-            let error = with_hook(Some(text), None, &path()).expect_err(text);
-            assert!(matches!(error, CommandError::DuplicateSetupJsonKey { .. }), "{text}");
-            let message = error.to_string();
-            assert!(message.contains("settings.json") && message.contains(key), "{message}");
-        }
-    }
-
-    #[test]
-    fn numbers_setup_does_not_touch_keep_their_text() {
-        let before = "{\n  \"big\": 12345678901234567890123,\n  \"small\": 1E5\n}\n";
-        let after = with_hook(Some(before), None, &path()).expect("merges");
-        assert!(
-            after.starts_with("{\n  \"big\": 12345678901234567890123,\n  \"small\": 1E5,\n  \"hooks\": {"),
-            "{after}"
-        );
-        assert_eq!(with_hook(Some(&after), None, &path()).expect("second run"), after);
-    }
-
-    #[test]
-    fn only_the_exact_command_with_a_startup_matcher_counts_as_the_hook() {
-        let settings = |matcher: &str, command: &str| {
-            format!(
-                r#"{{"hooks": {{"SessionStart": [{{{matcher}"hooks": [{{"type": "command", "command": {command:?}}}]}}]}}}}"#
-            )
-        };
-        let present = [
-            settings("", HOOK_COMMAND),
-            settings(r#""matcher": "startup|resume", "#, &format!(" {HOOK_COMMAND} ")),
-            settings(r#""matcher": "*", "#, HOOK_COMMAND),
-        ];
-        for text in present {
-            assert_eq!(
-                with_hook(Some(&text), Some("startup|resume"), &path()).expect("reads"),
-                text
-            );
-        }
-        let absent = [
-            settings("", "echo \"run arcl prime\""),
-            settings(r#""matcher": "compact", "#, HOOK_COMMAND),
-            settings(r#""matcher": 1, "#, HOOK_COMMAND),
-        ];
-        for text in absent {
-            let after = with_hook(Some(&text), Some("startup|resume"), &path()).expect("adds");
-            assert_ne!(after, text);
-            assert_eq!(
-                after.matches(HOOK_COMMAND).count(),
-                1 + text.matches(HOOK_COMMAND).count(),
-                "{after}"
-            );
-        }
     }
 
     #[test]
