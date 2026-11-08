@@ -2,6 +2,11 @@ use super::support::*;
 use super::*;
 use arcl_store::task_ancestry;
 
+/// The warning code for a `capture create` without `--from` whose
+/// `ARCL_AGENT` holds several in-progress claims, so the capture has no
+/// source.
+const CAPTURE_SOURCE_WARNING: &str = "capture_source";
+
 pub(super) enum CaptureResult {
     Mutation { action: &'static str, capture: Capture },
     Promotion(Box<arcl_store::CapturePromotionResult>),
@@ -145,7 +150,7 @@ pub(super) fn default_capture_source(command: CaptureCommand, warnings: &mut Vec
         [task] => Some(task.clone()),
         tasks => {
             warnings.push(Warning::new(
-                "capture_source",
+                CAPTURE_SOURCE_WARNING,
                 format!(
                     "`{agent}` has {} tasks in progress ({}), so the capture has no source; pass --from <task>",
                     tasks.len(),

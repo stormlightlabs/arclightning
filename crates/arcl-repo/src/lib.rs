@@ -15,8 +15,7 @@ pub mod workspace;
 /// in [`workspace`] and Git inspection in [`vcs`].
 pub mod prelude {
     pub use crate::project::{
-        ARCL_DIRECTORY, BLOCKER_EDGE_WARNING, CONFIG_FILE, DATABASE_FILE, LockWait, LockedWorkspace, ProjectDir,
-        ProjectError, SYNC_LOCK_FILE, SyncBefore, SyncLock, WORKSPACE_SYNC_WARNING, Warning, Workspace, as_dyn,
-        discover_vcs, nearest_project_root, sync_before,
+        ARCL_DIRECTORY, CONFIG_FILE, DATABASE_FILE, LockWait, LockedWorkspace, ProjectDir, ProjectError, SyncBefore,
+        SyncLock, Warning, Workspace, as_dyn, discover_vcs, nearest_project_root, sync_before,
     };
 }

@@ -51,9 +51,9 @@ pub fn run<T>(
     let project = ProjectDir::discover(start)?;
     project.require_database()?;
 
-    let SyncBefore { locked, result } = sync_before(project.workspace(), LockWait::Within(lock_wait), &|| {
-        cancelled.is_cancelled()
-    });
+    let is_cancelled = || cancelled.is_cancelled();
+    let wait = LockWait::Within { timeout: lock_wait, cancelled: &is_cancelled };
+    let SyncBefore { locked, result } = sync_before(project.workspace(), wait);
     let mut warnings = Vec::new();
     match result {
         Ok(found) => warnings.extend(Warning::blocker_edges(found)),

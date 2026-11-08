@@ -5,7 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-# Derive JSON Schemas for the gate check report, for adapters that publish it.
+# Derive JSON Schemas for the gate check report and `Warning`, for adapters
+# that publish them.
 schema = ["dep:schemars", "arcl-core/schema", "arcl-store/schema"]
 
 [dependencies]

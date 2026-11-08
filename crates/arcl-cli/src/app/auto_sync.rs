@@ -130,8 +130,11 @@ pub(super) fn synced_write<T>(
 pub(super) fn synced<T>(
     lock_wait: Option<Duration>, export: bool, operation: impl FnOnce() -> Result<T, ApplicationError>,
 ) -> Result<(T, Vec<Warning>), ApplicationError> {
-    let wait = lock_wait.map_or(LockWait::Unbounded, LockWait::Within);
-    let SyncBefore { locked, result } = sync_before(current_workspace(), wait, &|| false);
+    let wait = lock_wait.map_or(LockWait::Unbounded, |timeout| LockWait::Within {
+        timeout,
+        cancelled: &|| false,
+    });
+    let SyncBefore { locked, result } = sync_before(current_workspace(), wait);
     let mut warnings = match result {
         Ok(found) => Warning::blocker_edges(found).collect(),
         // A missing database is the operation's own error to report.

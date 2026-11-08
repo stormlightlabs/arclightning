@@ -38,13 +38,13 @@ pub const CONFIG_FILE: &str = "config.toml";
 pub const DATABASE_FILE: &str = "arcl.db";
 /// The lock file under [`ARCL_DIRECTORY`] that serializes syncs in one
 /// project. The `/arcl.db-*` entry in `.arcl/.gitignore` keeps it out of Git.
-pub const SYNC_LOCK_FILE: &str = "arcl.db-sync.lock";
+const SYNC_LOCK_FILE: &str = "arcl.db-sync.lock";
 /// The warning code for a sync or export that did not run while the
 /// operation went on.
-pub const WORKSPACE_SYNC_WARNING: &str = "workspace_sync";
+const WORKSPACE_SYNC_WARNING: &str = "workspace_sync";
 /// The warning code for a blocker rule violation a workspace import loaded
 /// because it did not introduce it.
-pub const BLOCKER_EDGE_WARNING: &str = "blocker_edge";
+const BLOCKER_EDGE_WARNING: &str = "blocker_edge";
 
 /// How often a bounded lock wait tries the lock again and checks for
 /// cancellation.
@@ -146,12 +146,16 @@ impl From<WorkspaceSyncError> for ProjectError {
 }
 
 /// How long to wait for the sync lock.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LockWait {
+#[derive(Clone, Copy)]
+pub enum LockWait<'a> {
     /// Wait as long as it takes, as an `arcl` command does.
     Unbounded,
-    /// Wait at most this long, then fail with [`ProjectError::SyncLockBusy`].
-    Within(Duration),
+    /// Wait at most `timeout`, then fail with [`ProjectError::SyncLockBusy`].
+    /// Fail with [`ProjectError::Cancelled`] once `cancelled` returns `true`.
+    Within {
+        timeout: Duration,
+        cancelled: &'a dyn Fn() -> bool,
+    },
 }
 
 /// A project: its root, the nearest directory holding `.arcl/config.toml`,
@@ -189,11 +193,6 @@ impl ProjectDir {
     /// The project root.
     pub fn root(&self) -> &Path {
         &self.root
-    }
-
-    /// The project configuration.
-    pub fn config(&self) -> &ProjectConfig {
-        &self.config
     }
 
     /// The path of the project's database file.
@@ -253,11 +252,6 @@ pub struct Workspace {
 }
 
 impl Workspace {
-    /// The project the workspace belongs to.
-    pub fn project(&self) -> &ProjectDir {
-        &self.project
-    }
-
     /// The project root, which is the Git worktree root the sync compares
     /// against.
     pub fn worktree_root(&self) -> &Path {
@@ -272,10 +266,10 @@ impl Workspace {
     /// Take the project's sync lock, creating the lock file if it is
     /// missing. [`LockWait::Unbounded`] blocks until no other process holds
     /// it. [`LockWait::Within`] tries again every 25 ms and fails with
-    /// [`ProjectError::SyncLockBusy`] once the wait passes, or with
-    /// [`ProjectError::Cancelled`] once `cancelled` returns `true`. The lock
-    /// lasts until the returned [`SyncLock`] drops.
-    pub fn lock(&self, wait: LockWait, cancelled: &dyn Fn() -> bool) -> Result<SyncLock, ProjectError> {
+    /// [`ProjectError::SyncLockBusy`] once the timeout passes, or with
+    /// [`ProjectError::Cancelled`] once its `cancelled` returns `true`. The
+    /// lock lasts until the returned [`SyncLock`] drops.
+    pub fn lock(&self, wait: LockWait<'_>) -> Result<SyncLock, ProjectError> {
         let path = self.worktree_root().join(ARCL_DIRECTORY).join(SYNC_LOCK_FILE);
         let file = OpenOptions::new()
             .create(true)
@@ -283,12 +277,12 @@ impl Workspace {
             .write(true)
             .open(&path)
             .map_err(|source| ProjectError::SyncLock { path: path.clone(), source })?;
-        let wait = match wait {
+        let (wait, cancelled) = match wait {
             LockWait::Unbounded => {
                 file.lock().map_err(|source| ProjectError::SyncLock { path, source })?;
                 return Ok(SyncLock { _file: file });
             }
-            LockWait::Within(wait) => wait,
+            LockWait::Within { timeout, cancelled } => (timeout, cancelled),
         };
         let deadline = Instant::now() + wait;
         loop {
@@ -330,11 +324,6 @@ pub struct LockedWorkspace {
 }
 
 impl LockedWorkspace {
-    /// The workspace.
-    pub fn workspace(&self) -> &Workspace {
-        &self.workspace
-    }
-
     /// Sync after a committed write to export it, adding a warning when the
     /// export fails, since the change is saved either way.
     pub fn export_after_write(&self, warnings: &mut Vec<Warning>) {
@@ -378,7 +367,7 @@ impl Warning {
     }
 
     /// A sync or export that did not run, while the operation went on.
-    pub const fn workspace_sync(message: String) -> Self {
+    const fn workspace_sync(message: String) -> Self {
         Self::new(WORKSPACE_SYNC_WARNING, message)
     }
 
@@ -412,15 +401,13 @@ impl Warning {
 /// kept the caller from finding it. `Ok(None)` syncs nothing. The lock stays
 /// held in [`SyncBefore::locked`] whether or not the sync succeeds, so the
 /// operation and the export after it run under it.
-pub fn sync_before(
-    workspace: Result<Option<Workspace>, ProjectError>, wait: LockWait, cancelled: &dyn Fn() -> bool,
-) -> SyncBefore {
+pub fn sync_before(workspace: Result<Option<Workspace>, ProjectError>, wait: LockWait<'_>) -> SyncBefore {
     let workspace = match workspace {
         Ok(Some(workspace)) => workspace,
         Ok(None) => return SyncBefore { locked: None, result: Ok(Vec::new()) },
         Err(error) => return SyncBefore { locked: None, result: Err(error) },
     };
-    match workspace.lock(wait, cancelled) {
+    match workspace.lock(wait) {
         Ok(lock) => {
             let result = workspace.sync();
             SyncBefore { locked: Some(LockedWorkspace { workspace, _lock: lock }), result }
@@ -498,6 +485,11 @@ mod tests {
         false
     }
 
+    /// A bounded lock wait of `timeout` that stops once `cancelled` is true.
+    fn within<'a>(timeout: Duration, cancelled: &'a dyn Fn() -> bool) -> LockWait<'a> {
+        LockWait::Within { timeout, cancelled }
+    }
+
     #[test]
     fn file_present_treats_only_a_missing_path_as_absent() {
         let missing = |kind: io::ErrorKind| file_present(Err(io::Error::from(kind)));
@@ -572,13 +564,9 @@ mod tests {
             .expect("project")
             .require_workspace()
             .expect("workspace");
-        let held = workspace.lock(LockWait::Unbounded, &never).expect("the lock is taken");
+        let held = workspace.lock(LockWait::Unbounded).expect("the lock is taken");
 
-        let synced = sync_before(
-            Ok(Some(workspace.clone())),
-            LockWait::Within(Duration::from_millis(50)),
-            &never,
-        );
+        let synced = sync_before(Ok(Some(workspace.clone())), within(Duration::from_millis(50), &never));
         assert!(synced.locked.is_none());
         let error = synced.result.expect_err("the lock is busy");
         assert!(matches!(error, ProjectError::SyncLockBusy { .. }), "{error}");
@@ -587,12 +575,12 @@ mod tests {
         assert!(error.to_string().contains(SYNC_LOCK_FILE), "{error}");
 
         let cancelled = workspace
-            .lock(LockWait::Within(Duration::from_secs(5)), &|| true)
+            .lock(within(Duration::from_secs(5), &|| true))
             .expect_err("a cancelled wait stops");
         assert!(matches!(cancelled, ProjectError::Cancelled));
 
         drop(held);
-        let synced = sync_before(Ok(Some(workspace)), LockWait::Within(Duration::from_millis(50)), &never);
+        let synced = sync_before(Ok(Some(workspace)), within(Duration::from_millis(50), &never));
         assert!(synced.locked.is_some());
         assert_eq!(synced.result.expect("the sync runs"), Vec::<String>::new());
     }
@@ -603,7 +591,7 @@ mod tests {
         fs::write(directory.path().join(".arcl/workspace/manifest.toml"), "not = [valid").expect("break the manifest");
         let workspace = ProjectDir::discover(directory.path()).expect("project").workspace();
 
-        let synced = sync_before(workspace, LockWait::Unbounded, &never);
+        let synced = sync_before(workspace, LockWait::Unbounded);
         let locked = synced.locked.expect("the lock is held after a failed sync");
         let error = synced.result.expect_err("the sync stops");
         assert!(matches!(error, ProjectError::Sync(_)), "{error}");
@@ -649,13 +637,24 @@ mod tests {
         assert!(matches!(lock.before_write(), ProjectError::SyncLockBusy { .. }));
     }
 
+    #[cfg(unix)]
     #[test]
-    fn an_invalid_workspace_path_is_a_config_error() {
-        let directory = project(false);
-        let config = "format-version = 1\n\n[workspace]\nenabled = true\npath = \"../outside\"\n";
-        fs::write(directory.path().join(".arcl/config.toml"), config).expect("config is written");
-        let error = ProjectDir::discover(directory.path()).expect_err("the config is invalid");
-        assert!(matches!(error, ProjectError::InvalidConfig { .. }), "{error}");
+    fn a_workspace_path_through_a_symlink_is_a_config_error() {
+        let directory = project(true);
+        let outside = tempfile::tempdir().expect("temporary directory can be created");
+        let workspace_root = directory.path().join(".arcl/workspace");
+        fs::remove_dir_all(&workspace_root).expect("workspace is removed");
+        std::os::unix::fs::symlink(outside.path(), &workspace_root).expect("symlink");
+
+        // The config parses, so the error comes from resolving the path.
+        let project = ProjectDir::discover(directory.path()).expect("the project is found");
+        let error = project.workspace().expect_err("the workspace path is a symlink");
+        let ProjectError::InvalidConfig { path, .. } = &error else { panic!("{error}") };
+        assert_eq!(path, &directory.path().join(".arcl/config.toml"));
         assert_eq!(error.exit_code(), 3);
+        assert!(matches!(
+            project.require_workspace(),
+            Err(ProjectError::InvalidConfig { .. })
+        ));
     }
 }

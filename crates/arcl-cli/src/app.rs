@@ -82,8 +82,12 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
     let SyncBefore { locked, result } = match access {
         Access::Untracked => SyncBefore { locked: None, result: Ok(Vec::new()) },
         _ => {
-            let wait = if prime { LockWait::Within(PRIME_LOCK_WAIT) } else { LockWait::Unbounded };
-            sync_before(current_workspace(), wait, &|| false)
+            let wait = if prime {
+                LockWait::Within { timeout: PRIME_LOCK_WAIT, cancelled: &|| false }
+            } else {
+                LockWait::Unbounded
+            };
+            sync_before(current_workspace(), wait)
         }
     };
     let mut warnings = Vec::new();

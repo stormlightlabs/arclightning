@@ -6,7 +6,7 @@ use super::*;
 /// an import, sync or resolve loaded because it did not introduce them.
 pub(super) fn exec_workspace(command: WorkspaceCommand) -> CResult<(Option<WorkspaceStatus>, Vec<String>)> {
     let workspace = ProjectDir::discover_current()?.require_workspace()?;
-    let _lock = workspace.lock(LockWait::Unbounded, &|| false)?;
+    let _lock = workspace.lock(LockWait::Unbounded)?;
     let (worktree_root, workspace_root) = (workspace.worktree_root(), workspace.workspace_root());
     let mut database = open_database()?;
     match command {

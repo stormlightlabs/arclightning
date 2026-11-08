@@ -989,6 +989,29 @@ async fn a_config_path_that_cannot_be_checked_fails_as_in_the_cli() {
     );
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn a_database_path_that_cannot_be_checked_fails_as_in_the_cli() {
+    let directory = project(false);
+    // A link to itself cannot be checked. A missing database, or a directory
+    // in its place, is not initialized instead.
+    let database = directory.path().join(".arcl/arcl.db");
+    fs::remove_file(&database).expect("remove the database");
+    std::os::unix::fs::symlink(&database, &database).expect("symlink the database");
+    let server = ArclServer::new(directory.path().to_owned());
+
+    let error = server
+        .ready(Parameters::from(ReadyInput::default()), CancellationToken::new())
+        .await
+        .err()
+        .expect("the database cannot be checked");
+    assert_eq!((error.code(), error.exit_code()), ("application_error", 1));
+    assert!(
+        error.to_string().starts_with("could not open Arc Lightning database"),
+        "{error}"
+    );
+}
+
 #[test]
 fn stdio_serves_tool_calls() {
     let project = project(false);
