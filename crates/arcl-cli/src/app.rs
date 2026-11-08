@@ -33,6 +33,7 @@ mod query;
 mod reads;
 mod rest;
 mod serve;
+mod setup;
 mod skill;
 mod support;
 mod web;
@@ -50,6 +51,7 @@ use prime::{PRIME_LOCK_WAIT, read_prime};
 use query::resolve_ready_filter;
 use reads::{read_context, read_explain, read_list, read_ready, read_show, read_tree};
 use serve::exec_serve;
+use setup::exec_setup;
 use skill::exec_skill;
 use support::{RecordScope, open_database, write_output};
 use web::exec_web;
@@ -200,6 +202,7 @@ fn dispatch(command: Option<Command>, renderer: &Renderer, warnings: &mut Vec<Wa
         Some(Command::Gate { command }) => exec_gate(command, renderer, warnings),
         Some(Command::Note { command }) => exec_note(command, renderer),
         Some(Command::Skill { command }) => exec_skill(command, renderer),
+        Some(Command::Setup { agent, yes, dry_run }) => exec_setup(agent, yes, dry_run, renderer),
         Some(Command::Show { id }) => write_output(read_show(&id, renderer)?),
         Some(Command::List { filters }) => write_output(read_list(filters, renderer)?),
         Some(Command::Tree { id, options }) => write_output(read_tree(id.as_deref(), options, renderer)?),

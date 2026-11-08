@@ -123,10 +123,12 @@ dependencies = [
  "arcl-store",
  "assert_cmd",
  "clap",
+ "jsonc-parser",
  "owo-colors",
  "rusqlite",
  "serde",
  "serde_json",
+ "similar",
  "tempfile",
  "thiserror",
  "unicode-width",
@@ -2088,6 +2090,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonc-parser"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ecded084f9b9a718d39668a42657c32253663d1f6afb3fbb9134f0305f73f48"
+
+[[package]]
 name = "jsonschema"
 version = "0.60.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2905,6 +2913,15 @@ checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
 dependencies = [
  "errno",
  "libc",
+]
+
+[[package]]
+name = "similar"
+version = "3.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2f8bec09ae8fae0f4f265a4559a9334be3929d8504e9b536df0a41302bd1733"
+dependencies = [
+ "bstr",
 ]
 
 [[package]]

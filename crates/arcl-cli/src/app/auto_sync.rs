@@ -70,6 +70,7 @@ pub(super) fn command_access(command: Option<&Command>) -> Access {
             | Command::Workspace { .. }
             | Command::Serve { .. }
             | Command::Skill { .. }
+            | Command::Setup { .. }
             | Command::Query { schema: true, .. },
         ) => Access::Untracked,
         Some(
