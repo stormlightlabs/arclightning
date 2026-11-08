@@ -1,8 +1,6 @@
 //! The read commands of the CLI. `arcl serve` answers the same reads through
 //! GraphQL, in [`super::rest`], with the same envelopes and errors.
 
-use arcl_store::prelude::*;
-
 use super::query::{connected_tree, list_connected, resolve_ready_filter, show_record};
 use super::skill::{absent, write_replacing};
 use super::support::*;
