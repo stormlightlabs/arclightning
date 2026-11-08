@@ -107,7 +107,11 @@ impl QueryRoot {
     async fn records(
         &self, ctx: &Context<'_>,
         #[graphql(desc = "`capture`, `release`, `spec`, `plan`, `phase`, `task` or `note`.")] kind: Option<String>,
-        #[graphql(default, desc = "Stored statuses, such as `pending`.")] status: Vec<String>,
+        #[graphql(
+            default,
+            desc = "Stored statuses, such as `pending`. Notes have none, so a status leaves them out."
+        )]
+        status: Vec<String>,
         #[graphql(default, desc = "Task priorities, such as `high`.")] priority: Vec<String>,
         #[graphql(desc = "Records in this release.")] release: Option<ID>,
         #[graphql(desc = "Plans and tasks under this spec.")] spec: Option<ID>,

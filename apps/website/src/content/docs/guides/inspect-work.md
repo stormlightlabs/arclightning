@@ -13,13 +13,14 @@ Show one record or filter a broader list:
 ```sh
 arcl show arcl-t-01J...
 arcl list --kind task --status pending --priority high
-arcl list --epic arcl-e-01J...
-arcl list --milestone arcl-m-01J... --status pending in_progress
+arcl list --spec arcl-s-01J...
+arcl list --phase arcl-ph-01J... --status pending in_progress
 ```
 
-`list` accepts `--kind`, `--status`, `--priority`, `--release`, `--epic`,
-`--milestone`, and `--parent`. Association filters include the matching
-container and work below it where applicable.
+`list` accepts `--kind`, `--status`, `--priority`, `--release`, `--spec`,
+`--plan`, `--phase`, `--parent`, `--assignee` and `--all`. Association filters
+include the matching container and work below it where applicable. Notes have
+no status, so `--status` leaves them out.
 
 Human output from `show` and `list` prints short IDs, the shortest unique end
 of each ID, such as `GBA5`. Any command accepts one in place of the

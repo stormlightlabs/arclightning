@@ -210,7 +210,7 @@ type Query {
 		"""
 		kind: String,
 		"""
-		Stored statuses, such as `pending`.
+		Stored statuses, such as `pending`. Notes have none, so a status leaves them out.
 		"""
 		status: [String!]! = [],
 		"""

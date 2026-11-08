@@ -34,7 +34,8 @@ pub enum TreeStatus {
 pub struct RecordFilter {
     /// One of [`RECORD_KINDS`].
     pub kind: Option<String>,
-    /// Stored statuses, such as `pending`; a note's status is `available`.
+    /// Stored statuses, such as `pending`. Notes have none, so a list with a
+    /// status filter leaves them out.
     pub statuses: Vec<String>,
     /// Task priorities. Only tasks carry one.
     pub priorities: Vec<TaskPriority>,
@@ -322,21 +323,29 @@ pub fn list_records(graph: &ConnectedGraph, filter: &RecordFilter) -> Result<Vec
             ));
         }
     }
-    for task in &graph.tasks {
+    // Ancestry walks the parent chain, so only a spec, plan or phase filter
+    // reads it, and only for a task every other filter matches.
+    let ancestry_matches = |task: &PlanningTask| -> Result<bool> {
+        if filter.spec_id.is_none() && filter.plan_id.is_none() && filter.phase_id.is_none() {
+            return Ok(true);
+        }
         let ancestry = task_ancestry(graph, task.id)?;
+        Ok(filter.spec_id.is_none_or(|id| ancestry.0 == Some(id))
+            && filter.plan_id.is_none_or(|id| ancestry.1 == Some(id))
+            && filter.phase_id.is_none_or(|id| ancestry.2 == Some(id)))
+    };
+    for task in &graph.tasks {
         let task_matches = filter.kind.as_deref().is_none_or(|kind| kind == "task")
             && (filter.archived || task.archived_at.is_none())
             && status_matches(&filter.statuses, task.status.as_str())
             && (filter.priorities.is_empty() || filter.priorities.contains(&task.priority))
-            && filter.spec_id.is_none_or(|id| ancestry.0 == Some(id))
-            && filter.plan_id.is_none_or(|id| ancestry.1 == Some(id))
-            && filter.phase_id.is_none_or(|id| ancestry.2 == Some(id))
             && filter.parent_id.is_none_or(|id| task.parent_id == Some(id))
             && filter
                 .assignee
                 .as_ref()
                 .is_none_or(|name| task.assignee.as_ref() == Some(name))
-            && release_member_matches(graph, "task", &task.id.to_string(), filter.release_id);
+            && release_member_matches(graph, "task", &task.id.to_string(), filter.release_id)
+            && ancestry_matches(task)?;
         if task_matches {
             records.push(RecordSummary::new(
                 "task",
@@ -814,8 +823,8 @@ fn status_matches(statuses: &[String], status: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{RecordFilterArgs, StorageError};
-    use crate::Database;
+    use super::{RecordFilter, RecordFilterArgs, StorageError, list_records};
+    use crate::{Database, PlanningTaskCreate};
     use arcl_core::domain::*;
 
     /// A refused [`RecordFilterArgs`], as a caller's error type wraps it.
@@ -992,5 +1001,58 @@ mod tests {
             .expect("a full ID resolves as it is");
         let error = database.list_records(&unknown).expect_err("no such spec");
         assert!(matches!(error, StorageError::SpecNotFound { .. }), "{error:?}");
+    }
+
+    #[test]
+    fn a_broken_task_ancestry_fails_only_lists_that_read_it() {
+        let mut database = Database::open_in_memory().expect("database opens");
+        let project_id = database.project().expect("project reads").id;
+        let spec = database
+            .create_spec("Feature".to_owned(), String::new(), String::new())
+            .expect("spec creates");
+        let capture = database
+            .create_capture("Idea".to_owned(), String::new())
+            .expect("capture creates");
+        let task = database
+            .create_planning_task(PlanningTaskCreate {
+                project_id,
+                spec_id: None,
+                plan_id: None,
+                phase_id: None,
+                parent_id: None,
+                title: "Orphan".to_owned(),
+                body: String::new(),
+                priority: TaskPriority::Normal,
+                position: 0,
+            })
+            .expect("task creates");
+        let mut graph = database.connected_graph().expect("graph reads");
+        let missing = TaskId::new();
+        graph.tasks[0].parent_id = Some(missing);
+
+        let captures = list_records(
+            &graph,
+            &RecordFilter { kind: Some("capture".to_owned()), ..RecordFilter::default() },
+        )
+        .expect("captures list");
+        let ids = captures.iter().map(|record| record.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids, [capture.id.to_string()]);
+        let tasks = list_records(
+            &graph,
+            &RecordFilter { kind: Some("task".to_owned()), ..RecordFilter::default() },
+        )
+        .expect("tasks list without an ancestry filter");
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].id, task.id.to_string());
+
+        let error = list_records(
+            &graph,
+            &RecordFilter { spec_id: Some(spec.id), ..RecordFilter::default() },
+        )
+        .expect_err("a spec filter reads the broken ancestry");
+        assert!(
+            matches!(&error, StorageError::PlanningTaskNotFound { id } if *id == missing.to_string()),
+            "{error:?}"
+        );
     }
 }

@@ -627,6 +627,92 @@ async fn list_filter_failures_match_the_cli() {
 }
 
 #[tokio::test]
+async fn list_filters_leave_out_archived_subtasks_unless_all() {
+    let project = project(false);
+    let mut database = Database::open(project.path().join(".arcl/arcl.db")).expect("database opens");
+    let project_id = database.project().expect("project reads").id;
+    let spec = database
+        .create_spec("Feature".to_owned(), String::new(), String::new())
+        .expect("spec creates");
+    let plan = database
+        .create_plan(spec.id, "Roadmap".to_owned(), String::new())
+        .expect("plan creates");
+    let phase = database
+        .create_phase(plan.id, "First".to_owned(), String::new(), 1)
+        .expect("phase creates");
+    let mut task = |title: &str, phase_id: Option<PhaseId>, parent_id: Option<TaskId>| {
+        database
+            .create_planning_task(PlanningTaskCreate {
+                project_id,
+                spec_id: None,
+                plan_id: None,
+                phase_id,
+                parent_id,
+                title: title.to_owned(),
+                body: String::new(),
+                priority: TaskPriority::Normal,
+                position: 0,
+            })
+            .expect("task creates")
+            .id
+    };
+    let parent = task("Parent", Some(phase.id), None);
+    let subtask = task("Subtask", None, Some(parent));
+    database
+        .complete_planning_task(subtask, arcl_store::OpenSubtasks::Refuse, Some("evidence".to_owned()))
+        .expect("subtask completes");
+    // The parent stays pending, so the compaction archives only the subtask.
+    database
+        .compact(&CompactionRequest {
+            before: "2999-01-01".to_owned(),
+            phase_id: Some(phase.id),
+            include_undated: false,
+            dry_run: false,
+        })
+        .expect("compaction runs");
+    drop(database);
+    let (spec, phase) = (spec.id.to_string(), phase.id.to_string());
+    let (parent, subtask) = (parent.to_string(), subtask.to_string());
+    let server = ArclServer::new(project.path().to_owned());
+
+    let task_kind = Some(RecordKind::Task);
+    /// A filter's name, its input with or without `all`, and the tasks it
+    /// lists without `all`.
+    type Case<'a> = (&'a str, Box<dyn Fn(bool) -> ListInput + 'a>, Vec<&'a String>);
+    let cases: [Case; 3] = [
+        (
+            "parent",
+            Box::new(|all| ListInput { parent: Some(parent.clone()), all, ..ListInput::default() }),
+            vec![],
+        ),
+        (
+            "spec",
+            Box::new(|all| ListInput { spec: Some(spec.clone()), kind: task_kind, all, ..ListInput::default() }),
+            vec![&parent],
+        ),
+        (
+            "phase",
+            Box::new(|all| ListInput { phase: Some(phase.clone()), kind: task_kind, all, ..ListInput::default() }),
+            vec![&parent],
+        ),
+    ];
+    for (filter, input, unarchived) in cases {
+        assert_eq!(
+            list_ids(&server, input(false)).await,
+            in_list_order(&unarchived),
+            "{filter}"
+        );
+        let mut with_archived = unarchived;
+        with_archived.push(&subtask);
+        assert_eq!(
+            list_ids(&server, input(true)).await,
+            in_list_order(&with_archived),
+            "{filter} with all"
+        );
+    }
+}
+
+#[tokio::test]
 async fn failures_use_the_cli_error_envelope() {
     let project = project(false);
     let server = ArclServer::new(project.path().to_owned());

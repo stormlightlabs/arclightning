@@ -524,9 +524,11 @@ example by a branch switch (exit `3`), and files the database and the workspace
 changed differently (exit `4`). Other commands that only read records warn and
 still run.
 
-`list` accepts `--kind`, `--status`, `--priority`, `--release`, `--epic`,
-`--milestone`, and `--parent`. `ready` and `next` accept the same priority and
-association filters. `list` leaves out archived tasks; `--all` includes them.
+`list` accepts `--kind`, `--status`, `--priority`, `--release`, `--spec`,
+`--plan`, `--phase`, `--parent`, `--assignee` and `--all`. Notes have no
+status, so `--status` leaves them out. `ready` and `next` accept `--priority`,
+`--spec`, `--plan`, `--phase` and `--parent`. `list` leaves out archived
+tasks; `--all` includes them.
 
 `context` leaves archived tasks out of the blockers, dependents and earlier
 evidence; `--all` includes them. The task itself always shows.
