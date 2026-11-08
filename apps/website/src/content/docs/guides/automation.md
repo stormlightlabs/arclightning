@@ -190,11 +190,14 @@ imports workspace changes into the database and exports the result.
 
 A call waits up to 10 seconds for an `arcl` command in the same project to
 finish, then fails with `application_error` (exit code `1`) naming the
-`.arcl/arcl.db-sync.lock` file. A call the client cancels while it waits
-changes nothing. Once its operation starts, a write runs to the end.
+`.arcl/arcl.db-sync.lock` file. `prime` is the exception: after 2 seconds it
+returns the database as it is with a `workspace_sync` warning, as `arcl prime`
+does. A call the client cancels while it waits changes nothing. Once its
+operation starts, a write runs to the end.
 
 | Tool              | Command           | `format_version`              |
 | ----------------- | ----------------- | ----------------------------- |
+| `prime`           | `prime`           | `1`                           |
 | `show`            | `show`            | `2` for a task, `1` otherwise |
 | `list`            | `list`            | `1`                           |
 | `ready`           | `ready`           | `1`                           |
@@ -224,6 +227,15 @@ version as `arcl/format_version`. Renaming, removing or retyping a field in
 either schema comes with a new version; a new field does not. A failure,
 including arguments the input schema rejects, is an error result whose
 structured content is the version 1 failure object above.
+
+`prime` takes no arguments and returns what `arcl --json prime` prints: the
+working loop as Markdown in `data.loop`, then `data.open` and `data.ready`,
+each with up to 5 tasks and a `more` count. Titles are cut to 200 bytes and
+handoffs to 400, each ending with `… [truncated]` when cut, so the result
+stays near 10 KiB. Outside an initialized project it
+succeeds with `data.initialized` false, `data.root` and a `data.message` that
+says to run `arcl init`. The server's instructions tell clients to call it at
+the start of a session.
 
 `list` and `ready` return at most `limit` records, from 1 to 200 and 50 by
 default. While more remain, `data.next_cursor` holds the `cursor` for the next

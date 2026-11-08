@@ -8,7 +8,11 @@
 //! database as it is. After a write, a second sync exports it, and a failure
 //! there is a warning, since the change is saved. A call waits at most
 //! [`LOCK_WAIT`] for the lock, then fails with `application_error`, the code
-//! the CLI gives a lock failure, whether it reads or writes.
+//! the CLI gives a lock failure, whether it reads or writes. The exception is
+//! [`Access::Prime`], which waits at most [`PRIME_LOCK_WAIT`] and then reads
+//! the database as it is with a warning, as `arcl prime` does. [`prime`]
+//! also answers outside an initialized project, with the [`PrimeSetup`]
+//! `arcl --json prime` prints there.
 //!
 //! A cancelled call stops while it waits for the lock, and checks once more
 //! before its operation starts. Once the operation starts it runs to the end:
@@ -19,6 +23,7 @@ use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 
+use arcl_core::prelude::*;
 use arcl_repo::prelude::*;
 use arcl_store::prelude::*;
 
@@ -33,6 +38,11 @@ pub const LOCK_WAIT: Duration = Duration::from_secs(10);
 pub enum Access {
     /// The operation only reads records.
     Read,
+    /// The operation only reads records. It waits at most [`PRIME_LOCK_WAIT`]
+    /// for the lock, then reads the database as it is with a
+    /// `workspace_sync` warning instead of failing. `prime` reads this way, as `arcl prime` does, so an agent
+    /// starting a session still gets its loop and its work.
+    Prime,
     /// The operation may change records.
     Write,
 }
@@ -41,7 +51,8 @@ pub enum Access {
 /// workspace around it as the CLI does. Returns the operation's value and the
 /// warnings the call collected.
 ///
-/// The call waits at most `lock_wait` for the sync lock. Once `cancelled`
+/// The call waits at most `lock_wait` for the sync lock, or at most
+/// [`PRIME_LOCK_WAIT`] for [`Access::Prime`]. Once `cancelled`
 /// fires, the call stops before `operation` starts; after that it runs to the
 /// end.
 pub fn run<T>(
@@ -50,14 +61,44 @@ pub fn run<T>(
 ) -> Result<(T, Vec<Warning>), ToolError> {
     let project = ProjectDir::discover(start)?;
     project.require_database()?;
+    run_in(&project, access, lock_wait, cancelled, operation)
+}
 
+/// Read the session primer for the project that holds `start`, as [`run`]
+/// does with [`Access::Prime`]. Where `start` is in no project, or in one
+/// without a database, return the [`PrimeSetup`] that says to run
+/// `arcl init`, with no warnings, as `arcl --json prime` does.
+pub fn prime(
+    start: &Path, lock_wait: Duration, cancelled: &CancellationToken,
+) -> Result<(Prime, Vec<Warning>), ToolError> {
+    let found = ProjectDir::discover(start).and_then(|project| project.require_database().map(|_| project));
+    let project = match found {
+        Ok(project) => project,
+        Err(error) => return Ok((Prime::Setup(PrimeSetup::from_error(error)?), Vec::new())),
+    };
+    run_in(&project, Access::Prime, lock_wait, cancelled, |database| {
+        Ok(Prime::Primer(Primer::read(database, &ShortIds::default())?))
+    })
+}
+
+/// [`run`] against `project`, whose database exists.
+fn run_in<T>(
+    project: &ProjectDir, access: Access, lock_wait: Duration, cancelled: &CancellationToken,
+    operation: impl FnOnce(&mut Database) -> Result<T, ToolError>,
+) -> Result<(T, Vec<Warning>), ToolError> {
+    let lock_wait = match access {
+        Access::Prime => lock_wait.min(PRIME_LOCK_WAIT),
+        Access::Read | Access::Write => lock_wait,
+    };
     let is_cancelled = || cancelled.is_cancelled();
     let wait = LockWait::Within { timeout: lock_wait, cancelled: &is_cancelled };
     let SyncBefore { locked, result } = sync_before(project.workspace(), wait);
     let mut warnings = Vec::new();
     match result {
         Ok(found) => warnings.extend(Warning::blocker_edges(found)),
-        Err(error) if stops_reads(&error) || access == Access::Write => return Err(error.before_write().into()),
+        Err(error) if access == Access::Write || stops_reads(&error, access) => {
+            return Err(error.before_write().into());
+        }
         Err(error) => warnings.push(Warning::unsynced_read(&error)),
     }
 
@@ -76,9 +117,13 @@ pub fn run<T>(
     Ok((value, warnings))
 }
 
-/// Whether a failure before the call stops it even as a read. The MCP server
-/// fails a read when the lock wait ran out or the client cancelled; the CLI
-/// warns and reads instead.
-const fn stops_reads(error: &ProjectError) -> bool {
-    matches!(error, ProjectError::SyncLockBusy { .. } | ProjectError::Cancelled)
+/// Whether a failure before the call stops it even as a read. A cancelled
+/// call always stops. A held lock stops an [`Access::Read`] call; an
+/// [`Access::Prime`] call warns and reads, as the CLI does for any read.
+const fn stops_reads(error: &ProjectError, access: Access) -> bool {
+    match error {
+        ProjectError::Cancelled => true,
+        ProjectError::SyncLockBusy { .. } => !matches!(access, Access::Prime),
+        _ => false,
+    }
 }

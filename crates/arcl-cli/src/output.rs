@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use owo_colors::{OwoColorize, Stream};
@@ -10,7 +9,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::cli::{ColorChoice, TreeStyle};
 use arcl_core::domain::{
     Capture, CaptureStatus, ContainerStatus, Gate, GateStatus, Note, Phase, Plan, PlanningTask, Release, ShortIds,
-    Spec, TaskDependency, TaskId, TaskNote, TaskPriority, TaskStatus,
+    Spec, TaskDependency, TaskId, TaskNote, TaskStatus,
 };
 use arcl_repo::{
     gate::{GH_MISSING, GateCheckReport},
@@ -22,23 +21,15 @@ use arcl_store::{
     PlanningWork,
 };
 
+pub use arcl_repo::prime::{
+    PRIME_LIST_LIMIT, PRIME_MAX_BYTES, PRIME_MAX_LINES, PrimeList, PrimeSetup, PrimeTask, Primer,
+};
 pub use arcl_store::{TREE_SECTIONS, TreeStatus, tree_section};
 pub use roadmap::{
     Roadmap, RoadmapItem, RoadmapPlan, RoadmapProgress, RoadmapSpec, RoadmapState, RoadmapTasks, escape_markdown,
 };
 
 mod roadmap;
-
-/// The most tasks each `arcl prime` list shows. The rest are counted in
-/// [`PrimeList::more`].
-pub const PRIME_LIST_LIMIT: usize = 5;
-
-/// The most lines human `arcl prime` output prints. The size budget the
-/// manual documents.
-pub const PRIME_MAX_LINES: usize = 40;
-
-/// The most bytes human `arcl prime` output prints.
-pub const PRIME_MAX_BYTES: usize = 4096;
 
 /// The characters human `arcl tree` output draws with by default.
 const UNICODE_TREE: TreeChars =
@@ -843,7 +834,7 @@ impl Renderer {
     /// full IDs.
     pub fn render_primer(&self, primer: &Primer) -> Result<Option<String>, OutputError> {
         Ok(match self.mode {
-            OutputMode::Human | OutputMode::Plain => Some(primer.human()),
+            OutputMode::Human | OutputMode::Plain => Some(human_primer(primer)),
             OutputMode::Json => Some(serde_json::to_string(&Envelope {
                 format_version: FORMAT_VERSION,
                 data: primer,
@@ -1627,191 +1618,6 @@ pub struct SetupReport {
     /// What the agent needs before it reads the files, such as trusting the
     /// project.
     pub notes: Vec<&'static str>,
-}
-
-/// What `arcl prime` prints: the skill's working loop, open work and ready
-/// work.
-#[derive(Debug, Serialize)]
-pub struct Primer {
-    /// Always true; [`PrimeSetup`] carries false.
-    pub initialized: bool,
-    /// The loop block of the Arc Lightning skill, as Markdown.
-    #[serde(rename = "loop")]
-    pub work_loop: &'static str,
-    /// In-progress tasks, then parked tasks.
-    pub open: PrimeList,
-    /// Ready tasks, in `arcl ready` order.
-    pub ready: PrimeList,
-}
-
-impl Primer {
-    /// The human text: a heading, the loop, both lists and a pointer to
-    /// `arcl context`.
-    fn human(&self) -> String {
-        let mut lines = vec![
-            "Arc Lightning tracks this project's tasks. Work the loop:".to_owned(),
-            String::new(),
-        ];
-        lines.extend(self.work_loop.lines().map(str::to_owned));
-        lines.push(String::new());
-        lines.extend(self.open.human_lines(
-            "Open work",
-            "arcl list --kind task --status in_progress parked",
-            PrimeTask::open_line,
-        ));
-        lines.push(String::new());
-        lines.extend(self.ready.human_lines("Ready", "arcl ready", PrimeTask::ready_line));
-        lines.push(String::new());
-        lines.push("`arcl context <id>` shows a task's criteria, blockers and full handoff.".to_owned());
-        lines.join("\n")
-    }
-}
-
-/// What `arcl prime` prints where the directory is not in an initialized
-/// project, so a session-start hook succeeds in a fresh clone.
-#[derive(Debug, Serialize)]
-pub struct PrimeSetup {
-    /// Always false; [`Primer`] carries true.
-    pub initialized: bool,
-    /// The project directory, or the current directory outside any project.
-    pub root: String,
-    /// The line human output prints, which says to run `arcl init`.
-    pub message: String,
-}
-
-/// One `arcl prime` list: at most [`PRIME_LIST_LIMIT`] tasks, and how many
-/// more there are.
-#[derive(Debug, Serialize)]
-pub struct PrimeList {
-    /// The first tasks, in order.
-    pub tasks: Vec<PrimeTask>,
-    /// How many tasks the list leaves out.
-    pub more: usize,
-}
-
-impl PrimeList {
-    /// Keep the first [`PRIME_LIST_LIMIT`] of `tasks`, with IDs from `ids`
-    /// and each task's open gate count from `open_gates`, and count the
-    /// rest.
-    pub fn new<'a>(
-        tasks: impl IntoIterator<Item = &'a PlanningTask>, ids: &ShortIds, open_gates: &HashMap<TaskId, usize>,
-    ) -> Self {
-        let mut list = Self { tasks: Vec::new(), more: 0 };
-        for task in tasks {
-            if list.tasks.len() < PRIME_LIST_LIMIT {
-                let gates = open_gates.get(&task.id).copied().unwrap_or_default();
-                list.tasks.push(PrimeTask::new(task, ids, gates));
-            } else {
-                list.more += 1;
-            }
-        }
-        list
-    }
-
-    /// The heading, then each task's lines, then where to find the rest.
-    fn human_lines(&self, heading: &str, rest: &str, line: fn(&PrimeTask) -> String) -> Vec<String> {
-        if self.tasks.is_empty() {
-            return vec![format!("{heading}: none.")];
-        }
-        let mut lines = vec![format!("{heading}:")];
-        for task in &self.tasks {
-            lines.push(line(task));
-            if let Some(handoff) = task.handoff_line() {
-                lines.push(format!("  Handoff: {handoff}"));
-            }
-        }
-        if self.more > 0 {
-            lines.push(format!("  and {} more: {rest}", self.more));
-        }
-        lines
-    }
-}
-
-/// One task in an `arcl prime` list.
-#[derive(Debug, Serialize)]
-pub struct PrimeTask {
-    /// The full ID, or the short ID in human output.
-    pub id: String,
-    /// The full title.
-    pub title: String,
-    /// The task's status.
-    pub status: TaskStatus,
-    /// The task's priority.
-    pub priority: TaskPriority,
-    /// Who claimed the task, if anyone did.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub assignee: Option<String>,
-    /// The latest handoff note in full, or empty.
-    pub handoff: String,
-    /// How many open gates the task has; JSON omits it at zero.
-    #[serde(skip_serializing_if = "is_zero")]
-    pub open_gates: usize,
-}
-
-impl PrimeTask {
-    fn new(task: &PlanningTask, ids: &ShortIds, open_gates: usize) -> Self {
-        let id = task.id.to_string();
-        Self {
-            id: ids.short(&id).to_owned(),
-            title: task.title.clone(),
-            status: task.status,
-            priority: task.priority,
-            assignee: task.assignee.clone(),
-            handoff: task.handoff.clone(),
-            open_gates,
-        }
-    }
-
-    /// `- <id> <status> (<assignee>) [<n> open gate(s)]: <title>`, with the
-    /// gate count only when the task has an open gate.
-    fn open_line(&self) -> String {
-        let gates = match self.open_gates {
-            0 => String::new(),
-            1 => " [1 open gate]".to_owned(),
-            count => format!(" [{count} open gates]"),
-        };
-        format!(
-            "- {} {}{}{gates}: {}",
-            self.id,
-            self.status.as_str(),
-            self.claim(),
-            self.clipped_title()
-        )
-    }
-
-    /// `- <id> [<priority>] (<assignee>): <title>`.
-    fn ready_line(&self) -> String {
-        format!(
-            "- {} [{}]{}: {}",
-            self.id,
-            self.priority.as_str(),
-            self.claim(),
-            self.clipped_title()
-        )
-    }
-
-    fn claim(&self) -> String {
-        self.assignee
-            .as_deref()
-            .map(|assignee| format!(" ({})", clip_escaped(assignee, PRIME_ASSIGNEE_BYTES, false)))
-            .unwrap_or_default()
-    }
-
-    /// The title's first line with control characters escaped, clipped, with
-    /// `…` when more follows.
-    fn clipped_title(&self) -> String {
-        let mut lines = self.title.lines();
-        let first = lines.next().unwrap_or_default();
-        clip_escaped(first, PRIME_TEXT_BYTES, lines.next().is_some())
-    }
-
-    /// The handoff's first non-blank line with control characters escaped,
-    /// clipped, with `…` when more follows.
-    fn handoff_line(&self) -> Option<String> {
-        let mut lines = self.handoff.lines().map(str::trim).filter(|line| !line.is_empty());
-        let first = lines.next()?;
-        Some(clip_escaped(first, PRIME_TEXT_BYTES, lines.next().is_some()))
-    }
 }
 
 /// The manifest `web export` writes beside the documents, and reads back on
@@ -2921,6 +2727,98 @@ fn clip_escaped(text: &str, limit: usize, cut: bool) -> String {
     }
     clipped.push('…');
     clipped
+}
+
+/// Human `arcl prime` output: a heading, the loop, both lists and a pointer
+/// to `arcl context`.
+fn human_primer(primer: &Primer) -> String {
+    let mut lines = vec![
+        "Arc Lightning tracks this project's tasks. Work the loop:".to_owned(),
+        String::new(),
+    ];
+    lines.extend(primer.work_loop.lines().map(str::to_owned));
+    lines.push(String::new());
+    lines.extend(human_prime_list(
+        &primer.open,
+        "Open work",
+        "arcl list --kind task --status in_progress parked",
+        human_open_task,
+    ));
+    lines.push(String::new());
+    lines.extend(human_prime_list(&primer.ready, "Ready", "arcl ready", human_ready_task));
+    lines.push(String::new());
+    lines.push("`arcl context <id>` shows a task's criteria, blockers and full handoff.".to_owned());
+    lines.join("\n")
+}
+
+/// The heading, then each task's lines, then where to find the rest.
+fn human_prime_list(list: &PrimeList, heading: &str, rest: &str, line: fn(&PrimeTask) -> String) -> Vec<String> {
+    if list.tasks.is_empty() {
+        return vec![format!("{heading}: none.")];
+    }
+    let mut lines = vec![format!("{heading}:")];
+    for task in &list.tasks {
+        lines.push(line(task));
+        if let Some(handoff) = prime_handoff(task) {
+            lines.push(format!("  Handoff: {handoff}"));
+        }
+    }
+    if list.more > 0 {
+        lines.push(format!("  and {} more: {rest}", list.more));
+    }
+    lines
+}
+
+/// `- <id> <status> (<assignee>) [<n> open gate(s)]: <title>`, with the gate
+/// count only when the task has an open gate.
+fn human_open_task(task: &PrimeTask) -> String {
+    let gates = match task.open_gates {
+        0 => String::new(),
+        1 => " [1 open gate]".to_owned(),
+        count => format!(" [{count} open gates]"),
+    };
+    format!(
+        "- {} {}{}{gates}: {}",
+        task.id,
+        task.status.as_str(),
+        prime_claim(task),
+        prime_title(task)
+    )
+}
+
+/// `- <id> [<priority>] (<assignee>): <title>`.
+fn human_ready_task(task: &PrimeTask) -> String {
+    format!(
+        "- {} [{}]{}: {}",
+        task.id,
+        task.priority.as_str(),
+        prime_claim(task),
+        prime_title(task)
+    )
+}
+
+/// ` (<assignee>)`, clipped, or nothing when no one claimed the task.
+fn prime_claim(task: &PrimeTask) -> String {
+    task.assignee
+        .as_deref()
+        .map(|assignee| format!(" ({})", clip_escaped(assignee, PRIME_ASSIGNEE_BYTES, false)))
+        .unwrap_or_default()
+}
+
+/// The title's first line with control characters escaped, clipped, with `…`
+/// when more follows.
+fn prime_title(task: &PrimeTask) -> String {
+    let mut lines = task.title.lines();
+    let first = lines.next().unwrap_or_default();
+    clip_escaped(first, PRIME_TEXT_BYTES, lines.next().is_some())
+}
+
+/// The handoff's first non-blank line with control characters escaped,
+/// clipped, with `…` when more follows.
+fn prime_handoff(task: &PrimeTask) -> Option<String> {
+    let mut lines = task.handoff.lines().map(str::trim).filter(|line| !line.is_empty());
+    let first = lines.next()?;
+    Some(clip_escaped(first, PRIME_TEXT_BYTES, lines.next().is_some()))
 }
 
 fn short(commit: &str) -> &str {

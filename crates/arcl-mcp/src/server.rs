@@ -7,7 +7,7 @@
 //! returns version 2 for a task and 1 for any other record, as the CLI does.
 
 use std::cell::OnceCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use rmcp::{
@@ -19,7 +19,7 @@ use rmcp::{
 use tokio_util::sync::CancellationToken;
 
 use arcl_core::prelude::*;
-use arcl_repo::prelude::Warning;
+use arcl_repo::prelude::{Prime, Warning};
 use arcl_store::prelude::*;
 
 use crate::error::ToolError;
@@ -45,7 +45,8 @@ macro_rules! read_description {
     };
 }
 
-const INSTRUCTIONS: &str = "Arc Lightning tracks this project's tasks. Find work with `ready`, \
+const INSTRUCTIONS: &str = "Arc Lightning tracks this project's tasks. Call `prime` at the start \
+of a session for the working loop, open work and the first ready tasks. Find work with `ready`, \
 claim it with `task_start`, read `context`, leave notes on decisions and findings with \
 `task_note`, make a task wait on a pull request, run or date with `gate_add`, then finish with \
 `task_complete` or park it with `task_handoff`. `explain` says why a task is not ready. Record work \
@@ -68,7 +69,8 @@ impl ArclServer {
     }
 
     /// The same server with calls waiting at most `lock_wait` for the sync
-    /// lock instead of [`project::LOCK_WAIT`].
+    /// lock instead of [`project::LOCK_WAIT`]. `prime` waits the shorter of
+    /// this and [`arcl_repo::prime::PRIME_LOCK_WAIT`].
     pub fn with_lock_wait(mut self, lock_wait: Duration) -> Self {
         self.lock_wait = lock_wait;
         self
@@ -102,11 +104,25 @@ impl ArclServer {
         T: Send + 'static,
         F: FnOnce(&mut Database) -> Result<T, ToolError> + Send + 'static,
     {
+        self.spawn(cancelled, move |start, lock_wait, token| {
+            project::run(start, access, lock_wait, token, operation)
+        })
+        .await
+    }
+
+    /// Run `task` on a blocking thread with the server's directory and lock
+    /// wait. `task`'s token fires when the client cancels the request or this
+    /// future is dropped.
+    async fn spawn<T, F>(&self, cancelled: CancellationToken, task: F) -> Result<(T, Vec<Warning>), ToolError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Path, Duration, &CancellationToken) -> Result<(T, Vec<Warning>), ToolError> + Send + 'static,
+    {
         let start = self.start.clone();
         let lock_wait = self.lock_wait;
         let token = cancelled.child_token();
         let _cancel_on_drop = token.clone().drop_guard();
-        tokio::task::spawn_blocking(move || project::run(&start, access, lock_wait, &token, operation))
+        tokio::task::spawn_blocking(move || task(&start, lock_wait, &token))
             .await
             .map_err(|error| ToolError::new(1, format!("the tool call stopped: {error}")))?
     }
@@ -114,6 +130,24 @@ impl ArclServer {
 
 #[tool_router(router = tool_router)]
 impl ArclServer {
+    /// Return the session primer, like `arcl --json prime`.
+    #[tool(
+        description = "Return the session primer, like `arcl --json prime`: the Arc Lightning working loop as \
+        Markdown in `data.loop`, then up to 5 open tasks (in progress, then parked) with handoffs and open gate \
+        counts, and up to 5 ready tasks. Each list's `more` counts the tasks it leaves out. Call it at the start \
+        of a session. With the workspace on, the call first syncs, as a command does; when an `arcl` command \
+        holds the sync lock past the wait, it returns the database as it is with a `workspace_sync` warning.",
+        annotations(read_only_hint = true, open_world_hint = false),
+        meta = version_meta(FORMAT_VERSION)
+    )]
+    pub async fn prime(
+        &self, Parameters(input): Parameters<PrimeInput>, cancelled: CancellationToken,
+    ) -> Result<Json<Envelope<Prime>>, ToolError> {
+        input?;
+        let (data, warnings) = self.spawn(cancelled, project::prime).await?;
+        Ok(Json(Envelope { format_version: FORMAT_VERSION, data, warnings }))
+    }
+
     /// Show one record by ID, like `arcl show`.
     #[tool(
         description = read_description!("Show one record by ID, like `arcl show`. A task returns its readiness view \
