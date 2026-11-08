@@ -407,6 +407,7 @@ and when it was created. Plain output prints the gate's `gate` line, then
 | `arcl show <id>`                                                     | Show one record by its full or short ID.                           |
 | `arcl list`                                                          | List records using kind, state, priority, and association filters. |
 | `arcl tree [<id>] [--all] [--ascii] [--depth <N>] [--style <STYLE>]` | Show the complete hierarchy or one rooted subtree.                 |
+| `arcl roadmap [--output <PATH>]`                                     | Print specs, plans, milestones and releases as one Markdown page.  |
 | `arcl explain <task-id>`                                             | Report every condition affecting task readiness.                   |
 | `arcl context <task-id>`                                             | Return the bounded context needed to work on a task.               |
 | `arcl check`                                                         | Sync the workspace, then validate database and graph invariants.   |
@@ -543,6 +544,63 @@ Colour appears only when stdout is a terminal and `NO_COLOR` is unset.
 check.
 
 See [Inspecting Work](/guides/inspect-work/) for the query workflow and context contents.
+
+### Roadmap
+
+`arcl roadmap` prints one Markdown page for a README or a docs site: each
+spec with its plans and their milestones, then the releases.
+
+```markdown
+# Roadmap
+
+## Arc Lightning first release and desktop app
+
+`arcl-s-01M5NE5NZPWXPVWMZA5CJBD6MY` · in progress · 70/86 tasks
+
+### Roadmap
+
+`arcl-pl-01M5NE5P0CWMJNP2A7B0ZQW6XC` · in progress · 70/86 tasks
+
+| Milestone | Status | Tasks |
+| --- | --- | --- |
+| Milestone 4: Blocking for automation | done | 11/11 |
+| Milestone 9: Integrated release | in progress | 2/3 |
+| Milestone 13: Project hub | planned | 0/6 |
+
+## Releases
+
+| Release | Status | Tasks |
+| --- | --- | --- |
+| v0.3.0 | done | 8/8 |
+```
+
+Task counts match `arcl tree`: completed tasks over all tasks at any depth,
+with cancelled tasks left out. A spec or plan counts every task below it. A
+release counts the tasks it holds and the tasks under the specs and plans it
+holds, each task once. `no tasks` stands in for `0/0`.
+
+The status is `done` for a completed record and `cancelled` for a cancelled
+one. An open record is `in progress` once a task below it is in progress or
+completed, and `planned` before that. Completed specs, plans and milestones
+stay on the page. A cancelled spec lists no plans, and a cancelled plan lists
+no milestones.
+
+Specs, plans and releases print in ID order, and milestones by position, then
+ID. The page has no timestamp, so the same records give the same bytes. It
+leaves out captures, notes and tasks outside any spec. IDs print as code with
+no links. Titles escape Markdown: `|`, `` ` ``, `*`, `_`, `[`, `]`, `<`, `>`,
+`~`, `&` and `\` anywhere, and a leading `#`, `-`, `+` or `=`.
+
+`--output <PATH>` (`-o`) writes the page to a file instead, through a
+temporary file renamed into place, and creates missing parent directories. The
+file holds the bytes `arcl roadmap` prints. Human output then prints
+`` Wrote the roadmap to `<PATH>`. ``, `--plain` prints the path, and `--json`
+returns `{path}`. `--plain` prints the same page as human output. `--json`
+without `--output` returns the page's data: `specs`, each with `plans` and
+their `milestones`, and `releases`. Each record has `id`, `title`, the stored
+`status`, `state` (`done`, `cancelled`, `in_progress` or `planned`) and
+`progress` with `done` and `total`. `--quiet` prints nothing, and with
+`--output` still writes the file.
 
 ## GraphQL queries
 

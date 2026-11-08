@@ -7,7 +7,8 @@
 //! compares the bytes each read returns with the files in
 //! `fixtures/rest/golden`. Set `ARCL_BLESS=1` to rewrite those files. Each
 //! read the CLI also makes with `--json` must print the same bytes as
-//! `arcl serve` returns.
+//! `arcl serve` returns. `arcl roadmap` prints the page in
+//! `fixtures/rest/golden/roadmap.md`.
 
 use std::{
     fs,
@@ -370,6 +371,74 @@ fn web_export_writes_the_golden_documents() {
     collect_files(&golden_dir().join("export"), &golden_dir().join("export"), &mut golden);
     golden.sort();
     assert_eq!(files, golden, "the export writes the golden set of documents");
+}
+
+/// Run `arcl roadmap` with `args` in `directory` and return its stdout.
+fn roadmap(directory: &Path, args: &[&str]) -> Vec<u8> {
+    let output = arcl(directory).args(args).output().expect("arcl roadmap runs");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    output.stdout
+}
+
+#[test]
+fn roadmap_prints_the_golden_page_the_same_way_each_time() {
+    let project = fixture_project();
+    let first = roadmap(project.path(), &["roadmap"]);
+    let page = String::from_utf8(first.clone()).expect("the page is UTF-8");
+    assert!(
+        matches_golden(&golden_dir().join("roadmap.md"), &page),
+        "`arcl roadmap` differs from roadmap.md:\n{page}"
+    );
+    assert_eq!(
+        roadmap(project.path(), &["roadmap"]),
+        first,
+        "a second run prints the same bytes"
+    );
+    assert_eq!(
+        roadmap(project.path(), &["--plain", "roadmap"]),
+        first,
+        "--plain prints the same page"
+    );
+}
+
+#[test]
+fn roadmap_output_writes_the_bytes_it_prints() {
+    let project = fixture_project();
+    let printed = roadmap(project.path(), &["roadmap"]);
+    let confirmation = roadmap(project.path(), &["roadmap", "--output", "docs/roadmap.md"]);
+    assert_eq!(
+        String::from_utf8_lossy(&confirmation),
+        "Wrote the roadmap to `docs/roadmap.md`.\n"
+    );
+    let path = project.path().join("docs/roadmap.md");
+    assert_eq!(fs::read(&path).expect("the roadmap file reads"), printed);
+
+    // A second write replaces the file whole and leaves no temporary file.
+    fs::write(&path, "stale and longer than nothing").expect("the file writes");
+    let confirmation = roadmap(project.path(), &["--json", "roadmap", "-o", "docs/roadmap.md"]);
+    let value: serde_json::Value = serde_json::from_slice(&confirmation).expect("JSON");
+    assert_eq!(
+        value,
+        serde_json::json!({ "format_version": 1, "data": { "path": "docs/roadmap.md" } })
+    );
+    assert_eq!(fs::read(&path).expect("the roadmap file reads"), printed);
+    let mut files = Vec::new();
+    collect_files(&project.path().join("docs"), &project.path().join("docs"), &mut files);
+    assert_eq!(files, ["roadmap.md"]);
+}
+
+#[test]
+fn roadmap_json_carries_the_page_data() {
+    let project = fixture_project();
+    let value: serde_json::Value =
+        serde_json::from_slice(&roadmap(project.path(), &["--json", "roadmap"])).expect("JSON");
+    assert_eq!(value["format_version"], 1);
+    let spec = &value["data"]["specs"][0];
+    assert_eq!(spec["id"], SPEC);
+    assert_eq!(spec["plans"][0]["id"], PLAN);
+    assert_eq!(spec["plans"][0]["milestones"][0]["id"], PHASE);
+    assert_eq!(value["data"]["releases"][0]["id"], RELEASE);
+    assert!(value["data"].get("captures").is_none() && value["data"].get("notes").is_none());
 }
 
 /// `text` with the value of its top-level `synced_at` replaced by

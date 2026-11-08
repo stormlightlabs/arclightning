@@ -22,6 +22,9 @@ use arcl_store::{
 };
 
 pub use arcl_store::{TREE_SECTIONS, TreeStatus, tree_section};
+pub use roadmap::{Roadmap, RoadmapItem, RoadmapPlan, RoadmapProgress, RoadmapSpec, RoadmapState, escape_markdown};
+
+mod roadmap;
 
 /// The most tasks each `arcl prime` list shows. The rest are counted in
 /// [`PrimeList::more`].
@@ -882,6 +885,30 @@ impl Renderer {
             OutputMode::Json => {
                 serde_json::to_string(&Envelope { format_version: FORMAT_VERSION, data: TreeNodesData { nodes } })?
             }
+            OutputMode::Quiet => return Ok(None),
+        };
+        Ok(Some(self.style(message)))
+    }
+
+    /// Render `arcl roadmap`: the Markdown page under human and plain
+    /// output, unstyled, and the same data under `--json`.
+    pub fn render_roadmap(&self, roadmap: &Roadmap) -> Result<Option<String>, OutputError> {
+        Ok(Some(match self.mode {
+            OutputMode::Human | OutputMode::Plain => roadmap.markdown(),
+            OutputMode::Json => serde_json::to_string(&Envelope { format_version: FORMAT_VERSION, data: roadmap })?,
+            OutputMode::Quiet => return Ok(None),
+        }))
+    }
+
+    /// Render the confirmation that `arcl roadmap --output` wrote `path`.
+    pub fn render_roadmap_written(&self, path: &Path) -> Result<Option<String>, OutputError> {
+        let message = match self.mode {
+            OutputMode::Human => format!("Wrote the roadmap to `{}`.", path.display()),
+            OutputMode::Plain => plain_escape(&path.display().to_string()),
+            OutputMode::Json => serde_json::to_string(&Envelope {
+                format_version: FORMAT_VERSION,
+                data: RoadmapWritten { path: &path.display().to_string() },
+            })?,
             OutputMode::Quiet => return Ok(None),
         };
         Ok(Some(self.style(message)))
@@ -1979,6 +2006,13 @@ struct TreeLine<'a> {
     /// The levels below the top level, or below a section heading, that
     /// `--style outline` indents the title by.
     indent: usize,
+}
+
+/// The `--json` data of `arcl roadmap --output`.
+#[derive(Debug, Serialize)]
+struct RoadmapWritten<'a> {
+    /// The file the Markdown page went to, as given.
+    path: &'a str,
 }
 
 #[derive(Debug, Serialize)]

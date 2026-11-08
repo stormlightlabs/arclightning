@@ -2,6 +2,7 @@
 //! GraphQL, in [`super::rest`], with the same envelopes and errors.
 
 use super::query::{connected_tree, list_connected, resolve_ready_filter, show_record};
+use super::skill::write_replacing;
 use super::support::*;
 use super::*;
 
@@ -70,6 +71,21 @@ pub(super) fn read_tree(root: Option<&str>, options: TreeArgs, renderer: &Render
         style: options.style,
     };
     Ok(renderer.render_connected_tree(&nodes, view)?)
+}
+
+/// `arcl roadmap`: print the roadmap page, or with `output` write it to that
+/// file, replacing it whole, and print a confirmation. The file holds the
+/// same bytes the command prints without `output` and without `--json`.
+pub(super) fn exec_roadmap(output: Option<&Path>, renderer: &Renderer) -> anyhow::Result<()> {
+    let database = open_database().map_err(ApplicationError::from_command)?;
+    let nodes = connected_tree(&database, None, TreeArgs::default()).map_err(ApplicationError::from_command)?;
+    let memberships = database.release_memberships().map_err(ApplicationError::from_command)?;
+    let roadmap = Roadmap::new(&nodes, &memberships);
+    let Some(path) = output else {
+        return write_output(renderer.render_roadmap(&roadmap)?);
+    };
+    write_replacing(path, &format!("{}\n", roadmap.markdown())).map_err(ApplicationError::from_command)?;
+    write_output(renderer.render_roadmap_written(path)?)
 }
 
 /// Replace each node's ID, and each blocker ID, with its short ID.
