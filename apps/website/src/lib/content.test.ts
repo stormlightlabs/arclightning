@@ -26,7 +26,7 @@ describe('docs', () => {
 describe('generated files', () => {
 	it('lists the landing page and every docs page in the sitemap', async () => {
 		const body = await sitemap().text();
-		expect(body).toContain('<loc>https://arclightning.stormlightlabs.org/</loc>');
+		expect(body).toContain('<loc>https://arcl.stormlightlabs.org/</loc>');
 		for (const doc of docs) expect(body).toContain(`/${doc.slug}/</loc>`);
 	});
 

@@ -19,8 +19,6 @@ Acceptance criteria:
       `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`
 - [ ] Attach arcl.stormlightlabs.org to the Pages project as a custom domain in
       Cloudflare
-- [ ] Set the site's canonical URL, sitemap and social metadata to
-      `https://arcl.stormlightlabs.org`
 
 Verification:
 

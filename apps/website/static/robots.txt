@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://arclightning.stormlightlabs.org/sitemap.xml
+Sitemap: https://arcl.stormlightlabs.org/sitemap.xml
