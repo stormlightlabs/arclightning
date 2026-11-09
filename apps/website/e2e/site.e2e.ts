@@ -182,3 +182,24 @@ test('serves Markdown, the sitemap and llms.txt', async ({ request }) => {
 	expect(await (await request.get('/sitemap.xml')).text()).toContain('/guides/tasks/</loc>');
 	expect(await (await request.get('/llms.txt')).text()).toContain('(/quick-start.md)');
 });
+
+test('serves the social card as a 1200x630 PNG', async ({ request }) => {
+	const card = await request.get('/og.png');
+	expect(card.ok()).toBe(true);
+	expect(card.headers()['content-type']).toBe('image/png');
+	const png = await card.body();
+	expect(png.subarray(1, 4).toString('ascii')).toBe('PNG');
+	expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([1200, 630]);
+});
+
+for (const path of ['/', '/guides/tasks/']) {
+	test(`${path} points og:image and twitter:image at the PNG card`, async ({ page }) => {
+		await page.goto(path);
+		const content = (selector: string) => page.locator(selector).getAttribute('content');
+		expect(await content('meta[property="og:image"]')).toBe('https://arcl.stormlightlabs.org/og.png');
+		expect(await content('meta[property="og:image:type"]')).toBe('image/png');
+		expect(await content('meta[property="og:image:width"]')).toBe('1200');
+		expect(await content('meta[property="og:image:height"]')).toBe('630');
+		expect(await content('meta[name="twitter:image"]')).toBe('https://arcl.stormlightlabs.org/og.png');
+	});
+}

@@ -21,6 +21,7 @@
 	},
 	"devDependencies": {
 		"@playwright/test": "catalog:",
+		"@resvg/resvg-js": "^2.6.2",
 		"@sveltejs/adapter-static": "catalog:",
 		"@sveltejs/kit": "catalog:",
 		"@sveltejs/vite-plugin-svelte": "catalog:",
@@ -31,6 +32,8 @@
 		"prettier": "catalog:",
 		"prettier-plugin-svelte": "catalog:",
 		"rehype-slug": "^6.0.0",
+		"satori": "^0.26.0",
+		"satori-html": "^0.3.2",
 		"shiki": "^3.23.0",
 		"svelte": "catalog:",
 		"svelte-check": "catalog:",

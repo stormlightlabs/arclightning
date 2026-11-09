@@ -20,8 +20,14 @@
 	<meta property="og:type" content="website" />
 	<meta property="og:url" content={absoluteUrl('/')} />
 	<meta property="og:site_name" content={site.name} />
-	<meta property="og:image" content={absoluteUrl('/social-card.svg')} />
+	<meta property="og:image" content={site.image.url} />
+	<meta property="og:image:type" content="image/png" />
+	<meta property="og:image:width" content={String(site.image.width)} />
+	<meta property="og:image:height" content={String(site.image.height)} />
+	<meta property="og:image:alt" content={site.image.alt} />
 	<meta name="twitter:card" content="summary_large_image" />
+	<meta name="twitter:image" content={site.image.url} />
+	<meta name="twitter:image:alt" content={site.image.alt} />
 	<link rel="canonical" href={absoluteUrl('/')} />
 </svelte:head>
 
