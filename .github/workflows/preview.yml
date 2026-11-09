@@ -1,6 +1,6 @@
 # Builds apps/website from the chosen branch and deploys it as a Cloudflare
 # Pages preview with a branch alias on arclightning.pages.dev. Run it from the
-# Actions tab. Production deploys from main belong to the deploy workflow.
+# Actions tab. It refuses main; production deploys are not set up yet.
 name: Preview
 
 on:
@@ -20,7 +20,7 @@ jobs:
       - name: Refuse main
         if: github.ref_name == 'main'
         run: |
-          echo "::error::Production deploys belong to the deploy workflow; pick another branch."
+          echo "::error::Preview deploys refuse main; pick another branch."
           exit 1
 
       - uses: actions/checkout@v5

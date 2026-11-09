@@ -151,11 +151,14 @@ Documentation content lives in `apps/website/src/content/docs/`. Verify the
 site with `pnpm --filter @arclightning/website build`.
 
 To preview the site from a branch, open Actions → Preview → Run workflow and
-pick the branch. It builds the site and deploys it to Cloudflare Pages under
-that branch's name, and the run summary links the deployment. The branch must
-contain `.github/workflows/preview.yml`, so create it from a `main` that has
-the workflow. The workflow refuses `main`, which only the production deploy
-publishes.
+pick the branch. The workflow appears there once it is on `main`, and a run
+uses the chosen branch's copy, so the branch must contain
+`.github/workflows/preview.yml`. It builds the site and deploys it to
+Cloudflare Pages at an alias of the branch name, with slashes turned into
+dashes, and the run summary links the deployment. It needs the
+`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets, and the
+token needs the Cloudflare Pages Edit permission. The workflow refuses `main`;
+production deploys are not set up yet.
 
 The web app in `apps/web` is the local UI for the workspace's tasks, which
 `arcl serve` serves on 127.0.0.1. [apps/web/README.md](apps/web/README.md)
