@@ -6,9 +6,9 @@
 	import { absoluteUrl, site } from '$lib/site';
 
 	const entryPoints = [
-		{ number: '01', label: 'Get started', title: 'Install and initialize', href: '/quick-start/' },
-		{ number: '02', label: 'Plan work', title: 'Understand the project model', href: '/overview/' },
-		{ number: '03', label: 'Execute', title: 'Work with tasks', href: '/guides/tasks/' }
+		{ number: '01', label: 'Get started', title: 'Install and initialize', href: '/tutorials/quick-start/' },
+		{ number: '02', label: 'Plan work', title: 'Understand the project model', href: '/explanation/record-model/' },
+		{ number: '03', label: 'Execute', title: 'Work a task to done', href: '/how-to/work-a-task/' }
 	];
 </script>
 
@@ -42,9 +42,9 @@
 				software agents.
 			</p>
 			<div class="hero__actions">
-				<a class="button-link" href="/quick-start/">Get started <Icon name="arrowRight" size={18} /></a><a
+				<a class="button-link" href="/tutorials/quick-start/">Get started <Icon name="arrowRight" size={18} /></a><a
 					class="text-link"
-					href="/overview/">How it works <Icon name="arrowRight" size={18} /></a>
+					href="/explanation/overview/">How it works <Icon name="arrowRight" size={18} /></a>
 			</div>
 		</div>
 		<figure class="terminal" aria-labelledby="terminal-caption">

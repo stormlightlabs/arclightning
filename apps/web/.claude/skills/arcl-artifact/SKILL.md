@@ -13,11 +13,11 @@ page, copies the records into the artifact's database and applies the edits
 people queue there. For local use, run `arcl serve` instead; this skill does
 not apply.
 
-The [claude.ai artifact guide](../../../../website/src/content/docs/guides/artifact.md)
-(`apps/website/src/content/docs/guides/artifact.md`) defines the documents,
-the queue entries and, under
-[Sync the artifact](../../../../website/src/content/docs/guides/artifact.md#sync-the-artifact),
-the sync procedure. Read it before the first sync in a session. This skill adds what the ArtifactData tool needs.
+[Artifact documents and queue](https://arcl.stormlightlabs.org/reference/artifact/)
+defines the documents and the queue entries, and
+[Sync the artifact](https://arcl.stormlightlabs.org/how-to/publish-the-artifact/#sync-the-artifact)
+the sync procedure. Read both before the first sync in a session. This skill
+adds what the ArtifactData tool needs.
 
 ## Prepare the checkout
 

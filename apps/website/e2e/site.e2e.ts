@@ -1,11 +1,12 @@
 import { createRequire } from 'node:module';
 import { expect, test, type Page } from '@playwright/test';
+import { redirects } from '../src/lib/redirects';
 
 const require = createRequire(import.meta.url);
 const AXE = require.resolve('axe-core/axe.min.js');
 
 /** The landing page and two docs pages, the core reading paths. */
-const PAGES = ['/', '/quick-start/', '/guides/tasks/'];
+const PAGES = ['/', '/tutorials/quick-start/', '/how-to/work-a-task/'];
 const MOBILE = { width: 390, height: 844 };
 
 type AxeViolation = { id: string; impact: string | null; nodes: { target: string[] }[] };
@@ -35,7 +36,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
 
 test.describe('keyboard', () => {
 	test('reaches the skip link first and moves to the content', async ({ page }) => {
-		await page.goto('/quick-start/');
+		await page.goto('/tutorials/quick-start/');
 		await page.keyboard.press('Tab');
 		const skip = page.getByRole('link', { name: 'Skip to content' });
 		await expect(skip).toBeFocused();
@@ -62,15 +63,17 @@ test.describe('keyboard', () => {
 
 test.describe('reading', () => {
 	test('shows the docs shell around the page', async ({ page }) => {
-		await page.goto('/guides/tasks/');
-		await expect(page.getByRole('heading', { level: 1, name: 'Tasks' })).toBeVisible();
-		await expect(page.getByRole('navigation', { name: 'Breadcrumbs' })).toContainText('Guides');
+		await page.goto('/how-to/work-a-task/');
+		await expect(page.getByRole('heading', { level: 1, name: 'Work a task to done' })).toBeVisible();
+		await expect(page.getByRole('navigation', { name: 'Breadcrumbs' })).toContainText('How-to guides');
 		await expect(
-			page.getByRole('complementary', { name: 'Documentation navigation' }).getByRole('link', { name: 'Tasks' })
+			page
+				.getByRole('complementary', { name: 'Documentation navigation' })
+				.getByRole('link', { name: 'Work a task to done' })
 		).toHaveAttribute('aria-current', 'page');
 		await expect(
-			page.getByRole('navigation', { name: 'On this page' }).getByRole('link', { name: 'Handoff' })
-		).toHaveAttribute('href', '#handoff');
+			page.getByRole('navigation', { name: 'On this page' }).getByRole('link', { name: 'Complete it', exact: true })
+		).toHaveAttribute('href', '#complete-it');
 		const pager = page.getByRole('navigation', { name: 'Page navigation' });
 		await expect(pager.getByRole('link', { name: /Previous/ })).toBeVisible();
 		await expect(pager.getByRole('link', { name: /Next/ })).toBeVisible();
@@ -78,11 +81,11 @@ test.describe('reading', () => {
 
 	test('copies the page Markdown and a code block', async ({ page, context }) => {
 		await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-		await page.goto('/quick-start/');
+		await page.goto('/tutorials/quick-start/');
 		await page.getByRole('link', { name: 'Copy Markdown' }).click();
 		await expect(page.getByRole('link', { name: 'Copied' })).toBeVisible();
 		const markdown = await page.evaluate(() => navigator.clipboard.readText());
-		const served = await (await page.request.get('/quick-start.md')).text();
+		const served = await (await page.request.get('/tutorials/quick-start.md')).text();
 		expect(markdown).toBe(served);
 
 		const block = page.locator('.doc-content pre').first();
@@ -91,10 +94,10 @@ test.describe('reading', () => {
 	});
 
 	test('keeps the theme choice across pages', async ({ page }) => {
-		await page.goto('/quick-start/');
+		await page.goto('/tutorials/quick-start/');
 		await page.getByRole('button', { name: 'Switch to dark mode' }).click();
 		await expect(page.locator('html')).toHaveAttribute('data-arcl-theme', 'dark');
-		await page.goto('/overview/');
+		await page.goto('/explanation/overview/');
 		await expect(page.locator('html')).toHaveAttribute('data-arcl-theme', 'dark');
 		await expect(page.getByRole('button', { name: 'Switch to light mode' })).toBeVisible();
 	});
@@ -105,7 +108,7 @@ test.describe('reading', () => {
 			['reduce', 'auto']
 		] as const) {
 			const page = await browser.newPage({ reducedMotion });
-			await page.goto('/quick-start/');
+			await page.goto('/tutorials/quick-start/');
 			expect(await page.evaluate(() => getComputedStyle(document.documentElement).scrollBehavior)).toBe(expected);
 			await page.close();
 		}
@@ -123,27 +126,27 @@ test.describe('mobile', () => {
 	}
 
 	test('opens the menu, follows a link and closes the menu', async ({ page }) => {
-		await page.goto('/quick-start/');
+		await page.goto('/tutorials/quick-start/');
 		await page.getByText('Menu').click();
 		const panel = page.locator('.mobile-menu__panel');
 		await expect(panel).toBeVisible();
-		await panel.getByRole('link', { name: 'Overview' }).click();
-		await expect(page).toHaveURL(/\/overview\/$/);
+		await panel.getByRole('link', { name: 'Overview', exact: true }).click();
+		await expect(page).toHaveURL(/\/explanation\/overview\/$/);
 		await expect(panel).toBeHidden();
 	});
 
 	test('closes the menu on Escape', async ({ page }) => {
-		await page.goto('/quick-start/');
+		await page.goto('/tutorials/quick-start/');
 		const toggle = page.getByText('Menu');
 		await toggle.click();
-		await page.locator('.mobile-menu__panel').getByRole('link', { name: 'Overview' }).focus();
+		await page.locator('.mobile-menu__panel').getByRole('link', { name: 'Overview', exact: true }).focus();
 		await page.keyboard.press('Escape');
 		await expect(page.locator('.mobile-menu__panel')).toBeHidden();
 		await expect(page.getByLabel('Open documentation menu')).toBeFocused();
 	});
 
 	test('closes the menu on Escape with nothing focused', async ({ page }) => {
-		await page.goto('/quick-start/');
+		await page.goto('/tutorials/quick-start/');
 		await page.getByText('Menu').click();
 		await expect(page.locator('.mobile-menu__panel')).toBeVisible();
 		await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
@@ -157,8 +160,8 @@ test.describe('without JavaScript', () => {
 	test.use({ javaScriptEnabled: false });
 
 	test('reads a docs page and offers the search page', async ({ page }) => {
-		await page.goto('/guides/tasks/');
-		await expect(page.getByRole('heading', { level: 1, name: 'Tasks' })).toBeVisible();
+		await page.goto('/how-to/work-a-task/');
+		await expect(page.getByRole('heading', { level: 1, name: 'Work a task to done' })).toBeVisible();
 		await expect(page.locator('.doc-content pre').first()).toBeVisible();
 		await expect(page.getByRole('link', { name: 'Browse documentation' })).toBeVisible();
 		await expect(page.getByRole('button', { name: /Open documentation search/ })).toBeHidden();
@@ -175,15 +178,129 @@ test.describe('without JavaScript', () => {
 	});
 });
 
+/**
+ * The section anchors of each retired page, taken from its headings. Each one
+ * must land on an element with the same id on the page that replaces it.
+ */
+const RETIRED_ANCHORS: Record<string, string[]> = {
+	overview: ['the-project-model', 'where-records-live', 'interfaces', 'a-typical-flow'],
+	'quick-start': [
+		'install',
+		'build-from-source',
+		'initialize-a-project',
+		'capture-an-idea',
+		'promote-it-to-a-spec',
+		'plan-the-work',
+		'work-a-task',
+		'commit-the-records',
+		'choose-an-output-mode',
+		'next-steps'
+	],
+	'guides/agents': ['set-up-an-agent', 'the-skill', 'prime-each-session', 'claim-work', 'leave-a-trail'],
+	'guides/api': ['query-with-arcl-query', 'serve-the-api', 'security-and-limits'],
+	'guides/artifact': [
+		'build-and-publish-the-page',
+		'export-records',
+		'queued-edits',
+		'apply-queued-edits',
+		'sync-the-artifact'
+	],
+	'guides/automation': [
+		'use-versioned-json',
+		'check-the-format-version',
+		'read-readiness-reasons',
+		'chain-from-completed-work',
+		'use-plain-or-quiet-output',
+		'keep-failures-machine-readable'
+	],
+	'guides/captures': [
+		'capture',
+		'record-where-it-came-from',
+		'review-the-inbox',
+		'promote-a-capture',
+		'discard-a-capture'
+	],
+	'guides/compaction': ['preview-then-compact', 'what-gets-archived', 'the-phase-note', 'after-compaction'],
+	'guides/epics': ['create-an-epic', 'update-an-epic', 'finish-or-cancel-an-epic'],
+	'guides/ideas': ['capture-an-idea', 'review-and-update-the-inbox', 'discard-an-idea', 'promote-ideas'],
+	'guides/inspect-work': [
+		'show-and-list-records',
+		'read-the-hierarchy',
+		'explain-readiness',
+		'gather-task-context',
+		'check-graph-integrity'
+	],
+	'guides/lifecycle': ['statuses-by-kind', 'move-tasks', 'close-containers'],
+	'guides/local-development': ['build-the-cli', 'run-the-docs-site', 'edit-documentation', 'edit-the-theme'],
+	'guides/mcp': ['install-and-connect', 'how-tools-run', 'tools', 'prime', 'pages-and-filters', 'starting-tasks'],
+	'guides/milestones': ['create-a-milestone', 'update-a-milestone', 'finish-or-cancel-a-milestone'],
+	'guides/notes': ['create-a-note', 'link-a-note', 'read-and-update-notes'],
+	'guides/phases': ['create-a-phase', 'put-tasks-in-a-phase', 'follow-progress', 'update-and-close-a-phase'],
+	'guides/plans': [
+		'create-a-plan',
+		'write-a-plan-file',
+		'check-diff-and-apply',
+		'read-and-update-a-plan',
+		'close-a-plan'
+	],
+	'guides/releases': ['create-a-release', 'add-members', 'close-a-release', 'publish-a-roadmap'],
+	'guides/rest': ['endpoints', 'reads', 'change-options', 'edit-a-records-file', 'bodies-errors-and-locking'],
+	'guides/specs': ['create-a-spec', 'read-and-update-a-spec', 'close-a-spec', 'write-the-plan-next'],
+	'guides/tasks': [
+		'create-a-task',
+		'update-and-move-tasks',
+		'move-work-through-its-lifecycle',
+		'leave-notes',
+		'wait-on-a-pull-request-run-or-date',
+		'close-parent-tasks',
+		'handoff',
+		'record-completion'
+	],
+	'guides/web-app': [
+		'start-the-server',
+		'work',
+		'task',
+		'inbox',
+		'planning',
+		'command-menu-and-shortcuts',
+		'quick-capture',
+		'theme-and-layout',
+		'builds-without-the-web-app'
+	],
+	'guides/workspace': [
+		'enable-the-workspace',
+		'sync-both-ways',
+		'work-with-git',
+		'check-before-you-sync',
+		'export-the-whole-database',
+		'import-the-whole-workspace',
+		'edit-workspace-files',
+		'understand-the-workspace',
+		'avoid-divergent-changes',
+		'resolve-divergent-changes'
+	]
+};
+
+test('redirects every retired docs URL to a page that exists', async ({ page }) => {
+	for (const [from, to] of Object.entries(redirects)) {
+		const response = await page.goto(`/${from}/`);
+		expect(response?.ok(), from).toBe(true);
+		await expect(page, from).toHaveURL(new RegExp(`/${to}/$`));
+		await expect(page.getByRole('heading', { level: 1 }), from).toBeVisible();
+	}
+});
+
 test('redirects a retired docs URL to the page that replaces it', async ({ page }) => {
 	await page.goto('/guides/ideas/');
-	await expect(page).toHaveURL(/\/guides\/captures\/$/);
-	await expect(page.getByRole('heading', { level: 1, name: 'Captures' })).toBeVisible();
+	await expect(page).toHaveURL(/\/how-to\/capture-and-triage\/$/);
+	await expect(page.getByRole('heading', { level: 1, name: 'Capture and triage work' })).toBeVisible();
 });
 
 test('keeps the section anchor when it redirects a retired docs URL', async ({ page }) => {
 	await page.goto('/guides/ideas/#review-the-inbox');
-	await expect(page).toHaveURL(/\/guides\/captures\/#review-the-inbox$/);
+	await expect(page).toHaveURL(/\/how-to\/capture-and-triage\/#review-the-inbox$/);
+	await page.goto('/guides/automation/#connect-the-mcp-server');
+	await expect(page).toHaveURL(/\/how-to\/script-arcl\/#connect-the-mcp-server$/);
 });
 
 test('keeps the anchors of sections that moved or were renamed', async ({ request }) => {
@@ -195,9 +312,12 @@ test('keeps the anchors of sections that moved or were renamed', async ({ reques
 			'milestones',
 			'task-management',
 			'api-only',
-			'publishing-and-syncing-the-artifact'
+			'publishing-and-syncing-the-artifact',
+			'status-codes'
 		],
-		'/guides/automation/': ['give-an-agent-the-skill', 'prime-each-session', 'connect-the-mcp-server']
+		'/how-to/script-arcl/': ['give-an-agent-the-skill', 'prime-each-session', 'connect-the-mcp-server'],
+		'/how-to/capture-and-triage/': ['review-the-inbox'],
+		'/how-to/publish-the-artifact/': ['sync-the-artifact']
 	};
 	for (const [path, ids] of Object.entries(moved)) {
 		const html = await (await request.get(path)).text();
@@ -205,18 +325,28 @@ test('keeps the anchors of sections that moved or were renamed', async ({ reques
 	}
 });
 
-test('serves the replacement Markdown at a retired .md URL', async ({ request }) => {
-	const retired = await request.get('/guides/ideas.md');
-	expect(retired.ok()).toBe(true);
-	expect(await retired.text()).toBe(await (await request.get('/guides/captures.md')).text());
+test('lands every section anchor of a retired page on its replacement', async ({ request }) => {
+	expect(Object.keys(RETIRED_ANCHORS).sort()).toEqual(Object.keys(redirects).sort());
+	for (const [from, ids] of Object.entries(RETIRED_ANCHORS)) {
+		const html = await (await request.get(`/${redirects[from]}/`)).text();
+		for (const id of ids) expect(html, `/${from}/#${id}`).toContain(`id="${id}"`);
+	}
+});
+
+test('serves the replacement Markdown at each retired .md URL', async ({ request }) => {
+	for (const [from, to] of Object.entries(redirects)) {
+		const retired = await request.get(`/${from}.md`);
+		expect(retired.ok(), from).toBe(true);
+		expect(await retired.text(), from).toBe(await (await request.get(`/${to}.md`)).text());
+	}
 });
 
 test('serves Markdown, the sitemap and llms.txt', async ({ request }) => {
-	const markdown = await request.get('/quick-start.md');
+	const markdown = await request.get('/tutorials/quick-start.md');
 	expect(markdown.ok()).toBe(true);
 	expect(await markdown.text()).toContain('title: Quick Start');
-	expect(await (await request.get('/sitemap.xml')).text()).toContain('/guides/tasks/</loc>');
-	expect(await (await request.get('/llms.txt')).text()).toContain('(/quick-start.md)');
+	expect(await (await request.get('/sitemap.xml')).text()).toContain('/how-to/work-a-task/</loc>');
+	expect(await (await request.get('/llms.txt')).text()).toContain('(/tutorials/quick-start.md)');
 });
 
 test('serves the social card as a 1200x630 PNG', async ({ request }) => {
@@ -228,7 +358,7 @@ test('serves the social card as a 1200x630 PNG', async ({ request }) => {
 	expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([1200, 630]);
 });
 
-for (const path of ['/', '/guides/tasks/']) {
+for (const path of ['/', '/how-to/work-a-task/']) {
 	test(`${path} points og:image and twitter:image at the PNG card`, async ({ page }) => {
 		await page.goto(path);
 		const content = (selector: string) => page.locator(selector).getAttribute('content');

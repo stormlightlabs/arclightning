@@ -14,8 +14,8 @@
 		<nav class="site-footer__links" aria-label="Footer navigation">
 			<section>
 				<h2>Arc Lightning</h2>
-				<a href="/quick-start/">Get started</a>
-				<a href="/overview/">Documentation</a>
+				<a href="/tutorials/quick-start/">Get started</a>
+				<a href="/explanation/overview/">Documentation</a>
 				<a class="github-link" href="https://github.com/stormlightlabs/arclightning">Source</a>
 			</section>
 			<section>

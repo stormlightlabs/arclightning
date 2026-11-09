@@ -8,8 +8,8 @@ const WIDTHS = [
 /** The landing page in full, and the top of two docs pages: a short one and one with tables and code. */
 const PAGES = [
 	{ name: 'landing', path: '/', fullPage: true },
-	{ name: 'quick-start', path: '/quick-start/', fullPage: false },
-	{ name: 'tasks', path: '/guides/tasks/', fullPage: false }
+	{ name: 'quick-start', path: '/tutorials/quick-start/', fullPage: false },
+	{ name: 'work-a-task', path: '/how-to/work-a-task/', fullPage: false }
 ] as const;
 
 for (const width of WIDTHS) {
