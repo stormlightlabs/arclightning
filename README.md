@@ -154,8 +154,9 @@ To preview the site from a branch, open Actions → Preview → Run workflow and
 pick the branch. The workflow appears there once it is on `main`, and a run
 uses the chosen branch's copy, so the branch must contain
 `.github/workflows/preview.yml`. It builds the site and deploys it to
-Cloudflare Pages at an alias of the branch name, with slashes turned into
-dashes, and the run summary links the deployment. It needs the
+Cloudflare Pages at an alias of the branch name. Cloudflare lowercases the
+alias, turns slashes into dashes and may shorten long names, so use the exact
+URLs in the run summary. It needs the
 `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets, and the
 token needs the Cloudflare Pages Edit permission. The workflow refuses `main`;
 production deploys are not set up yet.

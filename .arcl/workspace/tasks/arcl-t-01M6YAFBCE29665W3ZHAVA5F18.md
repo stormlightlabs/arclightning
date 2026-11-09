@@ -15,6 +15,9 @@ current product vocabulary.
 
 Acceptance criteria:
 
+- [ ] The first dispatched Preview run deploys this task's branch, the first
+      one to preview. It needs `.github/workflows/preview.yml` on `main` and
+      the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets
 - [ ] Document the `arcl` CLI, the web app, the MCP server, the GraphQL API
       with `arcl serve --api`, and the repository-native workflows
 - [ ] Replace the idea, epic and milestone commands and guides with capture,
@@ -27,6 +30,7 @@ Acceptance criteria:
 
 Verification:
 
+- Dispatch Preview on this branch and open the URLs in the run summary
 - `pnpm --filter @arclightning/website build`, which prerenders every page
   and redirect
 - `pnpm --filter @arclightning/website lint`
