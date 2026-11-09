@@ -712,7 +712,7 @@ so a link in a cloned repository cannot aim the write at a file such as
 `~/.bashrc`. A `PATH` that is a directory, a pipe, a device such as
 `/dev/stdout`, or has no file name such as `.`, exits 3 with
 `` `<PATH>` is not a file; `--output` needs the path of a file to write ``.
-Human output prints `` Wrote the roadmap to `<PATH>`. ``, `--plain` prints the
+Human output prints ``Wrote the roadmap to `<PATH>`.``, `--plain` prints the
 path, and `--json` returns `{path}`.
 
 `--plain` prints the same page as human output. `--json` without `--output`

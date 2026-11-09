@@ -14,10 +14,11 @@
 	}
 
 	function applyTheme(theme: Theme): void {
-		document.documentElement.dataset.arclTheme = theme;
-		document
-			.querySelector('meta[name="theme-color"]')
-			?.setAttribute('content', theme === 'dark' ? '#081a30' : '#f5f8fc');
+		const root = document.documentElement;
+		root.dataset.arclTheme = theme;
+		// Read the canvas token after the theme attribute changes, so the browser color follows tokens.css.
+		const canvas = getComputedStyle(root).getPropertyValue('--arcl-canvas').trim();
+		if (canvas) document.querySelector('meta[name="theme-color"]')?.setAttribute('content', canvas);
 		try {
 			localStorage.setItem(storageKey, theme);
 		} catch {

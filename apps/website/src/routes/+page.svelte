@@ -3,6 +3,7 @@
 	import SiteFooter from '$lib/components/SiteFooter.svelte';
 	import SiteHeader from '$lib/components/SiteHeader.svelte';
 	import { docs } from '$lib/content';
+	import { absoluteUrl, site } from '$lib/site';
 
 	const entryPoints = [
 		{ number: '01', label: 'Get started', title: 'Install and initialize', href: '/quick-start/' },
@@ -12,15 +13,22 @@
 </script>
 
 <svelte:head>
-	<title>Arc Lightning · Connected planning for developers and agents</title>
-	<meta
-		name="description"
-		content="A local-first project planning and execution system for developers and software agents." />
-	<meta property="og:title" content="Arc Lightning" />
+	<title>{site.title}</title>
+	<meta name="description" content={site.description} />
+	<meta property="og:title" content={site.name} />
 	<meta property="og:description" content="Connected, local-first planning for developers and software agents." />
-	<meta property="og:image" content="https://arclightning.stormlightlabs.org/social-card.svg" />
+	<meta property="og:type" content="website" />
+	<meta property="og:url" content={absoluteUrl('/')} />
+	<meta property="og:site_name" content={site.name} />
+	<meta property="og:image" content={site.image.url} />
+	<meta property="og:image:type" content="image/png" />
+	<meta property="og:image:width" content={String(site.image.width)} />
+	<meta property="og:image:height" content={String(site.image.height)} />
+	<meta property="og:image:alt" content={site.image.alt} />
 	<meta name="twitter:card" content="summary_large_image" />
-	<link rel="canonical" href="https://arclightning.stormlightlabs.org/" />
+	<meta name="twitter:image" content={site.image.url} />
+	<meta name="twitter:image:alt" content={site.image.alt} />
+	<link rel="canonical" href={absoluteUrl('/')} />
 </svelte:head>
 
 <SiteHeader {docs} />
@@ -45,15 +53,16 @@
 			</figcaption>
 			<pre><code
 					><span class="prompt">$</span> arcl capture create "Ship keyboard navigation"
-<span class="success">created</span>  arcl-c-01J…
+<span class="success">Created capture</span> `arcl-c-01M6YB…`: Ship keyboard navigation
 
-<span class="prompt">$</span> arcl task list --ready
-<span class="meta">READY   HIGH</span>  Add focus-visible states
-<span class="meta">READY   MED</span>   Document keyboard shortcuts
+<span class="prompt">$</span> arcl ready
+arcl-t-01M6YB…  <span class="meta">[high]   pending</span>  Add focus-visible states
+arcl-t-01M6YB…  <span class="meta">[normal] pending</span>  Document keyboard shortcuts
 
-<span class="prompt">$</span> arcl context arcl-t-01J…
-<span class="accent">spec</span>      Keyboard navigation
-<span class="accent">handoff</span>   Continue from the dialog focus trap</code></pre>
+<span class="prompt">$</span> arcl context arcl-t-01M6YB…
+<span class="accent">Task</span> `arcl-t-01M6YB…` [pending] Add focus-visible states
+<span class="accent">Ready:</span> true
+<span class="accent">Handoff:</span> Continue from the dialog focus trap</code></pre>
 		</figure>
 	</section>
 

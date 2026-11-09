@@ -1,10 +1,12 @@
+/** The Pagefind index the build writes. A variable keeps Vite from bundling it when tests import this file. */
+const pagefindUrl = '/pagefind/pagefind.js';
 const searchStates = [];
 const initializedBoxes = new WeakSet();
 let pagefind;
 let activeSearch;
 
 async function getPagefind() {
-	pagefind ??= await import('/pagefind/pagefind.js');
+	pagefind ??= await import(/* @vite-ignore */ pagefindUrl);
 	return pagefind;
 }
 
