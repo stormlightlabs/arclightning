@@ -1,52 +1,69 @@
 ---
 title: Lifecycle
-description: Move tracked work through explicit states without losing hierarchy.
+description: The statuses each record kind moves through, which moves are allowed, and how closing a container treats the work below it.
 ---
 
-Arc Lightning makes lifecycle changes explicit. Tasks can move between open
-states, while completion and cancellation are terminal decisions.
+Every status change in Arc Lightning is an explicit command. Completing and
+cancelling are final for every kind of record. Repeating the same final
+command does nothing; switching a completed record to cancelled, or the
+reverse, is refused.
 
-## Move tasks through their lifecycle
+## Statuses by kind
 
-```sh
-arcl task start arcl-t-01J...
-arcl task park arcl-t-01J...
-arcl task unpark arcl-t-01J...   # always returns to pending
-arcl task complete arcl-t-01J...
-arcl task cancel arcl-t-01J...
-```
+| Kind                       | Statuses                                                     |
+| -------------------------- | ------------------------------------------------------------ |
+| Capture                    | `captured`, then `promoted` or `discarded`                   |
+| Spec, plan, phase, release | `open`, then `completed` or `cancelled`                      |
+| Task                       | `pending`, `in_progress`, `parked`, `completed`, `cancelled` |
+| Note                       | None                                                         |
 
-`start` refuses a pending task that is not ready, apart from having child
-tasks, unless you pass `--force`. Tasks can complete from `pending` or
-`in_progress`; parked tasks must be unparked first.
-
-Repeating the same terminal command is safe, but changing a completed
-task to cancelled or a cancelled task to completed is rejected.
-
-See the [Tasks guide](/guides/tasks/) for the complete status model and the
-rules for moving parent tasks and subtasks.
-
-## Finish releases, epics, and milestones
-
-Releases, epics, and milestones support `complete` and `cancel`:
+## Move tasks
 
 ```sh
-arcl milestone complete arcl-m-01J...
-arcl epic cancel arcl-e-01J... --allow-open-children
-arcl release complete arcl-r-01J...
+arcl task start 7TR6
+arcl task park 7TR6
+arcl task unpark 7TR6
+arcl task complete 7TR6
+arcl task cancel 7TR6
 ```
 
-A parent task or container cannot become terminal while any descendant is
-non-terminal unless the command includes `--allow-open-children`.
+| Command    | From                       | To            |
+| ---------- | -------------------------- | ------------- |
+| `start`    | `pending`                  | `in_progress` |
+| `park`     | `pending`, `in_progress`   | `parked`      |
+| `handoff`  | `in_progress`              | `parked`      |
+| `unpark`   | `parked`                   | `pending`     |
+| `complete` | `pending`, `in_progress`   | `completed`   |
+| `cancel`   | any status but a final one | `cancelled`   |
 
-## Close only the selected record
+`start` refuses a task that is not ready, for any reason other than having
+subtasks, and lists the reasons; `--force` starts it anyway. A parked task
+must be unparked before it completes. No command reopens a completed or
+cancelled task. To reopen one, edit its workspace file, as the
+[manual](/reference/manual/#task-commands) describes.
 
-The `--allow-open-children` override changes only the selected record. It never
-cascades to descendants, so open child work stays available for later review.
+The [tasks guide](/guides/tasks/) covers claims, handoffs, evidence and
+completing a task with its subtasks.
+
+## Close containers
+
+Specs, plans, phases and releases close with `complete` or `cancel`:
+
+```sh
+arcl plan phase complete KSX8
+arcl plan cancel Z234
+arcl spec complete FVMC
+arcl release complete SVY2C
+```
+
+A container, or a parent task, refuses to close while any record below it is
+open. `--allow-open-children` closes only the record you name. It never
+cascades: open work below stays open, so you can review it later.
+
+Work under a closed spec, plan or phase is held back. Its tasks are no longer
+ready, `arcl explain` gives the reason `closed_container`, and a closed
+container takes no new tasks. Release membership does not hold work back, so
+completing a release changes no task's readiness.
 
 To finish a task and its open subtasks together, use
-`arcl task complete <id> --with-subtasks`. The [Tasks guide](/guides/tasks/)
-lists when it refuses.
-
-See the guides for [releases](/guides/releases/), [epics](/guides/epics/), [milestones](/guides/milestones/),
-and [tasks](/guides/tasks/) for entity-specific commands and hierarchy rules.
+`arcl task complete <id> --with-subtasks`.

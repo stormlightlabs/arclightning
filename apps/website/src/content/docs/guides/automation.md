@@ -1,22 +1,35 @@
 ---
 title: Automation
-description: Consume Arc Lightning mutations from scripts and agents.
+description: Read arcl from scripts with versioned JSON envelopes, typed readiness reasons, plain output and stable exit codes.
 ---
 
-Arc Lightning keeps mutation output short by default. Choose an explicit output
-mode when a script or coding agent needs a stable interface.
+Human output is for people and can change between releases. Scripts and
+coding agents choose an output mode with a stable shape: `--json`, `--plain`
+or `--quiet`. Agents that speak MCP can use the [MCP server](/guides/mcp/)
+instead, which returns the same envelopes as typed tool results.
+
+<div id="give-an-agent-the-skill"></div>
+<div id="prime-each-session"></div>
+<div id="connect-the-mcp-server"></div>
+
+[Agent workflows](/guides/agents/) covers installing the skill and
+[priming each session](/guides/agents/#prime-each-session).
+[MCP server](/guides/mcp/#install-and-connect) covers connecting the server.
 
 ## Use versioned JSON
 
 Pass `--json` before or after the command:
 
 ```sh
-arcl --json idea create "Automate this" --description "Details"
+arcl --json capture create "Automate this" --body "Details"
 ```
 
-The response is a versioned JSON object with a `format_version` and a `data`
-object. For a mutation, `data` holds the action and the affected record fields.
-For an idea, those fields include `id`, `title`, `description`, and `status`.
+```json
+{"format_version":1,"data":{"action":"created","capture":{"body":"Details","created_at":"2026-11-09T03:25:04.536Z","id":"arcl-c-01M6Z5D24RMB67SSTH6HG0NVKG","project_id":"arcl-pj-00000000000000000000000000","status":"captured","title":"Automate this"}}}
+```
+
+The response is one JSON object with a `format_version` and a `data` object.
+For a change, `data` holds the action and the affected record.
 
 Use JSON when the consumer needs named fields rather than text intended for a
 terminal.
@@ -86,195 +99,27 @@ are open. A refusal exits with status `3` and writes a version 1 failure with
 `code: "invalid_request"`. Its `message` lists the reasons as text. Read the
 typed reasons from `explain` instead. `--force` starts the task anyway.
 
-## Give an agent the skill
-
-The Arc Lightning skill teaches a coding agent the loop above with `--json`.
-`arcl skill install` writes the copy built into `arcl` into the project's
-`.claude/skills/` and `.agents/skills/`, and `--check` reports drift without
-writing:
-
-```sh
-arcl skill install
-```
-
-The [skills CLI](https://skills.sh) installs it from GitHub instead:
-
-```sh
-npx skills add stormlightlabs/arclightning --skill arclightning
-```
-
-`--skill arclightning` picks it out of the other skills this repository keeps
-for its own development.
-
-## Prime each session
-
-`arcl prime` prints the skill's loop, the in-progress and parked tasks with
-their handoffs, and the first ready tasks, in at most 40 lines and 4 KiB. Run
-it from a session-start hook so the agent starts with the loop and the open
-work in its context. The [manual](/reference/manual/#inspection) describes the
-output.
-
-`arcl setup claude`, `arcl setup codex` and `arcl setup pi` write the skill,
-the instruction lines and the hook below in one step. For any other agent,
-`arcl setup` writes the skill to `.agents/skills/` and the lines to
-`AGENTS.md`, with no hook; have the agent run `arcl prime` when a session
-starts. The [manual](/reference/manual/#arcl-setup) lists what each writes.
-
-The hooks below run `arcl prime` only when `arcl` is installed, so a teammate
-without it starts a session with no hook error. In a directory with no
-`.arcl/arcl.db`, such as a fresh clone, `arcl prime` prints one line saying to
-run `arcl init` and exits `0`. It still fails on a database it cannot open.
-
-For Claude Code, add the hook to `.claude/settings.json`. A `SessionStart`
-hook with no matcher also runs after `/clear` and after compaction, so the
-primer comes back once the context is compacted:
-
-```json
-{
-	"hooks": {
-		"SessionStart": [
-			{
-				"hooks": [
-					{
-						"type": "command",
-						"command": "if command -v arcl >/dev/null; then arcl prime; fi"
-					}
-				]
-			}
-		]
-	}
-}
-```
-
-For Codex, add the same shape to `.codex/hooks.json`. Codex runs project hooks
-only in a trusted project, after you trust the hook in `/hooks`:
-
-```json
-{
-	"hooks": {
-		"SessionStart": [
-			{
-				"matcher": "startup|resume",
-				"hooks": [
-					{
-						"type": "command",
-						"command": "if command -v arcl >/dev/null; then arcl prime; fi"
-					}
-				]
-			}
-		]
-	}
-}
-```
-
-## Connect the MCP server
-
-`arcl-mcp` serves the same operations as typed MCP tools over standard input
-and output, with no CLI text to parse. Install it, then have the MCP client
-start it in the project directory. For Claude Code:
-
-```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/stormlightlabs/arclightning/releases/latest/download/arcl-mcp-installer.sh | sh
-claude mcp add arcl -- arcl-mcp
-```
-
-On Windows, install it with `arcl-mcp-installer.ps1` from the same release, as
-the [Quick Start](/quick-start/) shows for `arcl`.
-`cargo install --git https://github.com/stormlightlabs/arclightning arcl-mcp`
-compiles it instead.
-
-Each tool calls the application operations directly and syncs the workspace
-around the call, as a command does. The read tools carry `readOnlyHint`
-because they change no records, but with the workspace on, a read first
-imports workspace changes into the database and exports the result.
-
-A call waits up to 10 seconds for an `arcl` command in the same project to
-finish, then fails with `application_error` (exit code `1`) naming the
-`.arcl/arcl.db-sync.lock` file. `prime` is the exception: after 2 seconds it
-returns the database as it is with a `workspace_sync` warning, as `arcl prime`
-does. A call the client cancels while it waits changes nothing. Once its
-operation starts, a write runs to the end.
-
-| Tool              | Command           | `format_version`              |
-| ----------------- | ----------------- | ----------------------------- |
-| `prime`           | `prime`           | `1`                           |
-| `show`            | `show`            | `2` for a task, `1` otherwise |
-| `list`            | `list`            | `1`                           |
-| `ready`           | `ready`           | `1`                           |
-| `explain`         | `explain`         | `2`                           |
-| `context`         | `context`         | `2`                           |
-| `capture_create`  | `capture create`  | `1`                           |
-| `capture_promote` | `capture promote` | `1`                           |
-| `spec_create`     | `spec create`     | `1`                           |
-| `plan_create`     | `plan create`     | `1`                           |
-| `task_create`     | `task create`     | `1`                           |
-| `task_update`     | `task update`     | `1`                           |
-| `note_create`     | `note create`     | `1`                           |
-| `task_start`      | `task start`      | `1`                           |
-| `task_handoff`    | `task handoff`    | `1`                           |
-| `task_note`       | `task note`       | `1`                           |
-| `gate_add`        | `gate add`        | `1`                           |
-| `gate_list`       | `gate list`       | `1`                           |
-| `gate_check`      | `gate check`      | `1`                           |
-| `task_unpark`     | `task unpark`     | `1`                           |
-| `task_complete`   | `task complete`   | `2`                           |
-
-A tool's structured content is the command's envelope: `format_version`,
-`data`, and a `warnings` array of `code` and `message` objects when the call
-went on despite a problem, such as a workspace sync that did not run. Each
-tool lists an input and an output JSON Schema, and its `_meta` names its
-version as `arcl/format_version`. Renaming, removing or retyping a field in
-either schema comes with a new version; a new field does not. A failure,
-including arguments the input schema rejects, is an error result whose
-structured content is the version 1 failure object above.
-
-`prime` takes no arguments and returns what `arcl --json prime` prints: the
-working loop as Markdown in `data.loop`, then `data.open` and `data.ready`,
-each with up to 5 tasks and a `more` count. Titles are cut to 200 bytes and
-handoffs to 400, each ending with `… [truncated]` when cut, so the result
-stays near 10 KiB. Outside an initialized project it
-succeeds with `data.initialized` false, `data.root` and a `data.message` that
-says to run `arcl init`. The server's instructions tell clients to call it at
-the start of a session.
-
-`list` and `ready` return at most `limit` records, from 1 to 200 and 50 by
-default. While more remain, `data.next_cursor` holds the `cursor` for the next
-page. `list` pages by kind, then ID, so new records do not shift later pages.
-`ready` pages by each task's place in the ready order (priority, position,
-then ID), so a task that starts between pages does not hide the next one. A
-malformed `cursor` fails with `invalid_request`.
-
-`list` takes the filters of `arcl list` other than `--assignee`: `kind`,
-`status`, `priority`, `release`, `spec`, `plan`, `phase`, `parent` and `all`.
-IDs may be full or short. Each record filter matches:
-
-- `spec`: the spec, and the plans and tasks under it.
-- `plan`: the plan, and the phases and tasks under it.
-- `phase`: the phase and the tasks under it.
-- `release`: the release, and the specs, plans, tasks and notes in it.
-- `parent`: direct subtasks of the task.
-
-Every filter given must match. Notes have no status, so `status` leaves them
-out. The checks run in the command's order and fail as it does: a status or
-priority the `kind` cannot have, or an ID of another kind, fails with
-`invalid_request`, and an ID that names no record fails with `not_found`.
-
-`task_start` has no force option. A task that is not ready fails with
-`invalid_request`, and `explain` gives the typed reasons.
-
 ## Use plain or quiet output
 
 `--plain` emits one stable, unstyled record per line:
 
 ```sh
-arcl --plain idea list
+arcl --plain tree
 ```
 
-`--quiet` suppresses explanatory output and prints only the affected ID for a
-mutation:
+```text
+0	spec	arcl-s-01M6Z52GCZF3KWGK2JPHSPJ7TV	open	Add keyboard shortcuts
+1	plan	arcl-pl-01M6Z52GDTQFRHBSTMT6FK17MR	open	Keyboard plan
+2	phase	arcl-ph-01M6Z52GDTM597QMZ1VWYS39QD	open	Key handling
+3	task	arcl-t-01M6Z52GDTA3RG3BF0KDD2KAJE	completed	Add the key bindings table
+3	task	arcl-t-01M6Z52GDT6HNSB2K69ZD3XG0Y	pending	Move the selection with j and k
+```
+
+`--quiet` prints nothing on success, for a step whose exit code is all a
+script needs:
 
 ```sh
-arcl --quiet task complete arcl-t-01J...
+arcl --quiet task complete KAJE
 ```
 
 These modes keep shell pipelines and agent tool calls free of terminal styling
@@ -282,7 +127,16 @@ and incidental status messages.
 
 ## Keep failures machine-readable
 
-JSON mode writes structured failures to standard error. Use the exit status to
-distinguish a successful command from a parsing error, invalid project or
-record, storage failure, or missing record. See the [manual](/reference/manual/)
-for the complete output and exit-status reference.
+Under `--json`, a failure goes to standard error as a version 1 object with
+a `code`, the `exit_code` and a `message`:
+
+```sh
+arcl --json task start nope
+```
+
+```json
+{"error":{"code":"not_found","exit_code":5,"message":"no record matches short ID `nope`"},"format_version":1}
+```
+
+Branch on the exit code. The [manual](/reference/manual/#status-codes) lists
+every code.

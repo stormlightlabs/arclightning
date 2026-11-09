@@ -175,6 +175,42 @@ test.describe('without JavaScript', () => {
 	});
 });
 
+test('redirects a retired docs URL to the page that replaces it', async ({ page }) => {
+	await page.goto('/guides/ideas/');
+	await expect(page).toHaveURL(/\/guides\/captures\/$/);
+	await expect(page.getByRole('heading', { level: 1, name: 'Captures' })).toBeVisible();
+});
+
+test('keeps the section anchor when it redirects a retired docs URL', async ({ page }) => {
+	await page.goto('/guides/ideas/#review-the-inbox');
+	await expect(page).toHaveURL(/\/guides\/captures\/#review-the-inbox$/);
+});
+
+test('keeps the anchors of sections that moved or were renamed', async ({ request }) => {
+	const moved: Record<string, string[]> = {
+		'/reference/manual/': [
+			'project-initialization',
+			'idea-commands',
+			'epics',
+			'milestones',
+			'task-management',
+			'api-only',
+			'publishing-and-syncing-the-artifact'
+		],
+		'/guides/automation/': ['give-an-agent-the-skill', 'prime-each-session', 'connect-the-mcp-server']
+	};
+	for (const [path, ids] of Object.entries(moved)) {
+		const html = await (await request.get(path)).text();
+		for (const id of ids) expect(html, `${path}#${id}`).toContain(`id="${id}"`);
+	}
+});
+
+test('serves the replacement Markdown at a retired .md URL', async ({ request }) => {
+	const retired = await request.get('/guides/ideas.md');
+	expect(retired.ok()).toBe(true);
+	expect(await retired.text()).toBe(await (await request.get('/guides/captures.md')).text());
+});
+
 test('serves Markdown, the sitemap and llms.txt', async ({ request }) => {
 	const markdown = await request.get('/quick-start.md');
 	expect(markdown.ok()).toBe(true);

@@ -168,8 +168,8 @@ which leaves the browser tests out.
 
 To dogfood the app on claude.ai,
 `pnpm --filter @arclightning/web build:artifact` builds it as an artifact page
-in `apps/web/build-artifact/index.html`. The manual's "Publishing and syncing
-the artifact" covers publishing it and `arcl web export` and `arcl web apply`.
+in `apps/web/build-artifact/index.html`. The [claude.ai artifact guide](apps/website/src/content/docs/guides/artifact.md)
+covers publishing it and `arcl web export` and `arcl web apply`.
 
 ## Releasing
 
