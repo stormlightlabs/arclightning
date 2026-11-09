@@ -66,9 +66,12 @@ arcl init --workspace
 ```
 
 The command creates `.arcl/config.toml`, `.arcl/arcl.db`, and a scoped
-`.arcl/.gitignore`. Inside a non-bare Git worktree it uses the worktree root;
-elsewhere it uses the current directory. It refuses a bare repository with
-exit code `3`. Every other command finds the project from any directory below
+`.arcl/.gitignore` in the project root. The root is the nearest directory,
+from the current one upward, that holds `.arcl/config.toml`. With none, it is
+the root of the Git worktree, or the current directory outside Git. A Git
+repository nested inside an arcl project therefore initializes the outer
+project. `init` refuses a bare repository with exit code `3`, and prints the
+root it used. Every other command finds the project from any directory below
 its root.
 
 Running `init` again keeps the existing configuration and records.

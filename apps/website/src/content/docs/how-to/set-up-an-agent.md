@@ -7,13 +7,12 @@ description: Set up Claude Code, Codex, Pi or another coding agent with arcl set
 
 ## Run arcl setup
 
-Name the agent:
+Run `arcl setup` with the agent's name, `claude`, `codex` or `pi`, or with no
+name for another agent. For Claude
+Code:
 
 ```sh
 arcl setup claude
-arcl setup codex
-arcl setup pi
-arcl setup
 ```
 
 ```text

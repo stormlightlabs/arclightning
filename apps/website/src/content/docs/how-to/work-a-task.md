@@ -43,6 +43,11 @@ arcl task update 8GQ6 --title "Add visible focus rings"
 arcl task update 8GQ6 --priority critical --position 20
 arcl task update 543N --phase YE6M7
 arcl task update AGD4 --parent 543N
+```
+
+To take `AGD4` out from under its parent again:
+
+```sh
 arcl task update AGD4 --no-parent
 ```
 
@@ -55,6 +60,11 @@ blocked by its own ancestor or descendant, or puts it under an archived task.
 
 ```sh
 arcl dependency add 8GQ6 --blocked-by 7TR6
+```
+
+To remove the edge:
+
+```sh
 arcl dependency remove 8GQ6 --blocked-by 7TR6
 ```
 
@@ -100,11 +110,22 @@ record](/how-to/keep-notes/).
 
 ## Wait on a pull request, run or date
 
-A gate holds the task back until something outside arcl happens:
+A gate holds the task back until something outside arcl happens. Add one
+with the flag for what to wait on. To wait on a pull request:
 
 ```sh
 arcl gate add 7TR6 --pr https://github.com/acme/app/pull/42
+```
+
+To wait on a CI run:
+
+```sh
 arcl gate add 7TR6 --run https://github.com/acme/app/actions/runs/123456
+```
+
+To wait until a date:
+
+```sh
 arcl gate add 7TR6 --until 2026-11-20
 ```
 
@@ -134,8 +155,15 @@ another.
 
 ## Complete it
 
+Give the evidence inline:
+
 ```sh
 arcl task complete 7TR6 --evidence "All tests pass."
+```
+
+Or read it from a file:
+
+```sh
 arcl task complete 7TR6 --evidence-file evidence.md
 ```
 

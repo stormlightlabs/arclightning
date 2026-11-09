@@ -26,11 +26,16 @@ arcl release update G9R7 --title "v0.1.0-beta" --body-file notes.md
 ```sh
 arcl release member add G9R7 --kind spec --record-id JKHQ
 arcl release member list G9R7
-arcl release member remove G9R7 --kind spec --record-id JKHQ
 ```
 
 ```text
 spec	arcl-r-01M70MJK5FNMS7CY4D1PG1G9R7	arcl-s-01M70M8AY4K0WT6RN8C4H4JKHQ
+```
+
+To take a record out of the release:
+
+```sh
+arcl release member remove G9R7 --kind spec --record-id JKHQ
 ```
 
 `--kind` is `spec`, `plan`, `task` or `note`. Captures join only after they

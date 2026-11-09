@@ -37,12 +37,26 @@ arcl 0.3.0
 
 ## Start a project
 
-Make a Git repository to practise in, and initialize arcl with the workspace
-on:
+Make a Git repository to practise in, outside any other arcl project, and
+check that no project encloses it:
 
 ```sh
 mkdir keyboard-demo && cd keyboard-demo
 git init
+arcl check
+```
+
+```text
+error: invalid project or record: Arc Lightning is not initialized in project directory `/home/you/keyboard-demo`; run `arcl init` first
+```
+
+That error is the result you want. If `arcl check` prints `Check passed.`,
+the directory is inside another arcl project, and `arcl init` would set up
+that project instead. Remove `keyboard-demo` and make it somewhere else.
+
+Initialize arcl with the workspace on:
+
+```sh
 arcl init --workspace
 ```
 
@@ -50,8 +64,9 @@ arcl init --workspace
 Initialized Arc Lightning in `/home/you/keyboard-demo` with the workspace enabled
 ```
 
-arcl made a `.arcl/` directory. It holds the database and a `workspace/`
-directory with one Markdown file per record, which you commit with the code.
+The path is the project root. arcl made a `.arcl/` directory there. It holds
+the database and a `workspace/` directory with one Markdown file per record,
+which you commit with the code.
 
 ## Capture an idea
 

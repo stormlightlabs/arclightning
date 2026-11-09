@@ -10,18 +10,9 @@ with an input and an output schema per tool and no terminal text to parse.
 
 ## Install arcl-mcp
 
-On macOS or Linux:
-
-```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/stormlightlabs/arclightning/releases/latest/download/arcl-mcp-installer.sh | sh
-```
-
-On Windows, run `arcl-mcp-installer.ps1` from the same release, as [Install
-arcl](/how-to/install/#install-a-release) shows for `arcl`. To compile it:
-
-```sh
-cargo install --git https://github.com/stormlightlabs/arclightning arcl-mcp
-```
+The `prime` tool this page uses is on `main` and not in the latest release,
+v0.3.0. Install `arcl-mcp` from `main` as [Install
+arcl](/how-to/install/#install-from-main) shows.
 
 ## Add it to Claude Code
 

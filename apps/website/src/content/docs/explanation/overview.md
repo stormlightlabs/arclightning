@@ -13,8 +13,9 @@ handoffs and evidence the next session needs to pick up the work.
 ## Records live in the repository
 
 `arcl init` creates `.arcl/` at the root of the Git worktree it runs in, or
-in the current directory outside Git. Every command finds that root, so
-`arcl` works from any directory below it.
+in the current directory outside Git. Inside an existing project, including a
+Git repository nested in one, it uses that project instead. Every command
+finds the root, so `arcl` works from any directory below it.
 
 ```text
 .arcl/

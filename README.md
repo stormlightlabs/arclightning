@@ -49,9 +49,10 @@ To compile it instead, run
 `cargo install --git https://github.com/stormlightlabs/arclightning arcl-cli`.
 That build leaves out the web app.
 
-Arc Lightning initializes ordinary directories directly and discovers the nearest
-project when commands run from any descendant directory. Inside a non-bare Git
-worktree, initialization uses the worktree root.
+Commands find the nearest project from any directory below its root.
+`arcl init` uses the nearest directory, from the current one upward, that
+holds `.arcl/config.toml`. With none, it uses the root of the Git worktree it
+runs in, or the current directory outside Git.
 
 ```sh
 # From a new or existing project directory
@@ -97,6 +98,10 @@ off, and complete tasks with `arcl --json`:
 ```sh
 npx skills add stormlightlabs/arclightning --skill arclightning
 ```
+
+The skill uses commands that are on `main` and not in v0.3.0, such as
+`arcl prime` and `--claim`. Install `main` with
+`cargo install --git https://github.com/stormlightlabs/arclightning arcl-cli`.
 
 ## Local development
 

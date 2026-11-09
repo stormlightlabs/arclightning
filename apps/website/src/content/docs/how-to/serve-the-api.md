@@ -39,13 +39,15 @@ The line includes `token` only when arcl made the token. A token from
 ## Send a request
 
 Every request sends the token in the `X-Arcl-Token` header. A token on the
-`curl` command line shows in `ps`, so write the header to a file only you can
-read. `printf` is a shell builtin and does not show:
+`curl` command line shows in `ps`, so write the header to a temporary file.
+`mktemp` creates it with mode `600`, readable only by you, outside the
+working tree. `printf` is a shell builtin and does not show in `ps`:
 
 ```sh
-(umask 077; printf 'X-Arcl-Token: %s\n' "$ARCL_SERVE_TOKEN" > token.header)
+header=$(mktemp)
+printf 'X-Arcl-Token: %s\n' "$ARCL_SERVE_TOKEN" > "$header"
 curl --fail --retry 10 --retry-delay 1 --retry-connrefused \
-  -H @token.header -H 'Content-Type: application/json' \
+  -H @"$header" -H 'Content-Type: application/json' \
   -d '{"query": "{ ready { id title } }"}' http://127.0.0.1:4321/graphql
 ```
 
@@ -71,7 +73,7 @@ outside `/api` and `/graphql` gets 404.
 The `/api` reads take a command's flags as query parameters:
 
 ```sh
-curl -H @token.header 'http://127.0.0.1:4321/api/records?kind=task&status=pending'
+curl -H @"$header" 'http://127.0.0.1:4321/api/records?kind=task&status=pending'
 ```
 
 ```json
@@ -81,7 +83,7 @@ curl -H @token.header 'http://127.0.0.1:4321/api/records?kind=task&status=pendin
 Changes are POST requests with a JSON body of the command's options:
 
 ```sh
-curl -H @token.header -H 'Content-Type: application/json' \
+curl -H @"$header" -H 'Content-Type: application/json' \
   -d '{"title": "Add a help overlay", "priority": "high"}' \
   http://127.0.0.1:4321/api/tasks
 ```
@@ -95,6 +97,12 @@ matches.
 
 [REST endpoints](/reference/rest/) lists every endpoint, its options, the
 error statuses and the server's limits.
+
+When you are done, delete the header file:
+
+```sh
+rm "$header"
+```
 
 ## Stop the server
 

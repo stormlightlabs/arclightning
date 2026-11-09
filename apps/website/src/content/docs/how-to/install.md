@@ -41,8 +41,15 @@ Cargo:
 cargo install --git https://github.com/stormlightlabs/arclightning arcl-cli
 ```
 
-This needs a Rust toolchain and leaves out the web app, as [Build from
-source](#build-from-source) explains. `main` carries version 0.3.0, so
+The MCP server's `prime` tool is on `main` too. Install `arcl-mcp` the same
+way:
+
+```sh
+cargo install --git https://github.com/stormlightlabs/arclightning arcl-mcp
+```
+
+Both need a Rust toolchain, and `arcl` built this way leaves out the web app,
+as [Build from source](#build-from-source) explains. `main` carries version 0.3.0, so
 `arcl --version` prints `arcl 0.3.0`, and `cargo binstall --git` downloads the
 v0.3.0 release instead of building `main`.
 
@@ -100,5 +107,7 @@ cargo install --git https://github.com/stormlightlabs/arclightning --tag v0.3.0 
 
 ## Install the MCP server
 
-`arcl-mcp` ships as its own binary. [Connect the MCP
-server](/how-to/connect-mcp/) installs it and adds it to an agent.
+`arcl-mcp` ships as its own binary. Each release has its own installers,
+`arcl-mcp-installer.sh` and `arcl-mcp-installer.ps1`, but v0.3.0 has no
+`prime` tool, so install it [from main](#install-from-main) for now. [Connect
+the MCP server](/how-to/connect-mcp/) adds it to an agent.

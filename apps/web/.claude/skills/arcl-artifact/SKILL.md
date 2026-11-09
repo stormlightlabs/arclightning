@@ -13,12 +13,11 @@ page, copies the records into the artifact's database and applies the edits
 people queue there. For local use, run `arcl serve` instead; this skill does
 not apply.
 
-[Artifact documents and queue](../../../../website/src/content/docs/reference/artifact.md)
-(`apps/website/src/content/docs/reference/artifact.md`) defines the documents
-and the queue entries, and
-[Sync the artifact](../../../../website/src/content/docs/how-to/publish-the-artifact.md#sync-the-artifact)
-(`apps/website/src/content/docs/how-to/publish-the-artifact.md`) the sync
-procedure. Read it before the first sync in a session. This skill adds what the ArtifactData tool needs.
+[Artifact documents and queue](https://arcl.stormlightlabs.org/reference/artifact/)
+defines the documents and the queue entries, and
+[Sync the artifact](https://arcl.stormlightlabs.org/how-to/publish-the-artifact/#sync-the-artifact)
+the sync procedure. Read both before the first sync in a session. This skill
+adds what the ArtifactData tool needs.
 
 ## Prepare the checkout
 

@@ -30,9 +30,9 @@ The version depends on the command. Check it before reading `data`. A failure go
 as `{"format_version": 1, "error": {"code", "exit_code", "message"}}`, and the
 command exits with that nonzero `exit_code`. A failed tool call returns the
 same object with `isError` set.
-[Output formats and exit codes](https://github.com/stormlightlabs/arclightning/blob/main/apps/website/src/content/docs/reference/output.md)
+[Output formats and exit codes](https://arcl.stormlightlabs.org/reference/output/)
 lists the version each command returns, and
-[Dependencies and readiness rules](https://github.com/stormlightlabs/arclightning/blob/main/apps/website/src/content/docs/reference/deps.md#readiness-reasons)
+[Dependencies and readiness rules](https://arcl.stormlightlabs.org/reference/deps/#readiness-reasons)
 the readiness reason kinds and their ID fields.
 
 ## Work the loop
