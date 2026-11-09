@@ -4,8 +4,8 @@ phase = "arcl-ph-01M5NE5P7R5JW95BAQ5J7EG6D4"
 title = "Write the documentation content"
 status = "pending"
 priority = "normal"
-position = 1
-blocked-by = ["arcl-t-01M5NE5P8KF13P2YZ4B8W2B7MS"]
+position = 2
+blocked-by = ["arcl-t-01M5NE5P8KF13P2YZ4B8W2B7MS", "arcl-t-01M6YVG52P5TSEFQ415C9Q668B"]
 +++
 
 Write the documentation that the shell from "Rebuild the website and
