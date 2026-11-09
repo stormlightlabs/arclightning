@@ -1,70 +1,77 @@
 ---
 title: Tasks
-description: Create, organize, and move work through its explicit lifecycle.
+description: Create tasks, place them under a spec, plan, phase or parent, and move them through their lifecycle with claims, notes, gates, handoffs and evidence.
 ---
 
-Tasks are the smallest tracked work items in Arc Lightning. A task belongs to a
-milestone and may have a parent task. Subtasks are ordinary task rows with their
-own IDs and lifecycle state.
+A task is a unit of work. It has a title, a Markdown body, a status, a
+priority, a position among its siblings, and optional subtasks, blockers and
+gates. A subtask is an ordinary task with a parent, its own ID and its own
+status.
 
 ## Create a task
 
 ```sh
-arcl task create "Add schema" \
-  --milestone arcl-m-01J... \
-  --priority high \
-  --position 10 \
-  --description "Create the tables needed by the tracker."
+arcl task create "Add focus rings" --phase KSX8 --priority high --body "Show focus on every control."
 ```
 
-Valid priorities are `critical`, `high`, `normal`, and `low`. The default is
-`normal`. Position values are non-negative integers used to order sibling work.
+```text
+Created task `arcl-t-01M6Z543M9MK02CDC2NKYD8GQ6`: Add focus rings
+```
 
-Attach a subtask to a parent task in the same milestone:
+A task can sit under a phase, a plan, a spec, a parent task, or nothing:
+
+| Option          | Places the task                                                |
+| --------------- | -------------------------------------------------------------- |
+| `--phase <ID>`  | In a phase, and so under its plan and spec.                    |
+| `--plan <ID>`   | In a plan outside any phase, and so under the plan's spec.     |
+| `--spec <ID>`   | Under a spec outside any plan.                                 |
+| `--parent <ID>` | Below another task, sharing the parent's spec, plan and phase. |
+| None            | At the top level of the project.                               |
+
+A subtask takes its spec, plan and phase from its parent. Naming a different
+one fails with `contradictory parent/phase ancestry`. The spec, plan or phase
+must be open.
+
+Priorities are `critical`, `high`, `normal` and `low`, with `normal` the
+default. `--position <N>` orders siblings, lowest first, and defaults to `0`.
+`--body-file <PATH|->` reads the body from a file or standard input.
+`--blocked-by <ID>` adds blockers in the same write; the
+[dependencies reference](/reference/deps/) covers them.
+
+To create many tasks at once, with phases and blockers, write a
+[plan file](/guides/plans/#write-a-plan-file).
+
+## Update and move tasks
 
 ```sh
-arcl task create "Add migration test" \
-  --milestone arcl-m-01J... \
-  --parent arcl-t-01J... \
-  --description-file migration-test.md
+arcl task update 8GQ6 --title "Add visible focus rings"
+arcl task update 8GQ6 --priority critical --position 20
+arcl task update 543N --phase YE6M7
+arcl task update AGD4 --parent 543N
+arcl task update AGD4 --no-parent
 ```
 
-## Update and reorganize tasks
-
-```sh
-arcl task update arcl-t-01J... --title "Add the initial schema"
-arcl task update arcl-t-01J... --priority critical --position 20
-arcl task update arcl-t-01J... --milestone arcl-m-02J...
-```
-
-Moving a task to another milestone moves its complete descendant subtree. A
-parent and child must belong to the same milestone.
-
-Use `--parent` to reparent a task, or `--no-parent` to make it a top-level task:
-
-```sh
-arcl task update arcl-t-02J... --parent arcl-t-01J...
-arcl task update arcl-t-02J... --no-parent
-```
-
-Cycles, invalid cross-milestone relationships, and moves after which a task is
-blocked by its own ancestor or descendant are rejected before rows change.
+`--spec`, `--plan`, `--phase` and `--parent` move a task, and `--no-spec`,
+`--no-plan`, `--no-phase` and `--no-parent` take it out. Moving a task moves
+its subtasks with it. A move that would create a parent cycle, or leave a task
+blocked by its own ancestor or descendant, is refused before anything
+changes. A task cannot move under an archived task.
 
 ## Move work through its lifecycle
 
 ```sh
-arcl task start arcl-t-01J...
-arcl task park arcl-t-01J...
-arcl task unpark arcl-t-01J...
-arcl task complete arcl-t-01J...
-arcl task cancel arcl-t-01J...
+arcl task start 7TR6
+arcl task park 7TR6
+arcl task unpark 7TR6
+arcl task complete 7TR6
+arcl task cancel 7TR6
 ```
 
-The allowed task statuses are:
+A task has one of five statuses:
 
 | Status        | Meaning                                               |
 | ------------- | ----------------------------------------------------- |
-| `pending`     | Ready to be started.                                  |
+| `pending`     | Not started. Ready once nothing holds it back.        |
 | `in_progress` | Work has started.                                     |
 | `parked`      | Open work temporarily excluded from active readiness. |
 | `completed`   | Terminal success state.                               |
@@ -82,11 +89,10 @@ handing off releases the claim, whoever runs it, and so does cancelling. A claim
 holds within one database, which is one checkout's `.arcl/arcl.db`. Agents in
 separate Git worktrees each have their own database, so both can claim the same
 task; one sees the other's claim only after the workspace change reaches its
-checkout through Git and a sync. The [manual](/reference/manual/) has the
-details.
+checkout through Git and a sync. `arcl list --assignee <NAME>` lists the
+tasks one assignee holds.
 
-`park`
-accepts pending or in-progress work. `unpark` always returns parked work to
+`park` accepts pending or in-progress work. `unpark` always returns parked work to
 `pending`. `complete` accepts pending or in-progress work, and `cancel` accepts
 any non-terminal task.
 
@@ -96,16 +102,17 @@ Notes record what you tried and decided while working, so the next session
 reads it from `show` or `context` instead of guessing:
 
 ```sh
-arcl task note arcl-t-01J... --kind decision "Store notes in their own table"
-arcl task note arcl-t-01J... "The importer reads files in path order"
+arcl task note 7TR6 --kind decision "Store notes in their own table"
+arcl task note 7TR6 "The importer reads files in path order"
 ```
 
 `--kind` is `decision`, `observation`, `blocker`, or `result`, and is optional.
-A note is plain text of at most 2000 characters and may span lines. Notes are
-kept in the order they were added, stay on the task when it is parked or
-completed. arcl commands only append notes; to change or remove one, edit the
-task file and run `arcl workspace sync`. `show` and the Task view list them newest
-first; `context` lists the 10 most recent.
+A note is plain text of at most 2000 characters and may span lines. A task in
+any status takes notes and keeps them. arcl commands only append notes; to
+change or remove one, edit the task file and run `arcl workspace sync`. `show`
+and the web app's Task view list them newest first, and `context` lists the 10
+most recent. For longer writing that links to several records, use a
+[note record](/guides/notes/).
 
 ## Wait on a pull request, run or date
 
@@ -113,9 +120,9 @@ A gate holds a task back until something outside arcl happens: a pull request
 merges, a CI run passes, or a date arrives.
 
 ```sh
-arcl gate add arcl-t-01J... --pr https://github.com/acme/app/pull/42
-arcl gate add arcl-t-01J... --run https://github.com/acme/app/actions/runs/123456
-arcl gate add arcl-t-01J... --until 2026-11-15
+arcl gate add 7TR6 --pr https://github.com/acme/app/pull/42
+arcl gate add 7TR6 --run https://github.com/acme/app/actions/runs/123456
+arcl gate add 7TR6 --until 2026-11-15
 ```
 
 While a gate is open, the task is not ready and `arcl explain` names the gate.
@@ -140,7 +147,7 @@ By default, a task cannot become terminal while a descendant is still open.
 Pass `--allow-open-children` to close only the selected task:
 
 ```sh
-arcl task complete arcl-t-01J... --allow-open-children
+arcl task complete 7TR6 --allow-open-children
 ```
 
 The override never cascades to child tasks.
@@ -149,7 +156,7 @@ Pass `--with-subtasks` to complete the task and every pending or in-progress
 descendant in one write:
 
 ```sh
-arcl task complete arcl-t-01J... --with-subtasks --evidence "Shipped in #42."
+arcl task complete 7TR6 --with-subtasks --evidence "Shipped in #42."
 ```
 
 Completed and cancelled descendants keep their status and evidence, and the
@@ -175,23 +182,28 @@ when no task became ready.
 An in-progress task can keep one current Markdown resume note:
 
 ```sh
-arcl task handoff arcl-t-01J... --note "Resume at the migration test."
-arcl task handoff arcl-t-01J... --note-file handoff.md
+arcl task handoff NGEH --note "Table drafted; wire it into the router next."
+arcl task handoff NGEH --note-file handoff.md
 ```
 
-`handoff` stores the note and parks the task in one transaction. Unparking and
+```text
+Handed off task `arcl-t-01M6Z4WFW2TSFXSAB8D95FNGEH`: Add the key bindings table
+```
+
+`handoff` stores the note and parks the task in one transaction, which also
+releases its claim. Unparking and
 starting the task preserve the note until another handoff replaces it. Use
 `--note-file -` to read UTF-8 Markdown from standard input. After `unpark`,
 `start` refuses a task that became not ready while parked; resolve the blocker
 or pass `--force`.
 
-## Record Completion
+## Record completion
 
 Attach optional Markdown evidence when completing a task:
 
 ```sh
-arcl task complete arcl-t-01J... --evidence "All tests pass."
-arcl task complete arcl-t-01J... --evidence-file evidence.md
+arcl task complete 7TR6 --evidence "All tests pass."
+arcl task complete 7TR6 --evidence-file evidence.md
 ```
 
 Use `--evidence-file -` to read from standard input. Arc Lightning stores the

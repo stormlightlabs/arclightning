@@ -1,20 +1,20 @@
 ---
 title: Inspecting Work
-description: Query the work graph, explain readiness, and gather task context.
+description: Show and list records, draw the planning tree, explain why a task is or is not ready, gather a task's context, and check the graph.
 ---
 
-Arc Lightning can inspect the whole tracker without changing it because typed IDs
-use their prefix to select ideas, releases, epics, milestones, tasks, and subtasks.
+These commands read records and change nothing. Each typed ID's prefix names
+its kind, so `arcl show` and `arcl tree` take an ID of any kind.
 
 ## Show and list records
 
 Show one record or filter a broader list:
 
 ```sh
-arcl show arcl-t-01J...
+arcl show 7TR6
 arcl list --kind task --status pending --priority high
-arcl list --spec arcl-s-01J...
-arcl list --phase arcl-ph-01J... --status pending in_progress
+arcl list --spec FVMC
+arcl list --phase KSX8 --status pending in_progress
 ```
 
 `list` accepts `--kind`, `--status`, `--priority`, `--release`, `--spec`,
@@ -28,14 +28,14 @@ full ID, with an optional kind: `arcl show GBA5` or `arcl task start t-GBA5`.
 A short ID can become ambiguous as records are added, so write full IDs in
 files and links. The [manual](/reference/manual/#record-ids) gives the rule.
 
-## Read the Hierarchy
+## Read the hierarchy
 
 Render the complete hierarchy or start at one record:
 
 ```sh
 arcl tree
-arcl tree arcl-e-01J...
-arcl tree arcl-t-01J...
+arcl tree pl-Z234
+arcl tree 543N
 arcl tree --all
 arcl tree --ascii --depth 3
 arcl tree --style outline | grep in_progress
@@ -46,7 +46,8 @@ position and ID order. Each line shows a status mark and a title. A phase
 shows its completed and total tasks, and a blocked task names its blockers by
 short ID. Finished phases fold into one line, and a footer counts the open
 captures and notes and names the releases. This is Arc Lightning's own plan,
-with milestones 5 to 8 and the tasks of milestone 11 cut:
+whose phases are titled `Milestone <n>`, with phases 5 to 8 and the tasks of
+phase 11 cut:
 
 ```text
 ◐ Arc Lightning first release and desktop app
@@ -83,7 +84,7 @@ A task with subtasks is never ready itself; its subtasks are. `--ascii` draws
 the tree and the marks with ASCII characters, which avoids misalignment in
 terminals that draw the marks double-width.
 
-![arcl tree folding finished milestones, with a status mark on each line](/images/arcl-tree-status.png)
+![arcl tree folding finished phases, with a status mark on each line](/images/arcl-tree-status.png)
 
 `--plain` and `--json` give the stored status instead.
 
@@ -94,9 +95,23 @@ terminals that draw the marks double-width.
 task is absent from that list, ask for every applicable reason:
 
 ```sh
-arcl ready --milestone arcl-m-01J...
+arcl ready --phase KSX8
 arcl next --priority critical high
-arcl explain arcl-t-01J...
+arcl explain 7TR6
+```
+
+This task's blocker is complete, but it waits on a date gate:
+
+```text
+Task `7TR6` [pending] Move the selection with j and k
+Ready: false
+Blockers: NGEH
+Ancestors:
+Spec: FVMC
+Plan: Z234
+Phase: KSX8
+Reason: gate `189W` waits until `2026-11-20`
+Gate: `189W` [open] date 2026-11-20
 ```
 
 Reasons include incomplete blockers, blockers inherited from ancestor tasks,
@@ -109,13 +124,13 @@ state.
 Use `context` before starting or resuming a task:
 
 ```sh
-arcl context arcl-t-01J...
-arcl context arcl-t-01J... --json
+arcl context SR1G
+arcl context SR1G --json
 ```
 
-The output will contain the task, ancestor chain, milestone, epic, optional
-release, linked spec path, direct blockers and dependents, readiness reasons,
-current handoff, task evidence, and evidence from completed blockers. It also
+The packet holds the task, its ancestor tasks, its spec, plan and phase,
+direct blockers and dependents, readiness reasons, the current handoff, the
+task's evidence, and the evidence of completed blockers. It also
 lists the task's 10 most recent notes, newest first, and how many older notes
 it left out; `show` lists them all. Both list every gate on the task, open
 and met.
@@ -136,7 +151,7 @@ Readiness reasons follow the same order: the task's own blockers, then each
 ancestor's, nearest first. An ancestor blocked by the task itself does not
 block it.
 
-## Check Graph Integrity
+## Check graph integrity
 
 ```sh
 arcl check

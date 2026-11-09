@@ -175,6 +175,12 @@ test.describe('without JavaScript', () => {
 	});
 });
 
+test('redirects a retired docs URL to the page that replaces it', async ({ page }) => {
+	await page.goto('/guides/ideas/');
+	await expect(page).toHaveURL(/\/guides\/captures\/$/);
+	await expect(page.getByRole('heading', { level: 1, name: 'Captures' })).toBeVisible();
+});
+
 test('serves Markdown, the sitemap and llms.txt', async ({ request }) => {
 	const markdown = await request.get('/quick-start.md');
 	expect(markdown.ok()).toBe(true);

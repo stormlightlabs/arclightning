@@ -31,19 +31,37 @@ const sources = import.meta.glob<string>('/src/content/docs/**/*.md', {
 const navigationOrder = [
 	'overview',
 	'quick-start',
-	'guides/local-development',
-	'guides/ideas',
-	'guides/epics',
-	'guides/milestones',
+	'guides/captures',
+	'guides/specs',
+	'guides/plans',
+	'guides/phases',
 	'guides/tasks',
+	'guides/notes',
 	'guides/lifecycle',
 	'guides/inspect-work',
 	'guides/releases',
 	'guides/workspace',
+	'guides/compaction',
+	'guides/agents',
 	'guides/automation',
+	'guides/mcp',
+	'guides/web-app',
+	'guides/api',
+	'guides/artifact',
+	'guides/local-development',
 	'reference/manual',
 	'reference/deps'
 ] as const;
+
+/**
+ * Retired page slugs and the slugs of the pages that replace them. The build
+ * prerenders each retired URL as a redirect.
+ */
+export const redirects: Readonly<Record<string, string>> = {
+	'guides/ideas': 'guides/captures',
+	'guides/epics': 'guides/specs',
+	'guides/milestones': 'guides/phases'
+};
 
 /** Documentation sections in display order. */
 export const docSections: DocSection[] = ['Get started', 'Guides', 'Reference'];
@@ -81,6 +99,11 @@ export const docs: Doc[] = Object.entries(modules)
 /** Find a documentation page by its route slug. */
 export function getDoc(slug: string): Doc | undefined {
 	return docs.find((doc) => doc.slug === slug);
+}
+
+/** Find the slug of the page that replaces a retired slug. */
+export function getRedirect(slug: string): string | undefined {
+	return Object.hasOwn(redirects, slug) ? redirects[slug] : undefined;
 }
 
 /** Find the pages immediately before and after a documentation page. */

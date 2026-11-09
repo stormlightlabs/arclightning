@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { GET as llms } from '../routes/llms.txt/+server';
 import { GET as sitemap } from '../routes/sitemap.xml/+server';
-import { docSections, docs, getAdjacentDocs, getDoc } from './content';
+import { docSections, docs, getAdjacentDocs, getDoc, getRedirect, redirects } from './content';
 
 describe('docs', () => {
 	it('gives every page a title, a description, a section and its Markdown', () => {
@@ -20,6 +20,22 @@ describe('docs', () => {
 		const last = docs[docs.length - 1];
 		expect(getAdjacentDocs(last.slug)).toEqual({ previous: docs[docs.length - 2], next: undefined });
 		expect(getAdjacentDocs('missing')).toEqual({ previous: undefined, next: undefined });
+	});
+});
+
+describe('redirects', () => {
+	it('points each retired slug at a page that exists, and retires no current page', () => {
+		expect(Object.keys(redirects).length).toBeGreaterThan(0);
+		for (const [from, to] of Object.entries(redirects)) {
+			expect(getDoc(from), from).toBeUndefined();
+			expect(getDoc(to), to).toBeDefined();
+			expect(getRedirect(from)).toBe(to);
+		}
+	});
+
+	it('ignores slugs that only name inherited object properties', () => {
+		expect(getRedirect('constructor')).toBeUndefined();
+		expect(getRedirect('guides/tasks')).toBeUndefined();
 	});
 });
 

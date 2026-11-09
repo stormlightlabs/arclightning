@@ -1,6 +1,6 @@
 ---
 title: Share the project workspace
-description: Export planning records to Markdown, commit them with your project, and rebuild the local database after pulling changes.
+description: Keep records as Markdown files committed with the code, sync them with the local database, and resolve conflicts after merges and branch switches.
 ---
 
 The workspace lets you review and share Arc Lightning records through version
@@ -106,25 +106,24 @@ also shows the branch, a detached HEAD, or a branch with no commits yet, and
 files Git reports as changed that match the last sync, such as files sync wrote
 that you have not staged. Use `--json` or `--plain` for scripts.
 
-## Export your work
+## Export the whole database
 
-After you change records through the CLI, export the database projection:
+Every command already writes its changes to the workspace. `export` writes
+the whole database again, such as after switching to a branch that lacks
+records:
 
 ```sh
 arcl workspace export
 ```
 
-Review the changes under `.arcl/workspace/`, then commit them. Export writes the
-complete connected model, but leaves files unchanged when their bytes already
-match. It stops if a workspace file has changed since the last export instead
-of overwriting that file.
+Export leaves files unchanged when their bytes already match. It stops if a
+workspace file has changed since the last export instead of overwriting that
+file. Review the changes under `.arcl/workspace/`, then commit them.
 
-Run another export before each commit that changes Arc Lightning records. This
-keeps the committed workspace in step with your local database.
+## Import the whole workspace
 
-## Import changes after a pull
-
-Import the workspace before making new local changes:
+The next command after a pull imports what changed. `import` validates the
+whole workspace and replaces the database with it:
 
 ```sh
 arcl workspace import
@@ -139,13 +138,8 @@ do all of them when the project has never synced or its database holds no
 records, as in a fresh clone. Arc Lightning replaces the database only after the
 whole workspace passes validation.
 
-For a fresh clone, initialize the local database first, then import the
-committed workspace:
-
-```sh
-arcl init --workspace
-arcl workspace import
-```
+A fresh clone has the committed configuration and workspace but no
+database. Run `arcl init` there; the next command imports the workspace.
 
 ## Edit workspace files
 

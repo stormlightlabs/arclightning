@@ -1,6 +1,6 @@
 ---
 title: Dependencies and Ready Work
-description: Model task blockers and find deterministic actionable work.
+description: Make tasks wait on other tasks, see which edges arcl refuses, and find ready work in a fixed order.
 ---
 
 Tasks can wait on other tasks without storing a separate ready status. Only a
@@ -39,8 +39,8 @@ the database already holds, with a warning.
 
 `ready` returns actionable leaf tasks in deterministic priority and position
 order. `next` returns the first result, or an empty result when no work is ready.
-Both commands also accept `--priority`, `--release`, `--epic`, `--milestone`,
-and `--parent` filters, and support `--json` for automation.
+Both commands also accept `--priority`, `--spec`, `--plan`, `--phase` and
+`--parent` filters, and support `--json` for automation.
 
 Use `explain` when a task does not appear in `ready`. It reports every applicable
 readiness or exclusion reason rather than stopping at the first one.

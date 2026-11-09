@@ -1,6 +1,6 @@
 ---
 title: Quick Start
-description: Install Arc Lightning and create your first tracked work.
+description: Install arcl, initialize a project, and take one capture through a spec, a plan and a completed task.
 ---
 
 ## Install
@@ -49,10 +49,7 @@ CI job would, replace `latest/download` with `download/<tag>`, such as
 Releases before 1.0 can change JSON shapes, and each envelope's
 `format_version` names the shape it carries.
 
-Arc Lightning uses the enclosing Git worktree root as its boundary. You can run
-it from the root or from a nested directory.
-
-## Build from Source
+## Build from source
 
 Building needs a Rust toolchain, plus Node and pnpm for the web app. Clone the
 repository and install the `arcl` binary into Cargo's local bin directory:
@@ -88,126 +85,159 @@ From the Git worktree you want to track:
 
 ```sh
 cd ~/src/my-project
-arcl init
-```
-
-Initialization creates `.arcl/config.toml`, `.arcl/arcl.db`, and a scoped
-`.arcl/.gitignore`. Re-running `arcl init` preserves existing configuration,
-database content, and local ignore customizations.
-
-Use the optional workspace flag when initializing a project that wants the
-workspace setting enabled:
-
-```sh
 arcl init --workspace
 ```
 
-See [Share the project workspace](/guides/workspace/) for the export,
-import, and Git workflow.
+`init` creates `.arcl/config.toml`, the database `.arcl/arcl.db`, and a
+`.arcl/.gitignore` that keeps the database out of Git. `--workspace` also
+turns on the [workspace](/guides/workspace/): one Markdown file per record
+under `.arcl/workspace/`, which you commit with the code. Leave it out to
+keep records in the local database only. Running `init` again keeps the
+existing configuration and records.
 
 ## Capture an idea
 
-Ideas are useful while the shape of the work is still changing:
+A capture is an inbox entry for work that is not planned yet:
 
 ```sh
-arcl idea create "Add keyboard shortcuts" \
-  --description "Support the common navigation actions."
-
-arcl idea list
+arcl capture create "Add keyboard shortcuts" --body "Support the common navigation actions."
 ```
 
-Descriptions can also come from a Markdown file or standard input:
-
-```sh
-arcl idea create "Document recovery" --description-file notes.md
-
-printf '# Recovery\n\nWrite down the restore steps.\n' \
-  | arcl idea create "Document recovery" --description-file -
+```text
+Created capture `arcl-c-01M6Z52GC3FZ44XVDYGEXW8XVX`: Add keyboard shortcuts
 ```
 
-## Promote Ideas into Plans
+`--body-file notes.md` reads the body from a file, and `--body-file -` from
+standard input.
 
-Create a release, promote the captured idea using an existing Markdown spec,
-and add an ordered milestone:
+## Promote it to a spec
+
+When the goal is clear, promote the capture. The spec takes the capture's
+title and body, and you can add acceptance criteria:
 
 ```sh
-arcl release create "Spring release" \
-  --description "Ship the next planning slice."
-
-arcl idea promote arcl-i-01J... \
-  --spec specs/keyboard-navigation.md \
-  --release arcl-r-01J...
-
-arcl milestone create "Foundation" \
-  --epic arcl-e-01J... \
-  --position 10
+arcl capture promote 8XVX spec --acceptance-criteria "- [ ] j and k move the selection"
 ```
 
-Copy the generated release and epic IDs from the command output.
-
-Promotion keeps the source idea linked to the new epic. Repeating the command
-returns that same epic instead of creating another one.
-
-Spec paths must resolve to existing regular Markdown files inside the worktree
-because Arc Lightning stores the path relative to the worktree root and never
-edits the linked spec.
-
-## Add and move work
-
-Create a task, attach a subtask, and move the task through its lifecycle:
-
-```sh
-arcl task create "Add schema" \
-  --milestone arcl-m-01J... \
-  --priority high \
-  --position 10 \
-  --description "Create the tables needed by the tracker."
-
-arcl task create "Add migration test" \
-  --milestone arcl-m-01J... \
-  --parent arcl-t-01J...
-
-arcl task start arcl-t-01J...
-arcl task complete arcl-t-01J... --evidence "Tests pass."
+```text
+Promoted capture `arcl-c-01M6Z52GC3FZ44XVDYGEXW8XVX` to spec `arcl-s-01M6Z52GCZF3KWGK2JPHSPJ7TV`
 ```
 
-Tasks may be `pending`, `in_progress`, `parked`, `completed`, or `cancelled`.
-Use `park` for work that should stay open but temporarily leave the active queue.
+`8XVX` is a short ID, the end of the capture's ID. Any command takes one in
+place of the full ID.
 
-`unpark` returns it to `pending`.
+## Plan the work
 
-Use `arcl task handoff` to store a Markdown resume note and park in-progress
-work in one operation. The [Tasks guide](/guides/tasks/) covers handoffs and
-completion evidence.
+A plan says how the spec will be built. Write its phases and tasks in a TOML
+file, `plan.toml`:
 
-## Inspect Work Graph
+```toml
+format-version = 1
+
+[[phases]]
+key = "keys"
+title = "Key handling"
+position = 0
+
+[[phases.tasks]]
+key = "bindings"
+title = "Add the key bindings table"
+priority = "high"
+position = 0
+
+[[phases.tasks]]
+key = "selection"
+title = "Move the selection with j and k"
+position = 1
+blocked-by = ["bindings"]
+```
+
+Create the plan and apply the file in one step:
 
 ```sh
+arcl plan create "Keyboard plan" --spec J7TV --input plan.toml
 arcl tree
-arcl ready
-arcl explain arcl-t-01J...
-arcl context arcl-t-01J...
-arcl check
 ```
 
-`explain` reports every reason a task is ready or excluded.
+```text
+Applied plan `arcl-pl-01M6Z52GDTQFRHBSTMT6FK17MR` (1 phase(s), 2 task(s)).
+○ Add keyboard shortcuts
+└── ○ Keyboard plan
+    └── ○ Key handling  0/2
+        ├── ● Add the key bindings table
+        └── ○ Move the selection with j and k  blocked by KAJE
+```
 
-`context` collects the task, its ancestors, linked spec, blockers, dependents,
-handoff, and blocker evidence in one response.
+`●` marks a ready task. The [plans guide](/guides/plans/) covers the file
+format and how to change a plan later.
 
-See [Inspecting Work](/guides/inspect-work/) for list filters and output examples.
+## Work a task
 
-## Choosing Output Mode
-
-Human-readable output is the default.
-
-Scripts and agents can select a stable machine-facing format:
+`arcl ready` lists the tasks you can start, highest priority first:
 
 ```sh
-arcl --json idea create "Automate this" --description "Details"
-arcl --plain idea list
-arcl --quiet task complete arcl-t-01J...
+arcl ready
 ```
 
-`--json` emits an envelope with a `format_version`, `--plain` emits
-stable unstyled records, and `--quiet` prints only the affected ID for mutations.
+```text
+arcl-t-01M6Z52GDTA3RG3BF0KDD2KAJE	[high]	pending	Add the key bindings table
+```
+
+Start it, claiming it so no one else starts it too, and record a decision as
+you go:
+
+```sh
+arcl task start KAJE --claim
+arcl task note KAJE --kind decision "Keep bindings in one table"
+```
+
+Finish with evidence. The output names the tasks the completion made ready:
+
+```sh
+arcl task complete KAJE --evidence "Bindings table merged."
+```
+
+```text
+Completed task `arcl-t-01M6Z52GDTA3RG3BF0KDD2KAJE`: Add the key bindings table
+Unblocked task `arcl-t-01M6Z52GDT6HNSB2K69ZD3XG0Y`: Move the selection with j and k
+```
+
+To stop partway, `arcl task handoff <id> --note "<where it stands>"` saves a
+resume note and parks the task. `arcl context <id>` shows the task with its
+spec, plan, blockers, handoff and evidence. The [tasks guide](/guides/tasks/)
+covers both.
+
+## Commit the records
+
+With the workspace on, each command has already written its records under
+`.arcl/workspace/`. Commit them like any other change:
+
+```sh
+git add .arcl
+git commit -m "Plan keyboard shortcuts"
+```
+
+A teammate who pulls runs `arcl init` once in the clone, and the next `arcl`
+command imports the records.
+
+## Choose an output mode
+
+Human output is the default. Scripts and agents choose a stable format:
+
+```sh
+arcl --json ready
+arcl --plain tree
+arcl --quiet capture create "Try a command palette"
+```
+
+`--json` prints an envelope with a `format_version` and `data`, `--plain`
+prints one unstyled record per line, and `--quiet` prints nothing on success.
+Errors still go to standard error. The [automation guide](/guides/automation/) describes the
+envelope.
+
+## Next steps
+
+- Set up a coding agent with `arcl setup`, as the [agent
+  workflows](/guides/agents/) guide shows.
+- Open the [web app](/guides/web-app/) with `arcl serve`.
+- Read the [manual](/reference/manual/) for every command.

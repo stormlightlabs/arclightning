@@ -1,6 +1,6 @@
 ---
 title: Manual
-description: Complete command and output reference for the arcl CLI.
+description: Every arcl command and option, with output formats, exit codes and the rules each command enforces.
 ---
 
 `arcl` operates on the enclosing non-bare Git worktree. Run `arcl --help` or
@@ -15,7 +15,7 @@ These options can appear before or after a subcommand & are global:
 | `--color auto\|always\|never` | Choose when human output may use ANSI colors. Defaults to `auto`.                |
 | `--json`                      | Emit a versioned JSON envelope. Mutually exclusive with `--plain` and `--quiet`. |
 | `--plain`                     | Emit one stable, unstyled record per line.                                       |
-| `--quiet`                     | Suppress explanatory output and print only affected IDs for mutations.           |
+| `--quiet`                     | Print nothing on success. Errors still go to standard error.                     |
 | `--help`                      | Print help for the current command.                                              |
 | `--version`                   | Print the installed version.                                                     |
 
@@ -51,7 +51,7 @@ can, print as `<kind>-<ULID>`, such as `t-01M5VDDD42HZQ1FEN49X80GBA5`.
 A short ID that is unique today can match a second record later. Write full IDs
 in files, evidence, links and scripts that outlive the command.
 
-## Project Initialization
+## Project setup
 
 ### `arcl init`
 
@@ -207,6 +207,19 @@ workspace layout.
 
 ## Capture commands
 
+| Command                                        | Purpose                                         |
+| ---------------------------------------------- | ----------------------------------------------- |
+| `arcl capture create <title>`                  | File a capture in the inbox.                    |
+| `arcl capture show <id>`                       | Show one capture.                               |
+| `arcl capture list`                            | List every capture in creation order.           |
+| `arcl capture update <id>`                     | Replace the title or body.                      |
+| `arcl capture discard <id>`                    | Mark the capture `discarded`, keeping the file. |
+| `arcl capture promote <id> <spec\|task\|note>` | Create a spec, task or note from the capture.   |
+
+Bodies use `--body <MARKDOWN>` (`-b`) or `--body-file <PATH|->`, here and in
+every command that takes a Markdown body. The two are mutually exclusive, and
+`-` reads UTF-8 Markdown from standard input.
+
 `arcl capture create <title>` files a capture in the Inbox. `--from <task>`
 records the task it came from, by full or short ID. Without `--from`, the
 capture takes the one in-progress task claimed by `ARCL_AGENT`. With no such
@@ -221,86 +234,101 @@ source. A promoted spec, task or note keeps it: `show`, `spec show`,
 `task show` and `note show` on the new record read it through the capture's
 promotion, and a capture file stores it as `source-task`.
 
-## Idea commands
+`promote` takes the target as a positional argument or `--to <KIND>`.
+`--title`, `--body` and `--body-file` override what the new record takes from
+the capture. A spec takes `--acceptance-criteria` or
+`--acceptance-criteria-file`. A task takes `--spec`, `--plan`, `--phase`,
+`--parent`, `--priority` (default `normal`) and `--position` (default `0`).
+Promotion creates the record, links it and marks the capture `promoted` in
+one transaction. Repeating it with the same target returns the existing
+record; another target, or a discarded capture, fails with exit code `3`. A
+discarded capture cannot be updated. See [Captures](/guides/captures/).
 
-| Command                                | Purpose                                    |
-| -------------------------------------- | ------------------------------------------ |
-| `arcl idea create <title>`             | Capture a new idea.                        |
-| `arcl idea update <id>`                | Replace an idea title or description.      |
-| `arcl idea discard <id>`               | Soft-delete an idea as `discarded`.        |
-| `arcl idea list`                       | List all ideas in the inbox.               |
-| `arcl idea promote <id> --spec <PATH>` | Create a linked epic from a captured idea. |
+## Spec commands
 
-Descriptions use either `--description <MARKDOWN>` or
-`--description-file <PATH|->`. The two sources are mutually exclusive; `-`
-reads UTF-8 Markdown from standard input.
+| Command                    | Purpose                              |
+| -------------------------- | ------------------------------------ |
+| `arcl spec create <title>` | Create an open spec.                 |
+| `arcl spec show <id>`      | Show one spec.                       |
+| `arcl spec list`           | List specs.                          |
+| `arcl spec update <id>`    | Replace the title, body or criteria. |
+| `arcl spec complete <id>`  | Complete a spec.                     |
+| `arcl spec cancel <id>`    | Cancel a spec.                       |
 
-Promotion accepts `--release <ID>`. It creates the epic and relationship and
-marks the idea promoted in one transaction. Repeating a successful promotion
-returns the existing epic.
+`create` and `update` take `--acceptance-criteria <MARKDOWN>` or
+`--acceptance-criteria-file <PATH|->`, and `update` takes `--title`. See
+[Specs](/guides/specs/).
 
-## Release commands
+## Plan commands
 
-| Command                       | Purpose                   |
-| ----------------------------- | ------------------------- |
-| `arcl release create <title>` | Create an open release.   |
-| `arcl release update <id>`    | Replace release metadata. |
-| `arcl release complete <id>`  | Complete a release.       |
-| `arcl release cancel <id>`    | Cancel a release.         |
+| Command                                 | Purpose                                                  |
+| --------------------------------------- | -------------------------------------------------------- |
+| `arcl plan create <title> --spec <ID>`  | Create an open plan under a spec.                        |
+| `arcl plan show <id>`                   | Show a plan with its phase, task and dependency counts.  |
+| `arcl plan list`                        | List plans.                                              |
+| `arcl plan update <id>`                 | Replace the title or body.                               |
+| `arcl plan check <id> --file <PATH\|->` | Validate a plan file and list its changes, writing none. |
+| `arcl plan diff <id> --file <PATH\|->`  | List the changes a plan file would make.                 |
+| `arcl plan apply <id> --file <PATH\|->` | Apply a plan file in one transaction.                    |
+| `arcl plan complete <id>`               | Complete a plan.                                         |
+| `arcl plan cancel <id>`                 | Cancel a plan.                                           |
 
-`complete` and `cancel` accept `--allow-open-children` to bypass the default
-descendant check for the selected release only.
+`create --input <PATH|->` applies a plan file after creating the plan, in the
+same command. `--no-input`, the default, creates the plan alone; the two
+conflict. Human and `--plain` output from `check` and `diff` print one line
+per phase, task and dependency with its change: `Create`, `Update` or
+`Unchanged`. `--json` returns `plan_id` and `phases`, `tasks` and
+`dependencies` lists, each entry with its `key` and `change`. A plan file that
+does not parse, or names an unknown or ambiguous dependency, fails with exit
+code `3`. [Plans](/guides/plans/) describes the file format.
 
-## Epics
+### Phase commands
 
-| Command                                  | Purpose                                             |
-| ---------------------------------------- | --------------------------------------------------- |
-| `arcl epic create <title> --spec <PATH>` | Create an epic linked to an existing Markdown spec. |
-| `arcl epic update <id>`                  | Replace epic metadata or its linked spec.           |
-| `arcl epic complete <id>`                | Complete an epic.                                   |
-| `arcl epic cancel <id>`                  | Cancel an epic.                                     |
+| Command                                      | Purpose                              |
+| -------------------------------------------- | ------------------------------------ |
+| `arcl plan phase create <title> --plan <ID>` | Create an open phase in a plan.      |
+| `arcl plan phase show <id>`                  | Show one phase.                      |
+| `arcl plan phase list`                       | List phases.                         |
+| `arcl plan phase update <id>`                | Replace the title, body or position. |
+| `arcl plan phase complete <id>`              | Complete a phase.                    |
+| `arcl plan phase cancel <id>`                | Cancel a phase.                      |
 
-Epic creation accepts `--release <ID>`. Epic updates accept either
-`--release <ID>` or `--no-release`. Spec paths are validated as regular `.md`
-files inside the current Git worktree.
+`--position <N>` orders phases in their plan; `create` defaults it to `0`.
+See [Phases](/guides/phases/).
 
-## Milestones
+## Task commands
 
-| Command                                     | Purpose                                 |
-| ------------------------------------------- | --------------------------------------- |
-| `arcl milestone create <title> --epic <ID>` | Create an ordered milestone.            |
-| `arcl milestone update <id>`                | Replace milestone metadata or position. |
-| `arcl milestone complete <id>`              | Complete a milestone.                   |
-| `arcl milestone cancel <id>`                | Cancel a milestone.                     |
+| Command                      | Purpose                                                 |
+| ---------------------------- | ------------------------------------------------------- |
+| `arcl task create <title>`   | Create a pending task or subtask.                       |
+| `arcl task show <id>`        | Show a task with readiness, ancestry and blockers.      |
+| `arcl task list [--all]`     | List tasks, leaving out archived ones without `--all`.  |
+| `arcl task update <id>`      | Replace metadata, move a subtree, or change its parent. |
+| `arcl task start <id>`       | Move ready pending work to `in_progress`.               |
+| `arcl task park <id>`        | Move pending or in-progress work to `parked`.           |
+| `arcl task unpark <id>`      | Return parked work to `pending`.                        |
+| `arcl task handoff <id>`     | Store a resume note and park in-progress work.          |
+| `arcl task note <id> <text>` | Append a timestamped note, with an optional `--kind`.   |
+| `arcl task complete <id>`    | Mark pending or in-progress work completed.             |
+| `arcl task cancel <id>`      | Cancel work that is not completed or cancelled.         |
+| `arcl task explain <id>`     | The same report as `arcl explain`.                      |
+| `arcl task context <id>`     | The same packet as `arcl context`.                      |
 
-Use `--position <N>` when creating or updating a milestone. The default position
-is `0`; negative positions are invalid. Terminal commands accept
-`--allow-open-children`.
+Task creation accepts `--spec <ID>`, `--plan <ID>`, `--phase <ID>`,
+`--parent <ID>`, `--priority <critical|high|normal|low>` (default `normal`),
+`--position <N>` (default `0`), and `--blocked-by <ID>`. A phase places the
+task under its plan and spec, and a plan under its spec. A subtask takes its
+spec, plan and phase from its parent; naming a different one fails with exit
+code `3`. The spec, plan or phase must be open. `--blocked-by` takes one ID
+per flag; repeat the flag or separate IDs with commas to add several
+blockers, as `dependency add` does.
 
-## Task Management
-
-| Command                                     | Purpose                                                 |
-| ------------------------------------------- | ------------------------------------------------------- |
-| `arcl task create <title> --milestone <ID>` | Create a pending task or subtask.                       |
-| `arcl task update <id>`                     | Replace metadata, move a subtree, or change its parent. |
-| `arcl task start <id>`                      | Move ready pending work to `in_progress`.               |
-| `arcl task park <id>`                       | Move pending or in-progress work to `parked`.           |
-| `arcl task unpark <id>`                     | Return parked work to `pending`.                        |
-| `arcl task handoff <id>`                    | Store a resume note and park in-progress work.          |
-| `arcl task note <id> <text>`                | Append a timestamped note, with an optional `--kind`.   |
-| `arcl task complete <id>`                   | Mark pending or in-progress work completed.             |
-| `arcl task cancel <id>`                     | Cancel non-terminal work.                               |
-
-Task creation accepts `--parent <ID>`, `--priority <critical|high|normal|low>`
-(default `normal`), `--position <N>` (default `0`), and `--blocked-by <ID>`.
-`--blocked-by` takes one ID per flag; repeat the flag or separate IDs with
-commas to add several blockers, as `dependency add` does. Task updates accept
-`--milestone <ID>`, `--parent <ID>`, or `--no-parent`. `--parent` and
-`--no-parent` are mutually exclusive.
-
-Moving a task between milestones moves its entire descendant subtree. Parent and
-child rows must belong to the same milestone, and cyclic reparenting is rejected
-before storage changes.
+Task updates accept `--title`, `--body`, `--body-file`, `--priority`,
+`--position`, and `--spec`, `--plan`, `--phase` or `--parent` with their
+`--no-spec`, `--no-plan`, `--no-phase` and `--no-parent` forms. Moving a task
+moves its entire descendant subtree. A cycle, a move that leaves a task
+blocked by its own ancestor or descendant, or a move under an archived task
+is refused before storage changes.
 
 `start` refuses a pending task that is not ready and lists the reasons. Having
 child tasks is the one reason it skips. `--force` starts the task anyway.
@@ -356,6 +384,20 @@ the IDs it completed in tree order, and `unblocked`, the IDs of tasks that were
 not ready before the command and are ready after it. Plain output prints the
 task ID, then a `subtask<TAB><id>` line for each completed subtask and an
 `unblocked<TAB><id>` line for each task it made ready.
+
+## Dependency commands
+
+| Command                                              | Purpose                                 |
+| ---------------------------------------------------- | --------------------------------------- |
+| `arcl dependency add <task-id> --blocked-by <ID>`    | Make a task wait for one or more tasks. |
+| `arcl dependency remove <task-id> --blocked-by <ID>` | Remove one blocker.                     |
+| `arcl dependency list`                               | List every dependency in the project.   |
+
+`add` takes several blockers, by repeating the flag or separating IDs with
+commas, and adds none if one is refused. It refuses an edge that closes a
+cycle, joins a task to its own ancestor or descendant, or touches an archived
+task, with exit code `3`. [Dependencies and ready work](/reference/deps/)
+explains how blockers affect readiness.
 
 ## Compaction
 
@@ -488,21 +530,54 @@ which `show` and `context` also print for each gate on the task.
 and when it was created. Plain output prints the gate's `gate` line, then
 `created<TAB><created-at>`. JSON returns `{action: "shown", gate}`.
 
+## Note commands
+
+| Command                                                          | Purpose                    |
+| ---------------------------------------------------------------- | -------------------------- |
+| `arcl note create <title>`                                       | Create a note.             |
+| `arcl note show <id>`                                            | Show one note.             |
+| `arcl note list`                                                 | List notes.                |
+| `arcl note update <id>`                                          | Replace the title or body. |
+| `arcl note link add <note-id> --kind <KIND> --record-id <ID>`    | Link the note to a record. |
+| `arcl note link remove <note-id> --kind <KIND> --record-id <ID>` | Remove one link.           |
+| `arcl note link list <note-id>`                                  | List the note's links.     |
+
+`--kind` is `capture`, `spec`, `plan`, `phase`, `task`, `note` or `release`,
+and a short `--record-id` matches only records of that kind. Notes have no
+status. See [Notes](/guides/notes/).
+
+## Release commands
+
+| Command                                                                  | Purpose                         |
+| ------------------------------------------------------------------------ | ------------------------------- |
+| `arcl release create <title>`                                            | Create an open release.         |
+| `arcl release show <id>`                                                 | Show one release.               |
+| `arcl release list`                                                      | List releases.                  |
+| `arcl release update <id>`                                               | Replace the title or body.      |
+| `arcl release complete <id>`                                             | Complete a release.             |
+| `arcl release cancel <id>`                                               | Cancel a release.               |
+| `arcl release member add <release-id> --kind <KIND> --record-id <ID>`    | Add a spec, plan, task or note. |
+| `arcl release member remove <release-id> --kind <KIND> --record-id <ID>` | Remove one member.              |
+| `arcl release member list <release-id>`                                  | List the explicit members.      |
+
+`--kind` is `spec`, `plan`, `task` or `note`. Membership never includes a
+record's descendants. See [Releases and roadmap](/guides/releases/).
+
 ## Inspection
 
-| Command                                                              | Purpose                                                            |
-| -------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `arcl show <id>`                                                     | Show one record by its full or short ID.                           |
-| `arcl list [--all]`                                                  | List records using kind, state, priority, and association filters. |
-| `arcl tree [<id>] [--all] [--ascii] [--depth <N>] [--style <STYLE>]` | Show the complete hierarchy or one rooted subtree.                 |
-| `arcl roadmap [--output <PATH>]`                                     | Print specs, plans, phases and releases as one Markdown page.      |
-| `arcl explain <task-id>`                                             | Report every condition affecting task readiness.                   |
-| `arcl context <task-id> [--all]`                                     | Return the bounded context needed to work on a task.               |
-| `arcl check`                                                         | Sync the workspace, then validate database and graph invariants.   |
-| `arcl ready`                                                         | List actionable leaf tasks in deterministic order.                 |
-| `arcl next`                                                          | Return the first actionable task, if one exists.                   |
-| `arcl next --start [--claim [<NAME>]]`                               | Start the first actionable task, claiming it with `--claim`.       |
-| `arcl prime`                                                         | Print the agent loop, open work, and the first ready tasks.        |
+| Command                                                              | Purpose                                                              |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `arcl show <id>`                                                     | Show one record by its full or short ID.                             |
+| `arcl list [--all]`                                                  | List records using kind, state, priority, and association filters.   |
+| `arcl tree [<id>] [--all] [--ascii] [--depth <N>] [--style <STYLE>]` | Show the complete hierarchy or one rooted subtree.                   |
+| `arcl roadmap [--output <PATH>]`                                     | Print specs, plans, phases and releases as one Markdown page.        |
+| `arcl explain <task-id>`                                             | Report every condition affecting task readiness.                     |
+| `arcl context <task-id> [--all]`                                     | Return the task with its spec, plan, blockers, handoff and evidence. |
+| `arcl check`                                                         | Sync the workspace, then validate database and graph invariants.     |
+| `arcl ready`                                                         | List actionable leaf tasks in deterministic order.                   |
+| `arcl next`                                                          | Return the first actionable task, if one exists.                     |
+| `arcl next --start [--claim [<NAME>]]`                               | Start the first actionable task, claiming it with `--claim`.         |
+| `arcl prime`                                                         | Print the agent loop, open work, and the first ready tasks.          |
 
 `check` syncs the workspace first. When the sync fails, `check` fails and
 skips the database checks. Workspace content arcl cannot read or accept fails
@@ -726,609 +801,61 @@ or are `null` when there are no such tasks. `--quiet` prints nothing, and with
 
 ## GraphQL queries
 
-`arcl query` runs a read-only GraphQL query against the project's records and
-prints the response as JSON. It needs no server, and `arcl serve` answers the
-same queries at `POST /graphql` (see [Web app](#web-app)). `arcl serve --api`
-serves `/graphql` and `/api` without the page, for scripts and other local
-tools (see [API only](#api-only)). Writes stay with the other commands.
-
 | Command                                                              | Purpose                                    |
 | -------------------------------------------------------------------- | ------------------------------------------ |
 | `arcl query '<document>' [--variables <JSON>] [--operation <NAME>]`  | Run a query given on the command line.     |
 | `arcl query --file <PATH> [--variables <JSON>] [--operation <NAME>]` | Run a query from a file, or `-` for stdin. |
 | `arcl query --schema`                                                | Print the schema in SDL.                   |
 
-```sh
-arcl query '{ task(id: "FXP7") { title status readiness { ready reasons { kind message } } blockers { task { id title } completed } gates { kind target status } } }'
-arcl query '{ records(kind: "task", status: ["pending"], priority: ["high"]) { id title ... on Task { phase { title } } } }'
-arcl query --file query.graphql --variables '{"id": "FXP7"}' --operation Task
-```
-
-The root fields are `record`, `capture`, `release`, `spec`, `plan`, `phase`,
-`task`, `note` and `gate`, each by full or short ID; `records`, with the
-filters `arcl list` takes; `ready`, with the filters `arcl ready` takes;
-`tree`, from an optional `root`, with `all`; `work`; `context(task:)`; and
-`source(id:)`, a record's workspace file and its `revision`. Like
-`arcl show`, `record` also takes a gate ID, so it returns a union: select
-fields with `... on Record { title }` or `... on Gate { target }`. A task's
-`readiness`, `blockers`, `inheritedBlockers`, `gates` and `notes` come from
-the same view as `arcl explain`. `spec`, `plan` and `phase` on a task are the
-effective ones; `specId`, `planId`, `phaseId` and `parentId` are the IDs the
-task stores. A tree node's `descendants` lists every node below it, depth
-first, each with its `depth`, so a tree of any depth reads in one query. IDs
-in responses are full IDs, and every record also has `shortId`. Statuses,
-kinds and priorities are the strings `--json` output uses, such as
-`in_progress`.
-
-The schema is checked in at
-[`crates/arcl-graphql/schema.graphql`](https://github.com/stormlightlabs/arclightning/blob/main/crates/arcl-graphql/schema.graphql).
-
-stdout holds the GraphQL response: `data`, and `errors` when there are any.
-A response with errors exits `3`. Each error from a resolver has an
-`extensions.code` of `NOT_FOUND`, `INVALID_REQUEST`, `CONFLICT` or `INTERNAL`.
-A well-formed ID that names no record is `NOT_FOUND`, worded as `arcl show`
-words it. An ID that does not parse, such as `arcl-t-bad`, is
-`INVALID_REQUEST`, in `record` as in the typed fields.
-
-A query document may be at most 64 KiB. A longer one is refused before it is
-parsed: `data` is `null` and the error's `extensions.code` is
-`QUERY_TOO_LARGE`.
-
-A query may nest fields at most 16 deep, counting `{ tree { id } }` as 2, and
-select at most 1000 fields, counting each field once. A query over either limit
-runs nothing: `data` is `null` and the error's `extensions.code` is
-`QUERY_TOO_DEEP` or `QUERY_TOO_COMPLEX`.
-
-A query may also resolve at most 10,000 objects, counting each record, task,
-gate, note, tree node and other object in the response once. Nested lists
-multiply: `plan { tasks { plan { tasks { id } } } }` resolves the square of
-the plan's task count. A query that passes the limit stops there: `data` is
-`null` and the one error's `extensions.code` is `RESULT_TOO_LARGE`.
+`arcl query` runs a read-only GraphQL query against the project's records
+and prints the response as JSON. It needs no server. A response with errors
+exits `3`. [GraphQL and REST API](/guides/api/) lists the root fields, the
+error codes and the query limits.
 
 ## Web app
 
-`arcl serve` serves the web app and its endpoints on `127.0.0.1`, on an
-ephemeral port unless `--port` pins one. It prints the URL to open, which
-carries a per-run token for the first page load. The app moves the token out
-of the URL and sends it in the `X-Arcl-Token` header on every later request.
-The server refuses a request without the token or with a `Host` header that
-does not name the server. Reads take GET and changes take POST; the server
-refuses any other method, so a GET never changes records. `/graphql` takes
-POST only and needs no `Origin`, since a query changes nothing. A change also
-needs an `Origin` header naming the server, which stops other pages, including
-those on other `127.0.0.1` ports, from sending one. Responses carry no CORS
-headers. The page's Content-Security-Policy runs only the app's own script and
-loads images only from the server or `data:` URLs, so Markdown cannot pull
-images from other hosts. The server runs until Ctrl-C, then gives open
-requests up to 5 seconds to finish and exits. A read or change that has not
-started by Ctrl-C gets status 503 and does not run; one already running
-finishes. A second Ctrl-C ends the wait for open requests, and the server exits
-once the read or change already running finishes. A read whose client
-disconnects before it starts does not run.
+| Command                      | Purpose                                             |
+| ---------------------------- | --------------------------------------------------- |
+| `arcl serve [--port <PORT>]` | Serve the web app on `127.0.0.1` until Ctrl-C.      |
+| `arcl serve --api`           | Serve only `/api` and `/graphql`, without the page. |
 
-The server closes a connection that takes more than 5 seconds to send a request
-head or idles that long between requests. It also closes one whose client reads
-replies slower than 64 KiB/s. Each connection starts with 5 seconds of waiting
-for its client to read, spends it while a reply waits, earns back a second per
-64 KiB the client reads, and never holds more than 5 seconds. A request it
-refuses for a bad `Host` or token, for a body over 1 MiB, or for a body that
-does not arrive within 5 seconds gets `Connection: close` and the connection
-closes after the reply. It keeps at most
-128 connections open; a new one waits to be accepted until another closes.
+`arcl serve` prints the URL to open, with a per-run token for the first page
+load. Under `--api`, the token comes from `ARCL_SERVE_TOKEN` when it is set;
+otherwise each run makes one. `--json` prints one startup line with the URL,
+port and token. Outside a project it exits `3` before it binds. See
+[Web app](/guides/web-app/) for the views and [GraphQL and REST
+API](/guides/api/) for the endpoints.
 
-| Endpoint                          | Same JSON as             |
-| --------------------------------- | ------------------------ |
-| `GET /api/records`                | `arcl list`              |
-| `GET /api/records/<id>`           | `arcl show <id>`         |
-| `GET /api/records/<id>/source`    | none (see below)         |
-| `GET /api/ready`                  | `arcl ready`             |
-| `GET /api/tasks/<id>/explain`     | `arcl explain <task-id>` |
-| `GET /api/tasks/<id>/context`     | `arcl context <task-id>` |
-| `GET /api/tree`                   | `arcl tree`              |
-| `GET /api/work`                   | none (see below)         |
-| `POST /api/tasks`                 | `arcl task create`       |
-| `POST /api/tasks/<id>/update`     | `arcl task update`       |
-| `POST /api/tasks/<id>/start`      | `arcl task start`        |
-| `POST /api/tasks/<id>/park`       | `arcl task park`         |
-| `POST /api/tasks/<id>/unpark`     | `arcl task unpark`       |
-| `POST /api/tasks/<id>/handoff`    | `arcl task handoff`      |
-| `POST /api/tasks/<id>/complete`   | `arcl task complete`     |
-| `POST /api/captures`              | `arcl capture create`    |
-| `POST /api/captures/<id>/promote` | `arcl capture promote`   |
-| `POST /api/captures/<id>/discard` | `arcl capture discard`   |
-| `POST /api/specs`                 | `arcl spec create`       |
-| `POST /api/plans`                 | `arcl plan create`       |
-| `POST /api/plans/<id>/apply`      | `arcl plan apply`        |
-| `POST /api/records/<id>/edit`     | none (see below)         |
-| `POST /graphql`                   | `arcl query`             |
+## Artifact commands
 
-`/api/records` and `/api/ready` take the command's flags as query parameters,
-such as `?kind=task&status=pending&status=parked`. `/api/tree` takes none and
-returns the tree of every record. `/api/work` takes none and
-returns the Work list in one request: every task that is not archived, with
-the readiness `arcl explain` reports and its phase ID, inherited from an
-ancestor where the task has none, and every phase. Its envelope is
-`{"format_version": 2, "data": {"tasks": [{"task", "readiness", "phase_id"}], "phases": [...]}}`.
+| Command                          | Purpose                                                     |
+| -------------------------------- | ----------------------------------------------------------- |
+| `arcl web export [--full] <DIR>` | Write the artifact's documents as JSON files under `DIR`.   |
+| `arcl web apply <FILE>`          | Apply the edits queued on the artifact, from a file or `-`. |
 
-`/api/records`, `/api/tree` and `/api/tasks/<id>/context` leave archived tasks
-out as the CLI does without `--all`, so the web app's Work list, board and
-Planning view never show them.
-
-Each `GET /api` read runs one named query against the schema `arcl query`
-uses and maps the result into its envelope. These reads have no limit on the
-objects they resolve.
-
-`POST /graphql` takes `{"query", "variables", "operationName"}`, as GraphQL
-clients send it, and answers status 200 with the response `arcl query` prints
-for the same query, with the same limits. Like the other `arcl serve` reads, it
-skips the workspace sync `arcl query` runs first. `errors` and limit refusals
-come back in that body too. A body that is not JSON, has no `query` string,
-has a `variables` that is not an object, or has an `operationName` that is not
-a string gets `invalid_request` with status 400.
-
-A POST takes a JSON object of the command's options, named like its flags
-with `_` for `-`:
-
-| Endpoint   | Options                                                                                                |
-| ---------- | ------------------------------------------------------------------------------------------------------ |
-| `tasks`    | `title` (required), `body`, `priority`, `parent`, `spec`, `plan`, `phase`, `blocked_by`                |
-| `update`   | `title`, `body`, `priority`                                                                            |
-| `start`    | `force`                                                                                                |
-| `handoff`  | `note`                                                                                                 |
-| `complete` | `evidence`, `allow_open_children`, `with_subtasks`                                                     |
-| `captures` | `title` (required), `body`                                                                             |
-| `promote`  | `to` (required), `title`, `body`, `acceptance_criteria`, `spec`, `plan`, `phase`, `parent`, `priority` |
-| `specs`    | `title` (required), `body`, `acceptance_criteria`                                                      |
-| `plans`    | `title` (required), `spec` (required), `body`                                                          |
-| `apply`    | `document` (required)                                                                                  |
-| `edit`     | `source` (required), `revision` (required)                                                             |
-
-`blocked_by` is a list of task IDs. `to` is `task`, `spec` or `note`, and
-`promote` uses the capture's title and body for any it leaves out. `document`
-is the plan's TOML, as `arcl plan apply --file` reads it.
-
-`/api/records/<id>/source` returns the record's workspace file, the bytes
-`arcl workspace export` writes for it, as
-`{"format_version": 1, "data": {"id", "kind", "path", "source", "revision"}}`.
-`path` is the file's place in the workspace, such as `tasks/<id>.md`, and
-`revision` is the lowercase hex SHA-256 of `source`. `edit` replaces the
-record with `source`, a whole file, and answers with the saved file in the
-same shape. It checks the file as `arcl workspace import` checks one: the TOML
-must parse, the fields must fit the record's kind, the ID must match the
-record, and every relationship and blocker rule must hold for the whole
-graph. The edit is compared with the database, as the task commands are, so
-a blocker cycle or ancestry rule violation it adds is refused even before the
-first sync; one already in the database loads with a warning.
-
-An edit may not change a field that only a command changes, since those
-commands check lifecycle rules, readiness and open subtasks that the import
-does not. Such an edit fails with `invalid_request`, status 400, and the
-message names the command. A field left at its value passes, so a closed
-record's other fields stay editable.
-
-| Kind    | Fields only a command changes                                 | Commands                                                                                  |
-| ------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| task    | `status`, `handoff`, `evidence`, `assignee`, `notes`, `gates` | `arcl task start`, `park`, `unpark`, `handoff`, `complete`, `cancel`, `note`; `arcl gate` |
-| capture | `status`, `promoted-to`, `source-task`                        | `arcl capture promote`, `discard`; `arcl capture create`                                  |
-| spec    | `status`, `source-capture`                                    | `arcl spec complete`, `cancel`; `arcl capture promote`                                    |
-| plan    | `status`                                                      | `arcl plan complete`, `cancel`                                                            |
-| phase   | `status`                                                      | `arcl plan phase complete`, `cancel`                                                      |
-| release | `status`                                                      | `arcl release complete`, `cancel`                                                         |
-
-The record ID in the path is the only file the request names. When the
-file's revision is no longer `revision`, such as after an edit in Git or
-another change, the edit fails with `conflict`, status 409. A refused edit
-changes nothing. A saved edit reaches the workspace file through the sync
-after the change.
-
-`park`, `unpark` and `discard` take an empty body or `{}`. An unknown option, a body that
-is not JSON, or a body over 1 MiB is refused. A request whose
-`Content-Length` is over 1 MiB gets status 413 before any other check. The
-server reads a body only after the request passes its checks, and answers 408
-and closes the connection when the body has not arrived after 5 seconds. A
-failure returns the CLI's error envelope with status 400 for
-exit codes 2 and 3, 404 for 5, 409 for 4, and 500 otherwise.
-
-A read opens the database without syncing the workspace, takes no lock and
-never changes records; opening the database can still run its migrations. A
-change runs as the CLI runs it: under the project's sync lock, after a sync
-that must succeed, followed by a sync that exports it. Where a sync or export
-warns, the reply's envelope lists the warnings in `warnings`, as the CLI's
-JSON output does. A change waits at most 3 seconds for the lock; if another
-`arcl` command still holds it, the change fails with `application_error`,
-status 503 and a `Retry-After` header, and records stay as they were. Other
-`arcl` commands run while the server serves. Outside a project, `arcl serve`
-exits with code 3 before it binds.
-
-The Work view lists every task by milestone, then by status, in the order
-`arcl tree` gives: milestones by plan and position, and tasks by position,
-each followed by its subtasks. A glyph leads each row; for a pending or parked
-task, hover over it or focus the row to read why the task is not ready. `j` and `k` move the selection, and `Enter`
-opens the task. Filters narrow the list by status, priority, milestone and
-readiness: ready, blocked by an incomplete task, or waiting for another
-reason, such as open subtasks. The page URL keeps the filters. A task deleted
-while the list loads is left out; any other failed read shows an error with a
-Retry button. **New task** opens a form for the title, priority and
-description, creates the task with `arcl task create`, and opens it.
-
-**List** and **Board** beside the title, or `v`, switch the layout. The
-choice is remembered in this browser, and the URL names the board as
-`?view=board`. The board has a column for each status: Pending, In progress,
-Parked, Completed and Cancelled. Its cards show the task's ID, title,
-readiness glyph and priority, link to the Task view, and follow the filters.
-A long column scrolls inside itself, and a narrow window scrolls the board
-sideways. Dragging a card to another column runs the command that makes that
-move:
-
-| From                 | To          | Runs                 |
-| -------------------- | ----------- | -------------------- |
-| Pending              | In progress | `arcl task start`    |
-| Pending, In progress | Parked      | `arcl task park`     |
-| Parked               | Pending     | `arcl task unpark`   |
-| Pending, In progress | Completed   | `arcl task complete` |
-
-A move to Completed first asks for optional evidence. The web app has no
-cancel action, so a drop on Cancelled is refused with a message that names
-`arcl task cancel`. No command reopens a closed task. Any other drop the
-table leaves out is refused with a message too, and the card stays in its
-column. While a move runs,
-no other card moves. A card moves once its command succeeds; a
-refused change shows the CLI's message. Each card's **Move** button, or `m`
-on the selected card, opens a dialog with the moves it allows, so the
-keyboard reaches every move.
-
-The Task view shows what `arcl show <task-id>` returns: why the task is not
-ready, its direct blockers, the blockers it inherits from each ancestor, its
-subtasks, the tasks it unblocks, the latest handoff and the evidence. Each
-task it names links to that task's view. The description renders as Markdown,
-and **View Markdown** opens the source in a read-only editor. The properties
-panel lists status, readiness, priority, parent, spec, plan and phase; `]`
-collapses and expands it, also from inside the read-only source. `Escape`
-returns to the Work list with its filters and the task selected, except while
-an open form holds unsaved input; inside the source, the first `Escape` moves
-focus out of the editor. A failed read shows an error with a Retry button.
-
-Buttons under the title change the task. A pending task offers Start and
-Park, an in-progress task Complete, Hand off and Park, and a parked task
-Unpark. Complete asks for optional Markdown evidence and Hand off for a
-Markdown note, which parks the task. **Edit** opens the title, priority and
-description in a writable editor; Save sends only the fields that changed.
-Each change runs the `arcl task` command of the same name, so the CLI's
-validation applies. A refused change shows the CLI's message and error code
-next to its button. A saved change whose sync or export warned shows the
-warnings in a notice. After a change the view reloads the task, and after a
-completion it lists the tasks the completion made ready.
-
-**Edit file** opens the task's whole workspace file in an editor, with the
-TOML front matter between the `+++` lines highlighted as TOML and the body as
-Markdown. **Save file** sends it to `POST /api/records/<id>/edit`, so the
-file passes the checks `arcl workspace import` runs. The file cannot change
-the task's status, handoff note or evidence; the buttons and the board do
-that. A refused file shows the CLI's message and keeps the edit open; when
-the file changed since it was opened, **Reload the file** loads the new
-version in place of the edit.
-
-The Inbox lists the captures not yet promoted or discarded, oldest first, and
-shows the selected one's body, with a link to the task it came from. `j` and
-`k` move the selection. **Promote to task**, **Promote to spec** and **Make a
-note** open a form with the capture's title, which runs `arcl capture
-promote`; the new record gets the capture's body. The task form sets the
-priority, milestone and parent, and reads `!priority` and `^REF` from the
-capture's title. A promotion takes no blockers, so the form names each
-`after:REF` for you to add with `arcl dependency add`. The spec form takes
-optional acceptance criteria.
-**Discard** asks first, then runs `arcl capture discard`. After either, the
-next capture is selected, and a notice links to the new task or to Planning.
-While a form holds edits, or a promotion or discard is running, `j`, `k` and
-clicking another capture keep the selection; with edits, they return focus to
-the form. A capture already promoted or discarded elsewhere, such as from the
-CLI, reloads the list with a notice.
-
-Planning lists each spec with its plans, and each plan with its milestones in
-`arcl tree` order. A milestone row shows whether the phase is open or done,
-how many of its tasks are done, and how many are ready or blocked; subtasks
-count. `j` and `k` move between specs, plans and milestones, and `Enter`
-opens the selected milestone's tasks and subtasks below it, or collapses and
-expands a spec or plan. Closed specs and plans start collapsed. A task in the
-tree opens its Task view. **New spec** runs `arcl spec create`, **New plan**
-on a spec runs `arcl plan create`, and **Apply plan** on a plan takes a TOML
-document and runs `arcl plan apply`. Applying again with the same keys updates
-the plan's phases and tasks. The view reloads in place after each change.
-
-`⌘K`, or `Ctrl+K` off macOS, opens the command menu; so does **Search** in the
-sidebar. The menu lists the actions on the selection first: the row
-selected in the Work list, the Task view's task, the Inbox's capture, or the
-selected spec or plan in Planning. The open view's
-commands, Quick capture and Go to follow, and once you type, the tasks whose
-titles match. Each command shows its shortcut. Typing filters the list, the
-arrow keys move, `Enter` runs the command and `Escape` closes the menu.
-`Backspace` in an empty search drops the selected task from the menu. A
-command runs the same change as its button; from the Work list, Complete and
-Hand off open the Task view with their form.
-
-| Keys          | Command                                                       |
-| ------------- | ------------------------------------------------------------- |
-| `⌘K` `Ctrl+K` | Open the command menu                                         |
-| `q`           | Quick capture                                                 |
-| `g` `i`       | Go to Inbox                                                   |
-| `g` `w`       | Go to Work                                                    |
-| `g` `p`       | Go to Planning                                                |
-| `n`           | New task, in the Work list                                    |
-| `s`           | Start the selected task                                       |
-| `c`           | Complete the selected task                                    |
-| `h`           | Hand off the selected task                                    |
-| `p`           | Park the selected task                                        |
-| `u`           | Unpark the selected task                                      |
-| `e`           | Edit the task, in the Task view                               |
-| `v`           | Switch between list and board, in Work                        |
-| `m`           | Move the selected card, on the board                          |
-| `j` `k`       | Select the next or previous task, in Work                     |
-| `Enter`       | Open the selected task, in Work                               |
-| `]`           | Collapse or expand properties, in a task                      |
-| `Escape`      | Return to Work, in a task                                     |
-| `j` `k`       | Select the next or previous row, in Inbox and Planning        |
-| `1`           | Promote the capture to a task, in Inbox                       |
-| `2`           | Promote the capture to a spec, in Inbox                       |
-| `3`           | Make the capture a note, in Inbox                             |
-| `Backspace`   | Discard the capture, in Inbox                                 |
-| `n`           | New spec, in Planning                                         |
-| `a`           | New plan on a spec, or Apply plan on a plan, in Planning      |
-| `Enter`       | Open or close the selected row, in Planning                   |
-| `Escape`      | Close the open form if it has no edits, in Inbox and Planning |
-
-Shortcuts do nothing while you type in a field, the editor or a dialog, or
-hold `Ctrl`, `⌘` or `Alt`. Press `g` and its second key within a second.
-
-`q`, or **Capture** in the sidebar, opens quick capture from any view. The
-first line is the title, and `Shift+Enter` starts the body. `Enter` files the
-text with `arcl capture create`. `⌘Enter`, or `Ctrl+Enter` off macOS, files it
-as a task with `arcl task create` and opens it; tokens in the first line then
-set the task's fields:
-
-| Token       | Sets                                                       |
-| ----------- | ---------------------------------------------------------- |
-| `!high`     | The priority, from `!critical`, `!high`, `!normal`, `!low` |
-| `^REF`      | The parent task                                            |
-| `after:REF` | A blocker; repeat it for more than one                     |
-
-`REF` is a task ID, such as `arcl-t-01M5…`, or a task number, such as `T18.4`
-for `T18.4: Add task mutations`. A reference that names no task or several
-stops the task with an error. With two `^REF`, only the last is looked up.
-Only a whole word is a token, so `!later`, `^C` and `after:lunch` stay text,
-and the body is never read for tokens. A leading backslash keeps a token as
-text: `\!high` puts `!high` in the title. A capture holds only a title and a
-body, so `Enter` keeps the first line as typed, tokens and backslashes
-included.
-
-A change from the menu or quick capture whose sync warned shows the warnings in
-a notice, as the Task view does.
-
-The theme follows the system's light or dark setting: light grey and blue, or
-black and blue. Text in both themes meets WCAG AA contrast. Animations and
-transitions stop when the system asks for reduced motion. In a window narrower
-than 48rem the sidebar becomes a bar at the top, and **Menu** shows Search,
-Capture and the views; choosing a view closes it.
-
-`arcl` embeds the web app from `apps/web/build` when it compiles. Release
-binaries include it. That build is not committed, so `cargo install --git`
-produces an `arcl` whose `serve` shows a page saying the web app was not
-built. To compile one with the web app, run `pnpm install` and
-`pnpm --filter @arclightning/web build` in a checkout, then
-`cargo install --path crates/arcl-cli`.
-
-### API only
-
-`arcl serve --api` serves `/graphql` and `/api` without the web app page, so a
-script or another local tool can use the endpoints above against the
-project's database. It binds `127.0.0.1` and refuses a request with the wrong
-`Host` or without the token, as the page mode does. Any path outside `/api` and
-`/graphql` gets 404. No URL carries the token: a request that puts it in the
-query string gets 401, and every request sends it in the `X-Arcl-Token`
-header.
-
-The token comes from `ARCL_SERVE_TOKEN` when it is set. It must be at least 32
-characters, ASCII letters and digits only; otherwise `arcl serve --api` exits
-`1` at startup with an error naming that rule. Without the variable, each run
-makes a new token. The page mode always makes a new one and ignores the
-variable.
-
-`arcl --json serve` prints one startup line with the URL, the port and the
-token:
-
-```json
-{ "format_version": 1, "data": { "status": "serving", "url": "http://127.0.0.1:4321", "port": 4321, "token": "..." } }
-```
-
-Under `--api` the URL is the server's origin. In the page mode it is the URL
-to open, with the token for the first page load. Human output under `--api`
-prints the URL and the token, and `--plain` prints them on two lines. A token
-from `ARCL_SERVE_TOKEN` is never printed, so it stays out of logs: human output
-says the variable's token is in use, `--plain` prints the URL alone, and the
-JSON line has no `token` field.
-
-Under `--api`, a change without an `Origin` header runs once the token
-matches. A change whose `Origin` does not name the server gets 403. A page in
-a browser cannot send the `X-Arcl-Token` header to another origin without a
-CORS preflight, and the server refuses every preflight without CORS headers.
-In the page mode, every change needs an `Origin` naming the server.
-
-`curl` retries until the server is listening and fails on an error status:
-
-```sh
-export ARCL_SERVE_TOKEN=$(openssl rand -hex 32)
-arcl serve --api --port 4321 &
-curl --fail --retry 10 --retry-delay 1 --retry-connrefused \
-  -H "X-Arcl-Token: $ARCL_SERVE_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"query": "{ ready { id title } }"}' http://127.0.0.1:4321/graphql
-```
-
-## Publishing and syncing the artifact
-
-The web app also runs as a claude.ai artifact, so a person can browse and
-triage a project from claude.ai without `arcl serve`. The artifact cannot
-reach the repository. An agent session copies the project's records into the
-artifact's database and applies the edits people queue on the page.
-
-`pnpm --filter @arclightning/web build:artifact` writes the artifact page to
-`apps/web/build-artifact/index.html`: the same views as `arcl serve`'s page,
-in one file with no external scripts. It routes on the URL's hash, such as
-`#/tasks/<id>`, sends no token and never calls `/api`. Publish it with this
-capability declaration:
-
-```json
-{
-	"db": {
-		"rules": [
-			{ "path": "", "read": "view", "write": "admin" },
-			{ "path": "queue", "read": "view", "write": "interact" }
-		]
-	},
-	"user": {}
-}
-```
-
-Everyone the artifact admits reads the records. Contributors and above queue
-edits; only editors and the owner write records. Opened outside claude.ai, or
-without the database, the page says to open it in claude.ai.
-
-`arcl web export <dir>` syncs the workspace, then writes the database's
-documents under `<dir>` with the same reads `arcl serve` runs. If the sync
-fails, it exits non-zero and writes nothing, so `meta/sync` never stamps
-records the sync did not update:
-
-| Document         | File                  | Same JSON as                                       |
-| ---------------- | --------------------- | -------------------------------------------------- |
-| `views/work`     | `views/work.json`     | `GET /api/work`                                    |
-| `views/tree`     | `views/tree.json`     | `GET /api/tree`                                    |
-| `views/tasks`    | `views/tasks.json`    | `GET /api/records?kind=task`                       |
-| `views/captures` | `views/captures.json` | `GET /api/records?kind=capture&status=captured`    |
-| `records/<id>`   | `records/<id>.json`   | `GET /api/records/<id>`, per task and open capture |
-| `sources/<id>`   | `sources/<id>.json`   | `GET /api/records/<id>/source`, per task           |
-| `meta/sync`      | `meta/sync.json`      | the commit, time and revision of the export        |
-
-`<dir>/manifest.json` lists every document in `documents`, the ones that are
-new or differ from the files of the last export into `<dir>` in `changed`,
-and the ones the last export had and this one does not in `removed`. A sync
-writes the `changed` documents in order and deletes the `removed` ones, so it
-touches only the records that changed. `changed` compares against `<dir>`,
-not the database, so after an upload that did not finish, or into a
-database `<dir>` never described, run `arcl web export --full <dir>`. It
-lists every document in `changed`.
-
-A document over 200 KiB is written as parts, `chunks/<collection>~<id>~<n>`,
-each `{"part": "..."}`, listed before a header
-`{"chunked": {"parts": n, "digest": "..."}}` at the document's own path. The
-page joins the parts and checks them against `digest`, the 64-bit FNV-1a hash
-of the joined text; parts that do not match are read as a sync in progress. A document needs at most 64 parts, about 12.5 MiB.
-`export` fails on a larger one.
-
-A change on the page writes a `queue/<id>` document instead of changing a
-record:
-
-```json
-{
-	"op": "discard_capture",
-	"target": "arcl-c-...",
-	"input": {},
-	"created_at": "2026-10-25T06:30:00.000Z",
-	"created_by": "u_...",
-	"status": "queued"
-}
-```
-
-`op` names the change: `create_task`, `update_task`, `start_task`,
-`park_task`, `unpark_task`, `hand_off_task`, `complete_task`,
-`create_capture`, `promote_capture`, `discard_capture`, `create_spec`,
-`create_plan`, `apply_plan` or `update_source`. `target` is the record ID for
-those that name one and `null` otherwise. `input` holds the options of the
-matching `arcl serve` POST endpoint. The page says the edit is queued, keeps
-showing the records as they are, and lists the queued edits above each view.
-A board move queues the same way, and its card stays put until the edit
-applies. The page refuses an edit whose entry is over 200 KiB as UTF-8 JSON
-and says to make it smaller or make it with `arcl`.
-
-**Edit file** reads the task's file from `sources/<id>` and **Save file**
-queues `update_source` with `{"source", "revision"}`: the whole file and the
-revision from that document. `apply` runs it as
-`POST /api/records/<id>/edit`, with the same checks. If the file changed
-after the export the page read, the entry fails with the `conflict` error;
-open the file again after the next sync and redo the edit. Any change to the
-task that applies first rewrites its file, whether a board move, an edit or
-another raw edit, so the raw edit then fails the same way. Saving closes the
-editor, and while any edit to the task waits for the sync, queued or
-applying, the page disables **Edit file** and says to edit the file after
-that sync.
-
-`arcl web apply <file>` reads a JSON array of queue entries, each the
-document's fields plus its `id`, from a file or `-` for standard input. It
-runs each entry whose `status` is `queued` through the same code as
-`arcl serve`'s endpoint: the same validation, sync lock and export, waiting up
-to 60 seconds for the lock. An entry with any other status, or none, is
-skipped; the page does not list it either. A file that is not a JSON array
-exits with code 3 and applies nothing. An entry that is not a valid queue
-entry, such as one with a field the page does not write, fails with an
-`invalid_request` error naming its position and `id`, and the other entries
-still run. So does an entry whose `input` is over 1 MiB as JSON, the
-endpoints' body limit. Under `--json` it prints
-`{"format_version": 1, "data": {"results": [...]}}`, one result per entry in
-order: `id`, `op`, `target` (each `null` when a malformed entry has no string
-value for it), `status` (`applied`, `failed` or `skipped`), the command's
-`data` when it applied, the CLI's `error` when it failed, and `warnings`.
-
-Anyone who can queue an edit can also change or delete another queued entry,
-so the queue is untrusted input. `apply` checks every entry as the CLI checks
-a command, and an applied edit runs as the person who runs `arcl`.
-
-To sync, the agent session that owns the artifact:
-
-1. Reads the `queue` collection. An entry whose `status` is `applying` was
-   claimed by a sync that stopped before it finished. Check whether its
-   change is in the records: if it is, delete the entry in step 5 with this
-   sync's applied ones; if it is not, set `status` back to `queued`.
-2. Sets `status` to `applying` on each `queued` entry in the database, then
-   writes those entries, with their IDs and `status` still `queued`, to a
-   file. An entry claimed this way never runs twice: `apply` skips it if a
-   later sync reads it again.
-3. Runs `arcl --json web apply <file>`, then sets `status` to `failed` and
-   `error` to the result's error on each failed entry, so the page shows
-   why. Applied entries stay `applying` for now.
-4. Runs `arcl --json web export <dir>` into the directory of the last sync,
-   writes each `changed` document from `<dir>/<path>.json` and deletes each
-   `removed` one. If the export fails because the workspace did not sync,
-   resolve that, with `arcl workspace status`, and run it again. If a write
-   fails, or `<dir>` is new, the next sync runs
-   `arcl --json web export --full <dir>`, writes every `changed` document
-   and deletes every document in `views`, `records`, `sources` and `chunks`
-   that `documents` does not list.
-5. Deletes each applied entry. This comes after the writes, so the page never
-   offers **Edit file** on a `sources/<id>` document older than the edit. If
-   a write in step 4 failed, stop before this step: the applied entries stay
-   `applying`, and step 1 of the next sync finds their changes in the
-   records.
-
-The page follows `meta/sync` and the queue. When `revision` changes, it offers
-to reload the view with the new records. It lists `applying` entries with the
-queued ones, marked as applying now. Dismissing a failed edit on the page
-deletes its entry. If the database ends the page's subscription for good, the
-page says it stopped following syncs and to reload.
+`export` syncs the workspace first and writes nothing if the sync fails.
+`--full` lists every document as changed. `apply` runs each queued entry as
+the matching `arcl serve` endpoint does. [claude.ai artifact](/guides/artifact/)
+describes the documents and the sync steps.
 
 ## Lifecycle
 
-Container records—releases, epics, and milestones—use `open`, `completed`, and
-`cancelled`. A container cannot become terminal while a descendant is
-non-terminal unless the command includes `--allow-open-children`.
+Captures move from `captured` to `promoted` or `discarded`. Specs, plans,
+phases and releases use `open`, `completed` and `cancelled`. A container
+cannot become terminal while a record below it is open unless the command
+includes `--allow-open-children`, which closes only that record.
 
-Task records use `pending`, `in_progress`, `parked`, `completed`, and
-`cancelled`. Completion and cancellation are terminal.
+Tasks use `pending`, `in_progress`, `parked`, `completed` and `cancelled`.
+Completion and cancellation are terminal.
 
 Repeating the same terminal command is safe, and switching between completed
-and cancelled is rejected.
+and cancelled is rejected. See [Lifecycle](/guides/lifecycle/).
 
 ## Outputs
 
-Human output is concise and may use ANSI colors. `--plain` emits stable unstyled
-records for shell pipelines. `--quiet` prints only the affected ID for a
-mutation. `--json` emits a top-level object with a `format_version` and a
+Human output is concise and may use ANSI colors. `--plain` emits stable
+unstyled records for shell pipelines. `--quiet` prints nothing on success.
+`--json` emits a top-level object with a `format_version` and a
 command-specific `data` object containing the action and record fields.
 
 | `format_version` | Commands                                                                                             |
@@ -1339,22 +866,18 @@ command-specific `data` object containing the action and record fields.
 Task views and context packets report `readiness` with `ready`, `blocked`, and
 `reasons`. Each reason has a `kind`: `status`, `has_children`,
 `closed_ancestor`, `closed_container`, `direct_blocker`, `inherited_blocker`,
-`cancelled_blocker`, `missing_blocker`, or `invalid_edge`. It also has a
-`message` and the `task`, `ancestor`, `blocker`, `container`, or `path` fields
-its kind names. [Automation](/guides/automation/) lists the fields per kind.
+`cancelled_blocker`, `missing_blocker`, `invalid_edge` or `open_gate`. It
+also has a `message` and the `task`, `ancestor`, `blocker`, `container`,
+`path` or `gate` fields its kind names.
+[Automation](/guides/automation/#read-readiness-reasons) lists the fields per
+kind.
 
-For example:
+Under `--json`, failures go to standard error as
+`{"format_version": 1, "error": {"code", "exit_code", "message"}}`.
 
-```sh
-arcl --json idea create "Automate this" --description "Details"
-```
+## Status codes
 
-The JSON mode writes structured failures to standard error and is intended
-for automation that needs stable field names rather than human prose.
-
-## Status Codes
-
-The CLI uses these status categories/codes:
+The CLI exits with these codes:
 
 | Code | Meaning                                                                                       |
 | ---- | --------------------------------------------------------------------------------------------- |
