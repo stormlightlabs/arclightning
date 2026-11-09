@@ -28,7 +28,7 @@ Acceptance criteria:
       `pages deploy apps/website/build --project-name=arclightning
       --branch=<branch>` on the built site through `cloudflare/wrangler-action`
       with a pinned wrangler, and only it gets the secrets
-      `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`
+      `CLOUDFLARE_PAGES_API_TOKEN` and `CLOUDFLARE_PAGES_API_ACCOUNT_ID`
 - [x] It creates the `arclightning` Pages project, production branch `main`,
       when the project does not exist, and goes on when it does
 - [x] It writes the deployment URL and the branch alias URL to the run summary

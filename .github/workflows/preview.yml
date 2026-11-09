@@ -68,8 +68,8 @@ jobs:
 
       - name: Create the Pages project if missing
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_PAGES_API_ACCOUNT_ID }}
         run: |
           if ! out=$(npx --yes "wrangler@$WRANGLER_VERSION" pages project create arclightning --production-branch=main 2>&1); then
             echo "$out"
@@ -80,8 +80,8 @@ jobs:
         id: deploy
         uses: cloudflare/wrangler-action@v4
         with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          apiToken: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_PAGES_API_ACCOUNT_ID }}
           wranglerVersion: ${{ env.WRANGLER_VERSION }}
           packageManager: npm
           command: pages deploy apps/website/build --project-name=arclightning --branch=${{ github.ref_name }}

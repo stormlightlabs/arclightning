@@ -17,7 +17,8 @@ Acceptance criteria:
 
 - [ ] The first dispatched Preview run deploys this task's branch, the first
       one to preview. It needs `.github/workflows/preview.yml` on `main` and
-      the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets
+      the `CLOUDFLARE_PAGES_API_TOKEN` and `CLOUDFLARE_PAGES_API_ACCOUNT_ID`
+      organization secrets
 - [ ] Document the `arcl` CLI, the web app, the MCP server, the GraphQL API
       with `arcl serve --api`, and the repository-native workflows
 - [ ] Replace the idea, epic and milestone commands and guides with capture,

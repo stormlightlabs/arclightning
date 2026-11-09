@@ -156,9 +156,9 @@ uses the chosen branch's copy, so the branch must contain
 `.github/workflows/preview.yml`. It builds the site and deploys it to
 Cloudflare Pages at an alias of the branch name. Cloudflare lowercases the
 alias, turns slashes into dashes and may shorten long names, so use the exact
-URLs in the run summary. It needs the
-`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets, and the
-token needs the Cloudflare Pages Edit permission. The workflow refuses `main`;
+URLs in the run summary. It reads the `CLOUDFLARE_PAGES_API_TOKEN` and
+`CLOUDFLARE_PAGES_API_ACCOUNT_ID` organization secrets, and the token needs
+the Cloudflare Pages Edit permission. The workflow refuses `main`;
 production deploys are not set up yet.
 
 The web app in `apps/web` is the local UI for the workspace's tasks, which
