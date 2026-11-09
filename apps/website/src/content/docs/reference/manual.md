@@ -3,12 +3,13 @@ title: Manual
 description: Every arcl command and option, with output formats, exit codes and the rules each command enforces.
 ---
 
-`arcl` operates on the enclosing non-bare Git worktree. Run `arcl --help` or
-`arcl <command> --help` for the generated command help.
+Every `arcl` command and its options. Run `arcl --help` or
+`arcl <command> --help` for the generated help. [Output formats and exit
+codes](/reference/output/) covers `--json`, `--plain` and the exit codes.
 
 ## Options
 
-These options can appear before or after a subcommand & are global:
+These options are global, and go before or after the subcommand:
 
 | Option                        | Purpose                                                                          |
 | ----------------------------- | -------------------------------------------------------------------------------- |
@@ -65,8 +66,13 @@ arcl init --workspace
 ```
 
 The command creates `.arcl/config.toml`, `.arcl/arcl.db`, and a scoped
-`.arcl/.gitignore`. It rejects directories outside Git worktrees and bare
-repositories. Re-running initialization preserves existing project state.
+`.arcl/.gitignore`. Inside a non-bare Git worktree it uses the worktree root;
+elsewhere it uses the current directory. It refuses a bare repository with
+exit code `3`. Every other command finds the project from any directory below
+its root.
+
+Running `init` again keeps the existing configuration and records.
+`--workspace` on an existing project turns the workspace on.
 
 A fresh clone or worktree has the committed config and workspace but no
 database. Other commands fail there with exit code `3` and say to run
@@ -204,8 +210,29 @@ Workspace commands require the workspace to be enabled with
 the workspace changed differently, stops the command with status code `4`
 instead of overwriting either version.
 
-See [Share the project workspace](/guides/workspace/) for the Git workflow and
-workspace layout.
+`status` lists each file that changed since the last sync and which side
+changed it, files both sides changed differently, files Git reports as
+unmerged, and entries outside the workspace layout. It warns about lines that
+look like conflict markers, which sync accepts as content. In a Git worktree
+it also shows the branch, a detached HEAD or a branch with no commits yet, and
+files Git reports as changed that match the last sync, such as files sync
+wrote that you have not staged.
+
+`export` writes the whole database, leaves a file alone when its bytes
+already match, and stops instead of overwriting a file that changed since the
+last export. `import` validates the whole workspace, its IDs, references, task
+ancestry, parent cycles and relationship graph, and replaces the database
+only after everything passes.
+
+`resolve --keep workspace` imports the named files over the database's
+version, and `--keep database` writes the database's version over the files.
+It then syncs every other change. It stops without writing if another file
+still diverges, a named file has nothing to resolve, another record file was
+removed from either side, or Git reports a workspace file as unmerged.
+
+[The workspace](/explanation/workspace/) explains sync, [Recover the
+workspace](/how-to/recover-the-workspace/) fixes a stopped sync, and
+[Workspace file format](/reference/workspace-format/) lists the files.
 
 <div id="idea-commands"></div>
 
@@ -246,7 +273,8 @@ the capture. A spec takes `--acceptance-criteria` or
 Promotion creates the record, links it and marks the capture `promoted` in
 one transaction. Repeating it with the same target returns the existing
 record; another target, or a discarded capture, fails with exit code `3`. A
-discarded capture cannot be updated. See [Captures](/guides/captures/).
+discarded capture cannot be updated. See [Capture and triage
+work](/how-to/capture-and-triage/).
 
 <div id="epics"></div>
 
@@ -263,7 +291,7 @@ discarded capture cannot be updated. See [Captures](/guides/captures/).
 
 `create` and `update` take `--acceptance-criteria <MARKDOWN>` or
 `--acceptance-criteria-file <PATH|->`, and `update` takes `--title`. See
-[Specs](/guides/specs/).
+[Write a spec](/how-to/write-a-spec/).
 
 ## Plan commands
 
@@ -294,7 +322,8 @@ task's path and the blocker's, then the change. The modes differ:
   lowercase, as in `--plain`.
 
 A plan file that does not parse, or names an unknown or ambiguous dependency,
-fails with exit code `3`. [Plans](/guides/plans/) describes the file format.
+fails with exit code `3`. [Plan file format](/reference/plan-file/) describes the
+file.
 
 <div id="milestones"></div>
 
@@ -310,7 +339,7 @@ fails with exit code `3`. [Plans](/guides/plans/) describes the file format.
 | `arcl plan phase cancel <id>`                | Cancel a phase.                      |
 
 `--position <N>` orders phases in their plan; `create` defaults it to `0`.
-See [Phases](/guides/phases/).
+See [Plan phases from a plan file](/how-to/plan-from-a-file/).
 
 <div id="task-management"></div>
 
@@ -415,7 +444,7 @@ task ID, then a `subtask<TAB><id>` line for each completed subtask and an
 `add` takes several blockers, by repeating the flag or separating IDs with
 commas, and adds none if one is refused. It refuses an edge that closes a
 cycle, joins a task to its own ancestor or descendant, or touches an archived
-task, with exit code `3`. [Dependencies and ready work](/reference/deps/)
+task, with exit code `3`. [Dependencies and readiness rules](/reference/deps/)
 explains how blockers affect readiness.
 
 ## Compaction
@@ -563,7 +592,7 @@ and when it was created. Plain output prints the gate's `gate` line, then
 
 `--kind` is `capture`, `spec`, `plan`, `phase`, `task`, `note` or `release`,
 and a short `--record-id` matches only records of that kind. Notes have no
-status. See [Notes](/guides/notes/).
+status. See [Keep research notes](/how-to/keep-notes/).
 
 ## Release commands
 
@@ -580,7 +609,8 @@ status. See [Notes](/guides/notes/).
 | `arcl release member list <release-id>`                                  | List the explicit members.      |
 
 `--kind` is `spec`, `plan`, `task` or `note`. Membership never includes a
-record's descendants. See [Releases and roadmap](/guides/releases/).
+record's descendants. See [Cut a release and render the
+roadmap](/how-to/cut-a-release/).
 
 ## Inspection
 
@@ -617,6 +647,12 @@ message, and print no report. These include a file removed from one side, for
 example by a branch switch (exit `3`), and files the database and the workspace
 changed differently (exit `4`). Other commands that only read records warn and
 still run.
+
+`check` reports duplicate sibling positions as warnings, and each blocker
+cycle or edge to a task's own ancestor or descendant as an error, as
+[Dependencies and readiness
+rules](/reference/deps/#how-check-reports-bad-edges) shows. It exits `0` when
+it finds no errors.
 
 `list` accepts `--kind`, `--status`, `--priority`, `--release`, `--spec`,
 `--plan`, `--phase`, `--parent`, `--assignee` and `--all`. Notes have no
@@ -679,6 +715,15 @@ such as `7/12`, counting subtasks and archived tasks and leaving out cancelled
 tasks. A task with unfinished direct blockers ends with `blocked by` and their
 short IDs.
 
+| Mark | ASCII | Status                                                                                    |
+| ---- | ----- | ----------------------------------------------------------------------------------------- |
+| `✓`  | `+`   | completed; capture promoted                                                               |
+| `✗`  | `x`   | cancelled; capture discarded                                                              |
+| `◐`  | `~`   | task in progress; open spec, plan or phase with a started or finished task                |
+| `‖`  | `=`   | task parked                                                                               |
+| `●`  | `*`   | pending task that is ready                                                                |
+| `○`  | `o`   | pending task that is not ready or has subtasks; other open record; captured capture; note |
+
 Each run of consecutive completed phases folds into one line. A completed phase
 with an unfinished task does not fold, so that task still shows. A run of one
 keeps its title, as in `✓ Milestone 6: Shared interface system  done · 1 task`.
@@ -735,8 +780,8 @@ Colour appears only when stdout is a terminal and `NO_COLOR` is unset.
 `FORCE_COLOR` or `CLICOLOR_FORCE` turns it on, and `--color` overrides every
 check.
 
-See [Inspecting Work](/guides/inspect-work/) for the query workflow and context
-contents.
+See [Find work and explain readiness](/how-to/find-work/) for the query
+workflow.
 
 ### Roadmap
 
@@ -828,7 +873,7 @@ or are `null` when there are no such tasks. `--quiet` prints nothing, and with
 
 `arcl query` runs a read-only GraphQL query against the project's records
 and prints the response as JSON. It needs no server. A response with errors
-exits `3`. [GraphQL and REST API](/guides/api/) lists the root fields, the
+exits `3`. [GraphQL schema](/reference/graphql/) lists the root fields, the
 error codes and the query limits.
 
 <div id="api-only"></div>
@@ -844,9 +889,9 @@ error codes and the query limits.
 load. Under `--api`, the token comes from `ARCL_SERVE_TOKEN` when it is set;
 otherwise each run makes one. `--json` prints one startup line with the URL,
 port and token. Outside a project it exits `3` before it binds. See
-[Web app](/guides/web-app/) for the views,
-[GraphQL and REST API](/guides/api/) for the server and
-[REST endpoints](/guides/rest/) for the endpoints.
+[Web app views and shortcuts](/reference/web-app/) for the views and
+[REST endpoints](/reference/rest/) for the endpoints, the token and the
+server's limits.
 
 <div id="publishing-and-syncing-the-artifact"></div>
 
@@ -859,8 +904,9 @@ port and token. Outside a project it exits `3` before it binds. See
 
 `export` syncs the workspace first and writes nothing if the sync fails.
 `--full` lists every document as changed. `apply` runs each queued entry as
-the matching `arcl serve` endpoint does. [claude.ai artifact](/guides/artifact/)
-describes the documents and the sync steps.
+the matching `arcl serve` endpoint does. [Artifact documents and
+queue](/reference/artifact/) describes the documents, and [Publish the claude.ai
+artifact](/how-to/publish-the-artifact/) the sync steps.
 
 ## Lifecycle
 
@@ -873,41 +919,15 @@ Tasks use `pending`, `in_progress`, `parked`, `completed` and `cancelled`.
 Completion and cancellation are terminal.
 
 Repeating the same terminal command is safe, and switching between completed
-and cancelled is rejected. See [Lifecycle](/guides/lifecycle/).
+and cancelled is rejected. See [Readiness and the
+lifecycle](/explanation/readiness/).
 
-## Outputs
+<div id="outputs"></div>
+<div id="status-codes"></div>
 
-Human output is concise and may use ANSI colors. `--plain` emits stable
-unstyled records for shell pipelines. `--quiet` prints nothing on success.
-`--json` emits a top-level object with a `format_version` and a
-command-specific `data` object containing the action and record fields.
+## Outputs and exit codes
 
-| `format_version` | Commands                                                                                             |
-| ---------------- | ---------------------------------------------------------------------------------------------------- |
-| `2`              | `show <task-id>`, `task show`, `explain`, `task explain`, `context`, `task context`, `task complete` |
-| `1`              | Every other command, failures, and sync warnings                                                     |
-
-Task views and context packets report `readiness` with `ready`, `blocked`, and
-`reasons`. Each reason has a `kind`: `status`, `has_children`,
-`closed_ancestor`, `closed_container`, `direct_blocker`, `inherited_blocker`,
-`cancelled_blocker`, `missing_blocker`, `invalid_edge` or `open_gate`. It
-also has a `message` and the `task`, `ancestor`, `blocker`, `container`,
-`path` or `gate` fields its kind names.
-[Automation](/guides/automation/#read-readiness-reasons) lists the fields per
-kind.
-
-Under `--json`, failures go to standard error as
-`{"format_version": 1, "error": {"code", "exit_code", "message"}}`.
-
-## Status codes
-
-The CLI exits with these codes:
-
-| Code | Meaning                                                                                       |
-| ---- | --------------------------------------------------------------------------------------------- |
-| `0`  | Success.                                                                                      |
-| `1`  | Runtime, filesystem, Git operation, or SQLite failure.                                        |
-| `2`  | Command-line parsing failure reported by `clap`.                                              |
-| `3`  | Invalid project, record, input, or lifecycle transition.                                      |
-| `4`  | Workspace or concurrent-modification conflict, skill drift, or an unconfirmed `setup` change. |
-| `5`  | Requested record was not found.                                                               |
+[Output formats and exit codes](/reference/output/) lists the output modes,
+the JSON envelope and its format versions, readiness fields, warnings,
+failure objects and every exit code. [Dependencies and readiness
+rules](/reference/deps/#readiness-reasons) lists each readiness reason.

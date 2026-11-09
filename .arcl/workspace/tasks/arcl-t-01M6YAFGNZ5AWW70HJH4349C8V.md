@@ -4,8 +4,8 @@ phase = "arcl-ph-01M5NE5P7R5JW95BAQ5J7EG6D4"
 title = "Deploy the site to arcl.stormlightlabs.org on Cloudflare Pages"
 status = "pending"
 priority = "normal"
-position = 3
-blocked-by = ["arcl-t-01M6YAFBCE29665W3ZHAVA5F18"]
+position = 4
+blocked-by = ["arcl-t-01M6YAFBCE29665W3ZHAVA5F18", "arcl-t-01M70NGA93755B894G11J8FBN7"]
 +++
 
 Publish the static site to arcl.stormlightlabs.org on Cloudflare Pages from

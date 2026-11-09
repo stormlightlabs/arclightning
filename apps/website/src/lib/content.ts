@@ -1,8 +1,8 @@
 import type { Component } from 'svelte';
 import type { DocHeading } from './table-of-contents';
 
-/** A documentation navigation group. */
-export type DocSection = 'Get started' | 'Guides' | 'Reference';
+/** A documentation navigation group, one per Diátaxis type. */
+export type DocSection = 'Tutorials' | 'How-to guides' | 'Explanation' | 'Reference';
 
 /** Front matter generated for a documentation page. */
 export type DocMetadata = {
@@ -29,48 +29,87 @@ const sources = import.meta.glob<string>('/src/content/docs/**/*.md', {
 });
 
 const navigationOrder = [
-	'overview',
-	'quick-start',
-	'guides/captures',
-	'guides/specs',
-	'guides/plans',
-	'guides/phases',
-	'guides/tasks',
-	'guides/notes',
-	'guides/lifecycle',
-	'guides/inspect-work',
-	'guides/releases',
-	'guides/workspace',
-	'guides/compaction',
-	'guides/agents',
-	'guides/automation',
-	'guides/mcp',
-	'guides/web-app',
-	'guides/api',
-	'guides/rest',
-	'guides/artifact',
-	'guides/local-development',
+	'tutorials/quick-start',
+	'tutorials/agent-feature',
+	'how-to/install',
+	'how-to/capture-and-triage',
+	'how-to/write-a-spec',
+	'how-to/plan-from-a-file',
+	'how-to/work-a-task',
+	'how-to/hand-off-and-resume',
+	'how-to/keep-notes',
+	'how-to/find-work',
+	'how-to/cut-a-release',
+	'how-to/compact-old-work',
+	'how-to/share-the-workspace',
+	'how-to/recover-the-workspace',
+	'how-to/set-up-an-agent',
+	'how-to/connect-mcp',
+	'how-to/script-arcl',
+	'how-to/query-graphql',
+	'how-to/serve-the-api',
+	'how-to/use-the-web-app',
+	'how-to/publish-the-artifact',
+	'how-to/develop-locally',
+	'explanation/overview',
+	'explanation/record-model',
+	'explanation/readiness',
+	'explanation/workspace',
+	'explanation/claims-and-handoffs',
+	'explanation/compaction',
 	'reference/manual',
-	'reference/deps'
+	'reference/deps',
+	'reference/output',
+	'reference/plan-file',
+	'reference/workspace-format',
+	'reference/mcp',
+	'reference/graphql',
+	'reference/rest',
+	'reference/web-app',
+	'reference/artifact'
 ] as const;
 
 /**
  * Retired page slugs and the slugs of the pages that replace them. The build
- * prerenders each retired URL as a redirect.
+ * prerenders each retired URL as a redirect. Each target is a current page, so
+ * no redirect leads to another.
  */
 export const redirects: Readonly<Record<string, string>> = {
-	'guides/ideas': 'guides/captures',
-	'guides/epics': 'guides/specs',
-	'guides/milestones': 'guides/phases'
+	overview: 'explanation/overview',
+	'quick-start': 'tutorials/quick-start',
+	'guides/agents': 'how-to/set-up-an-agent',
+	'guides/api': 'how-to/query-graphql',
+	'guides/artifact': 'how-to/publish-the-artifact',
+	'guides/automation': 'how-to/script-arcl',
+	'guides/captures': 'how-to/capture-and-triage',
+	'guides/compaction': 'how-to/compact-old-work',
+	'guides/epics': 'how-to/write-a-spec',
+	'guides/ideas': 'how-to/capture-and-triage',
+	'guides/inspect-work': 'how-to/find-work',
+	'guides/lifecycle': 'explanation/readiness',
+	'guides/local-development': 'how-to/develop-locally',
+	'guides/mcp': 'how-to/connect-mcp',
+	'guides/milestones': 'how-to/plan-from-a-file',
+	'guides/notes': 'how-to/keep-notes',
+	'guides/phases': 'how-to/plan-from-a-file',
+	'guides/plans': 'how-to/plan-from-a-file',
+	'guides/releases': 'how-to/cut-a-release',
+	'guides/rest': 'reference/rest',
+	'guides/specs': 'how-to/write-a-spec',
+	'guides/tasks': 'how-to/work-a-task',
+	'guides/web-app': 'how-to/use-the-web-app',
+	'guides/workspace': 'how-to/share-the-workspace'
 };
 
 /** Documentation sections in display order. */
-export const docSections: DocSection[] = ['Get started', 'Guides', 'Reference'];
+export const docSections: DocSection[] = ['Tutorials', 'How-to guides', 'Explanation', 'Reference'];
 
+/** The section a page belongs to, from the first part of its slug. */
 function sectionFor(slug: string): DocSection {
-	if (slug.startsWith('guides/')) return 'Guides';
+	if (slug.startsWith('tutorials/')) return 'Tutorials';
+	if (slug.startsWith('how-to/')) return 'How-to guides';
 	if (slug.startsWith('reference/')) return 'Reference';
-	return 'Get started';
+	return 'Explanation';
 }
 
 function sourceToSlug(source: string): string {

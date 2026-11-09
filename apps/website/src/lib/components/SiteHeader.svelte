@@ -7,8 +7,9 @@
 
 	let { docs, currentSlug = '' }: { docs: Doc[]; currentSlug?: string } = $props();
 	const links = [
-		{ label: 'Start', href: '/quick-start/', slug: 'quick-start' },
-		{ label: 'Guides', href: '/guides/tasks/', slug: 'guides' },
+		{ label: 'Tutorials', href: '/tutorials/quick-start/', slug: 'tutorials' },
+		{ label: 'How-to', href: '/how-to/work-a-task/', slug: 'how-to' },
+		{ label: 'Explanation', href: '/explanation/overview/', slug: 'explanation' },
 		{ label: 'Reference', href: '/reference/manual/', slug: 'reference' }
 	];
 	const isCurrent = (slug: string): boolean => currentSlug === slug || currentSlug.startsWith(`${slug}/`);

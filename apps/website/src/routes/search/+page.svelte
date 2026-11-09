@@ -10,7 +10,7 @@
 			Search uses the local documentation index in the production build. Browse the documentation directly when
 			JavaScript is unavailable.
 		</p>
-		<a class="button-link" href="/quick-start/">Start with the quick start</a>
+		<a class="button-link" href="/tutorials/quick-start/">Start with the quick start</a>
 	</div>
 </main>
 
