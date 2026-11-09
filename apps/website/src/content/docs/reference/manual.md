@@ -58,7 +58,7 @@ in files, evidence, links and scripts that outlive the command.
 
 ### `arcl init`
 
-Initialize or rediscover the project in the enclosing Git worktree.
+Initialize or rediscover the project in the current Git worktree or directory.
 
 ```sh
 arcl init
@@ -910,17 +910,30 @@ artifact](/how-to/publish-the-artifact/) the sync steps.
 
 ## Lifecycle
 
-Captures move from `captured` to `promoted` or `discarded`. Specs, plans,
-phases and releases use `open`, `completed` and `cancelled`. A container
-cannot become terminal while a record below it is open unless the command
-includes `--allow-open-children`, which closes only that record.
+Every status change is an explicit command.
 
-Tasks use `pending`, `in_progress`, `parked`, `completed` and `cancelled`.
-Completion and cancellation are terminal.
+| Kind                       | Statuses                                                     |
+| -------------------------- | ------------------------------------------------------------ |
+| Capture                    | `captured`, then `promoted` or `discarded`                   |
+| Spec, plan, phase, release | `open`, then `completed` or `cancelled`                      |
+| Task                       | `pending`, `in_progress`, `parked`, `completed`, `cancelled` |
+| Note                       | none                                                         |
 
-Repeating the same terminal command is safe, and switching between completed
-and cancelled is rejected. See [Readiness and the
-lifecycle](/explanation/readiness/).
+| Task command | From                       | To            |
+| ------------ | -------------------------- | ------------- |
+| `start`      | `pending`                  | `in_progress` |
+| `park`       | `pending`, `in_progress`   | `parked`      |
+| `handoff`    | `in_progress`              | `parked`      |
+| `unpark`     | `parked`                   | `pending`     |
+| `complete`   | `pending`, `in_progress`   | `completed`   |
+| `cancel`     | any status but a final one | `cancelled`   |
+
+Completed and cancelled are final for every kind. Repeating the same final
+command changes nothing, and switching between completed and cancelled is
+refused. A container cannot close while a record below it is open unless the
+command includes `--allow-open-children`, which closes only that record.
+[Readiness and the lifecycle](/explanation/readiness/) explains how these
+statuses decide what is ready.
 
 <div id="outputs"></div>
 <div id="status-codes"></div>

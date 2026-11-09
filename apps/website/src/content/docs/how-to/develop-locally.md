@@ -7,6 +7,8 @@ The repository holds the Rust crates, the web app in `apps/web` and this site
 in `apps/website`, so a command and its documentation change in one pull
 request.
 
+<div id="build-the-cli"></div>
+
 ## Build and run the CLI
 
 From the repository root:
@@ -46,6 +48,8 @@ just check
 the site build. [`apps/web/README.md`](https://github.com/stormlightlabs/arclightning/blob/main/apps/web/README.md)
 covers the web app's browser tests.
 
+<div id="run-the-docs-site"></div>
+
 ## Preview the docs site
 
 ```sh
@@ -63,6 +67,8 @@ pnpm --filter @arclightning/website preview
 The build prerenders every page and redirect, and fails on a broken internal
 link or anchor. `pnpm --filter @arclightning/website test:e2e` builds the site
 and runs the Playwright tests against it.
+
+<div id="edit-documentation"></div>
 
 ## Edit the documentation
 

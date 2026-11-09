@@ -6,6 +6,8 @@ description: Install arcl-mcp and add it to Claude Code or another MCP client, s
 `arcl-mcp` gives an agent each command's JSON envelope as structured content,
 with an input and an output schema per tool and no terminal text to parse.
 
+<div id="install-and-connect"></div>
+
 ## Install arcl-mcp
 
 On macOS or Linux:
@@ -43,6 +45,12 @@ tells the agent to use the tools when the server is connected, and names the
 tool for each step of the loop. The session hook still runs `arcl prime`, and
 the server's instructions tell the client to call the `prime` tool at the
 start of a session.
+
+<div id="how-tools-run"></div>
+<div id="tools"></div>
+<div id="prime"></div>
+<div id="pages-and-filters"></div>
+<div id="starting-tasks"></div>
 
 ## Check that it works
 

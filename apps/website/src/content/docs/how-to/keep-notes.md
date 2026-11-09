@@ -20,6 +20,8 @@ Created note `arcl-n-01M70MHBGM2E8VK7KEXTMMW4XR`: Keyboard research
 `--body-file <PATH|->` reads the body from a file or standard input. To turn a
 capture into a note, run `arcl capture promote <id> note`.
 
+<div id="link-a-note"></div>
+
 ## Link it to records
 
 Each link names the record's kind and ID:

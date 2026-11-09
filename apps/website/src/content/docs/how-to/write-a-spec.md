@@ -3,6 +3,8 @@ title: Write a spec
 description: Create a spec with a Markdown body and acceptance criteria, edit it from the CLI or its workspace file, and close it when the work is done.
 ---
 
+<div id="create-an-epic"></div>
+
 ## Create a spec
 
 Promote a capture, as [Capture and triage
@@ -21,6 +23,9 @@ Created spec `arcl-s-01M6Z53YH37HKN8ZPXWCCY3J0G`: Offline mode
 
 Both fields take Markdown. For longer text, `--body-file <PATH|->` and
 `--acceptance-criteria-file <PATH|->` read from a file or standard input.
+
+<div id="read-and-update-a-spec"></div>
+<div id="update-an-epic"></div>
 
 ## Update a spec
 
@@ -54,6 +59,9 @@ format](/reference/workspace-format/) lists the fields.
 `arcl context <task-id>` shows the body of the spec above the task.
 `arcl --json context <task-id>` adds the spec's `acceptance_criteria`, so an
 agent reads the goal with the task.
+
+<div id="finish-or-cancel-an-epic"></div>
+<div id="write-the-plan-next"></div>
 
 ## Close a spec
 

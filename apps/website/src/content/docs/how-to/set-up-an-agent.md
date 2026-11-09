@@ -3,6 +3,8 @@ title: Set up an agent
 description: Set up Claude Code, Codex, Pi or another coding agent with arcl setup, install or check the skill, and prime each session with the open work.
 ---
 
+<div id="set-up-an-agent"></div>
+
 ## Run arcl setup
 
 Name the agent:
@@ -66,12 +68,16 @@ Codex runs project hooks only in a trusted project, after you trust the hook
 in `/hooks`. Pi loads `.pi/extensions/` and `.agents/skills/` only after you
 trust the project. `setup` prints these as notes.
 
+<div id="prime-each-session"></div>
+
 ## Prime an agent without a hook
 
 `other` writes no hook. Have the agent run `arcl prime` when a session starts.
 It prints the working loop, the in-progress and parked tasks with the first
 line of each handoff, and the first ready tasks. The output stays within 40
-lines and 4 KiB. The MCP `prime` tool returns the same text.
+lines and 4 KiB. The MCP `prime` tool returns the same content as JSON,
+which keeps more of each title and handoff; [MCP tools](/reference/mcp/#prime)
+lists its limits.
 
 ## Write the hook by hand
 
@@ -120,6 +126,8 @@ The `command -v` test skips the hook for a teammate without `arcl`. In a
 clone with no database yet, `arcl prime` prints one line saying to run
 `arcl init` and exits `0`.
 
+<div id="the-skill"></div>
+
 ## Install or check the skill alone
 
 `arcl skill install` writes the skill built into `arcl`, the same files
@@ -143,6 +151,9 @@ npx skills add stormlightlabs/arclightning --skill arclightning
 
 `--skill arclightning` picks it out of the other skills the repository keeps
 for its own development.
+
+<div id="claim-work"></div>
+<div id="leave-a-trail"></div>
 
 ## Name each agent
 

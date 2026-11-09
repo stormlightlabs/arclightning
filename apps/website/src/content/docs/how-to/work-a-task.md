@@ -34,6 +34,8 @@ Priorities are `critical`, `high`, `normal` (the default) and `low`.
 To create many tasks at once, with phases and blockers, [write a plan
 file](/how-to/plan-from-a-file/).
 
+<div id="update-and-move-tasks"></div>
+
 ## Move or change a task
 
 ```sh
@@ -59,6 +61,8 @@ arcl dependency remove 8GQ6 --blocked-by 7TR6
 Only a completed blocker releases the task. [Dependencies and readiness
 rules](/reference/deps/) lists the edges arcl refuses.
 
+<div id="move-work-through-its-lifecycle"></div>
+
 ## Start and claim it
 
 ```sh
@@ -78,6 +82,8 @@ arcl next --start --claim
 `start` refuses a task that is not ready and lists the reasons. Having
 subtasks is the one reason it ignores. `--force` starts the task anyway, but
 does not override a claim.
+
+<div id="leave-notes"></div>
 
 ## Record notes as you work
 
@@ -124,6 +130,8 @@ A pull request closed without merging, or a failed run, is reported as
 `failed` and stays open; remove it with `arcl gate remove <gate-id>` or add
 another.
 
+<div id="record-completion"></div>
+
 ## Complete it
 
 ```sh
@@ -140,6 +148,8 @@ The evidence is Markdown; `--evidence-file -` reads standard input. arcl
 stores it and does not run commands, open links or judge whether it proves
 the work. The output names each task the completion made ready. Completing
 also releases the claim.
+
+<div id="close-parent-tasks"></div>
 
 ## Complete a task with subtasks
 
@@ -166,6 +176,8 @@ blocker outside the subtree.
 
 To close the parent alone and leave its subtasks open, pass
 `--allow-open-children`. The two flags cannot be combined.
+
+<div id="handoff"></div>
 
 ## Park or cancel it
 

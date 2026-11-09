@@ -5,6 +5,8 @@ description: List and filter records, draw the planning tree, find ready tasks, 
 
 These commands read records and change nothing.
 
+<div id="show-and-list-records"></div>
+
 ## List and show records
 
 ```sh
@@ -23,6 +25,8 @@ task	35WW	[pending]	Move the selection with j and k
 `--plan`, `--phase`, `--parent`, `--assignee` and `--all`. A spec, plan or
 phase filter matches that record and the work below it. Notes have no status,
 so `--status` leaves them out. `show` takes an ID of any kind.
+
+<div id="read-the-hierarchy"></div>
 
 ## Draw the tree
 
@@ -73,6 +77,8 @@ position and ID. `next` prints the first of them. Both take `--priority`,
 `--spec`, `--plan`, `--phase` and `--parent`. `next --start` starts the task
 it finds.
 
+<div id="explain-readiness"></div>
+
 ## Ask why a task is not ready
 
 ```sh
@@ -96,6 +102,8 @@ complete, and a date gate holds the task. [Dependencies and readiness
 rules](/reference/deps/#readiness-reasons) lists each reason and how to clear
 it.
 
+<div id="gather-task-context"></div>
+
 ## Gather a task's context
 
 Read the context before starting or resuming a task:
@@ -111,6 +119,8 @@ task's evidence and the evidence of completed blockers. It lists the 10 most
 recent task notes and every gate. `--json` adds the spec's acceptance
 criteria. `--all` includes archived tasks among the blockers, dependents and
 earlier evidence.
+
+<div id="check-graph-integrity"></div>
 
 ## Check the graph
 

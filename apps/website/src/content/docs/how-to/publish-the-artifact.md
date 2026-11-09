@@ -9,6 +9,8 @@ records into the artifact's database, and applies the edits people queue on
 the page. [Artifact documents and queue](/reference/artifact/) describes what
 it reads and writes.
 
+<div id="build-and-publish-the-page"></div>
+
 ## Build the page
 
 From a checkout of Arc Lightning:
@@ -39,6 +41,8 @@ Publish the page as a claude.ai artifact with this capability declaration:
 Everyone the artifact admits reads the records. Contributors and above queue
 edits. Only editors and the owner write records.
 
+<div id="export-records"></div>
+
 ## Load the records
 
 Export the records into a directory and write every document to the
@@ -50,6 +54,9 @@ arcl --json web export --full artifact-sync
 
 Write each document listed in `artifact-sync/manifest.json` under `changed`,
 from `artifact-sync/<path>.json`. Keep the directory for the next sync.
+
+<div id="queued-edits"></div>
+<div id="apply-queued-edits"></div>
 
 ## Sync the artifact
 

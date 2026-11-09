@@ -7,18 +7,17 @@ In this tutorial you install `arcl`, start a project, and take one idea from a
 capture to a completed task. It takes about ten minutes. You need a terminal
 and Git.
 
+<div id="install"></div>
+<div id="build-from-source"></div>
+
 ## Install arcl
 
-On macOS or Linux, run the installer:
+This tutorial uses commands that are on `main` and not in the latest release,
+v0.3.0. Install `main` with Cargo, which needs a [Rust
+toolchain](https://rustup.rs):
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/stormlightlabs/arclightning/releases/latest/download/arcl-cli-installer.sh | sh
-```
-
-On Windows, run this in PowerShell:
-
-```powershell
-powershell -ExecutionPolicy Bypass -c "irm https://github.com/stormlightlabs/arclightning/releases/latest/download/arcl-cli-installer.ps1 | iex"
+cargo install --git https://github.com/stormlightlabs/arclightning arcl-cli
 ```
 
 Check that it runs:
@@ -31,8 +30,10 @@ arcl --version
 arcl 0.3.0
 ```
 
-[Install arcl](/how-to/install/) covers Homebrew, cargo-binstall, pinned
-versions and building from source.
+[Install arcl](/how-to/install/#install-from-main) says why the version reads
+0.3.0, and covers release binaries, Homebrew and building with the web app.
+
+<div id="initialize-a-project"></div>
 
 ## Start a project
 
@@ -65,6 +66,8 @@ Created capture `arcl-c-01M70M85PHVYXC5W3WPQAFQM3S`: Add keyboard shortcuts
 ```
 
 Your ID differs from the one shown here. Every record gets its own.
+
+<div id="promote-it-to-a-spec"></div>
 
 ## Turn it into a spec
 
@@ -187,10 +190,14 @@ git commit -m "Plan keyboard shortcuts"
 Anyone who clones the repository and runs `arcl init` gets the same spec,
 plan and tasks.
 
+<div id="choose-an-output-mode"></div>
+<div id="next-steps"></div>
+
 ## Where to go next
 
 - [Plan and finish a feature with an agent](/tutorials/agent-feature/) runs a
   longer plan with a coding agent, including a handoff between sessions.
 - [The record model](/explanation/record-model/) explains captures, specs,
   plans, phases and tasks.
-- The [manual](/reference/manual/) lists every command.
+- The [manual](/reference/manual/) lists every command, and [Output formats
+  and exit codes](/reference/output/) covers `--json`, `--plain` and `--quiet`.

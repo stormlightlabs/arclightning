@@ -3,9 +3,15 @@ title: Use the web app
 description: Start arcl serve, triage the inbox, move tasks on the board, hand off and complete work, and edit a task's file in the browser.
 ---
 
+<div id="planning"></div>
+<div id="command-menu-and-shortcuts"></div>
+<div id="theme-and-layout"></div>
+
 The web app runs the same operations as the CLI, with the same validation, so
 you can use both side by side. [Web app views and
 shortcuts](/reference/web-app/) describes every view and key.
+
+<div id="builds-without-the-web-app"></div>
 
 ## Start the server
 
@@ -33,6 +39,8 @@ The web app reads the database directly and does not sync the workspace
 first. After editing workspace files or pulling, run any `arcl` command, such
 as `arcl workspace sync`, and reload the page.
 
+<div id="inbox"></div>
+
 ## Triage the inbox
 
 Press `g` then `i` to open the Inbox. It lists the open captures, oldest
@@ -47,6 +55,8 @@ first. For each one, pick an action:
 A promotion takes no blockers. The task form names each `after:REF` in the
 title so you can add it with `arcl dependency add`.
 
+<div id="work"></div>
+
 ## Work a task on the board
 
 Press `g` then `w` for the Work view, and `v` to switch from the list to the
@@ -56,6 +66,8 @@ for optional evidence first. Each card's **Move** button, or `m` on the selected
 card, offers the same moves from the keyboard.
 
 The board has no cancel action. Cancel a task with `arcl task cancel`.
+
+<div id="task"></div>
 
 ## Hand off or complete from the Task view
 
@@ -80,6 +92,8 @@ the front matter or the body, then **Save file**. The file passes the same
 checks as `arcl workspace import`. It cannot change the status, handoff or
 evidence; use the buttons for those. When the file changed since you opened
 it, **Reload the file** loads the new version.
+
+<div id="quick-capture"></div>
 
 ## Capture from anywhere
 

@@ -121,6 +121,8 @@ or another change, the edit fails with `conflict`, status 409. A refused edit
 changes nothing. A saved edit reaches the workspace file through the sync
 after the change.
 
+<div id="bodies-errors-and-locking"></div>
+
 ## Errors
 
 A failure returns the CLI's error envelope with a status from the exit code:

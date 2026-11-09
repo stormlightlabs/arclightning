@@ -8,10 +8,13 @@ developers and coding agents. One project holds captures, specs, plans,
 tasks, notes and releases. arcl works out which tasks are ready, and keeps the
 handoffs and evidence the next session needs to pick up the work.
 
+<div id="where-records-live"></div>
+
 ## Records live in the repository
 
-`arcl init` creates `.arcl/` at the root of the enclosing Git worktree. Every
-command finds that root, so `arcl` works from any directory below it.
+`arcl init` creates `.arcl/` at the root of the Git worktree it runs in, or
+in the current directory outside Git. Every command finds that root, so
+`arcl` works from any directory below it.
 
 ```text
 .arcl/
@@ -27,6 +30,8 @@ the code. Branches, pull requests, merges and review apply to plans and tasks
 as they do to source files. [The workspace](/explanation/workspace/) explains
 how the two copies stay in step.
 
+<div id="interfaces"></div>
+
 ## One set of operations, several interfaces
 
 Every interface runs the same Rust operations, with the same validation and
@@ -41,6 +46,9 @@ as one started from the CLI.
 | `arcl query`       | Scripts that read records with GraphQL, with no server.   |
 | `arcl serve --api` | Local tools that call the REST endpoints and `/graphql`.  |
 | claude.ai artifact | People who browse and triage from claude.ai.              |
+
+<div id="the-project-model"></div>
+<div id="a-typical-flow"></div>
 
 ## How work moves
 

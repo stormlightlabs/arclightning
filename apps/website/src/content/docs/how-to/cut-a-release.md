@@ -19,6 +19,8 @@ arcl release show G9R7
 arcl release update G9R7 --title "v0.1.0-beta" --body-file notes.md
 ```
 
+<div id="add-members"></div>
+
 ## Add what ships in it
 
 ```sh
@@ -38,6 +40,8 @@ releases.
 Membership is explicit. `member list` and `arcl list --release <id>` print
 the members you added, not the records under them.
 
+<div id="close-a-release"></div>
+
 ## Close the release
 
 ```sh
@@ -54,6 +58,8 @@ error: invalid project or record: stored release is invalid: cannot complete rel
 Finish that work first, or pass `--allow-open-children` to close the release
 alone. Release membership does not affect readiness, so closing a release
 holds no task back.
+
+<div id="publish-a-roadmap"></div>
 
 ## Render the roadmap
 

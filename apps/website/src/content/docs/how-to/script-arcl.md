@@ -14,6 +14,9 @@ speaks MCP can [connect the MCP server](/how-to/connect-mcp/) instead.
 [Set up an agent](/how-to/set-up-an-agent/) covers the skill and priming each
 session.
 
+<div id="use-versioned-json"></div>
+<div id="check-the-format-version"></div>
+
 ## Read JSON
 
 Pass `--json` before or after the command:
@@ -30,6 +33,8 @@ Check `format_version` before reading `data`. It changes when a field is
 renamed, removed or retyped. New fields can appear without a new version, so
 ignore fields you don't know. [Output formats and exit
 codes](/reference/output/) lists which commands use which version.
+
+<div id="read-readiness-reasons"></div>
 
 ## Find out why a task is not ready
 
@@ -56,6 +61,8 @@ before the command and are ready after it, in `ready` order. A loop can run
 `task start` refuses a pending task that is not ready, exits `3`, and writes a
 failure whose `message` lists the reasons as text. Read the typed reasons
 from `explain` instead.
+
+<div id="use-plain-or-quiet-output"></div>
 
 ## Print one record per line
 
@@ -85,6 +92,8 @@ arcl --quiet task complete KAJE
 ```
 
 Errors still go to standard error.
+
+<div id="keep-failures-machine-readable"></div>
 
 ## Handle failures
 

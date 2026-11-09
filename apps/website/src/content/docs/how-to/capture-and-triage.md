@@ -3,6 +3,9 @@ title: Capture and triage work
 description: File unplanned work in the inbox, record the task it came from, then promote each capture to a spec, task or note, or discard it.
 ---
 
+<div id="capture"></div>
+<div id="capture-an-idea"></div>
+
 ## File a capture
 
 Give the capture a title and, if it helps, a Markdown body:
@@ -25,6 +28,8 @@ printf 'Steps to restore.\n' | arcl capture create "Document backups" --body-fil
 The web app's quick capture, `q`, and the MCP `capture_create` tool file
 captures the same way.
 
+<div id="record-where-it-came-from"></div>
+
 ## Record the task it came from
 
 Name the task you were working on with `--from`:
@@ -46,6 +51,8 @@ only when the call passes `from`.
 The record a capture becomes keeps the source. `show` on the new spec, task or
 note reads it through the capture.
 
+<div id="review-and-update-the-inbox"></div>
+
 ## Review the inbox
 
 ```sh
@@ -62,6 +69,8 @@ capture	arcl-c-01M6Z4W77W18J8Z09XWF7VN1KS	[captured]	Document recovery
 `capture list` shows every capture in creation order, promoted and discarded
 ones included. `arcl tree` counts the open ones in its `Inbox` footer, and
 `arcl tree --all` lists them.
+
+<div id="promote-ideas"></div>
 
 ## Promote a capture
 
@@ -97,6 +106,8 @@ already made. Promoting it to another kind fails with exit code `3`:
 ```text
 error: invalid project or record: capture `arcl-c-01M6Z4WV16AG5CVWFCAPA4EBQ2` is already promoted to task; cannot promote it to note
 ```
+
+<div id="discard-an-idea"></div>
 
 ## Discard a capture
 

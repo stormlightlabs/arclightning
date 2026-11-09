@@ -7,6 +7,8 @@ description: Read records with arcl query, pass variables and pick an operation,
 the response as JSON. It needs no server, and syncs the workspace first as
 other commands do. Changes go through the CLI or the `POST /api` endpoints.
 
+<div id="query-with-arcl-query"></div>
+
 ## Run a query
 
 ```sh
@@ -92,6 +94,9 @@ arcl query '{ task(id: "ZZZZ") { title } }'
 
 Branch on `extensions.code`. [GraphQL schema](/reference/graphql/#errors)
 lists the codes and the query limits.
+
+<div id="serve-the-api"></div>
+<div id="security-and-limits"></div>
 
 ## Print the schema
 

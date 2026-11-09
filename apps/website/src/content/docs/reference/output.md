@@ -15,7 +15,12 @@ description: The four output modes, the JSON envelope and its format versions, w
 The flags are global and go before or after the subcommand. `--json` cannot
 be combined with `--plain` or `--quiet`. Errors always go to standard error.
 
-Human output prints IDs as short IDs. `--plain` and `--json` print full IDs.
+Human output uses both ID forms. Full IDs appear in the line that confirms a
+change, such as `Created task`, in `context`, and in the commands for one
+kind, such as `task list`, `spec show` and `plan show`. Short IDs appear in
+`list`, `tree`, `show`, `task show`, `prime`, and the IDs a record names,
+such as `From: task` and `blocked by`. `--plain` and `--json` always print
+full IDs.
 
 Color appears only when standard output is a terminal and `NO_COLOR` is unset.
 `FORCE_COLOR` or `CLICOLOR_FORCE` turns it on, and `--color

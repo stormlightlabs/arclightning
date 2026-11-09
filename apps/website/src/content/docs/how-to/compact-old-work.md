@@ -7,6 +7,8 @@ description: Archive tasks completed before a date with arcl compact, keeping th
 why. Run it on one branch: two clones that compact the same tasks set
 different `archived-at` times, and Git reports a conflict when they merge.
 
+<div id="preview-then-compact"></div>
+
 ## Preview the run
 
 Pick a date. Tasks completed before the start of that day, in UTC, are
@@ -28,6 +30,9 @@ Phase `GRYN` Key handling: would create a note Compacted work: Key handling
 A completed task stays when it blocks open work, sits outside every phase, or
 has an open or cancelled subtask. [The manual](/reference/manual/#compaction)
 lists every condition.
+
+<div id="what-gets-archived"></div>
+<div id="the-phase-note"></div>
 
 ## Archive the tasks
 
@@ -61,6 +66,8 @@ you pass `--include-undated`, which treats them as completed before any date:
 ```sh
 arcl compact --before 2026-11-10 --include-undated
 ```
+
+<div id="after-compaction"></div>
 
 ## Read archived work
 

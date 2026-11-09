@@ -3,6 +3,8 @@ title: Plan phases from a plan file
 description: Write a spec's phases, tasks and blockers in one TOML file, check and apply it, and keep the plan in step as the file changes.
 ---
 
+<div id="create-a-plan"></div>
+
 ## Create the plan
 
 A plan belongs to one spec. `--spec` is required:
@@ -17,6 +19,8 @@ Created plan `arcl-pl-01M6Z562G8V506ZE36H9N07BRH`: Offline plan
 
 `--input <PATH|->` applies a plan file in the same command, as the next steps
 do separately. A spec can have more than one plan.
+
+<div id="write-a-plan-file"></div>
 
 ## Write the plan file
 
@@ -48,19 +52,10 @@ title = "Test the selection keys"
 position = 0
 ```
 
-Every task in the file sits in a phase. Subtasks nest to any depth. A task's
-path is its phase key and the keys of its ancestors, joined by `/`, such as
-`keys/selection/tests`.
-
-`blocked-by` takes task paths, keys that name exactly one task in the file or
-the plan, or full task IDs from anywhere in the project:
-
-```toml
-blocked-by = ["keys/selection", "bindings", "arcl-t-01M6Z54428P55ZKSEFQX551WBR"]
-```
-
-[Plan file format](/reference/plan-file/) lists every field
-and rule.
+Every task sits in a phase, and subtasks nest under it. `blocked-by` names
+other tasks by key, by path such as `keys/selection`, or by full ID. [Plan
+file format](/reference/plan-file/) lists every field and the rules for keys,
+paths and blockers.
 
 ## Check, diff and apply
 
@@ -92,29 +87,23 @@ dependency	docs/page	keys/selection	Create
 Applied plan `arcl-pl-01M70M8FPNJTRS3HK1EZ7RDQ8G` (2 phase(s), 3 task(s)).
 ```
 
-A file that does not parse, names an unknown or ambiguous dependency, or would
-add a blocker cycle fails with exit code `3`, and nothing is written:
-
-```text
-error: invalid project or record: structured plan input is invalid: task `keys/x` references unknown dependency `nope`
-```
-
-A key that matches more than one task is ambiguous. Use its path instead.
+A file with an error fails with exit code `3`, and nothing is written. Where
+a key matches more than one task, use its path instead.
+[Errors](/reference/plan-file/#errors) lists what fails.
 
 ## Change the plan
 
-Keep the file in the repository. Edit it and apply it again:
+Keep the file in the repository. Edit it and apply it again. Apply updates
+and creates records by path and never deletes or cancels, so close work you
+removed from the file with `arcl task cancel` or `arcl plan phase cancel`.
+Set `priority` in the file for any task whose priority you changed with
+`arcl task update`, since apply resets a missing one to `normal`. [How apply
+matches records](/reference/plan-file/#how-apply-matches-records) lists every
+case.
 
-- A path the plan already has is updated: its title, priority, position and
-  parent. A task with no `priority` in the file gets `normal`, even after
-  `arcl task update` changed it.
-- A new path is created.
-- A phase or task the file leaves out stays as it is. Removing a line never
-  deletes or cancels work, so close it with `arcl task cancel` or
-  `arcl plan phase cancel`.
-- Apply never changes a task's status.
-
-Applying the same file twice changes nothing the second time.
+<div id="create-a-phase"></div>
+<div id="put-tasks-in-a-phase"></div>
+<div id="create-a-milestone"></div>
 
 ## Add phases and tasks by hand
 
@@ -134,8 +123,10 @@ Created phase `arcl-ph-01M6Z4X6K39GQSHZVS3W1TJYJH`: Polish
 Leave gaps such as 10, 20 and 30 to insert a phase later. Phases with the same
 position sort by ID.
 
-A phase made with `plan phase create` has no key, so no plan file matches it.
-Applying a file never updates it.
+A phase made this way has no key, so applying a file never updates it.
+
+<div id="follow-progress"></div>
+<div id="read-and-update-a-plan"></div>
 
 ## Read the plan
 
@@ -149,6 +140,11 @@ arcl plan phase show KSX8
 
 `plan show` counts the plan's phases, tasks and dependencies; `--json` lists
 them. `arcl tree` gives each phase its completed and total task count.
+
+<div id="update-and-close-a-phase"></div>
+<div id="close-a-plan"></div>
+<div id="update-a-milestone"></div>
+<div id="finish-or-cancel-a-milestone"></div>
 
 ## Update and close phases and plans
 

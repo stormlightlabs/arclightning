@@ -8,12 +8,13 @@ you work it the way a coding agent does: claim a task, leave notes, hand off
 partway, resume in a new session, and finish. You run the agent's commands
 yourself, so you see each step. In a real project the agent runs them.
 
-You need `arcl` installed, as the [quick start](/tutorials/quick-start/)
-shows, and Git. The examples use Claude Code; the steps are the same for
+You need Git and an `arcl` built from `main`, as the [quick
+start](/tutorials/quick-start/) installs it. The latest release, v0.3.0, does
+not have `arcl setup`, `arcl prime`, `arcl task note` or `--claim`. The examples use Claude Code; the steps are the same for
 other agents.
 
 Every record gets its own ID, so yours differ from the ones shown. Where a
-command names a short ID such as `PVEA`, use the last four or more characters
+command names a short ID such as `N62T`, use the last four or more characters
 of your own record's ID.
 
 ## Set up the project and the agent
@@ -60,7 +61,7 @@ arcl spec create "Export notes as Markdown" \
 ```
 
 ```text
-Created spec `arcl-s-01M70M9RCKZAZHY9Q2XNB8KVEY`: Export notes as Markdown
+Created spec `arcl-s-01M70P60VJQYJ2PE3K8K33E5TN`: Export notes as Markdown
 ```
 
 ## Write the plan file
@@ -104,13 +105,13 @@ Create an empty plan under the spec, then check the file against it. The
 check writes nothing:
 
 ```sh
-arcl plan create "Markdown export" --spec KVEY
-arcl plan check QRTP --file export-plan.toml
+arcl plan create "Markdown export" --spec E5TN
+arcl plan check PPQD --file export-plan.toml
 ```
 
 ```text
-Created plan `arcl-pl-01M70M9W0RSTBPAZ3S2GXHQRTP`: Markdown export
-Plan `arcl-pl-01M70M9W0RSTBPAZ3S2GXHQRTP`
+Created plan `arcl-pl-01M70P66W2Q2CJPFTGDNMKPPQD`: Markdown export
+Plan `arcl-pl-01M70P66W2Q2CJPFTGDNMKPPQD`
 phase	core	Create
 phase	cli	Create
 task	core/render	Create
@@ -120,22 +121,23 @@ dependency	core/write	render	Create
 dependency	cli/flag	core/write	Create
 ```
 
-Apply the file and look at the result:
+Apply the file and look at the result. `--style full` adds each record's
+short ID on the right; the rest of the tutorial uses them:
 
 ```sh
-arcl plan apply QRTP --file export-plan.toml
-arcl tree
+arcl plan apply PPQD --file export-plan.toml
+arcl tree --style full
 ```
 
 ```text
-Applied plan `arcl-pl-01M70M9W0RSTBPAZ3S2GXHQRTP` (2 phase(s), 3 task(s)).
-○ Export notes as Markdown
-└── ○ Markdown export
-    ├── ○ Exporter  0/2
-    │   ├── ● Render a note as Markdown
-    │   └── ○ Write one file per note  blocked by PVEA
-    └── ○ Command line  0/1
-        └── ○ Add the --format flag  blocked by K5KG
+Applied plan `arcl-pl-01M70P66W2Q2CJPFTGDNMKPPQD` (2 phase(s), 3 task(s)).
+○ Export notes as Markdown                              E5TN
+└── ○ Markdown export                                   PPQD
+    ├── ○ Exporter  0/2                                 3SVB
+    │   ├── ● Render a note as Markdown                 N62T
+    │   └── ○ Write one file per note  blocked by N62T  FH6E
+    └── ○ Command line  0/1                             GH7N
+        └── ○ Add the --format flag  blocked by FH6E    3ZMZ
 ```
 
 Commit the plan, so the agent's branch starts from it:
@@ -159,7 +161,7 @@ Arc Lightning tracks this project's tasks. Work the loop:
 Open work: none.
 
 Ready:
-- PVEA [high]: Render a note as Markdown
+- N62T [high]: Render a note as Markdown
 
 `arcl context <id>` shows a task's criteria, blockers and full handoff.
 ```
@@ -172,25 +174,25 @@ arcl next --start --claim
 ```
 
 ```text
-Started task `arcl-t-01M70MA00ZRHB519KSK58YPVEA`: Render a note as Markdown
+Started task `arcl-t-01M70P66XF1Z3GBZFH2JTWN62T`: Render a note as Markdown
 ```
 
 The task now belongs to `claude`. Another start, by a person or a second
 agent on this checkout, is refused until the claim is released.
 
-Next the agent reads the task's context. `arcl --json context PVEA` gives it
+Next the agent reads the task's context. `arcl --json context N62T` gives it
 the spec's acceptance criteria too:
 
 ```sh
-arcl context PVEA
+arcl context N62T
 ```
 
 ```text
-Task `arcl-t-01M70MA00ZRHB519KSK58YPVEA` [in_progress] Render a note as Markdown
+Task `arcl-t-01M70P66XF1Z3GBZFH2JTWN62T` [in_progress] Render a note as Markdown
 Ready: false
 Assignee: claude
 Ancestors:
-Spec: arcl-s-01M70M9RCKZAZHY9Q2XNB8KVEY
+Spec: arcl-s-01M70P60VJQYJ2PE3K8K33E5TN
 Let people take their notes out of the app.
 ...
 ```
@@ -200,7 +202,7 @@ Let people take their notes out of the app.
 While it works, the agent records a decision on the task:
 
 ```sh
-arcl task note PVEA --kind decision "Render with pulldown-cmark's writer, not string templates"
+arcl task note N62T --kind decision "Render with pulldown-cmark's writer, not string templates"
 ```
 
 It also notices a problem outside this task and files it in the inbox instead
@@ -211,11 +213,11 @@ arcl capture create "Notes with attachments lose them on export"
 ```
 
 ```text
-Created capture `arcl-c-01M70MA6EXF2SSQ2AZVMGY4X82`: Notes with attachments lose them on export
-From: task `PVEA`
+Created capture `arcl-c-01M70P6C1V8ZVXJCXVGMSRKP0G`: Notes with attachments lose them on export
+From: task `N62T`
 ```
 
-The capture names `PVEA` as its source, because `claude` holds exactly one
+The capture names `N62T` as its source, because `claude` holds exactly one
 task in progress.
 
 ## Hand off and resume
@@ -224,11 +226,11 @@ The session ends before the task is done. The agent hands it off with a note
 for whoever comes next:
 
 ```sh
-arcl task handoff PVEA --note "Headings and lists render. Code blocks still lose their language tag; fix that in render.rs next."
+arcl task handoff N62T --note "Headings and lists render. Code blocks still lose their language tag; fix that in render.rs next."
 ```
 
 ```text
-Handed off task `arcl-t-01M70MA00ZRHB519KSK58YPVEA`: Render a note as Markdown
+Handed off task `arcl-t-01M70P66XF1Z3GBZFH2JTWN62T`: Render a note as Markdown
 ```
 
 The handoff parked the task and released the claim. Start a new session. This
@@ -236,77 +238,77 @@ time `arcl prime` lists the parked task first:
 
 ```text
 Open work:
-- PVEA parked: Render a note as Markdown
+- N62T parked: Render a note as Markdown
   Handoff: Headings and lists render. Code blocks still lose their language tag; fix tha…
 
 Ready: none.
 ```
 
 The new session reads the whole handoff and the notes with
-`arcl context PVEA`:
+`arcl context N62T`:
 
 ```text
 Handoff: Headings and lists render. Code blocks still lose their language tag; fix that in render.rs next.
 Evidence: none
-Note: 2026-11-09T17:04:53.704Z [decision] Render with pulldown-cmark's writer, not string templates
+Note: 2026-11-09T17:37:45.511Z [decision] Render with pulldown-cmark's writer, not string templates
 ```
 
 Then it takes the task back and finishes it with evidence:
 
 ```sh
-arcl task unpark PVEA
-arcl task start PVEA --claim
-arcl task complete PVEA --evidence "render.rs keeps code block languages; cargo test passes (14 tests)."
+arcl task unpark N62T
+arcl task start N62T --claim
+arcl task complete N62T --evidence "render.rs keeps code block languages; cargo test passes (14 tests)."
 ```
 
 ```text
-Unparked task `arcl-t-01M70MA00ZRHB519KSK58YPVEA`: Render a note as Markdown
-Started task `arcl-t-01M70MA00ZRHB519KSK58YPVEA`: Render a note as Markdown
-Completed task `arcl-t-01M70MA00ZRHB519KSK58YPVEA`: Render a note as Markdown
-Unblocked task `arcl-t-01M70MA00ZEG3W6128TAW0K5KG`: Write one file per note
+Unparked task `arcl-t-01M70P66XF1Z3GBZFH2JTWN62T`: Render a note as Markdown
+Started task `arcl-t-01M70P66XF1Z3GBZFH2JTWN62T`: Render a note as Markdown
+Completed task `arcl-t-01M70P66XF1Z3GBZFH2JTWN62T`: Render a note as Markdown
+Unblocked task `arcl-t-01M70P66XFJVHG2640R6X2FH6E`: Write one file per note
 ```
 
 ## Finish the plan
 
-The agent repeats the loop for the next two tasks:
+The agent repeats the loop for the next two tasks. Each completion unblocks
+the next task, so `arcl next` starts it:
 
 ```sh
 arcl next --start --claim
-arcl task complete K5KG --evidence "Writes notes/<slug>.md per note; tested on 200 notes."
+arcl task complete FH6E --evidence "Writes notes/<slug>.md per note; tested on 200 notes."
 arcl next --start --claim
-arcl task complete 6FY4VS --evidence "notes export --format md works end to end."
-```
-
-Now triage the capture the agent filed. It belongs in the Exporter phase, so
-promote it to a task there:
-
-```sh
-arcl capture promote 4X82 task --phase 43WW1 --priority low
-arcl tree
+arcl task complete 3ZMZ --evidence "notes export --format md works end to end."
 ```
 
 ```text
-Promoted capture `arcl-c-01M70MA6EXF2SSQ2AZVMGY4X82` to task `arcl-t-01M70MAQK1N849HBECNJ300VTE`
-◐ Export notes as Markdown
-└── ◐ Markdown export
-    ├── ◐ Exporter  2/3
-    │   ├── ● Notes with attachments lose them on export
-    │   ├── ✓ Render a note as Markdown
-    │   └── ✓ Write one file per note
-    └── ◐ Command line  1/1
-        └── ✓ Add the --format flag
+Started task `arcl-t-01M70P66XFJVHG2640R6X2FH6E`: Write one file per note
+Completed task `arcl-t-01M70P66XFJVHG2640R6X2FH6E`: Write one file per note
+Unblocked task `arcl-t-01M70P66XF22PK2ANDE6S33ZMZ`: Add the --format flag
+Started task `arcl-t-01M70P66XF22PK2ANDE6S33ZMZ`: Add the --format flag
+Completed task `arcl-t-01M70P66XF22PK2ANDE6S33ZMZ`: Add the --format flag
 ```
 
-Work that last task the same way. Then close the phases, the plan and the
-spec. Each refuses to close while work below it is open:
+Now triage the capture the agent filed. It belongs in the Exporter phase,
+`3SVB`, so promote it to a task there:
+
+```sh
+arcl capture promote KP0G task --phase 3SVB --priority low
+```
+
+```text
+Promoted capture `arcl-c-01M70P6C1V8ZVXJCXVGMSRKP0G` to task `arcl-t-01M70P6HJF427BY91CZFVRC6Q4`
+```
+
+Work that last task, `C6Q4`, the same way. Then close the phases, the plan
+and the spec. Each refuses to close while work below it is open:
 
 ```sh
 arcl next --start --claim
-arcl task complete 0VTE --evidence "Attachments copy into an assets/ folder beside each note."
-arcl plan phase complete 43WW1
-arcl plan phase complete ANDD2
-arcl plan complete QRTP
-arcl spec complete KVEY
+arcl task complete C6Q4 --evidence "Attachments copy into an assets/ folder beside each note."
+arcl plan phase complete 3SVB
+arcl plan phase complete GH7N
+arcl plan complete PPQD
+arcl spec complete E5TN
 arcl tree
 ```
 

@@ -1,6 +1,6 @@
 ---
 title: Install arcl
-description: Install the arcl binary from a release, Homebrew or cargo-binstall, pin a version, or build it from source with the web app.
+description: Install the arcl binary from a release, Homebrew, cargo-binstall or main, pin a version, or build it from source with the web app.
 ---
 
 Release binaries cover Linux (x86_64 and arm64, static), macOS (arm64 and
@@ -29,6 +29,22 @@ brew install stormlightlabs/tap/arcl
 
 The `latest` links skip pre-releases. Releases before 1.0 can change JSON
 shapes; each envelope's `format_version` names the shape it carries.
+
+## Install from main
+
+The tutorials and several guides use commands that are on `main` and not in
+a release: `arcl setup`, `arcl prime`, `arcl task note` and `--claim`, among
+others. The latest release, v0.3.0, does not have them. Install `main` with
+Cargo:
+
+```sh
+cargo install --git https://github.com/stormlightlabs/arclightning arcl-cli
+```
+
+This needs a Rust toolchain and leaves out the web app, as [Build from
+source](#build-from-source) explains. `main` carries version 0.3.0, so
+`arcl --version` prints `arcl 0.3.0`, and `cargo binstall --git` downloads the
+v0.3.0 release instead of building `main`.
 
 ## Pin a version
 

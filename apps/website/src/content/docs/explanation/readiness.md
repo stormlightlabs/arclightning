@@ -30,27 +30,15 @@ unfinished.
 `arcl explain <id>` lists every reason a task is not ready. [Dependencies and readiness rules](/reference/deps/) lists each
 reason by name.
 
+<div id="statuses-by-kind"></div>
+<div id="move-tasks"></div>
+
 ## Statuses
 
-Every status change is an explicit command.
-
-| Kind                       | Statuses                                                     |
-| -------------------------- | ------------------------------------------------------------ |
-| Capture                    | `captured`, then `promoted` or `discarded`                   |
-| Spec, plan, phase, release | `open`, then `completed` or `cancelled`                      |
-| Task                       | `pending`, `in_progress`, `parked`, `completed`, `cancelled` |
-| Note                       | none                                                         |
-
-Tasks move between statuses like this:
-
-| Command    | From                       | To            |
-| ---------- | -------------------------- | ------------- |
-| `start`    | `pending`                  | `in_progress` |
-| `park`     | `pending`, `in_progress`   | `parked`      |
-| `handoff`  | `in_progress`              | `parked`      |
-| `unpark`   | `parked`                   | `pending`     |
-| `complete` | `pending`, `in_progress`   | `completed`   |
-| `cancel`   | any status but a final one | `cancelled`   |
+Every status change is an explicit command. A task starts `pending`, moves to
+`in_progress` when someone starts it, and ends `completed` or `cancelled`.
+[Lifecycle](/reference/manual/#lifecycle) lists the statuses of each kind of
+record and the command behind each task transition.
 
 Parked is open work set aside. It stays out of `ready` until someone unparks
 it, and a parked task must be unparked before it completes. Starting a task
@@ -58,11 +46,11 @@ that is already in progress changes nothing.
 
 ## Final statuses
 
-Completing and cancelling are final for every kind of record. Repeating the
-same final command changes nothing, and switching a completed record to
-cancelled, or back, is refused. No command reopens a closed task. A task file
-can be reopened by hand, as [Workspace file
+Completing and cancelling are final for every kind of record. No command
+reopens a closed task. A task file can be reopened by hand, as [Workspace file
 format](/reference/workspace-format/#task-fields) describes.
+
+<div id="close-containers"></div>
 
 ## Closing containers
 

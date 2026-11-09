@@ -3,6 +3,8 @@ title: Share records through Git
 description: Turn on the workspace, commit records with the code, set up a fresh clone, edit record files by hand, and check the workspace in CI.
 ---
 
+<div id="enable-the-workspace"></div>
+
 ## Turn on the workspace
 
 In a new project:
@@ -22,6 +24,10 @@ of Git. Commit `.arcl/.gitignore`, `.arcl/config.toml` and `.arcl/workspace/`:
 git add .arcl
 git commit -m "Track work with arcl"
 ```
+
+<div id="sync-both-ways"></div>
+<div id="work-with-git"></div>
+<div id="understand-the-workspace"></div>
 
 ## Commit records with the code
 
@@ -43,6 +49,8 @@ error: invalid project or record: Arc Lightning has no database in project direc
 ```
 
 Run `arcl init` once. The next command imports every record.
+
+<div id="edit-workspace-files"></div>
 
 ## Edit a record file
 
@@ -66,6 +74,8 @@ record file, since records are never deleted. Close a record through its
 status with the CLI instead. [Workspace file
 format](/reference/workspace-format/) lists the fields.
 
+<div id="check-before-you-sync"></div>
+
 ## See what a sync would do
 
 ```sh
@@ -86,6 +96,11 @@ To sync without running another command:
 ```sh
 arcl workspace sync
 ```
+
+<div id="export-the-whole-database"></div>
+<div id="import-the-whole-workspace"></div>
+<div id="avoid-divergent-changes"></div>
+<div id="resolve-divergent-changes"></div>
 
 ## Check the workspace in CI
 

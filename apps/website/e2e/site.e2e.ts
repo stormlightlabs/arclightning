@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module';
 import { expect, test, type Page } from '@playwright/test';
+import { redirects } from '../src/lib/redirects';
 
 const require = createRequire(import.meta.url);
 const AXE = require.resolve('axe-core/axe.min.js');
@@ -177,36 +178,111 @@ test.describe('without JavaScript', () => {
 	});
 });
 
-/** Each retired URL and the page that replaces it, as the build serves them. */
-const RETIRED: Record<string, string> = {
-	overview: 'explanation/overview',
-	'quick-start': 'tutorials/quick-start',
-	'guides/agents': 'how-to/set-up-an-agent',
-	'guides/api': 'how-to/query-graphql',
-	'guides/artifact': 'how-to/publish-the-artifact',
-	'guides/automation': 'how-to/script-arcl',
-	'guides/captures': 'how-to/capture-and-triage',
-	'guides/compaction': 'how-to/compact-old-work',
-	'guides/epics': 'how-to/write-a-spec',
-	'guides/ideas': 'how-to/capture-and-triage',
-	'guides/inspect-work': 'how-to/find-work',
-	'guides/lifecycle': 'explanation/readiness',
-	'guides/local-development': 'how-to/develop-locally',
-	'guides/mcp': 'how-to/connect-mcp',
-	'guides/milestones': 'how-to/plan-from-a-file',
-	'guides/notes': 'how-to/keep-notes',
-	'guides/phases': 'how-to/plan-from-a-file',
-	'guides/plans': 'how-to/plan-from-a-file',
-	'guides/releases': 'how-to/cut-a-release',
-	'guides/rest': 'reference/rest',
-	'guides/specs': 'how-to/write-a-spec',
-	'guides/tasks': 'how-to/work-a-task',
-	'guides/web-app': 'how-to/use-the-web-app',
-	'guides/workspace': 'how-to/share-the-workspace'
+/**
+ * The section anchors of each retired page, taken from its headings. Each one
+ * must land on an element with the same id on the page that replaces it.
+ */
+const RETIRED_ANCHORS: Record<string, string[]> = {
+	overview: ['the-project-model', 'where-records-live', 'interfaces', 'a-typical-flow'],
+	'quick-start': [
+		'install',
+		'build-from-source',
+		'initialize-a-project',
+		'capture-an-idea',
+		'promote-it-to-a-spec',
+		'plan-the-work',
+		'work-a-task',
+		'commit-the-records',
+		'choose-an-output-mode',
+		'next-steps'
+	],
+	'guides/agents': ['set-up-an-agent', 'the-skill', 'prime-each-session', 'claim-work', 'leave-a-trail'],
+	'guides/api': ['query-with-arcl-query', 'serve-the-api', 'security-and-limits'],
+	'guides/artifact': [
+		'build-and-publish-the-page',
+		'export-records',
+		'queued-edits',
+		'apply-queued-edits',
+		'sync-the-artifact'
+	],
+	'guides/automation': [
+		'use-versioned-json',
+		'check-the-format-version',
+		'read-readiness-reasons',
+		'chain-from-completed-work',
+		'use-plain-or-quiet-output',
+		'keep-failures-machine-readable'
+	],
+	'guides/captures': [
+		'capture',
+		'record-where-it-came-from',
+		'review-the-inbox',
+		'promote-a-capture',
+		'discard-a-capture'
+	],
+	'guides/compaction': ['preview-then-compact', 'what-gets-archived', 'the-phase-note', 'after-compaction'],
+	'guides/epics': ['create-an-epic', 'update-an-epic', 'finish-or-cancel-an-epic'],
+	'guides/ideas': ['capture-an-idea', 'review-and-update-the-inbox', 'discard-an-idea', 'promote-ideas'],
+	'guides/inspect-work': [
+		'show-and-list-records',
+		'read-the-hierarchy',
+		'explain-readiness',
+		'gather-task-context',
+		'check-graph-integrity'
+	],
+	'guides/lifecycle': ['statuses-by-kind', 'move-tasks', 'close-containers'],
+	'guides/local-development': ['build-the-cli', 'run-the-docs-site', 'edit-documentation', 'edit-the-theme'],
+	'guides/mcp': ['install-and-connect', 'how-tools-run', 'tools', 'prime', 'pages-and-filters', 'starting-tasks'],
+	'guides/milestones': ['create-a-milestone', 'update-a-milestone', 'finish-or-cancel-a-milestone'],
+	'guides/notes': ['create-a-note', 'link-a-note', 'read-and-update-notes'],
+	'guides/phases': ['create-a-phase', 'put-tasks-in-a-phase', 'follow-progress', 'update-and-close-a-phase'],
+	'guides/plans': [
+		'create-a-plan',
+		'write-a-plan-file',
+		'check-diff-and-apply',
+		'read-and-update-a-plan',
+		'close-a-plan'
+	],
+	'guides/releases': ['create-a-release', 'add-members', 'close-a-release', 'publish-a-roadmap'],
+	'guides/rest': ['endpoints', 'reads', 'change-options', 'edit-a-records-file', 'bodies-errors-and-locking'],
+	'guides/specs': ['create-a-spec', 'read-and-update-a-spec', 'close-a-spec', 'write-the-plan-next'],
+	'guides/tasks': [
+		'create-a-task',
+		'update-and-move-tasks',
+		'move-work-through-its-lifecycle',
+		'leave-notes',
+		'wait-on-a-pull-request-run-or-date',
+		'close-parent-tasks',
+		'handoff',
+		'record-completion'
+	],
+	'guides/web-app': [
+		'start-the-server',
+		'work',
+		'task',
+		'inbox',
+		'planning',
+		'command-menu-and-shortcuts',
+		'quick-capture',
+		'theme-and-layout',
+		'builds-without-the-web-app'
+	],
+	'guides/workspace': [
+		'enable-the-workspace',
+		'sync-both-ways',
+		'work-with-git',
+		'check-before-you-sync',
+		'export-the-whole-database',
+		'import-the-whole-workspace',
+		'edit-workspace-files',
+		'understand-the-workspace',
+		'avoid-divergent-changes',
+		'resolve-divergent-changes'
+	]
 };
 
 test('redirects every retired docs URL to a page that exists', async ({ page }) => {
-	for (const [from, to] of Object.entries(RETIRED)) {
+	for (const [from, to] of Object.entries(redirects)) {
 		const response = await page.goto(`/${from}/`);
 		expect(response?.ok(), from).toBe(true);
 		await expect(page, from).toHaveURL(new RegExp(`/${to}/$`));
@@ -249,8 +325,16 @@ test('keeps the anchors of sections that moved or were renamed', async ({ reques
 	}
 });
 
+test('lands every section anchor of a retired page on its replacement', async ({ request }) => {
+	expect(Object.keys(RETIRED_ANCHORS).sort()).toEqual(Object.keys(redirects).sort());
+	for (const [from, ids] of Object.entries(RETIRED_ANCHORS)) {
+		const html = await (await request.get(`/${redirects[from]}/`)).text();
+		for (const id of ids) expect(html, `/${from}/#${id}`).toContain(`id="${id}"`);
+	}
+});
+
 test('serves the replacement Markdown at each retired .md URL', async ({ request }) => {
-	for (const [from, to] of Object.entries(RETIRED)) {
+	for (const [from, to] of Object.entries(redirects)) {
 		const retired = await request.get(`/${from}.md`);
 		expect(retired.ok(), from).toBe(true);
 		expect(await retired.text(), from).toBe(await (await request.get(`/${to}.md`)).text());
