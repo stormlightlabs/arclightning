@@ -40,15 +40,16 @@ pulling, run any `arcl` command, such as `arcl workspace sync`, and reload.
 
 The Work view lists every task by phase, then by status, in the order
 `arcl tree` gives: phases by plan and position, and tasks by position, each
-followed by its subtasks. The app labels phases as milestones, and tasks
-outside any phase fall under **No milestone**. A glyph leads each row; for a
-pending or parked task, hover over it or focus the row to read why the task
-is not ready. `j` and `k` move the selection, and `Enter` opens the task.
-Filters narrow the list by status, priority, phase and readiness: ready, blocked by an incomplete task, or waiting for another
-reason, such as open subtasks. The page URL keeps the filters. A task deleted
-while the list loads is left out; any other failed read shows an error with a
-Retry button. **New task** opens a form for the title, priority and
-description, creates the task with `arcl task create`, and opens it.
+followed by its subtasks. The app labels phases as milestones, and tasks outside
+any phase fall under **No milestone**. A glyph leads each row; for a pending or
+parked task, hover over it or focus the row to read why the task is not ready.
+`j` and `k` move the selection, and `Enter` opens the task. Filters narrow the
+list by status, priority, phase and readiness: ready, blocked by an incomplete
+task, or waiting for another reason, such as open subtasks. The page URL keeps
+the filters. A task deleted while the list loads is left out; any other failed
+read shows an error with a Retry button. **New task** opens a form for the
+title, priority and description, creates the task with `arcl task create`, and
+opens it.
 
 **List** and **Board** beside the title, or `v`, switch the layout. The
 choice is remembered in this browser, and the URL names the board as

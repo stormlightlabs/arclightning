@@ -181,6 +181,12 @@ test('redirects a retired docs URL to the page that replaces it', async ({ page 
 	await expect(page.getByRole('heading', { level: 1, name: 'Captures' })).toBeVisible();
 });
 
+test('serves the replacement Markdown at a retired .md URL', async ({ request }) => {
+	const retired = await request.get('/guides/ideas.md');
+	expect(retired.ok()).toBe(true);
+	expect(await retired.text()).toBe(await (await request.get('/guides/captures.md')).text());
+});
+
 test('serves Markdown, the sitemap and llms.txt', async ({ request }) => {
 	const markdown = await request.get('/quick-start.md');
 	expect(markdown.ok()).toBe(true);

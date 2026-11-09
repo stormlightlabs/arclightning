@@ -47,6 +47,7 @@ const navigationOrder = [
 	'guides/mcp',
 	'guides/web-app',
 	'guides/api',
+	'guides/rest',
 	'guides/artifact',
 	'guides/local-development',
 	'reference/manual',

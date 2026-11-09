@@ -28,9 +28,11 @@ A task can sit under a phase, a plan, a spec, a parent task, or nothing:
 | `--parent <ID>` | Below another task, sharing the parent's spec, plan and phase. |
 | None            | At the top level of the project.                               |
 
-A subtask takes its spec, plan and phase from its parent. Naming a different
-one fails with `contradictory parent/phase ancestry`. The spec, plan or phase
-must be open.
+A subtask takes its spec, plan and phase from its parent. Naming one that
+differs from the parent's fails with exit code `3` and an error that the task
+has contradictory `parent/spec`, `parent/plan` or `parent/phase` ancestry.
+Where the parent has none, the subtask can name its own. The spec, plan or
+phase must be open.
 
 Priorities are `critical`, `high`, `normal` and `low`, with `normal` the
 default. `--position <N>` orders siblings, lowest first, and defaults to `0`.
@@ -79,8 +81,8 @@ A task has one of five statuses:
 
 `start` moves pending work to `in_progress` when it is ready, apart from having
 child tasks. Any other reason that `arcl task explain` reports, such as an
-unfinished blocker, refuses the start and lists the reasons; `--force` starts the
-task anyway. Starting a task that is already in progress does nothing.
+unfinished blocker, refuses the start and lists the reasons; `--force` starts
+the task anyway. Starting a task that is already in progress does nothing.
 
 `--claim [<NAME>]` records who started the task as its assignee. While a task
 has an assignee, any other start is refused with exit code `4`, with or without
@@ -92,9 +94,9 @@ task; one sees the other's claim only after the workspace change reaches its
 checkout through Git and a sync. `arcl list --assignee <NAME>` lists the
 tasks one assignee holds.
 
-`park` accepts pending or in-progress work. `unpark` always returns parked work to
-`pending`. `complete` accepts pending or in-progress work, and `cancel` accepts
-any non-terminal task.
+`park` accepts pending or in-progress work. `unpark` always returns parked work
+to `pending`. `complete` accepts pending or in-progress work, and `cancel`
+accepts any non-terminal task.
 
 ## Leave notes
 
@@ -211,4 +213,5 @@ evidence with the terminal transition; it does not run commands, open links,
 or judge whether the evidence proves completion.
 
 `arcl show` and `arcl context` include the current handoff and relevant blocker
-evidence. JSON and plain output expose the same information for agents and scripts.
+evidence. JSON and plain output expose the same information for agents and
+scripts.

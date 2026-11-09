@@ -159,8 +159,8 @@ The specification body goes here.
 ```
 
 Do not rename or delete an existing record file. The workspace does not support
-hard deletion. Use the record's status to complete, cancel, discard, or otherwise
-close it through the CLI.
+hard deletion. Use the record's status to complete, cancel, discard, or
+otherwise close it through the CLI.
 
 After a successful import, Arc Lightning rewrites the workspace in its
 canonical form. It sorts files by path and repeated references by kind and ID,
@@ -238,9 +238,9 @@ created-at = "2026-10-27T10:00:00.000Z"
 met-at = "2026-10-28T09:00:00.000Z"
 ```
 
-Import checks each target as `arcl gate add` does. Front matter stores record metadata
-and explicit relationships. Descendants are not added to releases or links
-implicitly.
+Import checks each target as `arcl gate add` does. Front matter stores record
+metadata and explicit relationships. Descendants are not added to releases or
+links implicitly.
 
 ## Avoid divergent changes
 

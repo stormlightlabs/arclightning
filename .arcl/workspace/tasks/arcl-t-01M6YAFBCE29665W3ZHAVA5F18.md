@@ -15,10 +15,16 @@ current product vocabulary.
 
 Acceptance criteria:
 
-- [ ] The first dispatched Preview run deploys this task's branch, the first
+- [x] The first dispatched Preview run deploys this task's branch, the first
       one to preview. It needs `.github/workflows/preview.yml` on `main` and
       the `CLOUDFLARE_PAGES_API_TOKEN` and `CLOUDFLARE_PAGES_API_ACCOUNT_ID`
-      organization secrets
+      organization secrets. Run
+      https://github.com/stormlightlabs/arclightning/actions/runs/42558302137
+      deployed https://claude-docs-content.arclightning.pages.dev (deployment
+      https://18fa9128.arclightning.pages.dev). `/`, `/guides/captures/`,
+      `/og.png`, `/llms.txt` and `/sitemap.xml` return 200, `/guides/ideas/`
+      meta-refreshes to `/guides/captures/`, and the preview sends
+      `x-robots-tag: noindex`
 - [ ] Document the `arcl` CLI, the web app, the MCP server, the GraphQL API
       with `arcl serve --api`, and the repository-native workflows
 - [ ] Replace the idea, epic and milestone commands and guides with capture,

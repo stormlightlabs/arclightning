@@ -230,10 +230,10 @@ arcl --plain tree
 arcl --quiet capture create "Try a command palette"
 ```
 
-`--json` prints an envelope with a `format_version` and `data`, `--plain`
-prints one unstyled record per line, and `--quiet` prints nothing on success.
-Errors still go to standard error. The [automation guide](/guides/automation/) describes the
-envelope.
+`--json` prints an envelope with a `format_version` and `data`, `--plain` prints
+one unstyled record per line, and `--quiet` prints nothing on success. Errors
+still go to standard error. The [automation guide](/guides/automation/)
+describes the envelope.
 
 ## Next steps
 

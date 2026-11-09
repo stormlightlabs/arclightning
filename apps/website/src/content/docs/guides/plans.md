@@ -100,6 +100,9 @@ dependency	keys/selection	bindings	Unchanged
 dependency	docs/shortcuts-page	keys/selection	Unchanged
 ```
 
+`--plain` drops the `Plan` line and writes the change in lowercase, such as
+`create`; `--json` uses the lowercase names in each entry's `change`.
+
 `apply` makes those changes in one transaction:
 
 ```text

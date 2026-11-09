@@ -74,7 +74,7 @@ flags against `arcl <command> --help`.
 
 ## Edit the theme
 
-`apps/website/src/styles/theme.css` composes the shared Arc Lightning tokens with
-the documentation layout. The shared package supplies IBM Plex Sans for body
-copy, Google Sans for headings and interface labels, and Google Sans Code for
-code. Keep website-only navigation and article styles in the website.
+`apps/website/src/styles/theme.css` composes the shared Arc Lightning tokens
+with the documentation layout. The shared package supplies IBM Plex Sans for
+body copy, Google Sans for headings and interface labels, and Google Sans Code
+for code. Keep website-only navigation and article styles in the website.

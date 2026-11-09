@@ -172,15 +172,15 @@ and exits with status code `4`, naming the files. Any answer other than `y` or
 the diff and the write, such as an edit saved while the question waits, the
 command writes nothing and exits with status code `4`, naming the file.
 
-`--dry-run` writes nothing. Its human and `--json` output include each change
-as a unified diff. Each file is `created`, `updated`, or `unchanged`, and a
-second run reports every file as `unchanged` and writes nothing. `--plain` prints `<status>\t<path>` per file.
-`--json` prints `action` (`applied`, or `planned` under `--dry-run`), `agent`,
-`agent_name`, `root`, `notes`, and a `files` array of `path`, `status` and,
-under `--dry-run`, `diff`. A settings file that is not strict JSON, is not a JSON object, or
-repeats a key on the path to the hook, such as two `hooks` keys, exits with
-status code `3`. So does an instruction file with a begin marker and no end
-marker, or with two begin markers.
+`--dry-run` writes nothing. Its human and `--json` output include each change as
+a unified diff. Each file is `created`, `updated`, or `unchanged`, and a second
+run reports every file as `unchanged` and writes nothing. `--plain` prints
+`<status>\t<path>` per file. `--json` prints `action` (`applied`, or `planned`
+under `--dry-run`), `agent`, `agent_name`, `root`, `notes`, and a `files` array
+of `path`, `status` and, under `--dry-run`, `diff`. A settings file that is not
+strict JSON, is not a JSON object, or repeats a key on the path to the hook,
+such as two `hooks` keys, exits with status code `3`. So does an instruction
+file with a begin marker and no end marker, or with two begin markers.
 
 Codex runs project hooks only in a trusted project, after you trust the hook
 in `/hooks`. Pi loads `.pi/extensions/` and `.agents/skills/` only after you
@@ -275,12 +275,20 @@ discarded capture cannot be updated. See [Captures](/guides/captures/).
 
 `create --input <PATH|->` applies a plan file after creating the plan, in the
 same command. `--no-input`, the default, creates the plan alone; the two
-conflict. Human and `--plain` output from `check` and `diff` print one line
-per phase, task and dependency with its change: `Create`, `Update` or
-`Unchanged`. `--json` returns `plan_id` and `phases`, `tasks` and
-`dependencies` lists, each entry with its `key` and `change`. A plan file that
-does not parse, or names an unknown or ambiguous dependency, fails with exit
-code `3`. [Plans](/guides/plans/) describes the file format.
+conflict. `check` and `diff` print one tab-separated line per phase, task
+and dependency: `phase` or `task` with its key path, or `dependency` with the
+task's path and the blocker's, then the change. The modes differ:
+
+- Human output opens with a ``Plan `<id>` `` line and writes the change as
+  `Create`, `Update` or `Unchanged`.
+- `--plain` has no header line and writes `create`, `update` or `unchanged`.
+- `--json` returns `plan_id` and `phases`, `tasks` and `dependencies` lists.
+  A phase or task entry has `key`, `id` (`null` for `create`) and `change`; a
+  dependency entry has `task`, `blocker` and `change`. `change` is
+  lowercase, as in `--plain`.
+
+A plan file that does not parse, or names an unknown or ambiguous dependency,
+fails with exit code `3`. [Plans](/guides/plans/) describes the file format.
 
 ### Phase commands
 
@@ -347,22 +355,23 @@ checkout through Git and a sync.
 
 `handoff` requires either `--note <MARKDOWN>` or `--note-file <PATH|->`.
 
-`note` appends a note to a task in any status, completed included.
-`--kind` takes `decision`, `observation`, `blocker`, or `result`; without it the
-note has no kind. The text is trimmed, at most 2000 characters, and may span
-lines. It is refused with exit code `3` when it is empty or holds a control
-character other than newline and tab, a format character, or a line that is
-exactly `+++`. arcl commands only append notes; editing or deleting a note in
-the task file and running `workspace sync` changes or removes it. `show` lists every note,
-newest first, and `context` lists the 10 most recent and reports how many it
-left out: `omitted_notes` in JSON and plain output, an `Older notes` line in
-human output. In JSON a note has `task_id`, `created_at`, `kind` when set, and
-`text`; `task note --json` returns `{action: "noted", note}`. Plain output
-prints `note<TAB><created-at><TAB><kind><TAB><text>`, with an empty kind field
-when the note has none.
+`note` appends a note to a task in any status, completed included. `--kind`
+takes `decision`, `observation`, `blocker`, or `result`; without it the note has
+no kind. The text is trimmed, at most 2000 characters, and may span lines. It is
+refused with exit code `3` when it is empty or holds a control character other
+than newline and tab, a format character, or a line that is exactly `+++`. arcl
+commands only append notes; editing or deleting a note in the task file and
+running `workspace sync` changes or removes it. `show` lists every note, newest
+first, and `context` lists the 10 most recent and reports how many it left out:
+`omitted_notes` in JSON and plain output, an `Older notes` line in human output.
+In JSON a note has `task_id`, `created_at`, `kind` when set, and `text`;
+`task note --json` returns `{action: "noted", note}`. Plain output prints
+`note<TAB><created-at><TAB><kind><TAB><text>`, with an empty kind field when the
+note has none.
 
 Completion accepts either `--evidence <MARKDOWN>` or `--evidence-file <PATH|->`.
-Each pair is mutually exclusive, and `-` reads UTF-8 Markdown from standard input.
+Each pair is mutually exclusive, and `-` reads UTF-8 Markdown from standard
+input.
 
 Completing a task records when, as `completed_at` in JSON and `completed-at` in
 its workspace file. Subtasks that `--with-subtasks` completes get the same
@@ -441,9 +450,9 @@ different versions of its note, so merging them conflicts in git on those
 files.
 
 An archived task takes no new work. `task create` with `--parent` or
-`--blocked-by`, `task update --parent`, `dependency add`, the MCP
-`task_create` tool and a raw edit in the web app refuse a task under an archived task, and a dependency to or on one, with exit
-code `3`:
+`--blocked-by`, `task update --parent`, `dependency add`, the MCP `task_create`
+tool and a raw edit in the web app refuse a task under an archived task, and a
+dependency to or on one, with exit code `3`:
 
 ```text
 task `arcl-t-…` is archived; a task cannot be created or moved under an archived task
@@ -660,13 +669,12 @@ such as `7/12`, counting subtasks and archived tasks and leaving out cancelled
 tasks. A task with unfinished direct blockers ends with `blocked by` and their
 short IDs.
 
-Each run of consecutive completed phases folds into one line. A completed
-phase with an unfinished task does not fold, so that task still shows. A run of
-one keeps its title, as in
-`✓ Milestone 6: Shared interface system  done · 1 task`. A longer run names its
-range when the part of each title before the first colon is `Milestone <n>` or
-`Phase <n>`, with the same word and consecutive numbers, as in
-`✓ Milestones 1–4  done · 20 tasks`. Otherwise it reads
+Each run of consecutive completed phases folds into one line. A completed phase
+with an unfinished task does not fold, so that task still shows. A run of one
+keeps its title, as in `✓ Milestone 6: Shared interface system  done · 1 task`.
+A longer run names its range when the part of each title before the first colon
+is `Milestone <n>` or `Phase <n>`, with the same word and consecutive numbers,
+as in `✓ Milestones 1–4  done · 20 tasks`. Otherwise it reads
 `✓ 3 phases  done · 9 tasks`.
 
 A footer sums up the captures, notes and releases, such as
@@ -717,7 +725,8 @@ Colour appears only when stdout is a terminal and `NO_COLOR` is unset.
 `FORCE_COLOR` or `CLICOLOR_FORCE` turns it on, and `--color` overrides every
 check.
 
-See [Inspecting Work](/guides/inspect-work/) for the query workflow and context contents.
+See [Inspecting Work](/guides/inspect-work/) for the query workflow and context
+contents.
 
 ### Roadmap
 
@@ -823,8 +832,9 @@ error codes and the query limits.
 load. Under `--api`, the token comes from `ARCL_SERVE_TOKEN` when it is set;
 otherwise each run makes one. `--json` prints one startup line with the URL,
 port and token. Outside a project it exits `3` before it binds. See
-[Web app](/guides/web-app/) for the views and [GraphQL and REST
-API](/guides/api/) for the endpoints.
+[Web app](/guides/web-app/) for the views,
+[GraphQL and REST API](/guides/api/) for the server and
+[REST endpoints](/guides/rest/) for the endpoints.
 
 ## Artifact commands
 

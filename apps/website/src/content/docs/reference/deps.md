@@ -38,9 +38,9 @@ report the same errors as `plan apply`. Workspace sync and import load bad edges
 the database already holds, with a warning.
 
 `ready` returns actionable leaf tasks in deterministic priority and position
-order. `next` returns the first result, or an empty result when no work is ready.
-Both commands also accept `--priority`, `--spec`, `--plan`, `--phase` and
+order. `next` returns the first result, or an empty result when no work is
+ready. Both commands also accept `--priority`, `--spec`, `--plan`, `--phase` and
 `--parent` filters, and support `--json` for automation.
 
-Use `explain` when a task does not appear in `ready`. It reports every applicable
-readiness or exclusion reason rather than stopping at the first one.
+Use `explain` when a task does not appear in `ready`. It reports every
+applicable readiness or exclusion reason rather than stopping at the first one.

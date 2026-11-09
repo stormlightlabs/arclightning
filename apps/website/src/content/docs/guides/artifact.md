@@ -61,9 +61,9 @@ lists every document in `changed`.
 A document over 200 KiB is written as parts, `chunks/<collection>~<id>~<n>`,
 each `{"part": "..."}`, listed before a header
 `{"chunked": {"parts": n, "digest": "..."}}` at the document's own path. The
-page joins the parts and checks them against `digest`, the 64-bit FNV-1a hash
-of the joined text; parts that do not match are read as a sync in progress. A document needs at most 64 parts, about 12.5 MiB.
-`export` fails on a larger one.
+page joins the parts and checks them against `digest`, the 64-bit FNV-1a hash of
+the joined text; parts that do not match are read as a sync in progress. A
+document needs at most 64 parts, about 12.5 MiB. `export` fails on a larger one.
 
 ## Queued edits
 

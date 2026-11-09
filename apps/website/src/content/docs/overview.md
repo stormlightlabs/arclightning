@@ -34,9 +34,18 @@ Project
 | Release | A named set of specs, plans, tasks and notes that ship together.          |
 
 A task can sit under a phase, a plan, a spec, another task, or nothing.
-Blockers connect any two tasks in the project. A task is ready when it is
-pending, every blocker on it and on its ancestors is completed, its spec,
-plan and phase are open, and it has no open gate.
+Blockers connect any two tasks in the project. A task is ready when all of
+these hold:
+
+- It is pending and has no child tasks, of any status.
+- No ancestor task is parked, completed or cancelled.
+- Its spec, plan and phase, where it has them, are open.
+- Every blocker on it and on its ancestor tasks is completed.
+- None of its blocker edges forms a cycle or joins it to its own ancestor or
+  descendant.
+- It has no open gate.
+
+`arcl explain <id>` names each condition that fails.
 
 Every record has a typed ID such as `arcl-t-01M5VDDD42HZQ1FEN49X80GBA5`. The
 prefix names the kind: `c` capture, `s` spec, `pl` plan, `ph` phase, `t`

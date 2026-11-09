@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { GET as markdown, entries as markdownEntries } from '../routes/[...slug].md/+server';
 import { GET as llms } from '../routes/llms.txt/+server';
 import { GET as sitemap } from '../routes/sitemap.xml/+server';
 import { docSections, docs, getAdjacentDocs, getDoc, getRedirect, redirects } from './content';
@@ -30,6 +31,16 @@ describe('redirects', () => {
 			expect(getDoc(from), from).toBeUndefined();
 			expect(getDoc(to), to).toBeDefined();
 			expect(getRedirect(from)).toBe(to);
+		}
+	});
+
+	it('serves the replacement page as Markdown at each retired .md URL', async () => {
+		const slugs = (await markdownEntries()).map((entry) => entry.slug);
+		for (const [from, to] of Object.entries(redirects)) {
+			expect(slugs, from).toContain(from);
+			const response = await markdown({ params: { slug: from } } as Parameters<typeof markdown>[0]);
+			expect(response.headers.get('content-type')).toBe('text/markdown; charset=utf-8');
+			expect(await response.text()).toBe(getDoc(to)?.markdown);
 		}
 	});
 
