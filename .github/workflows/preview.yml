@@ -1,0 +1,100 @@
+# Builds apps/website from the chosen branch and deploys it as a Cloudflare
+# Pages preview with a branch alias on arclightning.pages.dev. Run it from the
+# Actions tab. It refuses main; production deploys are not set up yet.
+#
+# The build job runs the branch's dependencies and gets no secrets. The deploy
+# job gets the Cloudflare secrets, and runs only the built site and a pinned
+# wrangler.
+name: Preview
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse main
+        if: github.ref_name == 'main'
+        run: |
+          echo "::error::Preview deploys refuse main; pick another branch."
+          exit 1
+
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter @arclightning/website build
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: website
+          path: apps/website/build
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      # One pinned wrangler for both steps. With no checkout there is no
+      # lockfile, so wrangler-action installs this version with npm.
+      WRANGLER_VERSION: 4.158.0
+    steps:
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: website
+          path: apps/website/build
+
+      - name: Create the Pages project if missing
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_PAGES_API_ACCOUNT_ID }}
+        run: |
+          if ! out=$(npx --yes "wrangler@$WRANGLER_VERSION" pages project create arclightning --production-branch=main 2>&1); then
+            echo "$out"
+            grep -qi "already exists" <<<"$out" || exit 1
+          fi
+
+      - name: Deploy
+        id: deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_PAGES_API_ACCOUNT_ID }}
+          wranglerVersion: ${{ env.WRANGLER_VERSION }}
+          packageManager: npm
+          command: pages deploy apps/website/build --project-name=arclightning --branch=${{ github.ref_name }}
+
+      - name: Summary
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment-url }}
+          ALIAS_URL: ${{ steps.deploy.outputs.pages-deployment-alias-url }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          {
+            echo "### Preview of \`$BRANCH\`"
+            echo
+            if [ -n "$ALIAS_URL" ]; then echo "- Branch: $ALIAS_URL"; fi
+            echo "- Deployment: ${DEPLOYMENT_URL:-not reported}"
+          } >> "$GITHUB_STEP_SUMMARY"
