@@ -51,6 +51,8 @@ can, print as `<kind>-<ULID>`, such as `t-01M5VDDD42HZQ1FEN49X80GBA5`.
 A short ID that is unique today can match a second record later. Write full IDs
 in files, evidence, links and scripts that outlive the command.
 
+<div id="project-initialization"></div>
+
 ## Project setup
 
 ### `arcl init`
@@ -205,6 +207,8 @@ instead of overwriting either version.
 See [Share the project workspace](/guides/workspace/) for the Git workflow and
 workspace layout.
 
+<div id="idea-commands"></div>
+
 ## Capture commands
 
 | Command                                        | Purpose                                         |
@@ -243,6 +247,8 @@ Promotion creates the record, links it and marks the capture `promoted` in
 one transaction. Repeating it with the same target returns the existing
 record; another target, or a discarded capture, fails with exit code `3`. A
 discarded capture cannot be updated. See [Captures](/guides/captures/).
+
+<div id="epics"></div>
 
 ## Spec commands
 
@@ -290,6 +296,8 @@ task's path and the blocker's, then the change. The modes differ:
 A plan file that does not parse, or names an unknown or ambiguous dependency,
 fails with exit code `3`. [Plans](/guides/plans/) describes the file format.
 
+<div id="milestones"></div>
+
 ### Phase commands
 
 | Command                                      | Purpose                              |
@@ -303,6 +311,8 @@ fails with exit code `3`. [Plans](/guides/plans/) describes the file format.
 
 `--position <N>` orders phases in their plan; `create` defaults it to `0`.
 See [Phases](/guides/phases/).
+
+<div id="task-management"></div>
 
 ## Task commands
 
@@ -821,6 +831,8 @@ and prints the response as JSON. It needs no server. A response with errors
 exits `3`. [GraphQL and REST API](/guides/api/) lists the root fields, the
 error codes and the query limits.
 
+<div id="api-only"></div>
+
 ## Web app
 
 | Command                      | Purpose                                             |
@@ -835,6 +847,8 @@ port and token. Outside a project it exits `3` before it binds. See
 [Web app](/guides/web-app/) for the views,
 [GraphQL and REST API](/guides/api/) for the server and
 [REST endpoints](/guides/rest/) for the endpoints.
+
+<div id="publishing-and-syncing-the-artifact"></div>
 
 ## Artifact commands
 

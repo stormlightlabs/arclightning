@@ -741,7 +741,8 @@ html:not(.js) .search-trigger {
 	line-height: 1.7;
 }
 .doc-content h2,
-.doc-content h3 {
+.doc-content h3,
+.doc-content div[id] {
 	scroll-margin-top: 6.5rem;
 }
 .doc-content h2 {

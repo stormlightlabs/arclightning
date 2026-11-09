@@ -57,7 +57,8 @@ arcl query --file query.graphql --variables '{"id": "7TR6"}' --operation Task
 The root fields are `record`, `capture`, `release`, `spec`, `plan`, `phase`,
 `task`, `note` and `gate`, each by full or short ID; `records`, with the
 filters `arcl list` takes; `ready`, with the filters `arcl ready` takes;
-`tree`, from an optional `root`, with `all`; `work`; `context(task:)`; and
+`tree`, from an optional `root`, with `all`; `work`, with `all` to include
+archived tasks; `context(task:)`; and
 `source(id:)`, a record's workspace file and its `revision`. Like
 `arcl show`, `record` also takes a gate ID, so it returns a union: select
 fields with `... on Record { title }` or `... on Gate { target }`. A task's
@@ -130,13 +131,16 @@ a browser cannot send the `X-Arcl-Token` header to another origin without a
 CORS preflight, and the server refuses every preflight without CORS headers.
 In the page mode, every change needs an `Origin` naming the server.
 
-`curl` retries until the server is listening and fails on an error status:
+This example writes the header to a file only you can read, since a token on
+the `curl` command line shows in `ps`. `printf` is a shell builtin, so it does
+not. `curl` retries until the server is listening and fails on an error status:
 
 ```sh
 export ARCL_SERVE_TOKEN=$(openssl rand -hex 32)
+(umask 077; printf 'X-Arcl-Token: %s\n' "$ARCL_SERVE_TOKEN" > token.header)
 arcl serve --api --port 4321 &
 curl --fail --retry 10 --retry-delay 1 --retry-connrefused \
-  -H "X-Arcl-Token: $ARCL_SERVE_TOKEN" -H 'Content-Type: application/json' \
+  -H @token.header -H 'Content-Type: application/json' \
   -d '{"query": "{ ready { id title } }"}' http://127.0.0.1:4321/graphql
 ```
 

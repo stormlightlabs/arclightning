@@ -85,10 +85,19 @@ import read Git's state, not the file text, so a record body can show a sample
 conflict.
 
 Switching branches imports the records the new branch adds or changes.
-Switching to a branch that lacks records synced elsewhere stops sync with status
-code `3`, since sync does not delete records. Run `arcl workspace export` to
-write those records back, then run sync again. Git shows the restored files as
-untracked on that branch.
+Switching to a branch that lacks records synced on another branch stops sync
+with status code `3`, since sync does not delete records. The database still
+holds those records, and the error names each file and how to write it back:
+
+```text
+error: invalid project or record: workspace file `captures/<capture-id>.md` was removed from the workspace; the workspace does not support hard deletion; `arcl workspace resolve --keep database captures/<capture-id>.md` writes it back
+```
+
+Run that command, or `arcl workspace export` to write every missing file at
+once, and sync runs again. Git shows the restored files as untracked. Do not
+commit them: they belong to the other branch, and committing them copies its
+records onto this one. Git refuses to switch back while they are untracked, so
+delete them first or switch with `git switch --force`.
 
 ## Check before you sync
 
@@ -109,8 +118,7 @@ that you have not staged. Use `--json` or `--plain` for scripts.
 ## Export the whole database
 
 Every command already writes its changes to the workspace. `export` writes
-the whole database again, such as after switching to a branch that lacks
-records:
+the whole database again:
 
 ```sh
 arcl workspace export
@@ -118,7 +126,9 @@ arcl workspace export
 
 Export leaves files unchanged when their bytes already match. It stops if a
 workspace file has changed since the last export instead of overwriting that
-file. Review the changes under `.arcl/workspace/`, then commit them.
+file. Review the changes under `.arcl/workspace/`, then commit them, except
+files restored after switching branches, as
+[Work with Git](#work-with-git) explains.
 
 ## Import the whole workspace
 

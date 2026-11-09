@@ -8,6 +8,14 @@ coding agents choose an output mode with a stable shape: `--json`, `--plain`
 or `--quiet`. Agents that speak MCP can use the [MCP server](/guides/mcp/)
 instead, which returns the same envelopes as typed tool results.
 
+<div id="give-an-agent-the-skill"></div>
+<div id="prime-each-session"></div>
+<div id="connect-the-mcp-server"></div>
+
+[Agent workflows](/guides/agents/) covers installing the skill and
+[priming each session](/guides/agents/#prime-each-session).
+[MCP server](/guides/mcp/#install-and-connect) covers connecting the server.
+
 ## Use versioned JSON
 
 Pass `--json` before or after the command:

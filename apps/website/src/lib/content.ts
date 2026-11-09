@@ -107,6 +107,24 @@ export function getRedirect(slug: string): string | undefined {
 	return Object.hasOwn(redirects, slug) ? redirects[slug] : undefined;
 }
 
+/**
+ * The HTML a retired URL serves. The script carries the URL fragment to the
+ * replacement page, so an old `#anchor` link still lands on its section; the
+ * meta refresh covers readers without JavaScript and drops the fragment.
+ */
+export function redirectPage(target: string): string {
+	const url = `/${target}/`;
+	return [
+		'<!doctype html>',
+		'<meta charset="utf-8">',
+		'<meta name="robots" content="noindex">',
+		`<link rel="canonical" href="${url}">`,
+		`<script>location.replace(${JSON.stringify(url)} + location.hash);</script>`,
+		`<meta http-equiv="refresh" content="0;url=${url}">`,
+		`<title>Moved to ${url}</title>`
+	].join('\n');
+}
+
 /** Find the pages immediately before and after a documentation page. */
 export function getAdjacentDocs(slug: string): { previous?: Doc; next?: Doc } {
 	const index = docs.findIndex((doc) => doc.slug === slug);
