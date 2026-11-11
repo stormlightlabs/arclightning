@@ -1,5 +1,5 @@
 //! The checks every request passes before it is routed: `Host`, the token,
-//! the method and `Origin`.
+//! the method and `Origin`. `GET /healthz` skips them all.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -9,13 +9,13 @@ use crate::answer::{Answer, Reply};
 use crate::routes::{Route, route, split_url};
 use crate::server::ServeError;
 
-/// The request header that carries the per-run token.
+/// The request header that carries the token.
 pub const TOKEN_HEADER: &str = "X-Arcl-Token";
 
 /// The query parameter that carries the token on the first page load.
 pub const TOKEN_QUERY: &str = "token";
 
-/// The fewest characters a token given to [`Server::bind_api`](crate::Server::bind_api)
+/// The fewest characters a token given to [`Server::bind_with`](crate::Server::bind_with)
 /// may have. It may hold only ASCII letters and digits.
 pub const MIN_TOKEN_CHARS: usize = 32;
 
@@ -30,24 +30,35 @@ pub(crate) struct Gate {
     /// `arcl serve --api` does: no page, and no `Origin` needed on a change
     /// that sends none.
     pub(crate) api_only: bool,
+    /// The `Host` values accepted beside `127.0.0.1:<port>` and
+    /// `localhost:<port>`, in lowercase, as [`allowed_host`] returns them.
+    pub(crate) allowed_hosts: Vec<String>,
     /// Whether a page load has used the query token.
     first_load_used: AtomicBool,
 }
 
 impl Gate {
     pub(crate) fn new(token: String, port: u16, api_only: bool) -> Self {
-        Self { token, port, api_only, first_load_used: AtomicBool::new(false) }
+        Self { token, port, api_only, allowed_hosts: Vec::new(), first_load_used: AtomicBool::new(false) }
     }
 
     /// Check the head of `incoming` and route it, or answer with the refusal.
     /// The body plays no part, so a refused request is never read. A refusal
     /// before the token is accepted closes the connection.
+    ///
+    /// `GET /healthz` passes with no `Host` or token check: a probe sends the
+    /// pod's address as `Host`, and the answer reveals nothing.
     pub(crate) fn admit(&self, incoming: &Incoming) -> Result<Route, Answer> {
         let (path, query) =
             split_url(&incoming.url).map_err(|message| Answer::closing(Reply::invalid_request(&message)))?;
         let query_token = token_in(&query);
         let route = match route(&path, query) {
             Route::Page if self.api_only => Route::NotFound,
+            Route::Health if incoming.method != "GET" => {
+                let reply = Reply::refusal(405, "method_not_allowed", "this path takes GET only");
+                return Err(Answer { allow: Some("GET"), ..Answer::json(reply) });
+            }
+            Route::Health => return Ok(Route::Health),
             route => route,
         };
         if self
@@ -70,6 +81,7 @@ impl Gate {
         let host_matches = incoming.host.as_deref().is_some_and(|host| {
             [format!("127.0.0.1:{}", self.port), format!("localhost:{}", self.port)]
                 .iter()
+                .chain(&self.allowed_hosts)
                 .any(|allowed| host.eq_ignore_ascii_case(allowed))
         });
         if !host_matches {
@@ -110,7 +122,8 @@ impl Gate {
     }
 
     /// Refuse a request with the wrong method for its route, or a mutation
-    /// whose `Origin` does not name the `Host`. The page mode also refuses a
+    /// whose `Origin` is neither `http://` and the `Host` nor `http://` or
+    /// `https://` and an allowed host. The page mode also refuses a
     /// mutation without `Origin`; the API-only mode lets the token stand for
     /// it, since a browser page cannot send the token header cross-origin
     /// without a CORS preflight the server never answers. A GraphQL query
@@ -129,11 +142,9 @@ impl Gate {
                         "forbidden",
                         "a change needs an Origin header naming this server",
                     )),
-                    Some(origin) if !origin.eq_ignore_ascii_case(&served) => Err(Reply::refusal(
-                        403,
-                        "forbidden",
-                        "the Origin header does not name this server",
-                    )),
+                    Some(origin) if !origin.eq_ignore_ascii_case(&served) && !self.allows_origin(origin) => Err(
+                        Reply::refusal(403, "forbidden", "the Origin header does not name this server"),
+                    ),
                     Some(_) => Ok(()),
                 }
             }
@@ -143,6 +154,16 @@ impl Gate {
             (_, "GET") => Ok(()),
             _ => Err(Reply::refusal(405, "method_not_allowed", "this path takes GET only")),
         }
+    }
+
+    /// Whether `origin` is `http://` or `https://` followed by an allowed
+    /// host, as a gateway in front of the server sends it.
+    fn allows_origin(&self, origin: &str) -> bool {
+        let origin = origin.to_ascii_lowercase();
+        let host = origin
+            .strip_prefix("http://")
+            .or_else(|| origin.strip_prefix("https://"));
+        host.is_some_and(|host| self.allowed_hosts.iter().any(|allowed| allowed == host))
     }
 }
 
@@ -177,6 +198,44 @@ impl Incoming {
             token: header(TOKEN_HEADER),
         }
     }
+}
+
+/// Check a `--allow-host` value, `host` or `host:port`, and return it in
+/// lowercase. The host is a DNS name or an IPv4 address of ASCII letters,
+/// digits, `.`, `-` and `_`, or an IPv6 address in brackets; the port is 1 to
+/// 65535. Anything else, such as a scheme, a path or user information, is
+/// refused with [`ServeError::AllowedHost`].
+pub(crate) fn allowed_host(value: &str) -> Result<String, ServeError> {
+    let refuse = || ServeError::AllowedHost(value.to_owned());
+    let (host_valid, port) = match value.strip_prefix('[') {
+        Some(rest) => {
+            let (address, after) = rest.split_once(']').ok_or_else(refuse)?;
+            let valid = !address.is_empty()
+                && address
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() || byte == b':' || byte == b'.');
+            let port = match after {
+                "" => None,
+                after => Some(after.strip_prefix(':').ok_or_else(refuse)?),
+            };
+            (valid, port)
+        }
+        None => {
+            let (host, port) = match value.split_once(':') {
+                Some((host, port)) => (host, Some(port)),
+                None => (value, None),
+            };
+            let valid = !host.is_empty()
+                && host.len() <= 253
+                && host
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'));
+            (valid, port)
+        }
+    };
+    let port_valid = port
+        .is_none_or(|port| port.bytes().all(|byte| byte.is_ascii_digit()) && matches!(port.parse::<u16>(), Ok(1..)));
+    if host_valid && port_valid { Ok(value.to_ascii_lowercase()) } else { Err(refuse()) }
 }
 
 /// Generate a token from the operating system's random source.

@@ -18,9 +18,11 @@
 //! lists the warnings its syncs gave in `warnings`, as objects with the
 //! `code` and `message` the CLI prints to stderr under `--json`.
 
+use std::ffi::OsString;
+
 use arcl_serve::{
     CapturePromotion, Completion, GraphqlRequest, Handoff, Mutations, NewCapture, NewPlan, NewSpec, NewTask, PlanInput,
-    Reads, RecordSourceEdit, Reply, ServeError, Server, TaskEdit, TaskStart,
+    Reads, RecordSourceEdit, Reply, ServeError, ServeOptions, Server, TaskEdit, TaskStart,
 };
 
 use super::graphql::run_query;
@@ -32,8 +34,37 @@ use super::*;
 /// long as it takes; the web app's user is waiting on a button instead.
 const LOCK_WAIT: Duration = Duration::from_secs(3);
 
-/// The environment variable that sets the token of `arcl serve --api`.
+/// The environment variable that sets the token of `arcl serve`, unless
+/// `--token-file` is given.
 const TOKEN_VARIABLE: &str = "ARCL_SERVE_TOKEN";
+
+/// Where a token the user supplied came from.
+#[derive(Debug, Eq, PartialEq)]
+enum TokenSource {
+    /// The `--token-file` at this path.
+    File(PathBuf),
+    /// [`TOKEN_VARIABLE`].
+    Variable,
+}
+
+impl TokenSource {
+    /// The source as startup output names it: the file's path or the
+    /// variable's name.
+    fn name(&self) -> String {
+        match self {
+            Self::File(path) => path.display().to_string(),
+            Self::Variable => TOKEN_VARIABLE.to_owned(),
+        }
+    }
+
+    /// The source as an error names it.
+    fn described(&self) -> String {
+        match self {
+            Self::File(path) => format!("the token in `{}`", path.display()),
+            Self::Variable => TOKEN_VARIABLE.to_owned(),
+        }
+    }
+}
 
 /// The endpoints, answering with the CLI's `--json` envelopes. `arcl web`
 /// runs the same reads and mutations for a claude.ai artifact.
@@ -282,37 +313,39 @@ impl Mutations for ServeApp {
     }
 }
 
-/// Bind the server, print its URL and serve until interrupted. The database
-/// opens first, so outside a project `serve` fails like other commands
-/// instead of serving endpoints that all fail.
+/// Bind the server, print its URL and serve until interrupted. With
+/// `--project`, the server runs in that directory, as if started there. The
+/// database opens first, so outside a project `serve` fails like other
+/// commands instead of serving endpoints that all fail.
 ///
-/// With `api`, the server answers only `/api` and `/graphql`, and its token
-/// is [`TOKEN_VARIABLE`] when that is set. The page mode always makes a new
-/// token and ignores the variable. A token from the variable is not printed.
-pub(super) fn exec_serve(port: Option<u16>, api: bool, renderer: &Renderer) -> anyhow::Result<()> {
+/// The token comes from `--token-file`, then [`TOKEN_VARIABLE`], and is never
+/// printed. Without either, each run mints one, and binding an address off
+/// loopback fails. With `--api`, the server answers only `/api`, `/graphql`
+/// and `/healthz`.
+pub(super) fn exec_serve(options: ServeArgs, renderer: &Renderer) -> anyhow::Result<()> {
+    let ServeArgs { port, api, bind, token_file, allow_hosts, project } = options;
+    if let Some(project) = &project {
+        std::env::set_current_dir(project)
+            .with_context(|| format!("could not enter the project directory `{}`", project.display()))?;
+    }
     drop(open_database().map_err(ApplicationError::from_command)?);
-    let (server, supplied) = if api {
-        let token = match std::env::var(TOKEN_VARIABLE) {
-            Ok(token) => Some(token),
-            Err(std::env::VarError::NotPresent) => None,
-            // Not UTF-8, so not ASCII letters and digits either.
-            Err(std::env::VarError::NotUnicode(_)) => Some(String::new()),
-        };
-        let supplied = token.is_some();
-        let server = Server::bind_api(port, token).map_err(|error| match error {
-            ServeError::WeakToken => anyhow::anyhow!("{TOKEN_VARIABLE} is not valid: {error}"),
-            error => anyhow::Error::new(error).context("could not start the web app server"),
-        })?;
-        (server, supplied)
-    } else {
-        (Server::bind(port).context("could not start the web app server")?, false)
+    let supplied = supplied_token(token_file.as_deref(), std::env::var_os(TOKEN_VARIABLE))?;
+    let (token, source) = supplied.map_or((None, None), |(token, source)| (Some(token), Some(source)));
+    let options = ServeOptions { address: bind, port, token, api_only: api, allowed_hosts: allow_hosts };
+    let server = Server::bind_with(options).map_err(|error| match (error, &source) {
+        (error @ ServeError::WeakToken, Some(source)) => anyhow::anyhow!("{} is not valid: {error}", source.described()),
+        (ServeError::OpenBind(address), _) => anyhow::anyhow!(
+            "--bind {address} needs a token from --token-file or {TOKEN_VARIABLE}; arcl serve mints one only on loopback"
+        ),
+        (error @ ServeError::AllowedHost(_), _) => anyhow::anyhow!("--allow-host: {error}"),
+        (error, _) => anyhow::Error::new(error).context("could not start the web app server"),
+    })?;
+    let name = source.as_ref().map(TokenSource::name);
+    let (url, token) = match &name {
+        Some(name) => (server.origin(), ServeToken::Supplied(name)),
+        None => (server.url(), ServeToken::Minted(server.token())),
     };
-    write_output(renderer.render_serve(&ServeStart {
-        url: &server.url(),
-        port: server.port(),
-        token: (!supplied).then(|| server.token()),
-        api,
-    })?)?;
+    write_output(renderer.render_serve(&ServeStart { url: &url, port: server.port(), token, api })?)?;
     let app = ServeApp::new(renderer.mode(), LOCK_WAIT);
     server.run(&app, &app).context("the web app server stopped")?;
     Ok(())
@@ -395,4 +428,86 @@ fn set_once(slot: &mut Option<String>, name: &str, value: &str) -> Result<(), St
     }
     *slot = Some(value.to_owned());
     Ok(())
+}
+
+/// The token the user supplied, and where from: the file at `token_file`
+/// when given, else `variable`, the value of [`TOKEN_VARIABLE`], when set.
+/// The file's trailing newline is dropped. A file that cannot be read, or
+/// holds nothing but whitespace, fails. A variable that is not UTF-8 counts
+/// as empty, which the server refuses as an invalid token.
+fn supplied_token(
+    token_file: Option<&Path>, variable: Option<OsString>,
+) -> anyhow::Result<Option<(String, TokenSource)>> {
+    if let Some(path) = token_file {
+        let content =
+            fs::read_to_string(path).with_context(|| format!("could not read the token file `{}`", path.display()))?;
+        let token = content.trim_end_matches(['\n', '\r']);
+        if token.trim().is_empty() {
+            anyhow::bail!("the token file `{}` is empty", path.display());
+        }
+        return Ok(Some((token.to_owned(), TokenSource::File(path.to_owned()))));
+    }
+    Ok(variable.map(|value| (value.into_string().unwrap_or_default(), TokenSource::Variable)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn supplied_token_reads_the_file_first() {
+        let directory = tempfile::tempdir().expect("a directory");
+        let path = directory.path().join("token");
+        let token = "Abc123".repeat(6);
+        for content in [
+            token.clone(),
+            format!("{token}\n"),
+            format!("{token}\r\n"),
+            format!("{token}\n\n"),
+        ] {
+            fs::write(&path, &content).expect("the file writes");
+            let supplied = supplied_token(Some(&path), Some(OsString::from("other"))).expect("a token");
+            assert_eq!(
+                supplied,
+                Some((token.clone(), TokenSource::File(path.clone()))),
+                "{content:?}"
+            );
+        }
+        // Only the line ending goes; other whitespace stays for the server to refuse.
+        fs::write(&path, format!("{token} \n")).expect("the file writes");
+        let supplied = supplied_token(Some(&path), None).expect("a token");
+        assert_eq!(supplied.map(|(token, _)| token), Some(format!("{token} ")));
+    }
+
+    #[test]
+    fn supplied_token_refuses_an_empty_or_missing_file() {
+        let directory = tempfile::tempdir().expect("a directory");
+        let path = directory.path().join("token");
+        for content in ["", "\n", "  \n", "\t\r\n"] {
+            fs::write(&path, content).expect("the file writes");
+            let error = supplied_token(Some(&path), Some(OsString::from("Abc123".repeat(6)))).expect_err(content);
+            assert_eq!(
+                error.to_string(),
+                format!("the token file `{}` is empty", path.display())
+            );
+        }
+        let missing = directory.path().join("missing");
+        let error = supplied_token(Some(&missing), None).expect_err("a missing file");
+        assert!(
+            error
+                .to_string()
+                .starts_with(&format!("could not read the token file `{}`", missing.display())),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn supplied_token_falls_back_to_the_variable() {
+        let token = "Abc123".repeat(6);
+        let supplied = supplied_token(None, Some(OsString::from(&token))).expect("a token");
+        assert_eq!(supplied, Some((token, TokenSource::Variable)));
+        let empty = supplied_token(None, Some(OsString::new())).expect("an empty token");
+        assert_eq!(empty, Some((String::new(), TokenSource::Variable)));
+        assert_eq!(supplied_token(None, None).expect("no token"), None);
+    }
 }

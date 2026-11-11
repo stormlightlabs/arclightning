@@ -1,22 +1,35 @@
-//! Local HTTP adapter for the Arc Lightning web app.
+//! HTTP adapter for the Arc Lightning web app.
 //!
-//! [`Server`] binds `127.0.0.1`, checks every request, serves the web app
-//! page embedded from `apps/web/build/index.html` for any path outside
-//! `/api` and `/graphql`, routes the read endpoints and GraphQL queries to a
-//! [`Reads`] implementation and the mutations to a [`Mutations`]
-//! implementation. Both answer with the CLI's JSON output.
+//! [`Server`] binds `127.0.0.1`, or the address [`ServeOptions`] names,
+//! checks every request, serves the web app page embedded from
+//! `apps/web/build/index.html` for any path outside `/api`, `/graphql` and
+//! `/healthz`, routes the read endpoints and GraphQL queries to a [`Reads`]
+//! implementation and the mutations to a [`Mutations`] implementation. Both
+//! answer with the CLI's JSON output.
 //!
-//! Every request needs a `Host` header naming the server and the per-run
-//! token in the [`TOKEN_HEADER`] header. The one exception is the first page
-//! load, which carries the token in the [`TOKEN_QUERY`] query parameter of the
+//! Every request needs a `Host` header naming the server and the token in
+//! the [`TOKEN_HEADER`] header. The one exception is the first page load,
+//! which carries the token in the [`TOKEN_QUERY`] query parameter of the
 //! printed URL; the server accepts a query token once, and never on an API
-//! path. A mutation also needs an `Origin` header naming the server. Reads
-//! take GET and mutations take POST; any other method is refused, so GET never
+//! path. The `Host` is `127.0.0.1:<port>`, `localhost:<port>`, or one of
+//! [`ServeOptions::allowed_hosts`]. A mutation also needs an `Origin` header
+//! naming the server: `http://` and the `Host`, or `http://` or `https://`
+//! and an allowed host, as a gateway that terminates TLS sends it. Reads take
+//! GET and mutations take POST; any other method is refused, so GET never
 //! changes state. `/graphql` takes POST only, and needs no `Origin`, since
 //! the schema has no mutations. Responses carry no CORS headers.
 //!
-//! [`Server::bind_api`] makes a server that answers only `/api` and
-//! `/graphql`, for scripts and other local tools. Any other path gets 404
+//! `GET /healthz` answers 200 `ok` with no `Host` or token check, for a
+//! liveness probe, which sends the pod's address as `Host`. `GET
+//! /api/version` answers `{"format_version": 1, "data": {"version"}}` with
+//! the crate version, after the usual checks.
+//!
+//! [`Server::bind_with`] refuses to mint a token for an address off
+//! loopback, since the CLI prints a minted token to its log. Such a server
+//! needs a token the caller supplies.
+//!
+//! [`Server::bind_api`] makes a server that answers only `/api`, `/graphql`
+//! and `/healthz`, for scripts and other local tools. Any other path gets 404
 //! once the `Host` and token checks pass, and there is no first page load, so
 //! no query token. The caller may choose the token, which needs at least
 //! [`MIN_TOKEN_CHARS`] characters, all ASCII letters and digits. A mutation
@@ -67,6 +80,7 @@
 //! | `GET /api/tasks/{id}/context`    | `arcl context <task-id>` |
 //! | `GET /api/tree`                  | `arcl tree`              |
 //! | `GET /api/work`                  | none; see below          |
+//! | `GET /api/version`               | `arcl --version`         |
 //! | `POST /api/tasks`                | `arcl task create`       |
 //! | `POST /api/tasks/{id}/update`    | `arcl task update`       |
 //! | `POST /api/tasks/{id}/start`     | `arcl task start`        |
@@ -144,4 +158,4 @@ pub use mutations::{
     RecordSourceEdit, TaskEdit, TaskStart, apply, operations,
 };
 pub use routes::{GraphqlRequest, Reads};
-pub use server::{ServeError, Server};
+pub use server::{ServeError, ServeOptions, Server};

@@ -1,5 +1,5 @@
 use std::io::{Read as _, Write as _};
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::net::{Shutdown, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
@@ -11,7 +11,7 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::sync::Notify;
 
 use crate::answer::{API_CSP, Answer, RETRY_AFTER_SECONDS};
-use crate::gate::{Gate, Incoming, TOKEN_BYTES, new_token};
+use crate::gate::{Gate, Incoming, TOKEN_BYTES, allowed_host, new_token};
 use crate::limits::{Limits, MAX_BODY_BYTES, WriteDeadline};
 use crate::mutations::mutate;
 use crate::routes::{Route, dispatch};
@@ -1664,4 +1664,252 @@ fn serve_answers_queued_reads_503_on_shutdown_without_running_them() {
     assert!(dropped.contains("server_stopping"), "{dropped}");
     assert_eq!(held.queries.load(Ordering::SeqCst), 0);
     assert!(done.recv_timeout(Duration::from_secs(2)).expect("run returns"));
+}
+
+/// The checks of a server behind a gateway that reaches it as `arcl:7410`
+/// and, over TLS, as `arcl.example.com`.
+fn hosted_gate() -> Gate {
+    let mut gate = Gate::new(TOKEN.to_owned(), PORT, false);
+    gate.allowed_hosts = vec!["arcl:7410".to_owned(), "arcl.example.com".to_owned()];
+    gate
+}
+
+/// A token [`Server::bind_with`] accepts.
+fn strong_token() -> String {
+    "A1".repeat(MIN_TOKEN_CHARS / 2)
+}
+
+/// Send `request` as it is on a new connection and read the response.
+fn exchange(port: u16, request: &str) -> String {
+    let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).expect("a connection");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .expect("a read timeout");
+    stream.write_all(request.as_bytes()).expect("a write");
+    response(stream)
+}
+
+#[test]
+fn serve_checks_allowed_hosts() {
+    for host in [
+        "arcl:7410",
+        "allowed_host",
+        "a.b-c_d",
+        "10.0.0.5:1",
+        "[::1]:7410",
+        "[fe80::1]",
+        "ARCL:65535",
+    ] {
+        let expected = host.to_ascii_lowercase();
+        assert_eq!(allowed_host(host).expect(host), expected);
+    }
+    for bad in [
+        "",
+        ":7410",
+        "arcl:",
+        "arcl:0",
+        "arcl:65536",
+        "arcl:+1",
+        "arcl:7410:1",
+        "http://arcl",
+        "arcl/path",
+        "user@arcl",
+        "arcl 7410",
+        "[::1",
+        "[]",
+        "[::1]7410",
+        "[zz]",
+    ] {
+        assert!(matches!(allowed_host(bad), Err(ServeError::AllowedHost(_))), "{bad:?}");
+    }
+}
+
+#[test]
+fn serve_accepts_an_allowed_host() {
+    for host in [
+        "arcl:7410",
+        "ARCL:7410",
+        "arcl.example.com",
+        &format!("127.0.0.1:{PORT}"),
+    ] {
+        let incoming = Incoming { host: Some(host.to_owned()), ..get("/api/tree", Some(TOKEN)) };
+        assert_eq!(
+            text(answered(&hosted_gate(), &incoming)),
+            (200, "tree".to_owned()),
+            "{host}"
+        );
+    }
+    for host in ["arcl", "arcl:7411", "evil.example", "arcl.example.com:443"] {
+        let incoming = Incoming { host: Some(host.to_owned()), ..get("/api/tree", Some(TOKEN)) };
+        let answer = answered(&hosted_gate(), &incoming);
+        assert_eq!(answer.status, 403, "{host}");
+        assert_eq!(error_code(&answer), "forbidden");
+    }
+    let tokenless = Incoming { host: Some("arcl:7410".to_owned()), ..get("/api/tree", None) };
+    assert_eq!(answered(&hosted_gate(), &tokenless).status, 401);
+}
+
+#[test]
+fn serve_accepts_an_origin_naming_an_allowed_host() {
+    let park = |host: &str, origin: &str| {
+        let incoming = Incoming {
+            host: Some(host.to_owned()),
+            origin: Some(origin.to_owned()),
+            ..post("/api/tasks/arcl-t-1/park")
+        };
+        answered(&hosted_gate(), &incoming).status
+    };
+    for (host, origin) in [
+        ("arcl:7410", "http://arcl:7410"),
+        ("arcl:7410", "https://arcl:7410"),
+        ("arcl:7410", "https://arcl.example.com"),
+        ("arcl:7410", "HTTPS://ARCL.EXAMPLE.COM"),
+        (&format!("127.0.0.1:{PORT}"), "http://arcl:7410"),
+        (&format!("127.0.0.1:{PORT}"), &format!("http://127.0.0.1:{PORT}")),
+    ] {
+        assert_eq!(park(host, origin), 200, "{host} {origin}");
+    }
+    for (host, origin) in [
+        ("arcl:7410", "http://evil.example"),
+        ("arcl:7410", "https://arcl.example.com:8443"),
+        ("arcl:7410", "ftp://arcl:7410"),
+        ("arcl:7410", "http://arcl:7410/"),
+        ("arcl:7410", "null"),
+        (&format!("127.0.0.1:{PORT}"), &format!("https://127.0.0.1:{PORT}")),
+    ] {
+        assert_eq!(park(host, origin), 403, "{host} {origin}");
+    }
+}
+
+#[test]
+fn serve_answers_the_version() {
+    for gate in [gate(), api_gate(), hosted_gate()] {
+        let answer = answered(&gate, &get("/api/version", Some(TOKEN)));
+        assert_eq!(answer.status, 200);
+        assert_eq!(answer.content_type, "application/json");
+        let body: serde_json::Value = serde_json::from_slice(&answer.body).expect("a JSON body");
+        assert_eq!(body["format_version"], 1);
+        let version = body["data"]["version"].as_str().expect("a version");
+        assert_eq!(version, env!("CARGO_PKG_VERSION"));
+        assert!((1..=64).contains(&version.len()), "{version}");
+        assert!(
+            version
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b".+_-".contains(&byte)),
+            "{version}"
+        );
+    }
+    assert_eq!(answered(&gate(), &get("/api/version", None)).status, 401);
+    let foreign = Incoming { host: Some("evil.example".to_owned()), ..get("/api/version", Some(TOKEN)) };
+    assert_eq!(answered(&gate(), &foreign).status, 403);
+    let posted = answered(
+        &gate(),
+        &Incoming { method: "POST".to_owned(), ..get("/api/version", Some(TOKEN)) },
+    );
+    assert_eq!(posted.status, 405);
+    assert!(posted.headers().contains(&("Allow", "GET")));
+}
+
+#[test]
+fn serve_answers_health_without_a_token_or_host() {
+    for gate in [gate(), api_gate(), hosted_gate()] {
+        for host in [None, Some("10.1.2.3:7410"), Some("evil.example")] {
+            let incoming = Incoming { host: host.map(str::to_owned), ..get("/healthz", None) };
+            let answer = answered(&gate, &incoming);
+            assert_eq!(answer.status, 200, "{host:?}");
+            assert_eq!(answer.content_type, "text/plain; charset=utf-8");
+            assert_eq!(answer.body, b"ok");
+        }
+        let posted = answered(&gate, &Incoming { method: "POST".to_owned(), ..get("/healthz", None) });
+        assert_eq!(posted.status, 405);
+        assert!(posted.headers().contains(&("Allow", "GET")));
+    }
+    // Only the exact path skips the checks.
+    for url in ["/healthz/", "/healthz/x", "/api/healthz"] {
+        assert_eq!(answered(&gate(), &get(url, None)).status, 401, "{url}");
+    }
+}
+
+#[test]
+fn serve_refuses_to_mint_a_token_off_loopback() {
+    for address in [IpAddr::V4(Ipv4Addr::UNSPECIFIED), IpAddr::V6(Ipv6Addr::UNSPECIFIED)] {
+        for api_only in [false, true] {
+            let options = ServeOptions { address, api_only, ..ServeOptions::default() };
+            let error = Server::bind_with(options).err().expect("a refusal");
+            assert!(
+                matches!(error, ServeError::OpenBind(refused) if refused == address),
+                "{error}"
+            );
+            assert!(error.to_string().contains("needs a token you supply"), "{error}");
+        }
+    }
+    let loopback = Server::bind_with(ServeOptions::default()).expect("a server");
+    assert_eq!(loopback.token().len(), TOKEN_BYTES * 2);
+    assert_eq!(loopback.origin(), format!("http://127.0.0.1:{}", loopback.port()));
+}
+
+#[test]
+fn serve_binds_a_chosen_address_with_a_supplied_token() {
+    let options = ServeOptions {
+        address: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+        token: Some(strong_token()),
+        ..ServeOptions::default()
+    };
+    let server = Server::bind_with(options).expect("a server");
+    assert_eq!(server.token(), strong_token());
+    assert_eq!(server.origin(), format!("http://0.0.0.0:{}", server.port()));
+    assert_eq!(
+        server.url(),
+        format!("http://0.0.0.0:{}/?token={}", server.port(), strong_token())
+    );
+
+    let weak = ServeOptions { token: Some("short".to_owned()), ..ServeOptions::default() };
+    assert!(matches!(Server::bind_with(weak), Err(ServeError::WeakToken)));
+    let malformed = ServeOptions { allowed_hosts: vec!["http://arcl".to_owned()], ..ServeOptions::default() };
+    let error = Server::bind_with(malformed).err().expect("a refusal");
+    assert_eq!(error.to_string(), "`http://arcl` is not a host or host:port");
+}
+
+#[test]
+fn serve_answers_a_gateway_over_tcp() {
+    let options = ServeOptions {
+        address: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+        token: Some(strong_token()),
+        allowed_hosts: vec!["arcl".to_owned()],
+        ..ServeOptions::default()
+    };
+    let server = Server::bind_with(options).expect("a server");
+    let port = server.port();
+    thread::spawn(move || server.run_until(&Echo, &Echo, std::future::pending));
+    let token = strong_token();
+    let request = |head: &str| exchange(port, &format!("{head}\r\nConnection: close\r\n\r\n"));
+
+    let page = request(&format!("GET /work HTTP/1.1\r\nHost: arcl\r\n{TOKEN_HEADER}: {token}"));
+    assert!(page.starts_with("HTTP/1.1 200"), "{page}");
+    assert!(page.to_ascii_lowercase().contains("content-type: text/html"), "{page}");
+    let read = request(&format!(
+        "GET /api/tree HTTP/1.1\r\nHost: arcl\r\n{TOKEN_HEADER}: {token}"
+    ));
+    assert!(read.starts_with("HTTP/1.1 200") && read.ends_with("tree"), "{read}");
+    let park = request(&format!(
+        "POST /api/tasks/arcl-t-1/park HTTP/1.1\r\nHost: arcl\r\n{TOKEN_HEADER}: {token}\r\nOrigin: http://arcl\r\nContent-Length: 0"
+    ));
+    assert!(
+        park.starts_with("HTTP/1.1 200") && park.ends_with("park arcl-t-1"),
+        "{park}"
+    );
+    let version = request(&format!(
+        "GET /api/version HTTP/1.1\r\nHost: arcl\r\n{TOKEN_HEADER}: {token}"
+    ));
+    assert!(version.starts_with("HTTP/1.1 200"), "{version}");
+    assert!(version.contains(r#""version":""#), "{version}");
+
+    let tokenless = request("GET /api/tree HTTP/1.1\r\nHost: arcl");
+    assert!(tokenless.starts_with("HTTP/1.1 401"), "{tokenless}");
+    let foreign = request(&format!(
+        "GET /api/tree HTTP/1.1\r\nHost: other\r\n{TOKEN_HEADER}: {token}"
+    ));
+    assert!(foreign.starts_with("HTTP/1.1 403"), "{foreign}");
+    let health = request("GET /healthz HTTP/1.1\r\nHost: 10.1.2.3:7410");
+    assert!(health.starts_with("HTTP/1.1 200") && health.ends_with("ok"), "{health}");
 }

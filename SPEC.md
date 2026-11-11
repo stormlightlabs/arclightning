@@ -279,25 +279,64 @@ give the same page, and `--output` writes it to a file.
 
 `arcl serve` runs the planning and execution workflow in the browser. It binds
 to `127.0.0.1` on an ephemeral port by default, prints the URL, and accepts
-`--port` to pin one. Every request needs a matching `Host` header, which
-stops DNS rebinding. Every request also needs the per-run token in a request
-header, never a cookie, and in no query string after the first page load.
+`--port` to pin one and `--bind` to choose the address. Every request needs a
+matching `Host` header, which stops DNS rebinding. Every request also needs
+the token in a request header, never a cookie, and in no query string after
+the first page load.
 Mutations need a matching `Origin`. `POST /graphql` runs read-only GraphQL
 queries and needs no `Origin`. The server sends no CORS headers and never
 changes state on GET. The header token and the `Origin` check stop other local
 pages, including those on other `127.0.0.1` ports, from driving it.
 
 `arcl serve --api` serves `/graphql` and `/api` without the page, for scripts
-and other local tools. It binds `127.0.0.1` and checks `Host` and the token
-header on every request. Any other path gets 404, and a token in a query
-string gets 401. Its token comes from `ARCL_SERVE_TOKEN` when that is set: at
-least 32 characters, ASCII letters and digits only, or startup fails with an
-error naming the rule. Without it, and always in the page mode, each run makes
-a new token. `--json` prints one startup line with the URL, port and token; a
-token from `ARCL_SERVE_TOKEN` is left out of every output. Under `--api`, a
-mutation without `Origin` runs on the token alone, and one with a mismatched
-`Origin` is refused. A browser page cannot send the token header cross-origin
-without a CORS preflight, which the server refuses.
+and other local tools. It checks `Host` and the token header on every
+request. Any other path gets 404, and a token in a query string gets 401.
+Under `--api`, a mutation without `Origin` runs on the token alone, and one
+with a mismatched `Origin` is refused. A browser page cannot send the token
+header cross-origin without a CORS preflight, which the server refuses.
+
+The token comes from `--token-file <path>`, then `ARCL_SERVE_TOKEN`, in both
+modes: at least 32 characters, ASCII letters and digits only. The file's
+trailing newline is dropped. A missing or empty file, or a token that breaks
+the rule, fails the start with exit 1 and an error naming the source. Without
+either, each run makes a new token. `--json` prints one startup line with the
+URL, port and token. A supplied token is left out of every output, the URL
+included, and human output names its source.
+
+`GET /api/version` answers `{"format_version": 1, "data": {"version"}}` with
+arcl's version, and needs the token. `GET /healthz` answers 200 `ok` with no
+token and no `Host` check, for a liveness probe that sends the pod's address
+as `Host`.
+
+#### Behind a gateway
+
+`arcl serve` can run as its own service behind a gateway that holds the
+token and sends it in `X-Arcl-Token`:
+
+```sh
+cd /work/repo && arcl init
+arcl serve --bind 0.0.0.0 --port 7410 --token-file /run/arcl/token \
+  --allow-host arcl:7410 --project /work/repo
+```
+
+- `--bind <addr>` listens on an IP address, `127.0.0.1` by default. An
+  address off loopback needs a token from `--token-file` or
+  `ARCL_SERVE_TOKEN`; without one `arcl serve` refuses to start, since a
+  minted token is printed to the log.
+- `--allow-host <host[:port]>`, repeatable, adds `Host` values to
+  `127.0.0.1:<port>` and `localhost:<port>`, compared exactly, ignoring
+  case. `arcl:7410` does not allow `Host: arcl`; pass both when a gateway may
+  drop the port.
+- A change needs an `Origin` of `http://` and the `Host`, or `http://` or
+  `https://` and an allowed host. A gateway that terminates TLS for
+  `https://arcl.example.com` adds `--allow-host arcl.example.com`.
+- `--project <dir>` serves the project that holds `dir`. The checkout must be
+  writable: mutations write `.arcl/workspace` files and the sync lock, and
+  `arcl.db` lives in `.arcl/` beside them. arcl keeps no cache elsewhere.
+  `arcl init` builds `arcl.db` from a fresh checkout.
+- `arcl serve` never commits. Reads do not sync, so run `arcl workspace sync`
+  after pulling. Another process commits and pushes the files
+  `arcl workspace status` lists.
 
 The server is a thin HTTP adapter over the Rust application operations. Its
 `GET /api` reads run named GraphQL queries and map each result into the read's

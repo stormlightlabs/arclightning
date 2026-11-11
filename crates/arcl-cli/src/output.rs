@@ -261,6 +261,16 @@ impl StatusMark {
     }
 }
 
+/// The token of `arcl serve`, as its startup output treats it.
+#[derive(Clone, Copy, Debug)]
+pub enum ServeToken<'a> {
+    /// Minted for this run, and printed so a client can send it.
+    Minted(&'a str),
+    /// Supplied from this source, such as `ARCL_SERVE_TOKEN` or a file's
+    /// path, and never printed.
+    Supplied(&'a str),
+}
+
 /// Output failures that can occur before the application boundary adds context.
 #[derive(Debug, Error)]
 pub enum OutputError {
@@ -1240,27 +1250,38 @@ impl Renderer {
     }
 
     /// Render what `arcl serve` prints once it listens. Plain and quiet
-    /// output print the URL alone, since it carries the token, and under
+    /// output print the URL alone, since it carries a minted token, and under
     /// `--api` the URL and the token on two lines. JSON output is one line
-    /// with the URL, port and token. A token from `ARCL_SERVE_TOKEN` is
-    /// never printed, so it stays out of logs: human output says the
-    /// variable's token is in use, plain and quiet output print the URL
-    /// alone, and JSON output leaves out `token`.
+    /// with the URL, port and token. A supplied token is never printed, so
+    /// it stays out of logs: human output names its source, plain and quiet
+    /// output print the URL alone, and JSON output leaves out `token`. The
+    /// URL then carries no token.
     pub fn render_serve(&self, start: &ServeStart<'_>) -> Result<Option<String>, OutputError> {
         let ServeStart { url, port, token, api } = *start;
+        let what = if api { "the Arc Lightning API" } else { "Arc Lightning" };
         let message = match (self.mode, api, token) {
-            (OutputMode::Human, false, _) => format!("Serving Arc Lightning at {url}\nPress Ctrl-C to stop."),
-            (OutputMode::Human, true, Some(token)) => {
+            (OutputMode::Human, false, ServeToken::Minted(_)) => {
+                format!("Serving Arc Lightning at {url}\nPress Ctrl-C to stop.")
+            }
+            (OutputMode::Human, true, ServeToken::Minted(token)) => {
                 format!("Serving the Arc Lightning API at {url}\nToken: {token}\nPress Ctrl-C to stop.")
             }
-            (OutputMode::Human, true, None) => format!(
-                "Serving the Arc Lightning API at {url}\nToken: the one in ARCL_SERVE_TOKEN\nPress Ctrl-C to stop."
-            ),
-            (OutputMode::Plain | OutputMode::Quiet, true, Some(token)) => format!("{url}\n{token}"),
+            (OutputMode::Human, _, ServeToken::Supplied(source)) => {
+                format!("Serving {what} at {url}\nToken: the one in {source}\nPress Ctrl-C to stop.")
+            }
+            (OutputMode::Plain | OutputMode::Quiet, true, ServeToken::Minted(token)) => format!("{url}\n{token}"),
             (OutputMode::Plain | OutputMode::Quiet, _, _) => url.to_owned(),
             (OutputMode::Json, _, _) => serde_json::to_string(&Envelope {
                 format_version: FORMAT_VERSION,
-                data: ServeData { status: "serving", url, port, token },
+                data: ServeData {
+                    status: "serving",
+                    url,
+                    port,
+                    token: match token {
+                        ServeToken::Minted(token) => Some(token),
+                        ServeToken::Supplied(_) => None,
+                    },
+                },
             })?,
         };
         Ok(Some(self.style(message)))
@@ -1495,9 +1516,9 @@ pub struct ServeStart<'a> {
     pub url: &'a str,
     /// The port the server listens on.
     pub port: u16,
-    /// The token every request sends in `X-Arcl-Token`, or `None` when it
-    /// came from `ARCL_SERVE_TOKEN` and must not be printed.
-    pub token: Option<&'a str>,
+    /// The token every request sends in `X-Arcl-Token`, or where it came
+    /// from when it must not be printed.
+    pub token: ServeToken<'a>,
     /// Whether the server answers only `/api` and `/graphql`.
     pub api: bool,
 }
@@ -1542,7 +1563,7 @@ struct ServeData<'a> {
     status: &'static str,
     url: &'a str,
     port: u16,
-    /// Left out when the token came from `ARCL_SERVE_TOKEN`.
+    /// Left out when the token was supplied.
     #[serde(skip_serializing_if = "Option::is_none")]
     token: Option<&'a str>,
 }

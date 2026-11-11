@@ -15,6 +15,10 @@ pub(crate) const RETRY_AFTER_SECONDS: &str = "1";
 /// The Content-Security-Policy of every API response: a JSON body loads nothing.
 pub(crate) const API_CSP: &str = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 
+/// The version `GET /api/version` reports: arcl's, since the crates share
+/// the workspace version.
+pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// The page served when `apps/web` was not built before `arcl` was compiled.
 const NOT_BUILT_PAGE: &str = include_str!("not_built.html");
 
@@ -197,5 +201,21 @@ pub(crate) fn page() -> Answer {
         retry_after: None,
         csp: PAGE_CSP.as_str(),
         close: false,
+    }
+}
+
+/// Answer `GET /api/version` with `{"format_version": 1, "data":
+/// {"version"}}`.
+pub(crate) fn version() -> Answer {
+    let body = serde_json::json!({ "format_version": 1, "data": { "version": VERSION } });
+    Answer::json(Reply::success(body.to_string()))
+}
+
+/// Answer `GET /healthz` with the plain text `ok`.
+pub(crate) fn health() -> Answer {
+    Answer {
+        content_type: "text/plain; charset=utf-8",
+        body: b"ok".to_vec(),
+        ..Answer::json(Reply::success(String::new()))
     }
 }
