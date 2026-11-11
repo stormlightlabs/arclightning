@@ -132,6 +132,6 @@ Ships the agent workflow milestone. `arcl setup` installs the skill, adds the ar
 
 The MCP server's `list` tool filters by priority, release, spec, plan, phase and parent, and a new `prime` tool returns the primer. `arcl query` runs read-only GraphQL, `arcl serve` answers GraphQL at `/graphql` and REST reads under `/api`, and `arcl serve --api` serves those without the web app. For hosting, `arcl serve` takes `--bind`, `--token-file` or `ARCL_SERVE_TOKEN`, `--allow-host` and `--project`, answers `GET /healthz` without a token and reports the version at `GET /api/version`.
 
-The workspace moves to format 6 and the database to schema 9. Claiming, noting, gating or completing a task, or `capture create --from`, writes a format arcl 0.3.0 cannot read, so upgrade every clone and CI job first. arcl refuses a database or workspace written by a newer version, with an error that names both versions.
+arcl reads and writes workspace formats up to 6, and the database moves to schema 9. Claiming, noting, gating or completing a task, or `capture create --from`, writes a format arcl 0.3.0 cannot read, so upgrade every clone and CI job first. arcl refuses a database or workspace written by a newer version, with an error that names both versions.
 
 The website is rebuilt with the full documentation, and any branch except `main` can be deployed as a Cloudflare Pages preview from the Actions tab. The web app copies record IDs, marks Edit and Edit file with icons and shows no readiness on closed tasks. "Prepare and tag v0.4.0" covers the release work itself.
