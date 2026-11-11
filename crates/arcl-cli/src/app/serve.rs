@@ -331,6 +331,7 @@ pub(super) fn exec_serve(options: ServeArgs, renderer: &Renderer) -> anyhow::Res
     drop(open_database().map_err(ApplicationError::from_command)?);
     let supplied = supplied_token(token_file.as_deref(), std::env::var_os(TOKEN_VARIABLE))?;
     let (token, source) = supplied.map_or((None, None), |(token, source)| (Some(token), Some(source)));
+    let other_hosts_refused = bind.is_unspecified() && allow_hosts.is_empty();
     let options = ServeOptions { address: bind, port, token, api_only: api, allowed_hosts: allow_hosts };
     let server = Server::bind_with(options).map_err(|error| match (error, &source) {
         (error @ ServeError::WeakToken, Some(source)) => anyhow::anyhow!("{} is not valid: {error}", source.described()),
@@ -345,7 +346,8 @@ pub(super) fn exec_serve(options: ServeArgs, renderer: &Renderer) -> anyhow::Res
         Some(name) => (server.origin(), ServeToken::Supplied(name)),
         None => (server.url(), ServeToken::Minted(server.token())),
     };
-    write_output(renderer.render_serve(&ServeStart { url: &url, port: server.port(), token, api })?)?;
+    let start = ServeStart { url: &url, port: server.port(), token, api, other_hosts_refused };
+    write_output(renderer.render_serve(&start)?)?;
     let app = ServeApp::new(renderer.mode(), LOCK_WAIT);
     server.run(&app, &app).context("the web app server stopped")?;
     Ok(())

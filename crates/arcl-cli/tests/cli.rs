@@ -4395,9 +4395,10 @@ fn serve_api_takes_its_token_from_the_environment() {
     let data = started["data"].as_object().expect("an object");
     let mut keys = data.keys().map(String::as_str).collect::<Vec<_>>();
     keys.sort_unstable();
-    assert_eq!(keys, ["port", "status", "url"]);
+    assert_eq!(keys, ["port", "status", "token_source", "url"]);
     assert_eq!(started["format_version"], 1);
     assert_eq!(data["status"], "serving");
+    assert_eq!(data["token_source"], "ARCL_SERVE_TOKEN");
 }
 
 #[test]
@@ -4464,6 +4465,7 @@ fn serve_page_mode_takes_the_token_variable() {
     let (served, started) = Served::start_json(directory.path(), &[], Some(&chosen));
     assert_eq!(served.token, chosen);
     assert!(started["data"].get("token").is_none(), "{started}");
+    assert_eq!(started["data"]["token_source"], "ARCL_SERVE_TOKEN");
     // A supplied token stays out of the URL too.
     assert_eq!(started["data"]["url"], format!("http://127.0.0.1:{}", served.port));
     assert_eq!(served.read("/api/ready").0, 200);
@@ -4472,11 +4474,16 @@ fn serve_page_mode_takes_the_token_variable() {
     drop(served);
 
     let human = serve_startup(directory.path(), &["serve"], Some(&chosen), 3);
-    assert!(
-        human[0].starts_with("Serving Arc Lightning at http://127.0.0.1:"),
+    let origin = human[0]
+        .strip_prefix("Serving Arc Lightning at ")
+        .expect("the first line names the origin");
+    assert!(origin.starts_with("http://127.0.0.1:"), "{human:?}");
+    assert_eq!(
+        human[1],
+        format!("Open {origin}/?token=<token> with the token from ARCL_SERVE_TOKEN"),
         "{human:?}"
     );
-    assert_eq!(human[1], "Token: the one in ARCL_SERVE_TOKEN", "{human:?}");
+    assert_eq!(human[2], "Press Ctrl-C to stop.", "{human:?}");
     assert!(human.iter().all(|line| !line.contains(&chosen)), "{human:?}");
 }
 
@@ -8764,20 +8771,35 @@ fn serve_takes_its_token_from_a_file_before_the_variable() {
         let (served, started) =
             Served::start_json_knowing(directory.path(), &flags, Some(&variable), Some(&file_token));
         assert!(started["data"].get("token").is_none(), "{started}");
+        assert_eq!(started["data"]["token_source"], path_text, "{started}");
         assert_eq!(served.read("/api/ready").0, 200);
         let variable_header = format!("X-Arcl-Token: {variable}");
         assert_eq!(served.get("/api/ready", &[served.host(), variable_header]).0, 401);
     }
 
     let human = serve_startup(directory.path(), &["serve", "--token-file", path_text], None, 3);
-    assert_eq!(human[1], format!("Token: the one in {path_text}"), "{human:?}");
+    let origin = human[0]
+        .strip_prefix("Serving Arc Lightning at ")
+        .expect("the first line names the origin");
+    assert_eq!(
+        human[1],
+        format!("Open {origin}/?token=<token> with the token from {path_text}"),
+        "{human:?}"
+    );
+    let api = serve_startup(
+        directory.path(),
+        &["serve", "--api", "--token-file", path_text],
+        None,
+        3,
+    );
+    assert_eq!(api[1], format!("Token: the one in {path_text}"), "{api:?}");
     let plain = serve_startup(
         directory.path(),
         &["--plain", "serve", "--api", "--token-file", path_text],
         None,
         1,
     );
-    for lines in [human, plain] {
+    for lines in [human, api, plain] {
         assert!(lines.iter().all(|line| !line.contains(&file_token)), "{lines:?}");
     }
 }
@@ -8855,7 +8877,8 @@ fn serve_answers_a_gateway_on_an_allowed_host() {
     ];
     let (served, started) = Served::start_json_knowing(directory.path(), &flags, None, Some(&token));
     assert_eq!(served.port, port);
-    assert_eq!(started["data"]["url"], format!("http://0.0.0.0:{port}"));
+    // `0.0.0.0` is not a name a browser sends, so the URL names 127.0.0.1.
+    assert_eq!(started["data"]["url"], format!("http://127.0.0.1:{port}"));
     let host = format!("Host: {allowed}");
     let with_token = format!("X-Arcl-Token: {token}");
 
@@ -8885,6 +8908,41 @@ fn serve_answers_a_gateway_on_an_allowed_host() {
     );
     let (status, body) = served.get("/healthz", &["Host: 10.1.2.3:7410".to_owned()]);
     assert_eq!((status, body.as_str()), (200, "ok"));
+}
+
+#[test]
+fn serve_names_a_working_url_for_a_wildcard_bind() {
+    let directory = initialized_directory();
+    let token = "Wildcard1".repeat(4);
+    let path = directory.path().join("token");
+    fs::write(&path, format!("{token}\n")).expect("the token file writes");
+    let path_text = path.to_str().expect("a UTF-8 path");
+    let flags = ["serve", "--bind", "0.0.0.0", "--token-file", path_text];
+
+    let human = serve_startup(directory.path(), &flags, None, 4);
+    let origin = human[0]
+        .strip_prefix("Serving Arc Lightning at ")
+        .expect("the first line names the origin");
+    assert!(origin.starts_with("http://127.0.0.1:"), "{human:?}");
+    assert_eq!(
+        human[2], "To reach it by another name, pass that name to --allow-host",
+        "{human:?}"
+    );
+    assert_eq!(human[3], "Press Ctrl-C to stop.", "{human:?}");
+
+    // With --allow-host given, there is no hint.
+    let allowed = [&flags[..], &["--allow-host", "arcl"]].concat();
+    let human = serve_startup(directory.path(), &allowed, None, 3);
+    assert_eq!(human[2], "Press Ctrl-C to stop.", "{human:?}");
+
+    let (served, _) = Served::start_json_knowing(
+        directory.path(),
+        &["--bind", "0.0.0.0", "--token-file", path_text],
+        None,
+        Some(&token),
+    );
+    let (status, page) = served.get(&format!("/?token={token}"), &[served.host()]);
+    assert_eq!(status, 200, "{page}");
 }
 
 #[test]

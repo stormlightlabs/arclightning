@@ -22,7 +22,7 @@ use thiserror::Error;
 use tokio::sync::{Semaphore, oneshot};
 
 use crate::answer::{Answer, Reply, health, page, version};
-use crate::gate::{Gate, Incoming, MIN_TOKEN_CHARS, TOKEN_QUERY, allowed_host, check_token, new_token};
+use crate::gate::{Gate, Incoming, MIN_TOKEN_CHARS, TOKEN_QUERY, allowed_host, check_token, new_token, reachable};
 use crate::limits::{Limits, SHUTDOWN_GRACE, WriteDeadline, declares_too_much, read_body};
 use crate::mutations::{Mutations, mutate};
 use crate::routes::{Reads, Route, Write, dispatch};
@@ -70,8 +70,9 @@ pub struct ServeOptions {
     pub token: Option<String>,
     /// Whether to answer only `/api`, `/graphql` and `/healthz`.
     pub api_only: bool,
-    /// `Host` values to accept beside `127.0.0.1:<port>` and
-    /// `localhost:<port>`, each `host` or `host:port`, compared ignoring
+    /// `Host` values to accept beside `127.0.0.1:<port>`,
+    /// `localhost:<port>` and `<address>:<port>` (`[::1]:<port>` for `::`),
+    /// each `host` or `host:port`, compared ignoring
     /// case. A change may also send `http://` or `https://` and one of them
     /// as its `Origin`.
     pub allowed_hosts: Vec<String>,
@@ -136,8 +137,7 @@ impl Server {
             None => new_token()?,
         };
         let (listener, port) = listen(address, port)?;
-        let mut gate = Gate::new(token, port, api_only);
-        gate.allowed_hosts = allowed_hosts;
+        let gate = Gate::new(token, address, port, api_only, allowed_hosts);
         Ok(Self { listener, address, gate, limits: Limits::default() })
     }
 
@@ -151,10 +151,16 @@ impl Server {
         &self.gate.token
     }
 
-    /// The server's origin, such as `http://127.0.0.1:4321`, naming the
-    /// address it listens on.
+    /// The address the server listens on, which may be `0.0.0.0` or `::`.
+    pub const fn address(&self) -> IpAddr {
+        self.address
+    }
+
+    /// The server's origin, such as `http://127.0.0.1:4321`. It names the
+    /// address the server listens on, or for `0.0.0.0` and `::`,
+    /// `127.0.0.1` and `[::1]`, so the `Host` a browser sends for it passes.
     pub fn origin(&self) -> String {
-        format!("http://{}", SocketAddr::new(self.address, self.gate.port))
+        format!("http://{}", SocketAddr::new(reachable(self.address), self.gate.port))
     }
 
     /// The URL to open, with the token for the first page load. A server

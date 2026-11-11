@@ -11,10 +11,12 @@
 //! the [`TOKEN_HEADER`] header. The one exception is the first page load,
 //! which carries the token in the [`TOKEN_QUERY`] query parameter of the
 //! printed URL; the server accepts a query token once, and never on an API
-//! path. The `Host` is `127.0.0.1:<port>`, `localhost:<port>`, or one of
-//! [`ServeOptions::allowed_hosts`]. A mutation also needs an `Origin` header
-//! naming the server: `http://` and the `Host`, or `http://` or `https://`
-//! and an allowed host, as a gateway that terminates TLS sends it. Reads take
+//! path. The `Host` is `127.0.0.1:<port>`, `localhost:<port>`, the bound
+//! address and port (`[::1]:<port>` for `::`, and none for `0.0.0.0`), or
+//! one of [`ServeOptions::allowed_hosts`]. A mutation also needs an
+//! `Origin` header naming the server: `http://` and the `Host`, or `http://`
+//! or `https://` and an allowed host, as a gateway that terminates TLS sends
+//! it. Reads take
 //! GET and mutations take POST; any other method is refused, so GET never
 //! changes state. `/graphql` takes POST only, and needs no `Origin`, since
 //! the schema has no mutations. Responses carry no CORS headers.

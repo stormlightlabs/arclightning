@@ -301,7 +301,9 @@ trailing newline is dropped. A missing or empty file, or a token that breaks
 the rule, fails the start with exit 1 and an error naming the source. Without
 either, each run makes a new token. `--json` prints one startup line with the
 URL, port and token. A supplied token is left out of every output, the URL
-included, and human output names its source.
+included. Human output names its source, and in page mode says to open
+`<url>/?token=<token>` with it. `--json` names the source in `token_source`
+instead of giving `token`.
 
 `GET /api/version` answers `{"format_version": 1, "data": {"version"}}` with
 arcl's version, and needs the token. `GET /healthz` answers 200 `ok` with no
@@ -322,10 +324,14 @@ arcl serve --bind 0.0.0.0 --port 7410 --token-file /run/arcl/token \
 - `--bind <addr>` listens on an IP address, `127.0.0.1` by default. An
   address off loopback needs a token from `--token-file` or
   `ARCL_SERVE_TOKEN`; without one `arcl serve` refuses to start, since a
-  minted token is printed to the log.
+  minted token is printed to the log. The server accepts `<addr>:<port>` as
+  `Host`, with an IPv6 address in brackets, and the printed URL names it.
+  `0.0.0.0` and `::` are not names a client sends, so for them the URL names
+  `127.0.0.1` or `[::1]`, and human output says to pass other names to
+  `--allow-host`.
 - `--allow-host <host[:port]>`, repeatable, adds `Host` values to
-  `127.0.0.1:<port>` and `localhost:<port>`, compared exactly, ignoring
-  case. `arcl:7410` does not allow `Host: arcl`; pass both when a gateway may
+  `127.0.0.1:<port>`, `localhost:<port>` and the bound address, compared
+  exactly, ignoring case. `arcl:7410` does not allow `Host: arcl`; pass both when a gateway may
   drop the port.
 - A change needs an `Origin` of `http://` and the `Host`, or `http://` or
   `https://` and an allowed host. A gateway that terminates TLS for

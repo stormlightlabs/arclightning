@@ -1,6 +1,7 @@
 //! The checks every request passes before it is routed: `Host`, the token,
 //! the method and `Origin`. `GET /healthz` skips them all.
 
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use axum::http::request::Parts;
@@ -30,16 +31,26 @@ pub(crate) struct Gate {
     /// `arcl serve --api` does: no page, and no `Origin` needed on a change
     /// that sends none.
     pub(crate) api_only: bool,
-    /// The `Host` values accepted beside `127.0.0.1:<port>` and
-    /// `localhost:<port>`, in lowercase, as [`allowed_host`] returns them.
-    pub(crate) allowed_hosts: Vec<String>,
+    /// The `Host` values that name the server itself: `127.0.0.1:<port>`,
+    /// `localhost:<port>` and the [`reachable`] address with the port.
+    own_hosts: [String; 3],
+    /// The `Host` values accepted beside [`Gate::own_hosts`], in lowercase,
+    /// as [`allowed_host`] returns them.
+    allowed_hosts: Vec<String>,
     /// Whether a page load has used the query token.
     first_load_used: AtomicBool,
 }
 
 impl Gate {
-    pub(crate) fn new(token: String, port: u16, api_only: bool) -> Self {
-        Self { token, port, api_only, allowed_hosts: Vec::new(), first_load_used: AtomicBool::new(false) }
+    /// The checks of a server listening on `address` and `port`, which also
+    /// accepts `allowed_hosts` as `Host`.
+    pub(crate) fn new(token: String, address: IpAddr, port: u16, api_only: bool, allowed_hosts: Vec<String>) -> Self {
+        let own_hosts = [
+            format!("127.0.0.1:{port}"),
+            format!("localhost:{port}"),
+            SocketAddr::new(reachable(address), port).to_string(),
+        ];
+        Self { token, port, api_only, own_hosts, allowed_hosts, first_load_used: AtomicBool::new(false) }
     }
 
     /// Check the head of `incoming` and route it, or answer with the refusal.
@@ -79,7 +90,7 @@ impl Gate {
     /// `true` for the first page load, which needs no further checks.
     fn authorize(&self, incoming: &Incoming, route: &Route, query_token: Option<&str>) -> Result<bool, Reply> {
         let host_matches = incoming.host.as_deref().is_some_and(|host| {
-            [format!("127.0.0.1:{}", self.port), format!("localhost:{}", self.port)]
+            self.own_hosts
                 .iter()
                 .chain(&self.allowed_hosts)
                 .any(|allowed| host.eq_ignore_ascii_case(allowed))
@@ -236,6 +247,17 @@ pub(crate) fn allowed_host(value: &str) -> Result<String, ServeError> {
     let port_valid = port
         .is_none_or(|port| port.bytes().all(|byte| byte.is_ascii_digit()) && matches!(port.parse::<u16>(), Ok(1..)));
     if host_valid && port_valid { Ok(value.to_ascii_lowercase()) } else { Err(refuse()) }
+}
+
+/// The address a client on this machine dials to reach a server listening on
+/// `address`: `127.0.0.1` for `0.0.0.0`, `::1` for `::`, and `address`
+/// itself otherwise.
+pub(crate) const fn reachable(address: IpAddr) -> IpAddr {
+    match address {
+        IpAddr::V4(v4) if v4.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+        IpAddr::V6(v6) if v6.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
+        address => address,
+    }
 }
 
 /// Generate a token from the operating system's random source.

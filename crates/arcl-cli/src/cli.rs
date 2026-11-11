@@ -4,18 +4,19 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
-/// The explicit color policy accepted by the CLI.
 /// The notes under `arcl serve --help`.
 const SERVE_AFTER_HELP: &str = r#"Token:
     Every request but GET /healthz sends the token in X-Arcl-Token. It comes from
     --token-file, then ARCL_SERVE_TOKEN: at least 32 characters, ASCII letters and
     digits only. Without either, each run mints a token and prints it. A token
-    you supply is never printed.
+    you supply is never printed: add /?token=<token> to the printed URL to open
+    the page.
 
 Hosts and origins:
-    Requests need a Host of 127.0.0.1:<port>, localhost:<port> or an --allow-host
-    value. A change needs an Origin of http://<Host>, or http:// or https:// and an
-    --allow-host value.
+    Requests need a Host of 127.0.0.1:<port>, localhost:<port>, the --bind
+    address with the port ([::1]:<port> for ::, none for 0.0.0.0) or an
+    --allow-host value. A change needs an Origin of http://<Host>, or http:// or
+    https:// and an --allow-host value.
 
 Probes:
     GET /healthz answers 200 with no token and any Host. GET /api/version answers
@@ -28,6 +29,7 @@ Examples:
     arcl serve --bind 0.0.0.0 --port 7410 --token-file /run/arcl/token --allow-host arcl:7410
 "#;
 
+/// The explicit color policy accepted by the CLI.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub enum ColorChoice {
     Auto,
@@ -1007,7 +1009,8 @@ pub struct ServeArgs {
     #[arg(long)]
     pub api: bool,
     /// Listen on this IP address. Any address but a loopback one needs a
-    /// token from --token-file or ARCL_SERVE_TOKEN.
+    /// token from --token-file or ARCL_SERVE_TOKEN. The printed URL names
+    /// it, or 127.0.0.1 for 0.0.0.0 and [::1] for ::.
     #[arg(long, value_name = "ADDR", default_value_t = IpAddr::V4(Ipv4Addr::LOCALHOST))]
     pub bind: IpAddr,
     /// Read the token from this file, dropping its trailing newline. It wins

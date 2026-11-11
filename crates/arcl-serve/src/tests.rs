@@ -102,12 +102,24 @@ impl Mutations for Echo {
 }
 
 fn gate() -> Gate {
-    Gate::new(TOKEN.to_owned(), PORT, false)
+    Gate::new(
+        TOKEN.to_owned(),
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        PORT,
+        false,
+        Vec::new(),
+    )
 }
 
 /// The checks of `arcl serve --api`.
 fn api_gate() -> Gate {
-    Gate::new(TOKEN.to_owned(), PORT, true)
+    Gate::new(
+        TOKEN.to_owned(),
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        PORT,
+        true,
+        Vec::new(),
+    )
 }
 
 /// Check and answer `incoming` as [`Server::run`] does, with an empty body.
@@ -1669,9 +1681,14 @@ fn serve_answers_queued_reads_503_on_shutdown_without_running_them() {
 /// The checks of a server behind a gateway that reaches it as `arcl:7410`
 /// and, over TLS, as `arcl.example.com`.
 fn hosted_gate() -> Gate {
-    let mut gate = Gate::new(TOKEN.to_owned(), PORT, false);
-    gate.allowed_hosts = vec!["arcl:7410".to_owned(), "arcl.example.com".to_owned()];
-    gate
+    let allowed = vec!["arcl:7410".to_owned(), "arcl.example.com".to_owned()];
+    Gate::new(TOKEN.to_owned(), IpAddr::V4(Ipv4Addr::LOCALHOST), PORT, false, allowed)
+}
+
+/// Whether `gate` admits a token-bearing read with `host` as its `Host`.
+fn admits_host(gate: &Gate, host: &str) -> bool {
+    let incoming = Incoming { host: Some(host.to_owned()), ..get("/api/tree", Some(TOKEN)) };
+    answered(gate, &incoming).status == 200
 }
 
 /// A token [`Server::bind_with`] accepts.
@@ -1857,10 +1874,11 @@ fn serve_binds_a_chosen_address_with_a_supplied_token() {
     };
     let server = Server::bind_with(options).expect("a server");
     assert_eq!(server.token(), strong_token());
-    assert_eq!(server.origin(), format!("http://0.0.0.0:{}", server.port()));
+    // The printed URL names an address whose `Host` the server accepts.
+    assert_eq!(server.origin(), format!("http://127.0.0.1:{}", server.port()));
     assert_eq!(
         server.url(),
-        format!("http://0.0.0.0:{}/?token={}", server.port(), strong_token())
+        format!("http://127.0.0.1:{}/?token={}", server.port(), strong_token())
     );
 
     let weak = ServeOptions { token: Some("short".to_owned()), ..ServeOptions::default() };
@@ -1912,4 +1930,91 @@ fn serve_answers_a_gateway_over_tcp() {
     assert!(foreign.starts_with("HTTP/1.1 403"), "{foreign}");
     let health = request("GET /healthz HTTP/1.1\r\nHost: 10.1.2.3:7410");
     assert!(health.starts_with("HTTP/1.1 200") && health.ends_with("ok"), "{health}");
+}
+
+#[test]
+fn serve_accepts_the_bound_address_as_host() {
+    let gate_on = |address: IpAddr| Gate::new(TOKEN.to_owned(), address, PORT, false, Vec::new());
+    let cases: [(IpAddr, &[String], &[String]); 4] = [
+        (
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)),
+            &[
+                format!("127.0.0.2:{PORT}"),
+                format!("127.0.0.1:{PORT}"),
+                format!("localhost:{PORT}"),
+            ],
+            &["127.0.0.2".to_owned(), format!("127.0.0.3:{PORT}")],
+        ),
+        (
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            &[format!("127.0.0.1:{PORT}"), format!("localhost:{PORT}")],
+            &[format!("0.0.0.0:{PORT}")],
+        ),
+        (
+            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+            &[format!("[::1]:{PORT}"), format!("127.0.0.1:{PORT}")],
+            &[format!("[::]:{PORT}"), format!("::1:{PORT}")],
+        ),
+        (
+            "fd00::A".parse().expect("an address"),
+            &[format!("[fd00::a]:{PORT}"), format!("[FD00::A]:{PORT}")],
+            &[format!("fd00::a:{PORT}"), format!("[fd00::b]:{PORT}")],
+        ),
+    ];
+    for (address, accepted, refused) in cases {
+        let gate = gate_on(address);
+        for host in accepted {
+            assert!(admits_host(&gate, host), "{address} {host}");
+        }
+        for host in refused {
+            assert!(!admits_host(&gate, host), "{address} {host}");
+        }
+    }
+}
+
+#[test]
+fn serve_opens_the_printed_url_on_a_chosen_loopback_address() {
+    let address = Ipv4Addr::new(127, 0, 0, 2);
+    let options = ServeOptions { address: IpAddr::V4(address), ..ServeOptions::default() };
+    let server = Server::bind_with(options).expect("a server");
+    let port = server.port();
+    let url = server.url();
+    let token = server.token().to_owned();
+    assert_eq!(url, format!("http://127.0.0.2:{port}/?token={token}"));
+    thread::spawn(move || server.run_until(&Echo, &Echo, std::future::pending));
+
+    let mut stream = TcpStream::connect((address, port)).expect("a connection");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .expect("a read timeout");
+    let target = url
+        .strip_prefix(&format!("http://127.0.0.2:{port}"))
+        .expect("the URL names the address");
+    let request = format!("GET {target} HTTP/1.1\r\nHost: 127.0.0.2:{port}\r\nConnection: close\r\n\r\n");
+    stream.write_all(request.as_bytes()).expect("a write");
+    let page = response(stream);
+    assert!(page.starts_with("HTTP/1.1 200"), "{page}");
+}
+
+#[test]
+fn serve_prints_a_loopback_url_for_a_wildcard_bind() {
+    let options = ServeOptions {
+        address: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+        token: Some(strong_token()),
+        ..ServeOptions::default()
+    };
+    let server = Server::bind_with(options).expect("a server");
+    let port = server.port();
+    let url = server.url();
+    assert_eq!(server.address(), IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+    thread::spawn(move || server.run_until(&Echo, &Echo, std::future::pending));
+
+    let target = url
+        .strip_prefix(&format!("http://127.0.0.1:{port}"))
+        .expect("the URL names 127.0.0.1");
+    let page = exchange(
+        port,
+        &format!("GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"),
+    );
+    assert!(page.starts_with("HTTP/1.1 200"), "{page}");
 }
