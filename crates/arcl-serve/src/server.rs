@@ -66,7 +66,9 @@ pub struct ServeOptions {
     /// The port, or `None` for an ephemeral one.
     pub port: Option<u16>,
     /// The token, which needs at least [`MIN_TOKEN_CHARS`] characters, all
-    /// ASCII letters and digits, or `None` to mint one.
+    /// ASCII letters and digits, or `None` to mint one. Every page load may
+    /// carry a token given here in [`TOKEN_QUERY`]; a minted one opens only
+    /// the first.
     pub token: Option<String>,
     /// Whether to answer only `/api`, `/graphql` and `/healthz`.
     pub api_only: bool,
@@ -128,6 +130,7 @@ impl Server {
             .iter()
             .map(|host| allowed_host(host))
             .collect::<Result<Vec<_>, _>>()?;
+        let supplied = token.is_some();
         let token = match token {
             Some(token) => {
                 check_token(&token)?;
@@ -138,6 +141,7 @@ impl Server {
         };
         let (listener, port) = listen(address, port)?;
         let gate = Gate::new(token, address, port, api_only, allowed_hosts);
+        let gate = if supplied { gate.with_supplied_token() } else { gate };
         Ok(Self { listener, address, gate, limits: Limits::default() })
     }
 

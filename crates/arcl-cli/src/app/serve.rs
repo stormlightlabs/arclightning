@@ -38,6 +38,10 @@ const LOCK_WAIT: Duration = Duration::from_secs(3);
 /// `--token-file` is given.
 const TOKEN_VARIABLE: &str = "ARCL_SERVE_TOKEN";
 
+/// The most bytes `--token-file` may hold, so a device such as `/dev/zero`
+/// or a stray large file fails instead of filling memory.
+const TOKEN_FILE_LIMIT: u64 = 4096;
+
 /// Where a token the user supplied came from.
 #[derive(Debug, Eq, PartialEq)]
 enum TokenSource {
@@ -314,9 +318,11 @@ impl Mutations for ServeApp {
 }
 
 /// Bind the server, print its URL and serve until interrupted. With
-/// `--project`, the server runs in that directory, as if started there. The
-/// database opens first, so outside a project `serve` fails like other
-/// commands instead of serving endpoints that all fail.
+/// `--project`, the server runs in that directory, as if started there. A
+/// relative `--token-file` is resolved against the directory `serve` started
+/// in, before it enters the project, so a file in the project cannot stand in
+/// for it. The database opens first, so outside a project `serve` fails like
+/// other commands instead of serving endpoints that all fail.
 ///
 /// The token comes from `--token-file`, then [`TOKEN_VARIABLE`], and is never
 /// printed. Without either, each run mints one, and binding an address off
@@ -324,6 +330,12 @@ impl Mutations for ServeApp {
 /// and `/healthz`.
 pub(super) fn exec_serve(options: ServeArgs, renderer: &Renderer) -> anyhow::Result<()> {
     let ServeArgs { port, api, bind, token_file, allow_hosts, project } = options;
+    let token_file = token_file
+        .map(|path| {
+            std::path::absolute(&path)
+                .with_context(|| format!("could not resolve the token file path `{}`", path.display()))
+        })
+        .transpose()?;
     if let Some(project) = &project {
         std::env::set_current_dir(project)
             .with_context(|| format!("could not enter the project directory `{}`", project.display()))?;
@@ -434,15 +446,15 @@ fn set_once(slot: &mut Option<String>, name: &str, value: &str) -> Result<(), St
 
 /// The token the user supplied, and where from: the file at `token_file`
 /// when given, else `variable`, the value of [`TOKEN_VARIABLE`], when set.
-/// The file's trailing newline is dropped. A file that cannot be read, or
-/// holds nothing but whitespace, fails. A variable that is not UTF-8 counts
-/// as empty, which the server refuses as an invalid token.
+/// The file's trailing newline is dropped. A file that cannot be read, is
+/// not a regular file, holds more than [`TOKEN_FILE_LIMIT`] bytes, or holds
+/// nothing but whitespace, fails. A variable that is not UTF-8 counts as
+/// empty, which the server refuses as an invalid token.
 fn supplied_token(
     token_file: Option<&Path>, variable: Option<OsString>,
 ) -> anyhow::Result<Option<(String, TokenSource)>> {
     if let Some(path) = token_file {
-        let content =
-            fs::read_to_string(path).with_context(|| format!("could not read the token file `{}`", path.display()))?;
+        let content = read_token_file(path)?;
         let token = content.trim_end_matches(['\n', '\r']);
         if token.trim().is_empty() {
             anyhow::bail!("the token file `{}` is empty", path.display());
@@ -450,6 +462,30 @@ fn supplied_token(
         return Ok(Some((token.to_owned(), TokenSource::File(path.to_owned()))));
     }
     Ok(variable.map(|value| (value.into_string().unwrap_or_default(), TokenSource::Variable)))
+}
+
+/// The text of the token file at `path`. The file must be a regular file,
+/// checked before it is opened so a FIFO cannot block the start, and is read
+/// no further than one byte past [`TOKEN_FILE_LIMIT`].
+fn read_token_file(path: &Path) -> anyhow::Result<String> {
+    use std::io::Read as _;
+
+    let unreadable = || format!("could not read the token file `{}`", path.display());
+    let metadata = fs::metadata(path).with_context(unreadable)?;
+    if !metadata.is_file() {
+        anyhow::bail!("the token file `{}` is not a regular file", path.display());
+    }
+    let mut content = Vec::new();
+    fs::File::open(path)
+        .and_then(|file| file.take(TOKEN_FILE_LIMIT + 1).read_to_end(&mut content))
+        .with_context(unreadable)?;
+    if content.len() as u64 > TOKEN_FILE_LIMIT {
+        anyhow::bail!(
+            "the token file `{}` is larger than {TOKEN_FILE_LIMIT} bytes",
+            path.display()
+        );
+    }
+    String::from_utf8(content).map_err(|_| anyhow::anyhow!("the token file `{}` is not UTF-8", path.display()))
 }
 
 #[cfg(test)]
@@ -501,6 +537,27 @@ mod tests {
                 .starts_with(&format!("could not read the token file `{}`", missing.display())),
             "{error}"
         );
+    }
+
+    #[test]
+    fn supplied_token_refuses_a_large_or_irregular_file() {
+        let directory = tempfile::tempdir().expect("a directory");
+        let path = directory.path().join("token");
+        fs::write(&path, "a".repeat(4096)).expect("the file writes");
+        assert!(supplied_token(Some(&path), None).expect("a token").is_some());
+        fs::write(&path, "a".repeat(4097)).expect("the file writes");
+        let error = supplied_token(Some(&path), None).expect_err("a large file");
+        assert_eq!(
+            error.to_string(),
+            format!("the token file `{}` is larger than 4096 bytes", path.display())
+        );
+        for irregular in [directory.path(), Path::new("/dev/zero")] {
+            let error = supplied_token(Some(irregular), None).expect_err("not a regular file");
+            assert_eq!(
+                error.to_string(),
+                format!("the token file `{}` is not a regular file", irregular.display())
+            );
+        }
     }
 
     #[test]

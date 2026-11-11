@@ -313,6 +313,25 @@ fn serve_accepts_the_query_token_for_the_first_page_load_only() {
 }
 
 #[test]
+fn serve_accepts_a_supplied_query_token_on_every_page_load() {
+    let gate = gate().with_supplied_token();
+    assert_eq!(answered(&gate, &get("/?token=nope", None)).status, 401);
+    for path in ["/", "/", "/work"] {
+        let page = answered(&gate, &get(&format!("{path}?token={TOKEN}"), None));
+        assert_eq!(page.status, 200, "{path}");
+        let referrer = page.headers().into_iter().find(|(name, _)| *name == "Referrer-Policy");
+        assert_eq!(referrer.map(|(_, value)| value), Some("no-referrer"), "{path}");
+    }
+    // The API still takes the token in the header only.
+    let api = answered(&gate, &get(&format!("/api/records?token={TOKEN}"), None));
+    assert_eq!(api.status, 401);
+    let message = text(api).1;
+    assert!(message.contains("opens the page only"), "{message}");
+    let post = answered(&gate, &post(&format!("/api/captures?token={TOKEN}")));
+    assert_eq!(post.status, 401);
+}
+
+#[test]
 fn serve_never_accepts_a_query_token_on_the_api() {
     let answer = answered(&gate(), &get(&format!("/api/records?token={TOKEN}"), None));
     assert_eq!(answer.status, 401);

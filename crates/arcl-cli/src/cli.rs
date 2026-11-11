@@ -8,9 +8,9 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 const SERVE_AFTER_HELP: &str = r#"Token:
     Every request but GET /healthz sends the token in X-Arcl-Token. It comes from
     --token-file, then ARCL_SERVE_TOKEN: at least 32 characters, ASCII letters and
-    digits only. Without either, each run mints a token and prints it. A token
-    you supply is never printed: add /?token=<token> to the printed URL to open
-    the page.
+    digits only. Without either, each run mints a token and prints it in the
+    URL, which opens the page once. A token you supply is never printed: add
+    /?token=<token> to the printed URL to open the page, on every load.
 
 Hosts and origins:
     Requests need a Host of 127.0.0.1:<port>, localhost:<port>, the --bind
@@ -1014,7 +1014,9 @@ pub struct ServeArgs {
     #[arg(long, value_name = "ADDR", default_value_t = IpAddr::V4(Ipv4Addr::LOCALHOST))]
     pub bind: IpAddr,
     /// Read the token from this file, dropping its trailing newline. It wins
-    /// over ARCL_SERVE_TOKEN.
+    /// over ARCL_SERVE_TOKEN. A relative path names a file under the current
+    /// directory, not under --project. The file must be a regular file of at
+    /// most 4 KiB.
     #[arg(long, value_name = "PATH")]
     pub token_file: Option<PathBuf>,
     /// Also accept this `Host`, as `host` or `host:port`, and `Origin`

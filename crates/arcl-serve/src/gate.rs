@@ -13,7 +13,8 @@ use crate::server::ServeError;
 /// The request header that carries the token.
 pub const TOKEN_HEADER: &str = "X-Arcl-Token";
 
-/// The query parameter that carries the token on the first page load.
+/// The query parameter that carries the token on a page load: the first one
+/// for a minted token, any one for a supplied token.
 pub const TOKEN_QUERY: &str = "token";
 
 /// The fewest characters a token given to [`Server::bind_with`](crate::Server::bind_with)
@@ -37,6 +38,10 @@ pub(crate) struct Gate {
     /// The `Host` values accepted beside [`Gate::own_hosts`], in lowercase,
     /// as [`allowed_host`] returns them.
     allowed_hosts: Vec<String>,
+    /// Whether the token was supplied rather than minted, so every page load
+    /// may carry it in [`TOKEN_QUERY`]. A minted token is printed in the URL,
+    /// so the query accepts it for the first page load only.
+    supplied: bool,
     /// Whether a page load has used the query token.
     first_load_used: AtomicBool,
 }
@@ -50,7 +55,22 @@ impl Gate {
             format!("localhost:{port}"),
             SocketAddr::new(reachable(address), port).to_string(),
         ];
-        Self { token, port, api_only, own_hosts, allowed_hosts, first_load_used: AtomicBool::new(false) }
+        Self {
+            token,
+            port,
+            api_only,
+            own_hosts,
+            allowed_hosts,
+            supplied: false,
+            first_load_used: AtomicBool::new(false),
+        }
+    }
+
+    /// The same checks for a token the caller supplied, which every page
+    /// load may carry in [`TOKEN_QUERY`]. The operator holds that token and
+    /// it is never printed, so a second user or a reload needs it too.
+    pub(crate) fn with_supplied_token(self) -> Self {
+        Self { supplied: true, ..self }
     }
 
     /// Check the head of `incoming` and route it, or answer with the refusal.
@@ -87,7 +107,9 @@ impl Gate {
     }
 
     /// Refuse a request with the wrong `Host` or without the token. Answers
-    /// `true` for the first page load, which needs no further checks.
+    /// `true` for a page load with the token in [`TOKEN_QUERY`], which needs
+    /// no further checks: any such load with a supplied token, and only the
+    /// first with a minted one.
     fn authorize(&self, incoming: &Incoming, route: &Route, query_token: Option<&str>) -> Result<bool, Reply> {
         let host_matches = incoming.host.as_deref().is_some_and(|host| {
             self.own_hosts
@@ -104,13 +126,18 @@ impl Gate {
         }
 
         if let Some(given) = query_token {
-            let first_load = matches!(route, Route::Page) && incoming.method == "GET";
+            let page_load = matches!(route, Route::Page) && incoming.method == "GET";
             // `swap` claims the first load, so two racing loads cannot both have it.
-            if first_load && same_token(given, &self.token) && !self.first_load_used.swap(true, Ordering::SeqCst) {
+            if page_load
+                && same_token(given, &self.token)
+                && (self.supplied || !self.first_load_used.swap(true, Ordering::SeqCst))
+            {
                 return Ok(true);
             }
             let message = if self.api_only {
                 format!("this server takes no token in the URL; send the token in the {TOKEN_HEADER} header")
+            } else if self.supplied {
+                format!("a token in the URL opens the page only; send the token in {TOKEN_HEADER}")
             } else {
                 format!("the link's token works for the first page load only; send the token in {TOKEN_HEADER}")
             };

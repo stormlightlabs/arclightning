@@ -4185,25 +4185,40 @@ fn json_only_chain_picks_work_reads_reasons_and_starts_what_completion_unblocked
     assert_eq!(context["data"]["readiness"]["reasons"][0]["task"], next);
 }
 
+/// An `arcl serve` process, killed and reaped when dropped, so a test that
+/// panics while it starts leaves no server running.
+struct ServeChild(std::process::Child);
+
+impl Drop for ServeChild {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 /// A running `arcl serve`, stopped when dropped.
 struct Served {
-    child: std::process::Child,
+    _child: ServeChild,
     port: u16,
     token: String,
 }
 
 impl Served {
-    /// Start `arcl --plain serve` in `directory` and read the URL it prints.
+    /// Start `arcl --plain serve` in `directory`, with `ARCL_SERVE_TOKEN`
+    /// unset, and read the URL it prints.
     fn start(directory: &Path) -> Self {
         use std::io::BufRead;
 
-        let mut child = isolated_command(assert_cmd::cargo::cargo_bin("arcl"), directory)
-            .args(["--plain", "serve"])
-            .stdout(std::process::Stdio::piped())
-            .spawn()
-            .expect("arcl serve starts");
+        let mut child = ServeChild(
+            isolated_command(assert_cmd::cargo::cargo_bin("arcl"), directory)
+                .args(["--plain", "serve"])
+                .env_remove("ARCL_SERVE_TOKEN")
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .expect("arcl serve starts"),
+        );
         let mut line = String::new();
-        std::io::BufReader::new(child.stdout.take().expect("stdout is piped"))
+        std::io::BufReader::new(child.0.stdout.take().expect("stdout is piped"))
             .read_line(&mut line)
             .expect("arcl serve prints its URL");
         let rest = line
@@ -4211,7 +4226,7 @@ impl Served {
             .strip_prefix("http://127.0.0.1:")
             .expect("the URL names 127.0.0.1");
         let (port, token) = rest.split_once("/?token=").expect("the URL carries the token");
-        Self { child, port: port.parse().expect("the URL has a port"), token: token.to_owned() }
+        Self { _child: child, port: port.parse().expect("the URL has a port"), token: token.to_owned() }
     }
 
     /// Start `arcl --json serve` with `flags` in `directory`, with
@@ -4238,18 +4253,20 @@ impl Served {
         if let Some(variable) = variable {
             command.env("ARCL_SERVE_TOKEN", variable);
         }
-        let mut child = command
-            .stdout(std::process::Stdio::piped())
-            .spawn()
-            .expect("arcl serve starts");
+        let mut child = ServeChild(
+            command
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .expect("arcl serve starts"),
+        );
         let mut line = String::new();
-        std::io::BufReader::new(child.stdout.take().expect("stdout is piped"))
+        std::io::BufReader::new(child.0.stdout.take().expect("stdout is piped"))
             .read_line(&mut line)
             .expect("arcl serve prints its startup line");
         let started: Value = serde_json::from_str(&line).expect("the startup line is JSON");
         let port = u16::try_from(started["data"]["port"].as_u64().expect("a port")).expect("a port number");
         let token = started["data"]["token"].as_str().or(known).expect("a token").to_owned();
-        (Self { child, port, token }, started)
+        (Self { _child: child, port, token }, started)
     }
 
     /// Send a GET for `path` with these extra header lines, and return the
@@ -4325,13 +4342,6 @@ impl Served {
 
     fn host(&self) -> String {
         format!("Host: 127.0.0.1:{}", self.port)
-    }
-}
-
-impl Drop for Served {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
     }
 }
 
@@ -4438,11 +4448,13 @@ fn serve_startup(directory: &Path, args: &[&str], token: Option<&str>, count: us
     if let Some(token) = token {
         command.env("ARCL_SERVE_TOKEN", token);
     }
-    let mut child = command
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .expect("arcl serve starts");
-    let mut reader = std::io::BufReader::new(child.stdout.take().expect("stdout is piped"));
+    let mut child = ServeChild(
+        command
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("arcl serve starts"),
+    );
+    let mut reader = std::io::BufReader::new(child.0.stdout.take().expect("stdout is piped"));
     let lines = (0..count)
         .map(|_| {
             let mut line = String::new();
@@ -4450,8 +4462,7 @@ fn serve_startup(directory: &Path, args: &[&str], token: Option<&str>, count: us
             line.trim_end().to_owned()
         })
         .collect::<Vec<_>>();
-    let _ = child.kill();
-    let _ = child.wait();
+    drop(child);
     let mut rest = String::new();
     reader.read_to_string(&mut rest).expect("the output reads");
     assert!(rest.is_empty(), "{lines:?} then {rest:?}");
@@ -5387,6 +5398,7 @@ fn serve_outside_a_project_fails_before_binding() {
     let directory = tempdir().expect("temporary directory can be created");
     let output = arcl_in(directory.path())
         .args(["--plain", "serve"])
+        .env_remove("ARCL_SERVE_TOKEN")
         .timeout(std::time::Duration::from_secs(30))
         .output()
         .expect("arcl serve runs");
@@ -8941,8 +8953,15 @@ fn serve_names_a_working_url_for_a_wildcard_bind() {
         None,
         Some(&token),
     );
-    let (status, page) = served.get(&format!("/?token={token}"), &[served.host()]);
-    assert_eq!(status, 200, "{page}");
+    // A supplied token opens the page on every load, for a reload or a second user.
+    for _ in 0..2 {
+        let (status, page) = served.get(&format!("/?token={token}"), &[served.host()]);
+        assert_eq!(status, 200, "{page}");
+    }
+    assert_eq!(
+        served.get(&format!("/api/ready?token={token}"), &[served.host()]).0,
+        401
+    );
 }
 
 #[test]
@@ -8962,6 +8981,32 @@ fn serve_runs_in_the_project_directory() {
     drop(served);
     let listed = run_json(directory.path(), ["--json", "list", "--kind", "capture"].as_ref());
     assert_eq!(listed["data"]["records"][0]["title"], "Elsewhere", "{listed}");
+
+    // A relative --token-file names a file where serve started, not one the
+    // project ships under the same name.
+    let outside = "Outside1".repeat(5);
+    let shipped = "Shipped1".repeat(5);
+    fs::write(elsewhere.path().join("token"), format!("{outside}\n")).expect("the token file writes");
+    fs::write(directory.path().join("token"), format!("{shipped}\n")).expect("the token file writes");
+    let (served, started) = Served::start_json_knowing(
+        elsewhere.path(),
+        &["--api", "--project", project, "--token-file", "token"],
+        None,
+        Some(&outside),
+    );
+    // The working directory is the physical path, so compare with that.
+    let resolved = fs::canonicalize(elsewhere.path())
+        .expect("the directory resolves")
+        .join("token");
+    assert_eq!(
+        started["data"]["token_source"],
+        resolved.to_str().expect("a UTF-8 path"),
+        "{started}"
+    );
+    assert_eq!(served.read("/api/ready").0, 200);
+    let shipped_header = format!("X-Arcl-Token: {shipped}");
+    assert_eq!(served.get("/api/ready", &[served.host(), shipped_header]).0, 401);
+    drop(served);
 
     let missing = elsewhere.path().join("missing");
     let missing_text = missing.to_str().expect("a UTF-8 path");

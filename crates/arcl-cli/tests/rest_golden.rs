@@ -48,20 +48,25 @@ const MISSING_TASK: &str = "arcl-t-00000000000000000000000000";
 
 /// A running `arcl serve`, stopped when dropped.
 struct Served {
-    child: Child,
+    _child: ServeChild,
     port: u16,
     token: String,
 }
 
 impl Served {
+    /// Start `arcl --plain serve` in `directory`, with `ARCL_SERVE_TOKEN`
+    /// unset so the server mints a token and prints it in the URL.
     fn start(directory: &Path) -> Self {
-        let mut child = arcl(directory)
-            .args(["--plain", "serve"])
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("arcl serve starts");
+        let mut child = ServeChild(
+            arcl(directory)
+                .args(["--plain", "serve"])
+                .env_remove("ARCL_SERVE_TOKEN")
+                .stdout(Stdio::piped())
+                .spawn()
+                .expect("arcl serve starts"),
+        );
         let mut line = String::new();
-        BufReader::new(child.stdout.take().expect("stdout is piped"))
+        BufReader::new(child.0.stdout.take().expect("stdout is piped"))
             .read_line(&mut line)
             .expect("arcl serve prints its URL");
         let rest = line
@@ -69,7 +74,7 @@ impl Served {
             .strip_prefix("http://127.0.0.1:")
             .expect("the URL names 127.0.0.1");
         let (port, token) = rest.split_once("/?token=").expect("the URL carries the token");
-        Self { child, port: port.parse().expect("the URL has a port"), token: token.to_owned() }
+        Self { _child: child, port: port.parse().expect("the URL has a port"), token: token.to_owned() }
     }
 
     /// GET `path` with the right `Host` and token, and return the status and
@@ -89,10 +94,14 @@ impl Served {
     }
 }
 
-impl Drop for Served {
+/// An `arcl serve` process, killed and reaped when dropped, so a test that
+/// panics while it starts leaves no server running.
+struct ServeChild(Child);
+
+impl Drop for ServeChild {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        let _ = self.0.kill();
+        let _ = self.0.wait();
     }
 }
 

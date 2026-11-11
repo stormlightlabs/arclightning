@@ -8,10 +8,14 @@
 //! answer with the CLI's JSON output.
 //!
 //! Every request needs a `Host` header naming the server and the token in
-//! the [`TOKEN_HEADER`] header. The one exception is the first page load,
-//! which carries the token in the [`TOKEN_QUERY`] query parameter of the
-//! printed URL; the server accepts a query token once, and never on an API
-//! path. The `Host` is `127.0.0.1:<port>`, `localhost:<port>`, the bound
+//! the [`TOKEN_HEADER`] header. The one exception is a page load, which may
+//! carry the token in the [`TOKEN_QUERY`] query parameter instead, never on
+//! an API path. A minted token is printed in the URL, so the server accepts
+//! it in the query for the first page load only. A token the caller
+//! supplies is never printed, so the query accepts it on every page load,
+//! for a reload or a second user. The page is sent with
+//! `Referrer-Policy: no-referrer`, so the URL's token does not leave in a
+//! `Referer`. The `Host` is `127.0.0.1:<port>`, `localhost:<port>`, the bound
 //! address and port (`[::1]:<port>` for `::`, and none for `0.0.0.0`), or
 //! one of [`ServeOptions::allowed_hosts`]. A mutation also needs an
 //! `Origin` header naming the server: `http://` and the `Host`, or `http://`

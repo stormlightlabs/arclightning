@@ -281,8 +281,9 @@ give the same page, and `--output` writes it to a file.
 to `127.0.0.1` on an ephemeral port by default, prints the URL, and accepts
 `--port` to pin one and `--bind` to choose the address. Every request needs a
 matching `Host` header, which stops DNS rebinding. Every request also needs
-the token in a request header, never a cookie, and in no query string after
-the first page load.
+the token in a request header, never a cookie. Only a page load may carry it
+in the query string instead: the first load for a minted token, and every load
+for a supplied one.
 Mutations need a matching `Origin`. `POST /graphql` runs read-only GraphQL
 queries and needs no `Origin`. The server sends no CORS headers and never
 changes state on GET. The header token and the `Origin` check stop other local
@@ -296,14 +297,21 @@ with a mismatched `Origin` is refused. A browser page cannot send the token
 header cross-origin without a CORS preflight, which the server refuses.
 
 The token comes from `--token-file <path>`, then `ARCL_SERVE_TOKEN`, in both
-modes: at least 32 characters, ASCII letters and digits only. The file's
-trailing newline is dropped. A missing or empty file, or a token that breaks
-the rule, fails the start with exit 1 and an error naming the source. Without
-either, each run makes a new token. `--json` prints one startup line with the
-URL, port and token. A supplied token is left out of every output, the URL
-included. Human output names its source, and in page mode says to open
-`<url>/?token=<token>` with it. `--json` names the source in `token_source`
-instead of giving `token`.
+modes: at least 32 characters, ASCII letters and digits only. A relative path
+is resolved against the directory `arcl serve` starts in, before `--project`
+changes it. The file's trailing newline is dropped. A missing or empty file, a
+file that is not a regular file or holds more than 4 KiB, or a token that
+breaks the rule, fails the start with exit 1 and an error naming the source.
+Without either, each run makes a new token. `--json` prints one startup line
+with the URL, port and token. A supplied token is left out of every output,
+the URL included. Human output names its source, and in page mode says to
+open `<url>/?token=<token>` with it. `--json` names the source in
+`token_source` instead of giving `token`.
+
+A minted token is printed in the URL, so the server accepts it in the query
+for the first page load only. A supplied token is held by the operator, so
+the query accepts it on every page load, for a reload or a second user. The
+page is sent with `Referrer-Policy: no-referrer` either way.
 
 `GET /api/version` answers `{"format_version": 1, "data": {"version"}}` with
 arcl's version, and needs the token. `GET /healthz` answers 200 `ok` with no

@@ -1532,7 +1532,8 @@ pub struct ServeStart<'a> {
     /// Whether the server answers only `/api` and `/graphql`.
     pub api: bool,
     /// Whether the server listens on every address but accepts no
-    /// `--allow-host`, so other machines cannot reach it by any name.
+    /// `--allow-host`, so it admits only a `Host` naming `127.0.0.1`,
+    /// `localhost` or `[::1]` with its port, as this machine's clients send.
     pub other_hosts_refused: bool,
 }
 
