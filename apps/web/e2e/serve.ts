@@ -70,7 +70,10 @@ export async function serveScratch(): Promise<Served> {
   // Clean up when setup fails partway, since the caller gets no `stop` then.
   try {
     cli("init");
-    const child = spawn(ARCL, ["serve", "--json"], { cwd: dir, stdio: ["ignore", "pipe", "inherit"] });
+    // Without ARCL_SERVE_TOKEN, the server mints a token and prints it in the URL.
+    const env = { ...process.env };
+    delete env.ARCL_SERVE_TOKEN;
+    const child = spawn(ARCL, ["serve", "--json"], { cwd: dir, env, stdio: ["ignore", "pipe", "inherit"] });
     server = child;
     exited = new Promise<void>((done) => child.once("exit", () => done()));
     let timer: ReturnType<typeof setTimeout> | undefined;

@@ -3,7 +3,7 @@
 
 use std::future::Future;
 use std::io;
-use std::net::{Ipv4Addr, TcpListener};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
 use std::panic::{self, AssertUnwindSafe};
 use std::pin::pin;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,8 +21,8 @@ use hyper_util::service::TowerToHyperService;
 use thiserror::Error;
 use tokio::sync::{Semaphore, oneshot};
 
-use crate::answer::{Answer, Reply, page};
-use crate::gate::{Gate, Incoming, MIN_TOKEN_CHARS, TOKEN_QUERY, check_token, new_token};
+use crate::answer::{Answer, Reply, health, page, version};
+use crate::gate::{Gate, Incoming, MIN_TOKEN_CHARS, TOKEN_QUERY, allowed_host, check_token, new_token, reachable};
 use crate::limits::{Limits, SHUTDOWN_GRACE, WriteDeadline, declares_too_much, read_body};
 use crate::mutations::{Mutations, mutate};
 use crate::routes::{Reads, Route, Write, dispatch};
@@ -34,9 +34,17 @@ const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
 /// A failure to start or run the server.
 #[derive(Debug, Error)]
 pub enum ServeError {
-    /// The port could not be bound.
-    #[error("could not listen on 127.0.0.1:{port}: {source}")]
-    Bind { port: u16, source: io::Error },
+    /// The address could not be bound.
+    #[error("could not listen on {address}: {source}")]
+    Bind { address: SocketAddr, source: io::Error },
+    /// The address is not a loopback address and no token was given. A
+    /// minted token is printed, so it never guards a server other machines
+    /// can reach.
+    #[error("listening on {0} needs a token you supply; a server off loopback never mints one")]
+    OpenBind(IpAddr),
+    /// An allowed host is not `host` or `host:port`.
+    #[error("`{0}` is not a host or host:port")]
+    AllowedHost(String),
     /// The operating system's random source failed.
     #[error("could not generate the access token: {0}")]
     Token(getrandom::Error),
@@ -49,9 +57,48 @@ pub enum ServeError {
     Start(io::Error),
 }
 
-/// A local server for the web app and its endpoints.
+/// How [`Server::bind_with`] listens and which requests it admits.
+#[derive(Clone, Debug)]
+pub struct ServeOptions {
+    /// The address to listen on. Any address but a loopback one needs
+    /// `token`.
+    pub address: IpAddr,
+    /// The port, or `None` for an ephemeral one.
+    pub port: Option<u16>,
+    /// The token, which needs at least [`MIN_TOKEN_CHARS`] characters, all
+    /// ASCII letters and digits, or `None` to mint one. Every page load may
+    /// carry a token given here in [`TOKEN_QUERY`]; a minted one opens only
+    /// the first.
+    pub token: Option<String>,
+    /// Whether to answer only `/api`, `/graphql` and `/healthz`.
+    pub api_only: bool,
+    /// `Host` values to accept beside `127.0.0.1:<port>`,
+    /// `localhost:<port>` and `<address>:<port>` (`[::1]:<port>` for `::`),
+    /// each `host` or `host:port`, compared ignoring
+    /// case. A change may also send `http://` or `https://` and one of them
+    /// as its `Origin`.
+    pub allowed_hosts: Vec<String>,
+}
+
+impl Default for ServeOptions {
+    /// `127.0.0.1` on an ephemeral port, with a minted token, the page, and
+    /// no extra hosts.
+    fn default() -> Self {
+        Self {
+            address: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            port: None,
+            token: None,
+            api_only: false,
+            allowed_hosts: Vec::new(),
+        }
+    }
+}
+
+/// A server for the web app and its endpoints.
 pub struct Server {
     listener: TcpListener,
+    /// The address the server listens on.
+    address: IpAddr,
     pub(crate) gate: Gate,
     /// The deadlines and the connection cap; the constants outside tests.
     pub(crate) limits: Limits,
@@ -62,9 +109,7 @@ impl Server {
     /// `None`, and generate the token for this run. The server answers the
     /// web app page as well as `/api` and `/graphql`.
     pub fn bind(port: Option<u16>) -> Result<Self, ServeError> {
-        let (listener, port) = listen(port)?;
-        let token = new_token()?;
-        Ok(Self { listener, gate: Gate::new(token, port, false), limits: Limits::default() })
+        Self::bind_with(ServeOptions { port, ..ServeOptions::default() })
     }
 
     /// Bind as [`Server::bind`] does, for a server that answers only `/api`
@@ -74,15 +119,30 @@ impl Server {
     /// [`MIN_TOKEN_CHARS`] characters, all ASCII letters and digits, and a new
     /// one otherwise. A refused token binds nothing.
     pub fn bind_api(port: Option<u16>, token: Option<String>) -> Result<Self, ServeError> {
+        Self::bind_with(ServeOptions { port, token, api_only: true, ..ServeOptions::default() })
+    }
+
+    /// Bind as `options` say. A refused token, a malformed allowed host, or
+    /// an address off loopback without a token binds nothing.
+    pub fn bind_with(options: ServeOptions) -> Result<Self, ServeError> {
+        let ServeOptions { address, port, token, api_only, allowed_hosts } = options;
+        let allowed_hosts = allowed_hosts
+            .iter()
+            .map(|host| allowed_host(host))
+            .collect::<Result<Vec<_>, _>>()?;
+        let supplied = token.is_some();
         let token = match token {
             Some(token) => {
                 check_token(&token)?;
                 token
             }
+            None if !address.is_loopback() => return Err(ServeError::OpenBind(address)),
             None => new_token()?,
         };
-        let (listener, port) = listen(port)?;
-        Ok(Self { listener, gate: Gate::new(token, port, true), limits: Limits::default() })
+        let (listener, port) = listen(address, port)?;
+        let gate = Gate::new(token, address, port, api_only, allowed_hosts);
+        let gate = if supplied { gate.with_supplied_token() } else { gate };
+        Ok(Self { listener, address, gate, limits: Limits::default() })
     }
 
     /// The port the server listens on.
@@ -95,14 +155,26 @@ impl Server {
         &self.gate.token
     }
 
+    /// The address the server listens on, which may be `0.0.0.0` or `::`.
+    pub const fn address(&self) -> IpAddr {
+        self.address
+    }
+
+    /// The server's origin, such as `http://127.0.0.1:4321`. It names the
+    /// address the server listens on, or for `0.0.0.0` and `::`,
+    /// `127.0.0.1` and `[::1]`, so the `Host` a browser sends for it passes.
+    pub fn origin(&self) -> String {
+        format!("http://{}", SocketAddr::new(reachable(self.address), self.gate.port))
+    }
+
     /// The URL to open, with the token for the first page load. A server
-    /// from [`Server::bind_api`] has no page, so its URL is the bare origin,
-    /// such as `http://127.0.0.1:4321`, with no token.
+    /// with no page, from [`Server::bind_api`], answers its bare
+    /// [`Server::origin`], with no token.
     pub fn url(&self) -> String {
         if self.gate.api_only {
-            format!("http://127.0.0.1:{}", self.gate.port)
+            self.origin()
         } else {
-            format!("http://127.0.0.1:{}/?{TOKEN_QUERY}={}", self.gate.port, self.gate.token)
+            format!("{}/?{TOKEN_QUERY}={}", self.origin(), self.gate.token)
         }
     }
 
@@ -133,7 +205,7 @@ impl Server {
     pub(crate) fn run_until<S: Future<Output = ()> + Send>(
         self, reads: &dyn Reads, mutations: &(dyn Mutations + Sync), signal: impl FnMut() -> S + Send,
     ) -> Result<(), ServeError> {
-        let Self { listener, gate, limits } = self;
+        let Self { listener, gate, limits, .. } = self;
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -277,17 +349,19 @@ async fn handle(State(shared): State<Arc<Shared>>, request: Request) -> Response
             Err(answer) => answer,
         },
         Ok(Route::Page) => page(),
+        Ok(Route::Version) => version(),
+        Ok(Route::Health) => health(),
         Ok(route) => ask(&shared.reads, (route, Vec::new())).await,
     };
     answer.into_response()
 }
 
-/// Bind `127.0.0.1` on `port`, or on an ephemeral one when `port` is `None`,
+/// Bind `address` on `port`, or on an ephemeral one when `port` is `None`,
 /// and return the listener with the port it got.
-fn listen(port: Option<u16>) -> Result<(TcpListener, u16), ServeError> {
-    let requested = port.unwrap_or(0);
-    let bind_error = |source| ServeError::Bind { port: requested, source };
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, requested)).map_err(bind_error)?;
+fn listen(address: IpAddr, port: Option<u16>) -> Result<(TcpListener, u16), ServeError> {
+    let requested = SocketAddr::new(address, port.unwrap_or(0));
+    let bind_error = |source| ServeError::Bind { address: requested, source };
+    let listener = TcpListener::bind(requested).map_err(bind_error)?;
     listener.set_nonblocking(true).map_err(bind_error)?;
     let port = listener.local_addr().map_err(bind_error)?.port();
     Ok((listener, port))

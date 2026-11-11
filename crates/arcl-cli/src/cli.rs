@@ -1,7 +1,33 @@
 use std::fmt;
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+
+/// The notes under `arcl serve --help`.
+const SERVE_AFTER_HELP: &str = r#"Token:
+    Every request but GET /healthz sends the token in X-Arcl-Token. It comes from
+    --token-file, then ARCL_SERVE_TOKEN: at least 32 characters, ASCII letters and
+    digits only. Without either, each run mints a token and prints it in the
+    URL, which opens the page once. A token you supply is never printed: add
+    /?token=<token> to the printed URL to open the page, on every load.
+
+Hosts and origins:
+    Requests need a Host of 127.0.0.1:<port>, localhost:<port>, the --bind
+    address with the port ([::1]:<port> for ::, none for 0.0.0.0) or an
+    --allow-host value. A change needs an Origin of http://<Host>, or http:// or
+    https:// and an --allow-host value.
+
+Probes:
+    GET /healthz answers 200 with no token and any Host. GET /api/version answers
+    the version and needs the token.
+
+Examples:
+
+    arcl serve
+    arcl serve --api --port 7410
+    arcl serve --bind 0.0.0.0 --port 7410 --token-file /run/arcl/token --allow-host arcl:7410
+"#;
 
 /// The explicit color policy accepted by the CLI.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -227,15 +253,11 @@ pub enum Command {
         #[arg(long, conflicts_with_all = ["document", "file", "variables", "operation"])]
         schema: bool,
     },
-    /// Serve the web app on 127.0.0.1 until interrupted.
+    /// Serve the web app until interrupted, on 127.0.0.1 unless --bind says otherwise.
+    #[command(after_help = SERVE_AFTER_HELP)]
     Serve {
-        /// Listen on this port instead of an ephemeral one.
-        #[arg(long, value_name = "PORT")]
-        port: Option<u16>,
-        /// Serve only `/api` and `/graphql`, without the web app page. The
-        /// token comes from ARCL_SERVE_TOKEN when it is set.
-        #[arg(long)]
-        api: bool,
+        #[command(flatten)]
+        options: ServeArgs,
     },
     /// Export records for the web app's claude.ai artifact and apply the edits queued on it.
     Web {
@@ -975,6 +997,35 @@ pub struct TreeArgs {
     /// Choose the human output layout.
     #[arg(long, value_enum, default_value_t = TreeStyle::Folded)]
     pub style: TreeStyle,
+}
+
+/// How `arcl serve` listens and which requests it admits.
+#[derive(Clone, Debug, Args)]
+pub struct ServeArgs {
+    /// Listen on this port instead of an ephemeral one.
+    #[arg(long, value_name = "PORT")]
+    pub port: Option<u16>,
+    /// Serve only `/api`, `/graphql` and `/healthz`, without the web app page.
+    #[arg(long)]
+    pub api: bool,
+    /// Listen on this IP address. Any address but a loopback one needs a
+    /// token from --token-file or ARCL_SERVE_TOKEN. The printed URL names
+    /// it, or 127.0.0.1 for 0.0.0.0 and [::1] for ::.
+    #[arg(long, value_name = "ADDR", default_value_t = IpAddr::V4(Ipv4Addr::LOCALHOST))]
+    pub bind: IpAddr,
+    /// Read the token from this file, dropping its trailing newline. It wins
+    /// over ARCL_SERVE_TOKEN. A relative path names a file under the current
+    /// directory, not under --project. The file must be a regular file of at
+    /// most 4 KiB.
+    #[arg(long, value_name = "PATH")]
+    pub token_file: Option<PathBuf>,
+    /// Also accept this `Host`, as `host` or `host:port`, and `Origin`
+    /// `http://` or `https://` with it. Repeat for several.
+    #[arg(long = "allow-host", value_name = "HOST[:PORT]")]
+    pub allow_hosts: Vec<String>,
+    /// Serve the project that holds this directory instead of the current one.
+    #[arg(long, value_name = "DIR")]
+    pub project: Option<PathBuf>,
 }
 
 /// Filters accepted by broad connected-record queries.

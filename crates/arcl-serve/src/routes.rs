@@ -3,7 +3,7 @@
 
 use serde::Deserialize;
 
-use crate::answer::{Answer, Reply, page};
+use crate::answer::{Answer, Reply, health, page, version};
 
 /// Where a request that passed the checks goes.
 #[derive(Debug, Eq, PartialEq)]
@@ -26,6 +26,10 @@ pub(crate) enum Route {
     /// Every task with its readiness and phase, and every phase. Holds
     /// whether the request carried query parameters, which it refuses.
     Work { has_query: bool },
+    /// `GET /api/version`: the server's version.
+    Version,
+    /// `GET /healthz`: liveness for a probe, with no `Host` or token check.
+    Health,
     /// A GraphQL query, which needs POST but no `Origin`, since the schema
     /// has no mutations. The body is the [`GraphqlRequest`].
     Graphql,
@@ -134,6 +138,8 @@ pub(crate) fn dispatch(route: Route, body: &[u8], reads: &dyn Reads) -> Answer {
             Answer::json(Reply::invalid_request("`/api/work` takes no query parameters"))
         }
         Route::Work { has_query: false } => Answer::json(reads.work()),
+        Route::Version => version(),
+        Route::Health => health(),
         Route::Graphql => Answer::json(graphql(body, reads)),
         // `handle` sends mutations to the mutation thread.
         Route::Write(_) => Answer::json(Reply::internal("a mutation reached the read path")),
@@ -210,6 +216,7 @@ pub(crate) fn route(path: &str, query: Vec<(String, String)>) -> Route {
         ["api", "tasks", id, "context"] if !id.is_empty() => Route::Context((*id).to_owned()),
         ["api", "tree"] => Route::Tree { has_query: !query.is_empty() },
         ["api", "work"] => Route::Work { has_query: !query.is_empty() },
+        ["api", "version"] => Route::Version,
         ["api", "tasks"] => Route::Write(Write::Create),
         ["api", "captures"] => Route::Write(Write::CreateCapture),
         ["api", "captures", id, "promote"] if !id.is_empty() => Route::Write(Write::PromoteCapture((*id).to_owned())),
@@ -231,6 +238,7 @@ pub(crate) fn route(path: &str, query: Vec<(String, String)>) -> Route {
         }
         ["api", ..] => Route::NotFound,
         ["graphql"] => Route::Graphql,
+        ["healthz"] => Route::Health,
         _ => Route::Page,
     }
 }
