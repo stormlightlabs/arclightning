@@ -66,7 +66,7 @@ restarted separately.
   directory. There is no `--db`: the web app writes workspace files and the
   sync lock under the project, so the checkout must sit on a writable volume,
   and `arcl.db` stays in its `.arcl/` beside them. arcl keeps no cache.
-- Everything ships in v0.4.0.
+- Everything ships in v0.4.1.
 
 ## Answers to the host
 
@@ -79,4 +79,4 @@ restarted separately.
   `arcl workspace status` lists the changed files.
 - Origin: no `--allow-origin`. The gateway sends an `Origin` naming an
   allowed host.
-- Release: all five needed items and both nice-to-haves ship in v0.4.0.
+- Release: all five needed items and both nice-to-haves ship in v0.4.1.
