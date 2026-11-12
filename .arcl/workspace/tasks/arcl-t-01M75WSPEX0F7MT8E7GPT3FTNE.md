@@ -8,7 +8,7 @@ position = 3
 +++
 
 Prepare and tag `v0.4.1`. The `v0.4.0` tag has no release, because its Apple
-Silicon build asked for the retired macos-14 runner. It ships the agent
+Silicon build, queued for a macos-14 runner, never got one. It ships the agent
 workflow milestone, the MCP list filters and `prime` tool, GraphQL and REST
 reads with `arcl serve --api`, the hosted serve flags, and the website.
 

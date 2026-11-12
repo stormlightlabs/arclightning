@@ -9,7 +9,7 @@ position = 16
 
 Run `arcl serve` as its own service behind a gateway, as the spec "Run arcl
 serve as a hosted service" (`arcl-s-01M747Q6A8X6GY5NBD1PN3MJ5Y`) describes.
-Ships in v0.4.0.
+Ships in v0.4.1.
 
 Deliverables:
 

@@ -28,6 +28,7 @@ github-build-setup = "../build-setup.yml"
 # publish-homebrew.yml pushes with its own app token; GITHUB_TOKEN only reads.
 github-custom-job-permissions = { "publish-homebrew" = { contents = "read" } }
 
-# GitHub retired the macos-14 image that dist 0.32 picks for Apple Silicon.
+# macos-14 jobs, which dist 0.32 picks for Apple Silicon, never got a runner
+# for the v0.4.0 release, so this target builds on macos-15.
 [dist.github-custom-runners]
 aarch64-apple-darwin = "macos-15"
