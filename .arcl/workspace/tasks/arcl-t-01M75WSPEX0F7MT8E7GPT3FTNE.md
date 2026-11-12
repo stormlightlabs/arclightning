@@ -2,9 +2,11 @@
 id = "arcl-t-01M75WSPEX0F7MT8E7GPT3FTNE"
 phase = "arcl-ph-01M5NE5P9FR8YZK0Z8YCV7YMZT"
 title = "Prepare and tag v0.4.1"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 3
+evidence = "Tagged v0.4.1 on 773432c (#101). Release run 43244581346 built all five targets, including aarch64-apple-darwin on macos-15, and published arcl and arcl-mcp archives with SHA-256 checksums, shell and PowerShell installers, and arcl.rb at 0.4.1 in stormlightlabs/homebrew-tap. Checked on Linux x86_64: the shell installer installs arcl 0.4.1, the musl archive matches its checksum, and arcl serve returns the 2.8 MB web app. The v0.4.0 tag on 815f012 has no release."
+completed-at = "2026-11-12T15:30:31.653Z"
 +++
 
 Prepare and tag `v0.4.1`. The `v0.4.0` tag has no release, because its Apple
@@ -33,7 +35,7 @@ Acceptance criteria:
 
 - [x] `arcl --version` prints `arcl 0.4.1`
 - [x] The release record lists the work it ships
-- [ ] `v0.4.1` is tagged on the merge commit, the GitHub Release has an
+- [x] `v0.4.1` is tagged on the merge commit, the GitHub Release has an
       archive and checksum for each target, and the release is completed
 
 Verification:
