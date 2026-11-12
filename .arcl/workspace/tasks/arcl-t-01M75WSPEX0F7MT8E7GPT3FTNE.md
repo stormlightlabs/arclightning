@@ -12,6 +12,10 @@ Silicon build, queued for a macos-14 runner, never got one. It ships the agent
 workflow milestone, the MCP list filters and `prime` tool, GraphQL and REST
 reads with `arcl serve --api`, the hosted serve flags, and the website.
 
+Do not re-run the v0.4.0 Release run (actions run 43159277636). Its failed
+jobs would publish a v0.4.0 GitHub Release, mark it Latest and push
+`arcl 0.4.0` over the tap's newer formula.
+
 Scope:
 
 - the project version at 0.4.1 in the workspace `Cargo.toml`, the
