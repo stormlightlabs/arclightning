@@ -113,7 +113,7 @@ dependencies = [
 
 [[package]]
 name = "arcl-cli"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "arcl-core",
@@ -136,7 +136,7 @@ dependencies = [
 
 [[package]]
 name = "arcl-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "schemars",
  "serde",
@@ -147,7 +147,7 @@ dependencies = [
 
 [[package]]
 name = "arcl-graphql"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "arcl-core",
  "arcl-repo",
@@ -159,7 +159,7 @@ dependencies = [
 
 [[package]]
 name = "arcl-mcp"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "arcl-cli",
  "arcl-core",
@@ -179,7 +179,7 @@ dependencies = [
 
 [[package]]
 name = "arcl-repo"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "arcl-core",
  "arcl-store",
@@ -195,7 +195,7 @@ dependencies = [
 
 [[package]]
 name = "arcl-serve"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "axum",
  "getrandom 0.4.3",
@@ -211,7 +211,7 @@ dependencies = [
 
 [[package]]
 name = "arcl-store"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "arcl-core",
  "rusqlite",
